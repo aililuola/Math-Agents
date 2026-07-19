@@ -1,0 +1,71 @@
+                        # Strategy-level failure is not repaired by polishing the same proof.
+                        if state.final_verification.failure_level == FailureLevel.STRATEGY:
+                            activity.warn_task(
+                                final_verify_task,
+                                title=activity.text("最终审计发现策略级缺口", "Final audit found a strategy-level gap"),
+                                detail=activity.text(
+                                    "停止仅靠文字修订同一证明，保留未验证状态",
+                                    "Stopping local proof polishing and preserving the unverified status",
+                                ),
+                                event_type="strategy_level_gap",
+                                stage="final_verification",
+                                parent_task_id=run_activity_task,
+                                importance=ActivityImportance.MAJOR,
+                            )
+                            break
+                        revision_task = activity.start_task(
+                            "final_revision",
+                            title=activity.text(
+                                f"执行第 {revisions + 1} 次定向修订",
+                                f"Running targeted revision {revisions + 1}",
+                            ),
+                            detail=activity.text(
+                                "只修复审计定位的首个关键缺口",
+                                "Repairing only the first decisive gap identified by the audit",
+                            ),
+                            stage="final_revision",
+                            parent_task_id=final_verify_task,
+                            importance=ActivityImportance.MAJOR,
+                            metrics={"revision_index": revisions + 1},
+                        )
+                        revised = await self._revise_final(
+                            problem,
+                            state.final_proof,
+                            state.final_verification,
+                            synthesizer,
+                            runner,
+                            prompts,
+                            memory,
+                            store,
+                            revisions + 1,
+                        )
+                        if revised is None:
+                            activity.fail_task(
+                                revision_task,
+                                title=activity.text("定向修订未形成有效草稿", "Targeted revision did not produce a valid draft"),
+                                detail=activity.text(
+                                    "保留上一版证明与审计结论",
+                                    "Keeping the previous proof and audit result",
+                                ),
+                                event_type="final_revision_failed",
+                                stage="final_revision",
+                                parent_task_id=final_verify_task,
+                                importance=ActivityImportance.MAJOR,
+                            )
+                            break
+                        state.final_proof = revised
+                        final_bundle = await self._verify_final(
+                            problem,
+                            state.final_proof,
+                            synthesizer,
+                            runner,
+                            prompts,
+                            router,
+                            memory,
+                            tools,
+                            store,
+                        )
+                        state.reports.extend(final_bundle.reports)
+                        state.final_verification = final_bundle.aggregate
+                        revisions += 1
+                        revision_status = (

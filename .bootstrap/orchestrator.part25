@@ -1,0 +1,82 @@
+            else:
+                verdict = VerificationVerdict.UNCERTAIN
+
+        issues: list[VerificationIssue] = []
+        seen_issue_keys: set[tuple[str | None, str]] = set()
+        for report in reports:
+            for issue in report.issues:
+                key = (issue.step_id or issue.claim_id, issue.description)
+                if key not in seen_issue_keys:
+                    issues.append(issue)
+                    seen_issue_keys.add(key)
+
+        failure_level = max(
+            (r.failure_level for r in reports),
+            key=self._failure_rank,
+            default=FailureLevel.NONE,
+        )
+        if verdict == VerificationVerdict.PASS:
+            confidence = min(r.confidence for r in reports)
+        elif verdict == VerificationVerdict.FAIL:
+            fail_confidences = [r.confidence for r in reports if r.verdict == VerificationVerdict.FAIL]
+            confidence = max(fail_confidences or [r.confidence for r in reports])
+        else:
+            # Uncertainty confidence is the confidence that more checking is needed, not a pass probability.
+            spread = max(r.confidence for r in reports) - min(r.confidence for r in reports)
+            confidence = min(0.95, 0.55 + 0.25 * spread + 0.05 * len(reports))
+
+        feedback_parts = []
+        for report in reports:
+            text = report.concise_feedback.strip()
+            if text and text not in feedback_parts:
+                feedback_parts.append(text)
+        first_error = next((r.first_error_step for r in reports if r.first_error_step), None)
+        return VerificationReport(
+            target_id=target_id,
+            target_type=target_type,  # type: ignore[arg-type]
+            agent_id="system-aggregate",
+            stage=stage,
+            problem_integrity_ok=all(r.problem_integrity_ok for r in reports),
+            verdict=verdict,
+            first_error_step=first_error,
+            issues=issues,
+            checked_dependencies=sorted(
+                {dependency for report in reports for dependency in report.checked_dependencies}
+            ),
+            tool_requests=[request for report in reports for request in report.tool_requests],
+            tool_results=[result for report in reports for result in report.tool_results],
+            failure_level=failure_level,
+            confidence=max(0.0, min(1.0, confidence)),
+            concise_feedback=" | ".join(feedback_parts)[:12000]
+            or "Independent reports were aggregated conservatively.",
+        )
+
+    def _apply_local_attempt_integrity_guard(
+        self,
+        problem: ProblemContract,
+        attempt: ProofAttempt,
+        report: VerificationReport,
+    ) -> None:
+        self._apply_local_target_integrity_guard(problem, attempt, report)
+        step_ids = {step.step_id for step in attempt.proof_steps}
+        claim_ids = {claim.claim_id for claim in attempt.proposed_lemmas}
+        known = step_ids | claim_ids
+        missing: set[str] = set()
+        for step in attempt.proof_steps:
+            for dep in step.dependencies:
+                if dep not in known and not dep.startswith("external:"):
+                    missing.add(dep)
+        if missing:
+            report.issues.append(
+                VerificationIssue(
+                    phase="local_dependency_guard",
+                    severity=Severity.ERROR,
+                    description=f"Missing dependency IDs: {sorted(missing)}",
+                    repair_hint="Add the missing derivation or replace the dependency with a verified claim ID.",
+                )
+            )
+            report.failure_level = max(
+                report.failure_level,
+                FailureLevel.PLAN,
+                key=self._failure_rank,
+            )

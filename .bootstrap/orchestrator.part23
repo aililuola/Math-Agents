@@ -1,0 +1,94 @@
+                target_type="final_proof",
+                agent_id="system-aggregate",
+                stage=VerificationStage.FINAL,
+                problem_integrity_ok=structural_report.problem_integrity_ok,
+                verdict=structural_report.verdict,
+                first_error_step=structural_report.first_error_step,
+                issues=structural_report.issues,
+                checked_dependencies=structural_report.checked_dependencies,
+                failure_level=structural_report.failure_level,
+                confidence=structural_report.confidence,
+                concise_feedback="Final detailed audit was blocked by the structural gate. "
+                + structural_report.concise_feedback,
+            )
+            reports.append(aggregate)
+            store.write_json("structured", f"final_verification_{new_id('v')}", aggregate)
+            return VerificationBundle(aggregate=aggregate, reports=reports)
+
+        final_reviewers = runner.pool.select_many(
+            "final_verifier",
+            self.config.budget.base_verifier_replicas,
+            exclude=exclude | {structural.id},
+        )
+        if not final_reviewers:
+            final_reviewers = [runner.pool.select("final_verifier", exclude=exclude)]
+        for reviewer in final_reviewers:
+            router.add_edge(
+                source=synthesizer.id if synthesizer else "synthesizer",
+                target=reviewer.id,
+                stage="final_detailed_verification",
+                payload_type="FinalProof",
+                reason="independent first-error, step-level final audit",
+            )
+        detailed = await self._call_detailed_reviewers(
+            problem,
+            proof,
+            structural_report,
+            final_reviewers,
+            runner,
+            prompts,
+            memory,
+            tools,
+            store,
+            stage="final",
+        )
+        reports.extend(detailed)
+
+        if (
+            self.config.topology.conditional_cross_review
+            and detailed
+            and (
+                any(r.verdict != VerificationVerdict.PASS for r in detailed)
+                or min(r.confidence for r in detailed)
+                < self.config.budget.verification_pass_threshold
+            )
+            and len(detailed) < self.config.budget.high_risk_verifier_replicas
+            and runner.ledger.remaining_calls > 0
+        ):
+            extra = runner.pool.select_many(
+                "final_verifier",
+                1,
+                exclude=exclude | {structural.id} | {r.agent_id for r in detailed},
+            )
+            extra_reports = await self._call_detailed_reviewers(
+                problem,
+                proof,
+                structural_report,
+                extra,
+                runner,
+                prompts,
+                memory,
+                tools,
+                store,
+                stage="final",
+            )
+            detailed.extend(extra_reports)
+            reports.extend(extra_reports)
+
+        aggregate = self._aggregate_reports(
+            "final_proof",
+            "final_proof",
+            VerificationStage.FINAL,
+            detailed,
+        )
+        # Final PASS has a configured minimum confidence floor.
+        if (
+            aggregate.verdict == VerificationVerdict.PASS
+            and aggregate.confidence < self.config.budget.verification_pass_threshold
+        ):
+            aggregate.verdict = VerificationVerdict.UNCERTAIN
+            aggregate.concise_feedback = (
+                "All available reviewers passed, but aggregate confidence is below the configured threshold. "
+                + aggregate.concise_feedback
+            )
+        reports.append(aggregate)

@@ -1,0 +1,80 @@
+                problem_integrity_ok=structural_aggregate.problem_integrity_ok,
+                verdict=VerificationVerdict.UNCERTAIN,
+                issues=structural_aggregate.issues,
+                checked_dependencies=structural_aggregate.checked_dependencies,
+                failure_level=structural_aggregate.failure_level,
+                confidence=max(0.1, structural_aggregate.confidence * 0.5),
+                concise_feedback="Structural gate did not lead to a completed detailed audit.",
+            )
+        else:
+            aggregate = self._aggregate_reports(
+                attempt.attempt_id,
+                "attempt",
+                VerificationStage.DETAILED,
+                detailed_reports,
+            )
+            if structural_aggregate.verdict == VerificationVerdict.UNCERTAIN and aggregate.verdict == VerificationVerdict.PASS:
+                aggregate.verdict = VerificationVerdict.UNCERTAIN
+                aggregate.confidence = min(aggregate.confidence, structural_aggregate.confidence)
+                aggregate.concise_feedback = (
+                    "Detailed reviewers passed, but the structural gate remains uncertain. "
+                    + aggregate.concise_feedback
+                )
+
+        reports.append(aggregate)
+        store.write_json("structured", f"verification_aggregate_{attempt.attempt_id}", aggregate)
+        memory.mark_attempt_verified(attempt.attempt_id, aggregate)
+        self._update_agent_trust(attempt, reports, aggregate, runner.pool)
+        if runner.activity is not None:
+            runner.activity.info(
+                "candidate_verification_result",
+                title=runner.activity.text("候选证明审查完成", "Candidate proof audit completed"),
+                detail=runner.activity.text(
+                    f"路线 {attempt.strategy_id}：{aggregate.verdict.value}；置信度 {aggregate.confidence:.2f}",
+                    f"Route {attempt.strategy_id}: {aggregate.verdict.value}; confidence {aggregate.confidence:.2f}",
+                ),
+                stage="detailed_verification",
+                importance=ActivityImportance.NORMAL,
+                metrics={
+                    "attempt_id": attempt.attempt_id,
+                    "strategy_id": attempt.strategy_id,
+                    "verdict": aggregate.verdict.value,
+                    "confidence": aggregate.confidence,
+                    "failure_level": aggregate.failure_level.value,
+                },
+            )
+        return VerificationBundle(aggregate=aggregate, reports=reports)
+
+    async def _call_structural_reviewers(
+        self,
+        problem: ProblemContract,
+        attempt: ProofAttempt,
+        reviewers: Sequence[AgentRuntime],
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        store: ArtifactStore,
+    ) -> list[VerificationReport]:
+        async def one(reviewer: AgentRuntime) -> VerificationReport:
+            bundle = prompts.structural_verify(
+                problem,
+                attempt.model_dump(mode="json"),
+                reviewer.id,
+            )
+            result = await self._safe_call(
+                runner,
+                "structural_verifier",
+                bundle,
+                fixed_agent=reviewer,
+                budget_bucket="verification",
+            )
+            if result is None:
+                return self._synthetic_verification_failure(
+                    attempt.attempt_id,
+                    "attempt",
+                    VerificationStage.STRUCTURAL,
+                    f"Structural verifier {reviewer.id} failed to return a valid report.",
+                    uncertain=True,
+                )
+            report: VerificationReport = result.value
+            self._normalize_report(
+                report,

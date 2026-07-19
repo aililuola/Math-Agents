@@ -1,0 +1,84 @@
+                        title=activity.text(action_label_zh, f"Adaptive action: {action.action.value}"),
+                        detail=action.reason,
+                        stage="adaptive_round",
+                        parent_task_id=round_task,
+                        importance=ActivityImportance.NORMAL,
+                        metrics={
+                            "action": action.action.value,
+                            "strategy_id": action.strategy_id,
+                            "target_id": action.target_id,
+                            "score": action.score,
+                        },
+                    )
+
+                    if action.action == ActionKind.DEEPEN and action.strategy_id:
+                        attempt = await self._deepen_path(
+                            problem,
+                            action.strategy_id,
+                            round_index,
+                            state,
+                            runner,
+                            prompts,
+                            router,
+                            memory,
+                            store,
+                        )
+                        if attempt is not None:
+                            state.attempts.append(attempt)
+                            await self._extract_claims_many(
+                                problem,
+                                [attempt],
+                                runner,
+                                prompts,
+                                memory,
+                                store,
+                                budget_bucket="depth",
+                            )
+                            performed = True
+                    elif action.action == ActionKind.WIDEN:
+                        new_attempts = await self._widen(
+                            problem,
+                            state.triage,
+                            round_index,
+                            state,
+                            runner,
+                            prompts,
+                            router,
+                            memory,
+                            store,
+                        )
+                        if new_attempts:
+                            state.attempts.extend(new_attempts)
+                            await self._extract_claims_many(
+                                problem,
+                                new_attempts,
+                                runner,
+                                prompts,
+                                memory,
+                                store,
+                                budget_bucket="breadth",
+                            )
+                            performed = True
+                    elif action.action == ActionKind.VERIFY and action.target_id:
+                        target = next(
+                            (a for a in state.attempts if a.attempt_id == action.target_id),
+                            None,
+                        )
+                        if target is not None:
+                            bundle = await self._verify_attempt(
+                                problem,
+                                target,
+                                runner,
+                                prompts,
+                                router,
+                                memory,
+                                tools,
+                                store,
+                            )
+                            self._record_verification_bundles(state, [bundle])
+                            performed = True
+
+                # Verify the best newly generated candidate when its marginal value is high.
+                unverified = [
+                    attempt
+                    for attempt in self._rank_attempts(state.attempts)

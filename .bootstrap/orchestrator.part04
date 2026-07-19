@@ -1,0 +1,76 @@
+                title=activity.text("首轮候选验证完成", "Initial candidate verification completed"),
+                detail=activity.text(
+                    f"通过 {verdict_counts['pass']}；不通过 {verdict_counts['fail']}；待定 {verdict_counts['uncertain']}",
+                    f"Pass {verdict_counts['pass']}; fail {verdict_counts['fail']}; uncertain {verdict_counts['uncertain']}",
+                ),
+                stage="initial_verification",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+                metrics=verdict_counts,
+            )
+
+            if state.attempts and runner.ledger.remaining_calls > 0:
+                meta_task = activity.start_task(
+                    "stage",
+                    title=activity.text("汇总审查结果", "Consolidating review evidence"),
+                    detail=activity.text(
+                        "定位最早断裂的步骤，并判断应继续深挖、拓宽还是进入综合",
+                        "Locating the first broken step and deciding whether to deepen, widen, or synthesize",
+                    ),
+                    stage="meta_review",
+                    parent_task_id=run_activity_task,
+                    importance=ActivityImportance.MAJOR,
+                )
+                review = await self._meta_review(
+                    problem,
+                    state.attempts,
+                    state.aggregate_reports,
+                    runner,
+                    prompts,
+                    store,
+                )
+                state.meta_reviews.append(review)
+                meta_detail_zh = (
+                    "已有候选可进入综合"
+                    if review.can_synthesize
+                    else f"暂不综合；失败层级 {review.failure_level.value}"
+                )
+                meta_detail_en = (
+                    "A candidate is ready for synthesis"
+                    if review.can_synthesize
+                    else f"Synthesis deferred; failure level {review.failure_level.value}"
+                )
+                activity.complete_task(
+                    meta_task,
+                    title=activity.text("综合复核完成", "Meta-review completed"),
+                    detail=activity.text(meta_detail_zh, meta_detail_en),
+                    stage="meta_review",
+                    parent_task_id=run_activity_task,
+                    importance=ActivityImportance.MAJOR,
+                    metrics={
+                        "can_synthesize": review.can_synthesize,
+                        "selected_target_id": review.selected_target_id,
+                        "failure_level": review.failure_level.value,
+                    },
+                )
+            self._checkpoint(store, "initial_verification", state, memory, runner)
+
+            # Adaptive breadth/depth loop. Actions are selected from verified progress,
+            # novelty, uncertainty, gaps, stagnation, and protected future call reserves.
+            for round_index in range(1, self.config.budget.max_rounds):
+                round_task = activity.start_task(
+                    "adaptive_round",
+                    title=activity.text(
+                        f"自适应调度第 {round_index} 轮",
+                        f"Adaptive scheduling round {round_index}",
+                    ),
+                    detail=activity.text(
+                        "根据进展、新颖性、不确定性和剩余预算平衡广度、深度与验证",
+                        "Balancing breadth, depth, and verification from progress, novelty, uncertainty, and remaining budget",
+                    ),
+                    stage="adaptive_round",
+                    parent_task_id=run_activity_task,
+                    importance=ActivityImportance.MAJOR,
+                    metrics={"round_index": round_index},
+                )
+                if self._has_synthesis_ready_candidate(state):

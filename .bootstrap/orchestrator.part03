@@ -1,0 +1,82 @@
+                exploration_task,
+                title=activity.text("首轮并行探索完成", "Initial parallel exploration completed"),
+                detail=activity.text(
+                    f"完整候选 {complete_count} 条；部分结果 {partial_count} 条；失败路线 {failed_count} 条",
+                    f"Complete {complete_count}; partial {partial_count}; failed {failed_count}",
+                ),
+                stage="initial_exploration",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+                metrics={
+                    "complete": complete_count,
+                    "partial": partial_count,
+                    "failed": failed_count,
+                },
+            )
+            claims_before = len(memory.claims)
+            claims_task = activity.start_task(
+                "stage",
+                title=activity.text("归纳可复用引理", "Extracting reusable lemmas"),
+                detail=activity.text(
+                    "将各路线结果压缩成带假设、依赖、来源和作用域的结构化 ClaimCard",
+                    "Compressing path results into structured ClaimCards with assumptions, dependencies, provenance, and scope",
+                ),
+                stage="claim_extraction",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+            )
+            await self._extract_claims_many(
+                problem,
+                initial_attempts,
+                runner,
+                prompts,
+                memory,
+                store,
+                budget_bucket="breadth",
+            )
+            claims_added = len(memory.claims) - claims_before
+            activity.complete_task(
+                claims_task,
+                title=activity.text("引理归纳完成", "Claim extraction completed"),
+                detail=activity.text(
+                    f"新增 {claims_added} 条候选引理；当前引理库共 {len(memory.claims)} 条",
+                    f"Added {claims_added} candidate claims; lemma memory now contains {len(memory.claims)} items",
+                ),
+                stage="claim_extraction",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+                metrics={"claims_added": claims_added, "claim_count": len(memory.claims)},
+            )
+            self._checkpoint(store, "initial_exploration", state, memory, runner)
+
+            candidates = self._rank_attempts(state.attempts)[
+                : self.config.budget.candidates_to_verify
+            ]
+            verification_task = activity.start_task(
+                "stage",
+                title=activity.text("验证候选证明", "Verifying candidate proofs"),
+                detail=activity.text(
+                    f"对排名靠前的 {len(candidates)} 条候选依次执行结构审查与逐步核查",
+                    f"Running structural and step-level audits on {len(candidates)} leading candidates",
+                ),
+                stage="initial_verification",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+                metrics={"candidate_count": len(candidates)},
+            )
+            verification_bundles = await self._verify_attempts_many(
+                problem,
+                candidates,
+                runner,
+                prompts,
+                router,
+                memory,
+                tools,
+                store,
+            )
+            self._record_verification_bundles(state, verification_bundles)
+            verdict_counts = {verdict.value: 0 for verdict in VerificationVerdict}
+            for bundle in verification_bundles:
+                verdict_counts[bundle.aggregate.verdict.value] += 1
+            activity.complete_task(
+                verification_task,

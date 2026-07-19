@@ -1,0 +1,94 @@
+                continue
+            try:
+                reviewer = pool.get(report.agent_id)
+            except KeyError:
+                continue
+            if aggregate.verdict == VerificationVerdict.UNCERTAIN:
+                continue
+            reviewer.update_trust(0.01 if report.verdict == aggregate.verdict else -0.015)
+
+    def _has_synthesis_ready_candidate(self, state: SolveState) -> bool:
+        return any(
+            attempt.status == AttemptStatus.COMPLETE
+            and state.aggregate_reports.get(attempt.attempt_id) is not None
+            and state.aggregate_reports[attempt.attempt_id].verdict == VerificationVerdict.PASS
+            and state.aggregate_reports[attempt.attempt_id].confidence
+            >= self.config.budget.synthesis_threshold
+            for attempt in state.attempts
+        )
+
+    def _run_status(self, state: SolveState) -> RunStatus:
+        if (
+            state.final_verification is not None
+            and state.final_verification.verdict == VerificationVerdict.PASS
+            and state.final_verification.confidence
+            >= self.config.budget.verification_pass_threshold
+        ):
+            return RunStatus.VERIFIED
+        if state.budget_exhausted:
+            return RunStatus.BUDGET_EXHAUSTED
+        if state.final_proof is not None:
+            return RunStatus.UNVERIFIED
+        return RunStatus.FAILED
+
+    def _build_result(
+        self,
+        run_id: str,
+        status: RunStatus,
+        problem: ProblemContract,
+        state: SolveState,
+        metrics: list[AgentMetric],
+        runner: StructuredAgentRunner,
+        pool: AgentPool,
+        store: ArtifactStore,
+        memory: LemmaMemory,
+        *,
+        summary_override: str | None = None,
+    ) -> RunResult:
+        total_usage = self._sum_usage([metric.usage for metric in metrics])
+        summary = summary_override or self._result_summary(status, state)
+        return RunResult(
+            run_id=run_id,
+            status=status,
+            problem=problem,
+            final_proof=state.final_proof,
+            final_verification=state.final_verification,
+            attempts=state.attempts,
+            claims=memory.claims,
+            verification_reports=state.reports,
+            meta_reviews=state.meta_reviews,
+            agent_metrics=metrics,
+            total_calls=runner.ledger.calls_started,
+            total_usage=total_usage,
+            run_directory=str(store.root),
+            summary=summary,
+        )
+
+    @staticmethod
+    def _result_summary(status: RunStatus, state: SolveState) -> str:
+        if status == RunStatus.VERIFIED:
+            return "A final proof passed independent structural and step-level verification under the configured threshold."
+        if status == RunStatus.UNVERIFIED:
+            verdict = state.final_verification.verdict.value if state.final_verification else "missing"
+            return f"A final answer/proof draft was produced, but final verification is {verdict}; inspect caveats and reports."
+        if status == RunStatus.BUDGET_EXHAUSTED:
+            return "The configured inference budget was exhausted; all partial attempts and evidence were preserved."
+        return "No final proof could be formed; inspect failed paths and structured artifacts."
+
+    def _checkpoint(
+        self,
+        store: ArtifactStore,
+        stage: str,
+        state: SolveState,
+        memory: LemmaMemory,
+        runner: StructuredAgentRunner,
+    ) -> None:
+        if not self.config.runtime.checkpoint_every_stage:
+            return
+        store.checkpoint(
+            stage,
+            {
+                "triage": state.triage,
+                "strategies": state.strategies,
+                "attempts": state.attempts,
+                "reports": state.reports,

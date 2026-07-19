@@ -1,0 +1,95 @@
+                if dep is not None:
+                    ordered.extend(closure(dep, visiting))
+            ordered.append(claim)
+            deduped: list[ClaimCard] = []
+            seen: set[str] = set()
+            for item in ordered:
+                if item.claim_id not in seen:
+                    deduped.append(item)
+                    seen.add(item.claim_id)
+            return deduped
+
+        for claim in ranked:
+            packet = [item for item in closure(claim) if item.claim_id not in selected_ids]
+            if not packet:
+                continue
+            encoded = [
+                json.dumps(item.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":"))
+                for item in packet
+            ]
+            packet_size = sum(len(value) for value in encoded)
+            if selected and used + packet_size > max_chars:
+                continue
+            for item in packet:
+                if item.claim_id not in selected_ids:
+                    selected.append(item)
+                    selected_ids.add(item.claim_id)
+            used += packet_size
+            if len(selected) >= self.config.topology.max_verified_claims_per_context:
+                break
+        return [claim.model_dump(mode="json") for claim in selected]
+
+    def _claim_dedup_index(self, claims: Sequence[ClaimCard]) -> list[dict[str, Any]]:
+        """Minimal lossless-for-dedup index instead of rebroadcasting every full proof packet."""
+        compact = [
+            {
+                "claim_id": claim.claim_id,
+                "content_hash": claim.content_hash,
+                "statement": claim.statement,
+                "conclusion": claim.conclusion,
+                "status": claim.status.value,
+                "source_attempt_id": claim.source_attempt_id,
+            }
+            for claim in claims
+        ]
+        return self._fit_json_items(
+            compact,
+            max_chars=max(2000, self.config.topology.max_context_chars // 4),
+            preserve_first=False,
+        )
+
+    def _attempt_context_dict(self, attempt: ProofAttempt, *, full: bool) -> dict[str, Any]:
+        data = attempt.model_dump(mode="json")
+        if full:
+            return data
+        return {
+            "attempt_id": data["attempt_id"],
+            "problem_hash": data["problem_hash"],
+            "strategy_id": data["strategy_id"],
+            "agent_id": data["agent_id"],
+            "round_index": data["round_index"],
+            "status": data["status"],
+            "final_answer": data["final_answer"],
+            "proof_steps": [
+                {
+                    "step_id": step["step_id"],
+                    "statement": step["statement"],
+                    "justification": step["justification"],
+                    "dependencies": step["dependencies"],
+                    "is_key_step": step["is_key_step"],
+                    "confidence": step["confidence"],
+                }
+                for step in data["proof_steps"]
+            ],
+            "unresolved_gaps": data["unresolved_gaps"],
+            "dead_ends": data["dead_ends"],
+            "raw_artifact_ref": data["raw_artifact_ref"],
+        }
+
+    def _update_agent_trust(
+        self,
+        attempt: ProofAttempt,
+        reports: Sequence[VerificationReport],
+        aggregate: VerificationReport,
+        pool: AgentPool,
+    ) -> None:
+        try:
+            prover = pool.get(attempt.agent_id)
+            if aggregate.verdict == VerificationVerdict.PASS:
+                prover.update_trust(0.03)
+            elif aggregate.verdict == VerificationVerdict.FAIL:
+                prover.update_trust(-0.03)
+        except KeyError:
+            pass
+        for report in reports:
+            if report.agent_id.startswith("system-"):

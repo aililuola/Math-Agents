@@ -1,0 +1,82 @@
+                metrics={
+                    "problem_kind": state.triage.problem_kind.value,
+                    "difficulty": state.triage.difficulty.value,
+                    "suggested_paths": state.triage.suggested_paths,
+                },
+            )
+            self._checkpoint(store, "triage", state, memory, runner)
+
+            strategy_task = activity.start_task(
+                "stage",
+                title=activity.text("生成差异化证明路线", "Generating diverse proof strategies"),
+                detail=activity.text(
+                    "要求各路线采用不同的关键数学机制，避免重复探索",
+                    "Requiring distinct mathematical mechanisms to avoid duplicate exploration",
+                ),
+                stage="strategy_generation",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+            )
+            state.strategies = await self._initial_strategies(
+                problem,
+                state.triage,
+                runner,
+                prompts,
+                router,
+                store,
+            )
+            assignments = router.assign_explorers(state.strategies)
+            strategy_names = "；".join(strategy.title for strategy in state.strategies[:4])
+            if len(state.strategies) > 4:
+                strategy_names += "；…"
+            activity.complete_task(
+                strategy_task,
+                title=activity.text("证明路线已生成并分配", "Proof strategies generated and assigned"),
+                detail=activity.text(
+                    f"保留 {len(state.strategies)} 条路线：{strategy_names}",
+                    f"Selected {len(state.strategies)} diverse routes for isolated exploration",
+                ),
+                stage="strategy_generation",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+                metrics={"strategy_count": len(state.strategies)},
+            )
+            for strategy, agent in assignments:
+                activity.info(
+                    "strategy_assignment",
+                    title=activity.text("分配探索路线", "Explorer route assigned"),
+                    detail=strategy.title,
+                    stage="strategy_assignment",
+                    parent_task_id=strategy_task,
+                    agent_id=agent.id,
+                    importance=ActivityImportance.NORMAL,
+                    metrics={"strategy_id": strategy.strategy_id},
+                )
+            self._checkpoint(store, "strategy_assignment", state, memory, runner)
+
+            exploration_task = activity.start_task(
+                "stage",
+                title=activity.text("并行探索不同证明方向", "Exploring different proof directions in parallel"),
+                detail=activity.text(
+                    f"{len(assignments)} 个子 Agent 首轮相互隔离，分别深挖一条路线",
+                    f"{len(assignments)} sub-agents are independently deepening separate routes",
+                ),
+                stage="initial_exploration",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+                metrics={"path_count": len(assignments)},
+            )
+            initial_attempts = await self._parallel_initial_exploration(
+                problem,
+                assignments,
+                runner,
+                prompts,
+                router,
+                memory,
+                store,
+            )
+            state.attempts.extend(initial_attempts)
+            complete_count = sum(a.status == AttemptStatus.COMPLETE for a in initial_attempts)
+            partial_count = sum(a.status == AttemptStatus.PARTIAL for a in initial_attempts)
+            failed_count = sum(a.status == AttemptStatus.FAILED for a in initial_attempts)
+            activity.complete_task(

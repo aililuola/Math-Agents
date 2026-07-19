@@ -1,0 +1,104 @@
+                regulator_feedback=feedback,
+            ),
+            budget_bucket="breadth",
+        )
+        if result is None:
+            candidates = self._fallback_strategy_set(problem, count).strategies
+        else:
+            candidates = result.value.strategies
+
+        genuinely_new: list[StrategyCard] = []
+        for candidate in candidates:
+            max_similarity = max(
+                (
+                    jaccard_similarity(strategy_text(candidate), strategy_text(existing))
+                    for existing in state.strategies
+                ),
+                default=0.0,
+            )
+            if max_similarity < self.config.topology.strategy_similarity_threshold:
+                genuinely_new.append(candidate)
+        if not genuinely_new:
+            return []
+        selected = router.select_diverse_strategies(genuinely_new, count)
+        state.strategies.extend(selected)
+        assignments = router.assign_explorers(selected)
+        return await self._parallel_round_exploration(
+            problem,
+            assignments,
+            round_index,
+            runner,
+            prompts,
+            router,
+            memory,
+            store,
+        )
+
+    async def _parallel_round_exploration(
+        self,
+        problem: ProblemContract,
+        assignments: list[tuple[StrategyCard, AgentRuntime]],
+        round_index: int,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+    ) -> list[ProofAttempt]:
+        results = await asyncio.gather(
+            *(
+                self._explore_path(
+                    problem,
+                    strategy,
+                    agent,
+                    round_index=round_index,
+                    runner=runner,
+                    prompts=prompts,
+                    router=router,
+                    memory=memory,
+                    store=store,
+                    targeted_feedback=[],
+                    previous_attempt=None,
+                    budget_bucket="breadth",
+                )
+                for strategy, agent in assignments
+            ),
+            return_exceptions=True,
+        )
+        attempts: list[ProofAttempt] = []
+        for (strategy, agent), result in zip(assignments, results):
+            if isinstance(result, Exception):
+                attempts.append(self._failed_attempt(problem, strategy, agent.id, round_index, result))
+            else:
+                attempts.append(result)
+        return attempts
+
+    async def _synthesize(
+        self,
+        problem: ProblemContract,
+        state: SolveState,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+    ) -> tuple[FinalProof | None, AgentRuntime | None]:
+        selected = self._select_for_synthesis(state)
+        if not selected:
+            return None, None
+        review = state.meta_reviews[-1] if state.meta_reviews else self._local_meta_review(
+            selected,
+            state.aggregate_reports,
+        )
+        exclude = {a.agent_id for a in selected} if len(runner.pool.agents) > 1 else set()
+        synthesizer = runner.pool.select("synthesizer", exclude=exclude)
+        for attempt in selected:
+            router.add_edge(
+                source=attempt.agent_id,
+                target=synthesizer.id,
+                stage="synthesis",
+                payload_type="ProofAttempt+VerificationReport",
+                reason="only selected, supported paths are sent to the synthesizer",
+            )
+        selected_contexts = self._fit_attempt_contexts(
+            selected,

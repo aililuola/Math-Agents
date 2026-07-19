@@ -1,0 +1,127 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Iterable, Sequence, TypeVar
+
+from pydantic import BaseModel
+
+from .activity import (
+    ActivityImportance,
+    ActivityListener,
+    ActivityStatus,
+    ActivityStream,
+)
+from .agents import (
+    BudgetExhaustedError,
+    StructuredAgentRunner,
+    StructuredCallResult,
+    StructuredOutputError,
+)
+from .budget import AdaptiveBudgetManager, SoftBudgetAllocator
+from .config import SystemConfig
+from .llm.mock import MockResponder
+from .llm.pool import AgentPool, AgentRuntime
+from .memory import LemmaMemory
+from .prompts import PromptBundle, PromptFactory
+from .report import write_run_report
+from .schemas import (
+    ActionKind,
+    AgentMetric,
+    AttemptStatus,
+    CandidateAssessment,
+    ClaimBatch,
+    ClaimCard,
+    ClaimStatus,
+    Difficulty,
+    EvidenceRef,
+    FailureLevel,
+    FinalProof,
+    MetaReview,
+    ProblemContract,
+    ProblemKind,
+    ProofAttempt,
+    RunResult,
+    RunStatus,
+    Severity,
+    StrategyCard,
+    StrategySet,
+    TriageResult,
+    UsageRecord,
+    VerificationIssue,
+    VerificationReport,
+    VerificationStage,
+    VerificationVerdict,
+    new_id,
+    stable_hash,
+)
+from .store import ArtifactStore
+from .tools import ToolBroker
+from .topology import SparseTopologyRouter, jaccard_similarity, strategy_text
+
+logger = logging.getLogger(__name__)
+T = TypeVar("T", bound=BaseModel)
+
+
+@dataclass(slots=True)
+class VerificationBundle:
+    aggregate: VerificationReport
+    reports: list[VerificationReport]
+
+
+@dataclass(slots=True)
+class SolveState:
+    triage: TriageResult | None
+    strategies: list[StrategyCard]
+    attempts: list[ProofAttempt]
+    reports: list[VerificationReport]
+    aggregate_reports: dict[str, VerificationReport]
+    meta_reviews: list[MetaReview]
+    final_proof: FinalProof | None = None
+    final_verification: VerificationReport | None = None
+    budget_exhausted: bool = False
+
+
+class ProofMeshOrchestrator:
+    """
+    Sparse, verification-first multi-agent orchestrator for difficult mathematics.
+
+    The default graph is deliberately not a round-table chat:
+      planner -> isolated explorers -> independent structural/detailed reviewers
+      -> meta-reviewer -> targeted widen/deepen -> synthesizer -> final verifier.
+
+    Raw model outputs are immutable artifacts. Inter-agent transfers use typed packets
+    with provenance, content hashes, dependency IDs, and verification status.
+    """
+
+    def __init__(
+        self,
+        config: SystemConfig,
+        *,
+        mock_responders: dict[str, MockResponder] | None = None,
+        activity_listener: ActivityListener | None = None,
+    ) -> None:
+        self.config = config
+        self.mock_responders = mock_responders or {}
+        self.activity_listener = activity_listener
+
+    async def solve(self, problem_text: str, *, run_id: str | None = None) -> RunResult:
+        if not problem_text or not problem_text.strip():
+            raise ValueError("problem_text must be non-empty")
+
+        run_id = run_id or self._make_run_id(problem_text)
+        store = ArtifactStore(self.config.runtime.run_root, run_id)
+        activity = ActivityStream(
+            store,
+            language=self.config.runtime.output_language,
+            listener=self.activity_listener,
+            persist=self.config.runtime.activity_persist,
+        )
+        pool = AgentPool(self.config, mock_responders=self.mock_responders)
+        runner = StructuredAgentRunner(self.config, pool, store, activity=activity)
+        prompts = PromptFactory(self.config.runtime.output_language)
+        router = SparseTopologyRouter(self.config, pool, store)

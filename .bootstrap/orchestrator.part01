@@ -1,0 +1,83 @@
+        budget_manager = AdaptiveBudgetManager(self.config)
+        allocator = SoftBudgetAllocator(self.config, runner.ledger)
+        memory = LemmaMemory(store)
+        tools = ToolBroker(self.config, store)
+
+        problem = ProblemContract(
+            exact_statement=problem_text,
+            normalized_statement=self._normalize_statement(problem_text),
+            problem_kind=ProblemKind.UNKNOWN,
+            deliverables=["Give a correct answer and an explicit, auditable derivation or proof."],
+            hard_constraints=[
+                "Do not change hypotheses, quantifiers, domains, or requested conclusions.",
+                "Distinguish proved claims from conjectures and unresolved gaps.",
+            ],
+            allowed_tools=self._allowed_tools(),
+            output_language=self.config.runtime.output_language,
+        )
+        store.write_json("structured", "problem_contract", problem)
+        store.write_json("structured", "config_redacted", self.config.redacted_dict())
+        store.append_event(
+            "run_started",
+            {
+                "problem_id": problem.problem_id,
+                "problem_hash": problem.integrity_hash,
+                "system_name": self.config.system_name,
+            },
+        )
+        run_activity_task = activity.start_task(
+            "run",
+            title=activity.text("启动多 Agent 数学求解", "Starting the multi-agent mathematics run"),
+            detail=activity.text(
+                f"已冻结原题；启用 {len(pool.agents)} 个隔离子 Agent",
+                f"Problem contract frozen; {len(pool.agents)} isolated sub-agents are available",
+            ),
+            stage="run",
+            importance=ActivityImportance.MAJOR,
+            metrics={"agent_count": len(pool.agents), "problem_hash": problem.integrity_hash},
+        )
+        activity.info(
+            "problem_contract_ready",
+            title=activity.text("题目契约已建立", "Problem contract created"),
+            detail=activity.text(
+                "后续阶段不得改变原题的条件、量词、定义域或目标结论",
+                "Later stages may not alter hypotheses, quantifiers, domains, or the requested conclusion",
+            ),
+            stage="run",
+            parent_task_id=run_activity_task,
+            importance=ActivityImportance.NORMAL,
+        )
+
+        state = SolveState(
+            triage=None,
+            strategies=[],
+            attempts=[],
+            reports=[],
+            aggregate_reports={},
+            meta_reviews=[],
+        )
+
+        try:
+            triage_task = activity.start_task(
+                "stage",
+                title=activity.text("分析题型、难度与证明风险", "Analyzing the problem type, difficulty, and risks"),
+                detail=activity.text(
+                    "识别题目结构并决定适合的证明组织方式",
+                    "Classifying the task and choosing an appropriate proof organization",
+                ),
+                stage="triage",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+            )
+            state.triage = await self._triage(problem, runner, prompts, store)
+            problem.problem_kind = state.triage.problem_kind
+            activity.complete_task(
+                triage_task,
+                title=activity.text("题目分析完成", "Problem triage completed"),
+                detail=activity.text(
+                    f"题型 {state.triage.problem_kind.value}；难度 {state.triage.difficulty.value}；建议 {state.triage.suggested_paths} 条路线",
+                    f"Kind {state.triage.problem_kind.value}; difficulty {state.triage.difficulty.value}; {state.triage.suggested_paths} paths suggested",
+                ),
+                stage="triage",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,

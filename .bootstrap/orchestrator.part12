@@ -1,0 +1,98 @@
+            logger.exception("MathProofMesh run failed")
+            store.append_event("run_failed", {"type": type(exc).__name__, "error": str(exc)})
+            result = self._build_result(
+                run_id,
+                RunStatus.FAILED,
+                problem,
+                state,
+                pool.metrics(),
+                runner,
+                pool,
+                store,
+                memory,
+                summary_override=f"Run failed with {type(exc).__name__}: {exc}",
+            )
+            router.export()
+            store.write_json("structured", "run_result", result)
+            activity.close_open_tasks(
+                status=ActivityStatus.FAILED,
+                detail=activity.text(
+                    "由于运行异常，本阶段中止；已保留当前产物",
+                    "This stage was interrupted by a run error; current artifacts were preserved",
+                ),
+                exclude_task_ids={run_activity_task},
+            )
+            activity.fail_task(
+                run_activity_task,
+                title=activity.text("运行异常终止", "Run terminated with an error"),
+                detail=activity.text(
+                    f"错误类型 {type(exc).__name__}；已保存当前阶段的全部可用产物",
+                    f"Error type {type(exc).__name__}; all available artifacts were preserved",
+                ),
+                event_type="run_failed",
+                stage="run",
+                importance=ActivityImportance.MAJOR,
+                metrics={"error_type": type(exc).__name__},
+            )
+            activity.finalize()
+            write_run_report(store, result)
+            return result
+        finally:
+            await pool.aclose()
+
+    async def _triage(
+        self,
+        problem: ProblemContract,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        store: ArtifactStore,
+    ) -> TriageResult:
+        result = await self._safe_call(
+            runner,
+            "planner",
+            prompts.triage(problem),
+            budget_bucket="breadth",
+        )
+        if result is not None:
+            triage = result.value
+            store.write_json("structured", "triage", triage)
+            return triage
+        triage = TriageResult(
+            problem_kind=ProblemKind.UNKNOWN,
+            difficulty=Difficulty.HARD,
+            key_risks=[
+                "The solver may change the statement or omit cases.",
+                "A plausible key step may remain unproved.",
+            ],
+            likely_tools=self._allowed_tools(),
+            suggested_paths=self.config.budget.initial_paths,
+            suggested_rounds=self.config.budget.max_rounds,
+            proof_mode="hybrid",
+            rationale="Deterministic fallback triage after planner failure.",
+            confidence=0.25,
+        )
+        store.write_json("structured", "triage_fallback", triage)
+        return triage
+
+    async def _initial_strategies(
+        self,
+        problem: ProblemContract,
+        triage: TriageResult,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        store: ArtifactStore,
+    ) -> list[StrategyCard]:
+        requested = min(
+            self.config.budget.strategies_to_generate,
+            max(self.config.budget.initial_paths, triage.suggested_paths),
+        )
+        result = await self._safe_call(
+            runner,
+            "planner",
+            prompts.strategies(problem, triage, requested),
+            budget_bucket="breadth",
+        )
+        strategy_set = result.value if result is not None else self._fallback_strategy_set(problem, requested)
+        selected = router.select_diverse_strategies(
+            strategy_set.strategies,

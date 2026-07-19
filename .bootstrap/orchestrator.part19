@@ -1,0 +1,83 @@
+                if runner.ledger.remaining_calls > 0:
+                    follow_up = prompts.detailed_verify(
+                        problem,
+                        target.model_dump(mode="json"),
+                        structural_report,
+                        self._select_claim_context(
+                            memory.verified(),
+                            target.model_dump_json(),
+                            max_chars=max(2000, self.config.topology.max_context_chars // 4),
+                        ),
+                        reviewer.id,
+                        [t.model_dump(mode="json") for t in tool_results],
+                        stage=stage,
+                    )
+                    follow_result = await self._safe_call(
+                        runner,
+                        "final_verifier" if stage == "final" else "detailed_verifier",
+                        follow_up,
+                        fixed_agent=reviewer,
+                        budget_bucket="verification",
+                    )
+                    if follow_result is not None:
+                        interpreted: VerificationReport = follow_result.value
+                        self._normalize_report(
+                            interpreted,
+                            target_id=target_id,
+                            target_type=target_type,
+                            agent_id=reviewer.id,
+                            stage=(
+                                VerificationStage.FINAL
+                                if stage == "final"
+                                else VerificationStage.DETAILED
+                            ),
+                            raw_ref=follow_result.raw_ref,
+                            usage=self._sum_usage([result.usage, follow_result.usage]),
+                        )
+                        interpreted.tool_requests = report.tool_requests
+                        interpreted.tool_results = tool_results
+                        self._apply_local_target_integrity_guard(problem, target, interpreted)
+                        self._apply_deterministic_tool_guard(interpreted)
+                        report = interpreted
+            store.write_json("structured", f"report_{report.report_id}", report)
+            return report
+
+        results = await asyncio.gather(*(one(r) for r in reviewers), return_exceptions=True)
+        reports: list[VerificationReport] = []
+        for reviewer, result in zip(reviewers, results):
+            if isinstance(result, Exception):
+                reports.append(
+                    self._synthetic_verification_failure(
+                        target_id,
+                        target_type,
+                        VerificationStage.FINAL if stage == "final" else VerificationStage.DETAILED,
+                        f"Detailed verifier {reviewer.id} raised: {result}",
+                        uncertain=True,
+                    )
+                )
+            else:
+                reports.append(result)
+        return reports
+
+    async def _meta_review(
+        self,
+        problem: ProblemContract,
+        attempts: Sequence[ProofAttempt],
+        aggregate_reports: dict[str, VerificationReport],
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        store: ArtifactStore,
+    ) -> MetaReview:
+        ranked = self._rank_attempts(attempts)
+        candidates = ranked[: max(1, min(5, len(ranked)))]
+        reports = [
+            aggregate_reports[a.attempt_id]
+            for a in candidates
+            if a.attempt_id in aggregate_reports
+        ]
+        result = await self._safe_call(
+            runner,
+            "meta_reviewer",
+            prompts.meta_review(
+                problem,
+                self._fit_json_items(

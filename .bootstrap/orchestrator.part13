@@ -1,0 +1,103 @@
+            min(self.config.budget.initial_paths, len(strategy_set.strategies)),
+        )
+        store.write_json("structured", "strategy_set", strategy_set)
+        store.write_json("structured", "selected_strategies", selected)
+        return selected
+
+    async def _parallel_initial_exploration(
+        self,
+        problem: ProblemContract,
+        assignments: list[tuple[StrategyCard, AgentRuntime]],
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+    ) -> list[ProofAttempt]:
+        async def one(strategy: StrategyCard, agent: AgentRuntime) -> ProofAttempt:
+            return await self._explore_path(
+                problem,
+                strategy,
+                agent,
+                round_index=0,
+                runner=runner,
+                prompts=prompts,
+                router=router,
+                memory=memory,
+                store=store,
+                targeted_feedback=[],
+                previous_attempt=None,
+                budget_bucket="breadth",
+            )
+
+        results = await asyncio.gather(
+            *(one(strategy, agent) for strategy, agent in assignments),
+            return_exceptions=True,
+        )
+        attempts: list[ProofAttempt] = []
+        for (strategy, agent), result in zip(assignments, results):
+            if isinstance(result, Exception):
+                store.append_event(
+                    "exploration_failed",
+                    {
+                        "strategy_id": strategy.strategy_id,
+                        "agent_id": agent.id,
+                        "error": str(result),
+                    },
+                )
+                attempts.append(self._failed_attempt(problem, strategy, agent.id, 0, result))
+            else:
+                attempts.append(result)
+        return attempts
+
+    async def _explore_path(
+        self,
+        problem: ProblemContract,
+        strategy: StrategyCard,
+        agent: AgentRuntime,
+        *,
+        round_index: int,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+        targeted_feedback: list[str],
+        previous_attempt: ProofAttempt | None,
+        budget_bucket: str,
+    ) -> ProofAttempt:
+        relevant = router.relevant_claims(memory.claims, strategy, targeted_feedback)
+        bundle = prompts.explore(
+            problem,
+            strategy.model_dump(mode="json"),
+            agent.id,
+            round_index,
+            [c.model_dump(mode="json") for c in relevant],
+            targeted_feedback,
+            self._attempt_context_dict(previous_attempt, full=False) if previous_attempt else None,
+            runner.ledger.remaining_calls,
+        )
+        result = await self._safe_call(
+            runner,
+            "explorer",
+            bundle,
+            fixed_agent=agent,
+            budget_bucket=budget_bucket,
+        )
+        if result is None:
+            return self._failed_attempt(
+                problem,
+                strategy,
+                agent.id,
+                round_index,
+                RuntimeError("explorer returned no valid structured result"),
+            )
+        attempt: ProofAttempt = result.value
+        # Authoritative metadata is assigned by the orchestrator, not trusted from model text.
+        attempt.problem_hash = problem.integrity_hash
+        attempt.strategy_id = strategy.strategy_id
+        attempt.agent_id = agent.id
+        attempt.round_index = round_index
+        attempt.raw_artifact_ref = result.raw_ref
+        attempt.usage = result.usage
+        for lemma in attempt.proposed_lemmas:

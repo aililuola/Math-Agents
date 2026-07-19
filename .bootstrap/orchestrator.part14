@@ -1,0 +1,81 @@
+            lemma.source_attempt_id = attempt.attempt_id
+            lemma.source_agent_id = agent.id
+            if not any(e.artifact_ref == result.raw_ref for e in lemma.evidence_refs):
+                lemma.evidence_refs.append(
+                    EvidenceRef(
+                        artifact_ref=result.raw_ref,
+                        summary="Raw explorer response containing the proposed lemma.",
+                    )
+                )
+        store.write_json("structured", f"attempt_{attempt.attempt_id}", attempt)
+        store.append_event("attempt_completed", attempt)
+        if runner.activity is not None:
+            runner.activity.info(
+                "proof_route_result",
+                title=runner.activity.text("一条证明路线已返回", "A proof route returned"),
+                detail=runner.activity.text(
+                    f"{strategy.title}：{attempt.status.value}；步骤 {len(attempt.proof_steps)}；未解缺口 {len(attempt.unresolved_gaps)}",
+                    f"{strategy.title}: {attempt.status.value}; {len(attempt.proof_steps)} steps; {len(attempt.unresolved_gaps)} unresolved gaps",
+                ),
+                stage="independent_exploration",
+                agent_id=agent.id,
+                importance=ActivityImportance.NORMAL,
+                metrics={
+                    "attempt_id": attempt.attempt_id,
+                    "strategy_id": strategy.strategy_id,
+                    "status": attempt.status.value,
+                    "proof_step_count": len(attempt.proof_steps),
+                    "unresolved_gap_count": len(attempt.unresolved_gaps),
+                },
+            )
+        return attempt
+
+    async def _extract_claims_many(
+        self,
+        problem: ProblemContract,
+        attempts: Sequence[ProofAttempt],
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+        *,
+        budget_bucket: str,
+    ) -> None:
+        async def one(attempt: ProofAttempt) -> ClaimBatch | None:
+            if attempt.status == AttemptStatus.FAILED:
+                return None
+            exclude = {attempt.agent_id} if len(runner.pool.agents) > 1 else set()
+            summarizer = runner.pool.select("summarizer", exclude=exclude)
+            bundle = prompts.summarize_claims(
+                problem,
+                attempt,
+                self._claim_dedup_index(memory.claims),
+            )
+            result = await self._safe_call(
+                runner,
+                "summarizer",
+                bundle,
+                fixed_agent=summarizer,
+                budget_bucket=budget_bucket,
+            )
+            if result is None:
+                # Explorer-supplied lemmas remain proposed; no silent loss.
+                if attempt.proposed_lemmas:
+                    self._normalize_claims(attempt.proposed_lemmas, attempt, attempt.raw_artifact_ref)
+                    memory.add_many(attempt.proposed_lemmas)
+                return None
+            batch: ClaimBatch = result.value
+            batch.attempt_id = attempt.attempt_id
+            self._normalize_claims(batch.claims, attempt, attempt.raw_artifact_ref)
+            memory.add_many(batch.claims)
+            store.write_json("structured", f"claim_batch_{attempt.attempt_id}", batch)
+            return batch
+
+        results = await asyncio.gather(*(one(a) for a in attempts), return_exceptions=True)
+        for attempt, result in zip(attempts, results):
+            if isinstance(result, Exception):
+                store.append_event(
+                    "claim_extraction_failed",
+                    {"attempt_id": attempt.attempt_id, "error": str(result)},
+                )
+                if attempt.proposed_lemmas:

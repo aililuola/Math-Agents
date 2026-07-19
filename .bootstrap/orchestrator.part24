@@ -1,0 +1,103 @@
+        store.write_json("structured", f"final_verification_{new_id('v')}", aggregate)
+        return VerificationBundle(aggregate=aggregate, reports=reports)
+
+    async def _revise_final(
+        self,
+        problem: ProblemContract,
+        proof: FinalProof,
+        verification: VerificationReport,
+        synthesizer: AgentRuntime | None,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+        revision_index: int,
+    ) -> FinalProof | None:
+        reviser = synthesizer or runner.pool.select("synthesizer")
+        result = await self._safe_call(
+            runner,
+            "synthesizer",
+            prompts.revise_final(
+                problem,
+                proof,
+                verification,
+                self._select_claim_context(
+                    memory.verified(),
+                    proof.model_dump_json(),
+                    max_chars=max(2000, self.config.topology.max_context_chars // 4),
+                ),
+                reviser.id,
+            ),
+            fixed_agent=reviser,
+            budget_bucket="synthesis",
+        )
+        if result is None:
+            return None
+        revised: FinalProof = result.value
+        revised.problem_hash = problem.integrity_hash
+        store.write_json("structured", f"final_proof_revision_{revision_index}", revised)
+        return revised
+
+    async def _safe_call(
+        self,
+        runner: StructuredAgentRunner,
+        role: str,
+        bundle: PromptBundle,
+        *,
+        fixed_agent: AgentRuntime | None = None,
+        exclude: set[str] | None = None,
+        specialty_hints: list[str] | None = None,
+        prefer_provider_not: str | None = None,
+        budget_bucket: str,
+    ) -> StructuredCallResult[Any] | None:
+        try:
+            return await runner.call(
+                role,
+                bundle,
+                fixed_agent=fixed_agent,
+                exclude=exclude,
+                specialty_hints=specialty_hints,
+                prefer_provider_not=prefer_provider_not,
+                budget_bucket=budget_bucket,
+            )
+        except BudgetExhaustedError:
+            raise
+        except (StructuredOutputError, RuntimeError, ValueError) as exc:
+            logger.warning("Agent call failed at %s (%s): %s", bundle.stage, role, exc)
+            runner.store.append_event(
+                "agent_stage_failed",
+                {
+                    "stage": bundle.stage,
+                    "role": role,
+                    "agent_id": fixed_agent.id if fixed_agent else None,
+                    "error": str(exc),
+                },
+            )
+            return None
+
+    def _aggregate_reports(
+        self,
+        target_id: str,
+        target_type: str,
+        stage: VerificationStage,
+        reports: Sequence[VerificationReport],
+    ) -> VerificationReport:
+        if not reports:
+            return self._synthetic_verification_failure(
+                target_id,
+                target_type,
+                stage,
+                "No independent verification report was available.",
+                uncertain=True,
+            )
+        if any(not report.problem_integrity_ok for report in reports):
+            verdict = VerificationVerdict.FAIL
+        else:
+            verdicts = [r.verdict for r in reports]
+            deterministic_fail = any(self._has_deterministic_refutation(r) for r in reports)
+            if deterministic_fail:
+                verdict = VerificationVerdict.FAIL
+            elif all(v == VerificationVerdict.PASS for v in verdicts):
+                verdict = VerificationVerdict.PASS
+            elif all(v == VerificationVerdict.FAIL for v in verdicts):
+                verdict = VerificationVerdict.FAIL
