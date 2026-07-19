@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from collections.abc import AsyncIterator
 from typing import Any, Literal
 
 import httpx
@@ -16,16 +17,16 @@ ReasoningEffort = Literal["high", "max"]
 class DeepSeekClient(LLMClient):
     """DeepSeek V4 client using the official OpenAI-compatible HTTP endpoint.
 
-    MathProofMesh sends self-contained system/user requests and executes deterministic
-    tools locally between model calls. Provider-side tool-call transcripts are therefore
-    not replayed here. The model's private ``reasoning_content`` is never forwarded to
-    another agent and is not persisted; only the final structured content and
+    MathProofMesh calls the model with self-contained system/user messages and executes
+    deterministic tools locally between model calls. Consequently, provider-side tool-call
+    transcripts are not replayed here. The model's private ``reasoning_content`` is never
+    forwarded to another agent and is not persisted; only the final structured content and
     non-sensitive reasoning metadata are retained.
 
-    ``streaming`` controls how the provider response reaches this adapter. When enabled,
-    DeepSeek emits Server-Sent Events (SSE), which are incrementally consumed and locally
-    aggregated into the same :class:`LLMResponse` returned by non-streaming calls. The
-    public behavior of the rest of MathProofMesh is therefore unchanged.
+    ``streaming`` controls only how this adapter reads the provider response. When enabled,
+    DeepSeek sends Server-Sent Events (SSE), which are aggregated locally into the same
+    ``LLMResponse`` shape used by the non-streaming path. The default remains non-streaming
+    for backward compatibility.
     """
 
     def __init__(
@@ -80,7 +81,7 @@ class DeepSeekClient(LLMClient):
         }
         if self.thinking_enabled:
             payload["reasoning_effort"] = self.reasoning_effort
-            # DeepSeek V4 thinking mode ignores sampling controls such as temperature.
+            # DeepSeek V4 thinking mode does not use sampling controls such as temperature.
         else:
             payload["temperature"] = temperature
         if self.user_id:
@@ -90,12 +91,12 @@ class DeepSeekClient(LLMClient):
 
         started = time.perf_counter()
         if self.streaming:
-            # The final SSE usage-only chunk is requested so budgets and cost accounting
-            # retain the same semantics as non-streaming responses.
             payload["stream_options"] = {"include_usage": True}
             return await self._complete_streaming(payload, started)
 
-        response = await self._client.post(f"{self.base_url}/chat/completions", json=payload)
+        response = await self._client.post(
+            f"{self.base_url}/chat/completions", json=payload
+        )
         response.raise_for_status()
         data = response.json()
         elapsed = (time.perf_counter() - started) * 1000.0
@@ -113,7 +114,7 @@ class DeepSeekClient(LLMClient):
             "model": data.get("model", self.model),
             "finish_reason": choice.get("finish_reason"),
             "usage": usage,
-            "streaming": {"enabled": False},
+            "streaming": False,
             "reasoning": {
                 "present": bool(reasoning_text),
                 "characters": len(reasoning_text),
@@ -141,18 +142,12 @@ class DeepSeekClient(LLMClient):
         payload: dict[str, Any],
         started: float,
     ) -> LLMResponse:
-        """Consume a DeepSeek SSE response and return one ordinary ``LLMResponse``.
-
-        Only final answer fragments are accumulated as user-visible text. Private
-        ``reasoning_content`` fragments are hashed incrementally and discarded, avoiding
-        both a second full in-memory copy and accidental persistence in raw artifacts.
-        """
-
         content_parts: list[str] = []
         reasoning_hash = hashlib.sha256()
         reasoning_characters = 0
         reasoning_present = False
         usage: dict[str, Any] = {}
+        usage_received = False
         response_id: str | None = None
         response_object: str | None = None
         created: int | None = None
@@ -160,11 +155,8 @@ class DeepSeekClient(LLMClient):
         finish_reason: str | None = None
         request_id: str | None = None
         chunk_count = 0
-        content_chunk_count = 0
-        reasoning_chunk_count = 0
         done_received = False
-        usage_received = False
-        first_event_latency_ms: float | None = None
+        first_chunk_latency_ms: float | None = None
 
         async with self._client.stream(
             "POST",
@@ -174,56 +166,49 @@ class DeepSeekClient(LLMClient):
         ) as response:
             response.raise_for_status()
             request_id = response.headers.get("x-request-id")
-
-            async for raw_line in response.aiter_lines():
-                line = raw_line.strip()
-                if not line or line.startswith(":") or not line.startswith("data:"):
-                    continue
-
-                event = line[5:].strip()
+            async for event in self._iter_sse_data(response):
                 if event == "[DONE]":
                     done_received = True
                     break
-                if not event:
-                    continue
-
-                if first_event_latency_ms is None:
-                    first_event_latency_ms = (time.perf_counter() - started) * 1000.0
-
                 try:
                     chunk = json.loads(event)
                 except json.JSONDecodeError as exc:
-                    raise ValueError("DeepSeek returned a malformed SSE data event") from exc
+                    preview = event[:240].replace("\n", "\\n")
+                    raise RuntimeError(
+                        f"invalid DeepSeek SSE JSON chunk: {preview}"
+                    ) from exc
                 if not isinstance(chunk, dict):
-                    raise ValueError("DeepSeek returned a non-object SSE data event")
+                    raise RuntimeError("DeepSeek returned a non-object SSE payload")
                 if chunk.get("error"):
                     error = chunk["error"]
                     if isinstance(error, dict):
-                        error_type = str(error.get("type") or "stream_error")
-                        error_message = str(error.get("message") or "DeepSeek stream failed")
+                        detail = (
+                            error.get("message") or error.get("type") or "unknown error"
+                        )
                     else:
-                        error_type = "stream_error"
-                        error_message = str(error)
-                    raise RuntimeError(f"DeepSeek {error_type}: {error_message}")
+                        detail = str(error)
+                    raise RuntimeError(f"DeepSeek streaming error: {detail}")
 
                 chunk_count += 1
-                response_id = str(chunk.get("id") or response_id or "") or None
-                response_object = str(chunk.get("object") or response_object or "") or None
+                if first_chunk_latency_ms is None:
+                    first_chunk_latency_ms = (time.perf_counter() - started) * 1000.0
+
+                if chunk.get("id") is not None:
+                    response_id = str(chunk["id"])
+                if chunk.get("object") is not None:
+                    response_object = str(chunk["object"])
                 if chunk.get("created") is not None:
                     created = int(chunk["created"])
-                response_model = str(chunk.get("model") or response_model)
-
-                chunk_usage = chunk.get("usage")
-                if isinstance(chunk_usage, dict):
-                    usage = chunk_usage
-                    usage_received = True
+                if chunk.get("model") is not None:
+                    response_model = str(chunk["model"])
+                if isinstance(chunk.get("usage"), dict):
+                    usage = dict(chunk["usage"])
+                    usage_received = bool(usage)
 
                 choices = chunk.get("choices") or []
                 if not isinstance(choices, list) or not choices:
-                    # With include_usage=true, the final usage chunk intentionally has
-                    # an empty choices array.
+                    # With include_usage=true, the final usage-only chunk has choices=[].
                     continue
-
                 choice = choices[0] if isinstance(choices[0], dict) else {}
                 if choice.get("finish_reason") is not None:
                     finish_reason = str(choice["finish_reason"])
@@ -234,22 +219,21 @@ class DeepSeekClient(LLMClient):
                 content = self._text_value(delta.get("content"))
                 if content:
                     content_parts.append(content)
-                    content_chunk_count += 1
 
                 reasoning = self._text_value(delta.get("reasoning_content"))
                 if reasoning:
                     reasoning_present = True
                     reasoning_characters += len(reasoning)
                     reasoning_hash.update(reasoning.encode("utf-8"))
-                    reasoning_chunk_count += 1
 
         if not done_received:
-            raise httpx.RemoteProtocolError(
-                "DeepSeek SSE stream ended before the data: [DONE] terminator"
-            )
-        if not usage_received:
-            raise httpx.RemoteProtocolError(
-                "DeepSeek SSE stream ended without the requested usage summary"
+            raise RuntimeError("DeepSeek SSE stream ended before data: [DONE]")
+        if (
+            payload.get("stream_options", {}).get("include_usage")
+            and not usage_received
+        ):
+            raise RuntimeError(
+                "DeepSeek SSE stream ended without the requested final usage summary"
             )
 
         elapsed = (time.perf_counter() - started) * 1000.0
@@ -260,14 +244,12 @@ class DeepSeekClient(LLMClient):
             "model": response_model,
             "finish_reason": finish_reason,
             "usage": usage,
-            "streaming": {
-                "enabled": True,
+            "streaming": True,
+            "stream": {
                 "chunks": chunk_count,
-                "content_chunks": content_chunk_count,
-                "reasoning_chunks": reasoning_chunk_count,
-                "first_event_latency_ms": first_event_latency_ms,
                 "done_received": done_received,
                 "usage_received": usage_received,
+                "first_chunk_latency_ms": first_chunk_latency_ms,
             },
             "reasoning": {
                 "present": reasoning_present,
@@ -286,6 +268,35 @@ class DeepSeekClient(LLMClient):
             request_id=request_id or response_id,
             raw=safe_raw,
         )
+
+    @staticmethod
+    async def _iter_sse_data(response: httpx.Response) -> AsyncIterator[str]:
+        """Yield complete SSE ``data`` payloads, including a final ``[DONE]`` marker.
+
+        DeepSeek currently emits one JSON object per ``data:`` line, but this parser also
+        accepts standards-compliant multi-line data fields and ignores comments/other SSE
+        fields. This keeps provider transport details out of the orchestration layer.
+        """
+
+        data_lines: list[str] = []
+        async for raw_line in response.aiter_lines():
+            line = raw_line.rstrip("\r")
+            if not line:
+                if data_lines:
+                    yield "\n".join(data_lines).lstrip("\ufeff")
+                    data_lines.clear()
+                continue
+            if line.startswith(":"):
+                continue
+            if not line.startswith("data:"):
+                continue
+            value = line[5:]
+            if value.startswith(" "):
+                value = value[1:]
+            data_lines.append(value)
+
+        if data_lines:
+            yield "\n".join(data_lines).lstrip("\ufeff")
 
     @staticmethod
     def _text_value(value: Any) -> str:

@@ -28,7 +28,7 @@ synthesizer
 
 ### 5 个 DeepSeek V4 Pro key 的专用配置
 
-仓库中的 `config.deepseek-v4-pro.yaml` 使用五个独立环境变量，并将角色分为 Planner、三个可探索 Agent 和 Synthesizer/Verifier。所有请求固定为 `deepseek-v4-pro`、思考模式开启、`reasoning_effort=max`，并以 `streaming: true` 使用 DeepSeek SSE 分块读取长响应。由于五个 Agent 属于同一提供商，配置关闭了无意义的“跨提供商优先”加分，但仍强制作者排除、独立 `user_id`、首轮隔离和条件复核。详见 [DEEPSEEK_V4_PRO.md](DEEPSEEK_V4_PRO.md)。
+仓库中的 `config.deepseek-v4-pro.yaml` 使用五个独立环境变量，并将角色分为 Planner、三个可探索 Agent 和 Synthesizer/Verifier。所有请求固定为 `deepseek-v4-pro`、思考模式开启、`reasoning_effort=max`。由于五个 Agent 属于同一提供商，配置关闭了无意义的“跨提供商优先”加分，但仍强制作者排除、独立 `user_id`、首轮隔离和条件复核。详见 [DEEPSEEK_V4_PRO.md](DEEPSEEK_V4_PRO.md)。
 
 ### 8–12 个 key 的高难度配置
 
@@ -89,17 +89,12 @@ budget:
 
 若供应商不返回 token usage，这两个限制不能精确生效；调用次数上限仍有效。生产环境可扩展本地 tokenizer 估算器。
 
-DeepSeek 流式配置会发送 `stream_options.include_usage=true`，因此正常完成时会在
-`data: [DONE]` 之前收到一个 `choices=[]` 的 usage-only 尾块，并继续使用供应商返回的
-完整 token 数做预算与费用核算。若连接在尾块之前中断，当前调用会按传输错误重试，
-而不是用不完整 usage 静默计费。
-
 ## 4. 并发与限流
 
 - `runtime.max_parallel_calls`：全局并发；
 - `agent.max_concurrency`：单 key 并发；
 - `agent.requests_per_minute`：单 key 滑动窗口；
-- `runtime.request_retries`：网络/429/5xx 重试；
+- `runtime.request_retries`：同一 key 对超时、网络、远端协议错误、408/409/429/5xx 的额外重试次数；401/403 跳过同 key 重试并可切换备用 key；
 - `runtime.parse_retries`：合法响应但 JSON 不合 Schema 时的修复次数。
 
 不要通过复制同一个 key 为多个 Agent ID 来绕过供应商限额。系统无法判断两个环境变量是否实际指向同一 key，部署者应保证隔离。
@@ -204,24 +199,35 @@ class MyProviderClient(LLMClient):
 
 ## 9. 可恢复执行
 
-当前每个阶段都写 checkpoint，但自动恢复命令尚未完整实现。要补充生产级恢复，可按以下方式扩展：
+正式配置已启用证明步骤级检查点和进程恢复。启动任务时指定稳定 `run_id`：
 
-1. 从 `problem_contract.json` 和最近 checkpoint 重建 `SolveState`；
-2. 从 `lemma_memory.json` 重建 Claim 状态；
-3. 从 `config_redacted.json` 检查配置结构，真实 key 仍从环境注入；
-4. 读取 `events.jsonl` 确认已开始/已完成的 stage；
-5. 以幂等名称写结构化产物；
-6. 不重新收费调用已经完成且原始响应有效的阶段。
+```bash
+mathproofmesh solve problem.txt \
+  --config config.deepseek-v4-pro.yaml \
+  --run-id hard-problem-001
+```
+
+进程中断后重新注入 API-key 环境变量，然后执行：
+
+```bash
+mathproofmesh resume hard-problem-001 \
+  --config config.deepseek-v4-pro.yaml
+```
+
+恢复会加载 `ProblemContract`、阶段快照、单独持久化的 Triage/Strategy/LemmaMemory、Claim、验证报告、每条路径的 `latest.json`、runtime ledger、累计 usage 和已有 Activity 时间线。即使第一个阶段快照尚未生成，也能从冻结原题重新进入；未完成的 SSE/JSON 不会成为恢复点。原 key 的调用级重试耗尽后，可由备用 Agent 使用同一检查点继续，且 checkpoint Reviewer 不能是当前 Delta 作者。
+
+预算上限按 `run_id` 累计；若上一轮是 `budget_exhausted`，恢复前应在配置中提高 `max_total_calls`。HTTP 部署还提供 `/resume` 与 `/resume/stream`。生产环境应把 `runs/` 放在持久卷，并保证同一 `run_id` 不被多个无协调进程并发写入。检查点父子链能拒绝旧父节点覆盖，但当前版本不实现分布式租约；需要多副本调度时，应在外层增加任务队列或数据库锁。详见 [CHECKPOINT_RESUME.md](CHECKPOINT_RESUME.md)。
 
 ## 10. 真实 API 尚未验证的部分
 
-当前构建环境无法解析外部 API 域名，因此以下内容只完成了实现、HTTP Mock 与本地端到端测试：
+交付构建没有使用用户真实凭据发起付费 API 请求，因此以下内容只完成了实现、HTTP Mock 与本地端到端测试：
 
 - 各供应商实时模型名是否存在；
 - 第三方 OpenAI-compatible 网关的参数差异；
 - 真实速率限制和 429 行为；
 - 供应商 usage 字段完整性；
 - 长输出 JSON 在特定模型上的遵循率；
-- 多 key 大规模并发下的成本和延迟。
+- 多 key 大规模并发下的成本和延迟；
+- 真实长响应中断后的供应商计费与 usage 尾块行为。
 
 正式使用前应按第 2 节逐步联调，并从低预算开始。

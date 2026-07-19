@@ -45,14 +45,22 @@ class AdaptiveBudgetManager:
             )
             latest = path_attempts[-1] if path_attempts else None
             if latest is None:
-                stats.append(PathStats(strategy_id=strategy.strategy_id, novelty=self._novelty(strategy, strategies)))
+                stats.append(
+                    PathStats(
+                        strategy_id=strategy.strategy_id,
+                        novelty=self._novelty(strategy, strategies),
+                    )
+                )
                 continue
 
             step_progress = min(0.6, 0.06 * len(latest.proof_steps))
             lemma_progress = min(0.25, 0.08 * len(latest.proposed_lemmas))
             complete_bonus = 0.35 if latest.status.value == "complete" else 0.0
             gap_penalty = min(0.35, 0.06 * len(latest.unresolved_gaps))
-            progress = max(0.0, min(1.0, step_progress + lemma_progress + complete_bonus - gap_penalty))
+            progress = max(
+                0.0,
+                min(1.0, step_progress + lemma_progress + complete_bonus - gap_penalty),
+            )
 
             target_reports = reports_by_target.get(latest.attempt_id, [])
             verification_score = 0.0
@@ -114,7 +122,8 @@ class AdaptiveBudgetManager:
         if not others:
             return 1.0
         max_similarity = max(
-            jaccard_similarity(strategy_text(strategy), strategy_text(other)) for other in others
+            jaccard_similarity(strategy_text(strategy), strategy_text(other))
+            for other in others
         )
         return 1.0 - max_similarity
 
@@ -130,28 +139,48 @@ class AdaptiveBudgetManager:
     ) -> BudgetDecision:
         if final_verified:
             return BudgetDecision(
-                actions=[BudgetAction(action=ActionKind.STOP, score=1.0, reason="final proof passed independent verification")],
+                actions=[
+                    BudgetAction(
+                        action=ActionKind.STOP,
+                        score=1.0,
+                        reason="final proof passed independent verification",
+                    )
+                ],
                 global_uncertainty=0.0,
                 coverage=1.0,
                 rationale="Stop condition reached.",
             )
         if remaining_calls <= 0:
             return BudgetDecision(
-                actions=[BudgetAction(action=ActionKind.STOP, score=1.0, reason="global call budget exhausted")],
+                actions=[
+                    BudgetAction(
+                        action=ActionKind.STOP,
+                        score=1.0,
+                        reason="global call budget exhausted",
+                    )
+                ],
                 global_uncertainty=1.0,
-                coverage=min(1.0, current_path_count / max(1, self.config.budget.max_paths)),
+                coverage=min(
+                    1.0, current_path_count / max(1, self.config.budget.max_paths)
+                ),
                 rationale="No calls remain.",
             )
 
-        coverage = min(1.0, current_path_count / max(1, self.config.budget.initial_paths))
+        coverage = min(
+            1.0, current_path_count / max(1, self.config.budget.initial_paths)
+        )
         global_uncertainty = (
             sum(s.uncertainty for s in stats) / len(stats) if stats else 1.0
         )
         actions: list[BudgetAction] = []
         bucket_pressure = bucket_pressure or {}
-        breadth_multiplier = max(0.35, 1.25 - 0.35 * bucket_pressure.get("breadth", 0.0))
+        breadth_multiplier = max(
+            0.35, 1.25 - 0.35 * bucket_pressure.get("breadth", 0.0)
+        )
         depth_multiplier = max(0.35, 1.25 - 0.35 * bucket_pressure.get("depth", 0.0))
-        verification_multiplier = max(0.45, 1.30 - 0.30 * bucket_pressure.get("verification", 0.0))
+        verification_multiplier = max(
+            0.45, 1.30 - 0.30 * bucket_pressure.get("verification", 0.0)
+        )
 
         for stat in stats:
             if stat.attempt_id is None:
@@ -174,7 +203,10 @@ class AdaptiveBudgetManager:
                 )
 
             # Deepening is preferred for promising paths with repairable gaps and nonzero marginal progress.
-            if not stat.complete or stat.verification_score < self.config.budget.synthesis_threshold:
+            if (
+                not stat.complete
+                or stat.verification_score < self.config.budget.synthesis_threshold
+            ):
                 depth_score = (
                     0.45 * stat.progress
                     + 0.25 * stat.novelty
@@ -233,7 +265,11 @@ class AdaptiveBudgetManager:
             if key in seen_targets:
                 continue
             # Do not spend the last call merely widening when a candidate already exists.
-            if remaining_calls == 1 and action.action == ActionKind.WIDEN and any_complete:
+            if (
+                remaining_calls == 1
+                and action.action == ActionKind.WIDEN
+                and any_complete
+            ):
                 continue
             selected.append(action)
             seen_targets.add(key)
@@ -282,12 +318,18 @@ class SoftBudgetAllocator:
             "synthesis": config.budget.synthesis_share,
         }
         # At least one call per phase; rounding residue remains globally borrowable.
-        self.targets = {bucket: max(1, int(round(maximum * share))) for bucket, share in shares.items()}
-        self.minimum_finish_reserve = min(maximum, 3)  # synthesis + structural audit + detailed audit
+        self.targets = {
+            bucket: max(1, int(round(maximum * share)))
+            for bucket, share in shares.items()
+        }
+        self.minimum_finish_reserve = min(
+            maximum, 3
+        )  # synthesis + structural audit + detailed audit
 
     def pressure_snapshot(self) -> dict[str, float]:
         return {
-            bucket: self.ledger.bucket_calls.get(bucket, 0) / max(1, self.targets[bucket])
+            bucket: self.ledger.bucket_calls.get(bucket, 0)
+            / max(1, self.targets[bucket])
             for bucket in self.BUCKETS
         }
 
@@ -302,7 +344,11 @@ class SoftBudgetAllocator:
         if calls <= 0:
             return True
         remaining = self.ledger.remaining_calls
-        reserve = self.minimum_finish_reserve if protect_finish and has_candidate and bucket != "synthesis" else 0
+        reserve = (
+            self.minimum_finish_reserve
+            if protect_finish and has_candidate and bucket != "synthesis"
+            else 0
+        )
         if remaining - calls < reserve:
             return False
         # A phase may exceed its target by borrowing, but not while another essential
@@ -311,14 +357,18 @@ class SoftBudgetAllocator:
             used = self.ledger.bucket_calls.get(bucket, 0)
             target = self.targets[bucket]
             if used + calls > target:
-                missing_verification = self.ledger.bucket_calls.get("verification", 0) == 0
+                missing_verification = (
+                    self.ledger.bucket_calls.get("verification", 0) == 0
+                )
                 missing_synthesis = self.ledger.bucket_calls.get("synthesis", 0) == 0
                 protected = int(missing_verification) + int(missing_synthesis)
                 if remaining - calls < reserve + protected:
                     return False
         return True
 
-    def should_protect_finish(self, aggregate_reports: Iterable[VerificationReport]) -> bool:
+    def should_protect_finish(
+        self, aggregate_reports: Iterable[VerificationReport]
+    ) -> bool:
         has_supported = any(
             report.verdict == VerificationVerdict.PASS
             and report.confidence >= self.config.budget.synthesis_threshold
@@ -332,11 +382,11 @@ class SoftBudgetAllocator:
     @staticmethod
     def estimate_action_calls(action: ActionKind) -> int:
         return {
-            ActionKind.WIDEN: 3,       # strategy + explorer + claim packet
-            ActionKind.DEEPEN: 2,      # explorer + claim packet
-            ActionKind.VERIFY: 2,      # structural + detailed; conditional replicas may cost more
+            ActionKind.WIDEN: 3,  # strategy + explorer + claim packet
+            ActionKind.DEEPEN: 2,  # explorer + claim packet
+            ActionKind.VERIFY: 2,  # structural + detailed; conditional replicas may cost more
             ActionKind.SYNTHESIZE: 3,  # synthesis + structural + detailed final audit
-            ActionKind.REVISE: 3,      # revision + structural + detailed re-audit
+            ActionKind.REVISE: 3,  # revision + structural + detailed re-audit
             ActionKind.STOP: 0,
         }[action]
 

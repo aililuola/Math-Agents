@@ -25,7 +25,9 @@ P1 TriageResult
   ↓
 P2 StrategySet / StrategyCard
   ↓
-P3 ProofAttempt (isolated)
+P3 ProofAttempt (legacy isolated mode)
+  ↓ when continuation is enabled
+P3C ProofDelta → checkpoint verification → committed ProofCheckpoint
   ↓
 P4 ClaimBatch → ClaimCard memory
   ↓
@@ -157,6 +159,31 @@ P11 Revised FinalProof
 
 Explorer 自己提出的引理不会自动成为 verified；自评只影响调度。
 
+### P3C：检查点续推提示
+
+启用 `continuation` 后，首轮和后续深挖改用 `continue_proof()`：
+
+**输入：**
+
+- 不可变 ProblemContract；
+- 单一路径 StrategyCard；
+- 最新 `committed` ProofCheckpoint；
+- 相关 verified Claim；
+- 当前子目标、剩余子目标和定向反馈；
+- 权威的 parent checkpoint、path、round 和 segment ID。
+
+**输出：** `ProofDelta`，且一次最多产生配置允许的少量步骤和 Claim。提示词明确要求：
+
+- 不重证已提交步骤，除非报告显式冲突；
+- 只依赖已提交步骤、verified Claim、明确外部定理或本 Delta 更早步骤；
+- `verified_subgoal` 策略下必须填写 `completed_subgoal`；
+- 只有完整解决原题时才能设置 `proof_complete=true`；
+- 只输出可审计增量，不输出隐藏草稿。
+
+随后 `verify_delta()` 将父检查点、候选 Delta 和 verified Claim 一并交给独立 Reviewer。作者 ID 会从首选 Reviewer 和 Reviewer 故障转移候选中同时排除。Reviewer 必须核查身份、依赖、每个新推导及子目标状态；PASS 之前 Delta 不会成为恢复点。
+
+断线或跨 key 接力时，新 Agent 收到完全相同的检查点包。系统不传递半截 SSE 或原作者的私有 `reasoning_content`。
+
 ## 7. P4：Claim 提取
 
 ### 输入
@@ -173,7 +200,7 @@ Explorer 自己提出的引理不会自动成为 verified；自评只影响调�
 
 - 只提取证明真正存在的实质性结论；
 - 目标、猜测和想要得到的结论不能冒充引理；
-- Claim.dependencies 只能是其他 Claim ID 或 `external:*`；
+- Claim.dependencies 只能是已经提交的 Claim、同一 Delta 中更早出现的 Claim ID 或 `external:*`；自依赖和前向循环在本地守卫阶段直接拒绝；
 - Claim 内部步骤依赖写在 `ProofStep.dependencies`；
 - 保留范围限制、失败条件、反例风险和证据引用；
 - 没有可复用结论时返回空列表。
@@ -400,5 +427,7 @@ verified --(dependency later invalidated)----------> uncertain
 - 是否允许 confidence 越权；
 - 是否保留失败方向和反例；
 - 是否会导致 Reviewer 相互锚定；
+- 续推提示是否携带 latest checkpoint 和准确 parent ID；
+- 是否可能把未验证 Delta 或半截输出当作恢复状态；
 - 是否超过上下文预算；
 - Schema 修改是否同步到 Mock、测试和报告。

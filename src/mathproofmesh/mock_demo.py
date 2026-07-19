@@ -3,12 +3,20 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .config import AgentConfig, BudgetConfig, RuntimeConfig, SystemConfig
+from .config import (
+    AgentConfig,
+    BudgetConfig,
+    ContinuationConfig,
+    RuntimeConfig,
+    SystemConfig,
+)
 from .llm.base import Message
 
 
 def _user_text(messages: list[Message]) -> str:
-    return "\n".join(message["content"] for message in messages if message["role"] == "user")
+    return "\n".join(
+        message["content"] for message in messages if message["role"] == "user"
+    )
 
 
 def demo_responder(
@@ -78,6 +86,64 @@ def demo_responder(
             ],
             "coverage_notes": "The paths use recursive, algebraic telescoping, and geometric mechanisms.",
             "omitted_directions": [],
+        }
+    if schema_name == "ProofDelta":
+        parent_match = re.search(r'"checkpoint_id"\s*:\s*"([^"]+)"', text)
+        problem_match = re.search(r'"integrity_hash"\s*:\s*"([^"]+)"', text)
+        path_match = re.search(r'"path_id"\s*:\s*"([^"]+)"', text)
+        strategy_match = re.search(r'"strategy_id"\s*:\s*"([^"]+)"', text)
+        segment_match = re.search(r"segment_index=(\d+)", text)
+        round_match = re.search(r"round_index=(\d+)", text)
+        agent_match = re.search(r"agent_id=\'([^\']+)\'", text)
+        return {
+            "problem_hash": problem_match.group(1) if problem_match else "0" * 64,
+            "path_id": path_match.group(1) if path_match else "path_mock",
+            "strategy_id": strategy_match.group(1)
+            if strategy_match
+            else "strategy_mock",
+            "parent_checkpoint_id": parent_match.group(1)
+            if parent_match
+            else "checkpoint_mock",
+            "agent_id": agent_match.group(1) if agent_match else "mock-explorer",
+            "round_index": int(round_match.group(1)) if round_match else 0,
+            "segment_index": int(segment_match.group(1)) if segment_match else 1,
+            "completed_subgoal": "Establish the consecutive-square difference and telescope it.",
+            "new_steps": [
+                {
+                    "step_id": f"seg{segment_match.group(1) if segment_match else '1'}_s1",
+                    "statement": "For every k>=1, k^2-(k-1)^2=2k-1.",
+                    "justification": "Expand the square and simplify.",
+                    "dependencies": [],
+                    "calculations": ["k^2-(k^2-2k+1)=2k-1"],
+                    "citations": [],
+                    "is_key_step": True,
+                    "confidence": 0.99,
+                },
+                {
+                    "step_id": f"seg{segment_match.group(1) if segment_match else '1'}_s2",
+                    "statement": "Summing from k=1 to n telescopes to n^2.",
+                    "justification": "All intermediate square terms cancel.",
+                    "dependencies": [
+                        f"seg{segment_match.group(1) if segment_match else '1'}_s1"
+                    ],
+                    "calculations": ["sum_{k=1}^n(k^2-(k-1)^2)=n^2"],
+                    "citations": [],
+                    "is_key_step": True,
+                    "confidence": 0.99,
+                },
+            ],
+            "new_claims": [],
+            "active_assumptions": ["n is a positive integer"],
+            "remaining_subgoals": [],
+            "current_goal": None,
+            "known_risks": [],
+            "detected_conflicts": [],
+            "candidate_final_answer": "For every positive integer n, 1+3+...+(2n-1)=n^2.",
+            "proof_complete": True,
+            "ready_for_verification": True,
+            "self_confidence": 0.98,
+            "raw_artifact_ref": None,
+            "usage": {},
         }
     if schema_name == "ProofAttempt":
         return {
@@ -151,7 +217,9 @@ def demo_responder(
                     "tags": ["telescoping", "identity"],
                 }
             ],
-            "reusable_insights": ["Express odd numbers as consecutive square differences."],
+            "reusable_insights": [
+                "Express odd numbers as consecutive square differences."
+            ],
             "discarded_material": [],
             "summary": "One reusable telescoping identity was extracted with source provenance.",
         }
@@ -162,7 +230,17 @@ def demo_responder(
             stage = "final"
         else:
             stage = "detailed"
-        target_type = "final_proof" if "CURRENT FINAL PROOF" in text or '"problem_hash"' in text and "SELECTED ATTEMPTS" not in text and "TARGET:" in text and '"answer"' in text else "attempt"
+        if "[STAGE:checkpoint_verification]" in text:
+            target_type = "proof_delta"
+        elif "CURRENT FINAL PROOF" in text or (
+            '"problem_hash"' in text
+            and "SELECTED ATTEMPTS" not in text
+            and "TARGET:" in text
+            and '"answer"' in text
+        ):
+            target_type = "final_proof"
+        else:
+            target_type = "attempt"
         return {
             "target_id": "target_mock",
             "target_type": target_type,
@@ -195,7 +273,9 @@ def demo_responder(
                     "recommended_action": "synthesize",
                 }
             ],
-            "shared_agreements": ["Consecutive-square differences establish the identity."],
+            "shared_agreements": [
+                "Consecutive-square differences establish the identity."
+            ],
             "unresolved_conflicts": [],
             "required_actions": [],
             "failure_level": "none",
@@ -239,12 +319,42 @@ def demo_responder(
 
 def build_demo_config(run_root: str = "runs") -> SystemConfig:
     agents = [
-        AgentConfig(id="planner", provider="mock", model="mock", roles=["planner", "meta_reviewer"]),
-        AgentConfig(id="explorer-a", provider="mock", model="mock", roles=["explorer", "summarizer"]),
-        AgentConfig(id="explorer-b", provider="mock", model="mock", roles=["explorer", "summarizer"]),
-        AgentConfig(id="verifier-a", provider="mock", model="mock", roles=["structural_verifier", "detailed_verifier", "final_verifier"]),
-        AgentConfig(id="verifier-b", provider="mock", model="mock", roles=["structural_verifier", "detailed_verifier", "final_verifier"]),
-        AgentConfig(id="synthesizer", provider="mock", model="mock", roles=["synthesizer", "final_verifier"]),
+        AgentConfig(
+            id="planner",
+            provider="mock",
+            model="mock",
+            roles=["planner", "meta_reviewer"],
+        ),
+        AgentConfig(
+            id="explorer-a",
+            provider="mock",
+            model="mock",
+            roles=["explorer", "summarizer"],
+        ),
+        AgentConfig(
+            id="explorer-b",
+            provider="mock",
+            model="mock",
+            roles=["explorer", "summarizer"],
+        ),
+        AgentConfig(
+            id="verifier-a",
+            provider="mock",
+            model="mock",
+            roles=["structural_verifier", "detailed_verifier", "final_verifier"],
+        ),
+        AgentConfig(
+            id="verifier-b",
+            provider="mock",
+            model="mock",
+            roles=["structural_verifier", "detailed_verifier", "final_verifier"],
+        ),
+        AgentConfig(
+            id="synthesizer",
+            provider="mock",
+            model="mock",
+            roles=["synthesizer", "final_verifier"],
+        ),
     ]
     return SystemConfig(
         agents=agents,
@@ -259,6 +369,7 @@ def build_demo_config(run_root: str = "runs") -> SystemConfig:
             base_verifier_replicas=1,
             high_risk_verifier_replicas=2,
         ),
+        continuation=ContinuationConfig(enabled=False),
         runtime=RuntimeConfig(run_root=run_root, parse_retries=0, request_retries=0),
     )
 

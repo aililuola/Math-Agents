@@ -5,11 +5,20 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 
 class ConfigModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", validate_assignment=True, str_strip_whitespace=True)
+    model_config = ConfigDict(
+        extra="forbid", validate_assignment=True, str_strip_whitespace=True
+    )
 
 
 ProviderName = Literal["openai_compatible", "deepseek", "anthropic", "gemini", "mock"]
@@ -75,7 +84,9 @@ class AgentConfig(ConfigModel):
     def validate_user_id(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+        allowed = set(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+        )
         if any(char not in allowed for char in value):
             raise ValueError("user_id may contain only letters, digits, '-' and '_'")
         return value
@@ -117,9 +128,16 @@ class BudgetConfig(ConfigModel):
 
     @model_validator(mode="after")
     def validate_shares_and_paths(self) -> "BudgetConfig":
-        total = self.breadth_share + self.depth_share + self.verification_share + self.synthesis_share
+        total = (
+            self.breadth_share
+            + self.depth_share
+            + self.verification_share
+            + self.synthesis_share
+        )
         if abs(total - 1.0) > 1e-6:
-            raise ValueError("breadth/depth/verification/synthesis shares must sum to 1.0")
+            raise ValueError(
+                "breadth/depth/verification/synthesis shares must sum to 1.0"
+            )
         if self.initial_paths > self.max_paths:
             raise ValueError("initial_paths cannot exceed max_paths")
         if self.strategies_to_generate < self.initial_paths:
@@ -152,6 +170,28 @@ class VerificationConfig(ConfigModel):
     external_tool_timeout_seconds: float = Field(default=20.0, ge=1.0, le=600.0)
 
 
+class ContinuationConfig(ConfigModel):
+    """Proof-step checkpointing, reconnect, and cross-agent failover controls."""
+
+    enabled: bool = False
+    checkpoint_policy: Literal["verified_subgoal", "verified_delta"] = (
+        "verified_subgoal"
+    )
+    max_new_steps_per_call: int = Field(default=3, ge=1, le=32)
+    max_new_claims_per_call: int = Field(default=3, ge=0, le=32)
+    max_output_tokens_per_segment: int = Field(default=12000, ge=512, le=128000)
+    segments_per_explore_call: int = Field(default=1, ge=1, le=8)
+    max_segments_per_path: int = Field(default=12, ge=1, le=128)
+    verify_each_delta: bool = True
+    delta_verifier_replicas: int = Field(default=1, ge=1, le=4)
+    checkpoint_pass_threshold: float = Field(default=0.78, ge=0.0, le=1.0)
+    resume_on_disconnect: bool = True
+    allow_cross_agent_failover: bool = True
+    max_failover_agents: int = Field(default=2, ge=0, le=16)
+    process_resume_enabled: bool = True
+    retain_rejected_deltas: bool = True
+
+
 class RuntimeConfig(ConfigModel):
     run_root: str = "runs"
     output_language: str = "zh-CN"
@@ -176,6 +216,7 @@ class SystemConfig(ConfigModel):
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
     topology: TopologyConfig = Field(default_factory=TopologyConfig)
     verification: VerificationConfig = Field(default_factory=VerificationConfig)
+    continuation: ContinuationConfig = Field(default_factory=ContinuationConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
 
     @field_validator("agents")
@@ -190,7 +231,9 @@ class SystemConfig(ConfigModel):
         return agents
 
     def redacted_dict(self) -> dict[str, Any]:
-        data = self.model_dump(mode="json", exclude={"agents": {"__all__": {"api_key"}}})
+        data = self.model_dump(
+            mode="json", exclude={"agents": {"__all__": {"api_key"}}}
+        )
         for agent in data.get("agents", []):
             if agent.get("api_key_env"):
                 agent["key_status"] = "configured-via-env"

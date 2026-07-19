@@ -73,11 +73,18 @@ def _validate_expression_ast(expression: str) -> set[str]:
                 raise UnsafeExpressionError("private/dunder names are forbidden")
             names.add(node.id)
         if isinstance(node, ast.Call):
-            if not isinstance(node.func, ast.Name) or node.func.id not in _ALLOWED_FUNCTIONS:
-                raise UnsafeExpressionError("only whitelisted mathematical functions are allowed")
+            if (
+                not isinstance(node.func, ast.Name)
+                or node.func.id not in _ALLOWED_FUNCTIONS
+            ):
+                raise UnsafeExpressionError(
+                    "only whitelisted mathematical functions are allowed"
+                )
             if node.keywords:
                 raise UnsafeExpressionError("keyword arguments are forbidden")
-        if isinstance(node, ast.Constant) and not isinstance(node.value, (int, float, complex)):
+        if isinstance(node, ast.Constant) and not isinstance(
+            node.value, (int, float, complex)
+        ):
             raise UnsafeExpressionError("only numeric constants are allowed")
     return names
 
@@ -193,7 +200,9 @@ class ToolBroker:
         lhs = parse_expression(str(args["lhs"]))
         rhs = parse_expression(str(args["rhs"]))
         relation = str(args.get("relation", "eq"))
-        variables = args.get("variables") or sorted(str(s) for s in lhs.free_symbols | rhs.free_symbols)
+        variables = args.get("variables") or sorted(
+            str(s) for s in lhs.free_symbols | rhs.free_symbols
+        )
         ranges = args.get("ranges") or {}
         samples = min(10000, max(1, int(args.get("samples", 200))))
         tolerance = float(args.get("tolerance", 1e-8))
@@ -233,7 +242,10 @@ class ToolBroker:
             try:
                 lval = complex(sp.N(lhs.subs(substitution), 30))
                 rval = complex(sp.N(rhs.subs(substitution), 30))
-                if not all(math.isfinite(x) for x in [lval.real, lval.imag, rval.real, rval.imag]):
+                if not all(
+                    math.isfinite(x)
+                    for x in [lval.real, lval.imag, rval.real, rval.imag]
+                ):
                     skipped += 1
                     continue
             except Exception:

@@ -6,13 +6,14 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
 from .activity import ActivityImportance, ActivityStatus, ActivityStream, stage_label
 from .config import SystemConfig
-from .llm.pool import AgentPool, AgentRuntime
+from .llm.pool import AgentCallFailure, AgentPool, AgentRuntime
 from .prompts import PromptBundle
 from .schemas import UsageRecord
 from .store import ArtifactStore
@@ -28,6 +29,16 @@ class BudgetExhaustedError(RuntimeError):
 
 class StructuredOutputError(RuntimeError):
     pass
+
+
+class AgentFailoverExhausted(RuntimeError):
+    def __init__(self, role: str, tried_agents: list[str], errors: list[str]) -> None:
+        self.role = role
+        self.tried_agents = tried_agents
+        self.errors = errors
+        super().__init__(
+            f"all agents failed for role={role}; tried={tried_agents}; errors={errors}"
+        )
 
 
 @dataclass(slots=True)
@@ -57,9 +68,15 @@ class CallLedger:
         budget = self.config.budget
         if self.calls_started >= budget.max_total_calls:
             return False
-        if budget.max_total_tokens is not None and self.pool.total_tokens() >= budget.max_total_tokens:
+        if (
+            budget.max_total_tokens is not None
+            and self.pool.total_tokens() >= budget.max_total_tokens
+        ):
             return False
-        if budget.max_cost_usd is not None and self.pool.total_cost_usd() >= budget.max_cost_usd:
+        if (
+            budget.max_cost_usd is not None
+            and self.pool.total_cost_usd() >= budget.max_cost_usd
+        ):
             return False
         return True
 
@@ -94,6 +111,19 @@ class StructuredAgentRunner:
         self.activity = activity
         self.ledger = CallLedger(config, pool)
 
+    def persist_runtime_state(self) -> None:
+        """Atomically persist budget and usage state for process-level resume."""
+        self.store.write_json(
+            "checkpoints",
+            "runtime_ledger",
+            {
+                "calls_started": self.ledger.calls_started,
+                "stage_calls": self.ledger.stage_calls,
+                "bucket_calls": self.ledger.bucket_calls,
+                "agent_metrics": self.pool.metrics(),
+            },
+        )
+
     async def call(
         self,
         role: str,
@@ -112,14 +142,19 @@ class StructuredAgentRunner:
             prefer_provider_not=prefer_provider_not,
         )
         schema = bundle.response_model.model_json_schema()
-        prompt_ref = self.store.save_prompt(bundle.stage, agent.id, bundle.system, bundle.user)
+        prompt_ref = self.store.save_prompt(
+            bundle.stage, agent.id, bundle.system, bundle.user
+        )
         messages = [
             {"role": "system", "content": bundle.system},
             {"role": "user", "content": bundle.user},
         ]
 
         activity_task: str | None = None
-        if self.activity is not None and self.config.runtime.activity_include_agent_calls:
+        if (
+            self.activity is not None
+            and self.config.runtime.activity_include_agent_calls
+        ):
             zh = self.activity.is_zh
             activity_task = self.activity.start_task(
                 "agent_call",
@@ -146,6 +181,7 @@ class StructuredAgentRunner:
         try:
             for parse_attempt in range(self.config.runtime.parse_retries + 1):
                 self.ledger.start(bundle.stage, budget_bucket)
+                self.persist_runtime_state()
                 if parse_attempt > 0:
                     repair_system = (
                         "You repair malformed structured output. Return only one JSON object matching the schema. "
@@ -170,7 +206,9 @@ class StructuredAgentRunner:
                     if activity_task and self.activity is not None:
                         self.activity.update_task(
                             activity_task,
-                            title=stage_label(bundle.stage, self.config.runtime.output_language),
+                            title=stage_label(
+                                bundle.stage, self.config.runtime.output_language
+                            ),
                             detail=(
                                 f"{agent.id} 正在修复第 {parse_attempt} 次结构化输出"
                                 if self.activity.is_zh
@@ -211,7 +249,9 @@ class StructuredAgentRunner:
                             "latency_ms": response.latency_ms,
                         },
                         "provider_metadata": (
-                            response.raw if self.config.runtime.save_raw_provider_responses else {}
+                            response.raw
+                            if self.config.runtime.save_raw_provider_responses
+                            else {}
                         ),
                     },
                     summary=f"Raw response for {bundle.stage} from {agent.id}",
@@ -221,10 +261,15 @@ class StructuredAgentRunner:
                 total_usage.output_tokens += response.output_tokens
                 total_usage.total_tokens += response.total_tokens
                 total_usage.estimated_cost_usd += (
-                    response.input_tokens / 1_000_000 * agent.config.pricing.input_per_million
-                    + response.output_tokens / 1_000_000 * agent.config.pricing.output_per_million
+                    response.input_tokens
+                    / 1_000_000
+                    * agent.config.pricing.input_per_million
+                    + response.output_tokens
+                    / 1_000_000
+                    * agent.config.pricing.output_per_million
                 )
                 total_usage.latency_ms += response.latency_ms
+                self.persist_runtime_state()
                 try:
                     payload = extract_json_object(response.text)
                     value = bundle.response_model.model_validate(payload)
@@ -243,7 +288,9 @@ class StructuredAgentRunner:
                     if activity_task and self.activity is not None:
                         self.activity.complete_task(
                             activity_task,
-                            title=stage_label(bundle.stage, self.config.runtime.output_language),
+                            title=stage_label(
+                                bundle.stage, self.config.runtime.output_language
+                            ),
                             detail=(
                                 f"{agent.id} 完成；{total_usage.total_tokens:,} tokens，"
                                 f"模型耗时 {total_usage.latency_ms / 1000:.1f} 秒"
@@ -264,6 +311,7 @@ class StructuredAgentRunner:
                                 "latency_ms": total_usage.latency_ms,
                             },
                         )
+                    self.persist_runtime_state()
                     return StructuredCallResult(
                         value=value,
                         agent=agent,
@@ -292,7 +340,9 @@ class StructuredAgentRunner:
                     if activity_task and self.activity is not None:
                         self.activity.warn_task(
                             activity_task,
-                            title=stage_label(bundle.stage, self.config.runtime.output_language),
+                            title=stage_label(
+                                bundle.stage, self.config.runtime.output_language
+                            ),
                             detail=(
                                 f"{agent.id} 的结构化输出未通过校验，准备定向修复"
                                 if self.activity.is_zh
@@ -311,10 +361,13 @@ class StructuredAgentRunner:
                 f"{bundle.response_model.__name__}: {last_error}"
             ) from last_error
         except Exception as exc:
+            self.persist_runtime_state()
             if activity_task and self.activity is not None:
                 self.activity.fail_task(
                     activity_task,
-                    title=stage_label(bundle.stage, self.config.runtime.output_language),
+                    title=stage_label(
+                        bundle.stage, self.config.runtime.output_language
+                    ),
                     detail=(
                         f"{agent.id} 未完成当前任务：{type(exc).__name__}"
                         if self.activity.is_zh
@@ -327,6 +380,116 @@ class StructuredAgentRunner:
                     metrics={"error_type": type(exc).__name__},
                 )
             raise
+
+    async def call_with_failover(
+        self,
+        role: str,
+        bundle_factory: Callable[[AgentRuntime], PromptBundle],
+        *,
+        primary_agent: AgentRuntime,
+        specialty_hints: list[str] | None = None,
+        budget_bucket: str = "other",
+        max_failover_agents: int = 0,
+        allow_failover: bool = True,
+        failover_only_on_retryable: bool = True,
+        exclude_agent_ids: set[str] | None = None,
+    ) -> tuple[StructuredCallResult[Any], list[str]]:
+        """Try one key with its normal retries, then move the same task to backup keys."""
+        tried: list[str] = []
+        errors: list[str] = []
+        excluded = set(exclude_agent_ids or set())
+        if primary_agent.id in excluded:
+            raise ValueError(
+                f"primary agent {primary_agent.id!r} is excluded from role={role}"
+            )
+        candidates = [primary_agent]
+        if allow_failover and max_failover_agents > 0:
+            candidates.extend(
+                self.pool.failover_candidates(
+                    role,
+                    exclude={primary_agent.id, *excluded},
+                    specialty_hints=specialty_hints,
+                    prefer_provider_not=primary_agent.provider,
+                    limit=max_failover_agents,
+                )
+            )
+
+        for index, agent in enumerate(candidates):
+            tried.append(agent.id)
+            if index > 0:
+                self.store.append_event(
+                    "agent_failover_started",
+                    {
+                        "role": role,
+                        "from_agent_id": tried[-2],
+                        "to_agent_id": agent.id,
+                        "attempt_index": index,
+                    },
+                )
+                if self.activity is not None:
+                    self.activity.info(
+                        "agent_failover",
+                        title=self.activity.text(
+                            "原 API 重试耗尽，切换备用 Agent",
+                            "Primary API retries exhausted; switching to a backup agent",
+                        ),
+                        detail=self.activity.text(
+                            f"{tried[-2]} → {agent.id}；从同一已验证检查点继续",
+                            f"{tried[-2]} → {agent.id}; continuing from the same verified checkpoint",
+                        ),
+                        stage="agent_failover",
+                        agent_id=agent.id,
+                        importance=ActivityImportance.MAJOR,
+                        metrics={"tried_agents": list(tried)},
+                    )
+            try:
+                result = await self.call(
+                    role,
+                    bundle_factory(agent),
+                    fixed_agent=agent,
+                    budget_bucket=budget_bucket,
+                )
+                if index > 0:
+                    self.store.append_event(
+                        "agent_failover_succeeded",
+                        {
+                            "role": role,
+                            "agent_id": agent.id,
+                            "tried_agents": list(tried),
+                        },
+                    )
+                return result, tried
+            except BudgetExhaustedError:
+                raise
+            except (
+                AgentCallFailure,
+                StructuredOutputError,
+                RuntimeError,
+                ValueError,
+            ) as exc:
+                errors.append(f"{agent.id}:{type(exc).__name__}:{exc}")
+                self.store.append_event(
+                    "agent_failover_candidate_failed",
+                    {
+                        "role": role,
+                        "agent_id": agent.id,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                        "retryable": getattr(exc, "retryable", None),
+                    },
+                )
+                if (
+                    failover_only_on_retryable
+                    and isinstance(exc, AgentCallFailure)
+                    and not exc.retryable
+                    and exc.status_code not in {401, 403}
+                ):
+                    break
+                # Authentication/authorization failures are not retried on the
+                # same key, but a different configured key may still be valid.
+                continue
+
+        raise AgentFailoverExhausted(role, tried, errors)
 
     async def _call_with_activity_heartbeat(
         self,

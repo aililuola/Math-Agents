@@ -40,7 +40,9 @@ def test_deepseek_agent_config_accepts_v4_pro_max() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_pool_constructs_deepseek_client(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_agent_pool_constructs_deepseek_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("TEST_DEEPSEEK_KEY", "test-secret")
     config = SystemConfig(
         agents=[
@@ -128,11 +130,12 @@ async def test_deepseek_payload_and_reasoning_redaction() -> None:
     assert response.provider == "deepseek"
     assert response.raw["reasoning"]["present"] is True
     assert response.raw["reasoning"]["characters"] > 0
+    assert response.raw["streaming"] is False
     assert "reasoning_content" not in json.dumps(response.raw)
 
 
 @pytest.mark.asyncio
-async def test_deepseek_streaming_payload_usage_and_reasoning_redaction() -> None:
+async def test_deepseek_streaming_payload_and_reasoning_redaction() -> None:
     captured: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -164,7 +167,7 @@ async def test_deepseek_streaming_payload_usage_and_reasoning_redaction() -> Non
                     {
                         "index": 0,
                         "finish_reason": None,
-                        "delta": {"reasoning_content": "reasoning"},
+                        "delta": {"reasoning_content": [{"text": "reasoning"}]},
                     }
                 ],
                 "usage": None,
@@ -178,7 +181,7 @@ async def test_deepseek_streaming_payload_usage_and_reasoning_redaction() -> Non
                     {
                         "index": 0,
                         "finish_reason": None,
-                        "delta": {"content": [{"type": "text", "text": '{"ok":'}]},
+                        "delta": {"content": '{"ok":'},
                     }
                 ],
                 "usage": None,
@@ -248,47 +251,36 @@ async def test_deepseek_streaming_payload_usage_and_reasoning_redaction() -> Non
     assert response.input_tokens == 17
     assert response.output_tokens == 19
     assert response.request_id == "req-stream"
-    assert response.raw["finish_reason"] == "stop"
-    assert response.raw["streaming"]["enabled"] is True
-    assert response.raw["streaming"]["chunks"] == 5
-    assert response.raw["streaming"]["done_received"] is True
-    assert response.raw["streaming"]["usage_received"] is True
     assert response.raw["reasoning"]["characters"] == len("private reasoning")
-    assert response.raw["reasoning"]["sha256"]
+    assert response.raw["streaming"] is True
+    assert response.raw["stream"]["chunks"] == 5
+    assert response.raw["stream"]["done_received"] is True
+    assert response.raw["stream"]["first_chunk_latency_ms"] is not None
     assert "reasoning_content" not in json.dumps(response.raw)
 
 
 @pytest.mark.asyncio
-async def test_deepseek_streaming_rejects_incomplete_stream() -> None:
+async def test_deepseek_streaming_rejects_incomplete_sse() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        event = {
-            "id": "chat-incomplete",
-            "object": "chat.completion.chunk",
-            "model": "deepseek-v4-pro",
-            "choices": [
-                {
-                    "index": 0,
-                    "finish_reason": None,
-                    "delta": {"content": "partial"},
-                }
-            ],
-            "usage": None,
-        }
+        body = (
+            'data: {"id":"chat-cut","model":"deepseek-v4-pro",'
+            '"choices":[{"delta":{"content":"partial"}}]}\n\n'
+        )
         return httpx.Response(
             200,
             headers={"content-type": "text/event-stream"},
-            content=f"data: {json.dumps(event)}\n\n".encode("utf-8"),
+            content=body.encode("utf-8"),
         )
 
     client = DeepSeekClient(api_key="test-secret", streaming=True)
     await client._client.aclose()
     client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
-        with pytest.raises(httpx.RemoteProtocolError, match=r"\[DONE\]"):
+        with pytest.raises(RuntimeError, match=r"ended before data: \[DONE\]"):
             await client.complete(
                 [{"role": "user", "content": "Return JSON."}],
                 temperature=0.0,
-                max_output_tokens=1024,
+                max_output_tokens=256,
                 json_mode=True,
             )
     finally:
@@ -304,8 +296,16 @@ async def test_deepseek_model_list_probe() -> None:
             json={
                 "object": "list",
                 "data": [
-                    {"id": "deepseek-v4-flash", "object": "model", "owned_by": "deepseek"},
-                    {"id": "deepseek-v4-pro", "object": "model", "owned_by": "deepseek"},
+                    {
+                        "id": "deepseek-v4-flash",
+                        "object": "model",
+                        "owned_by": "deepseek",
+                    },
+                    {
+                        "id": "deepseek-v4-pro",
+                        "object": "model",
+                        "owned_by": "deepseek",
+                    },
                 ],
             },
         )
@@ -318,3 +318,32 @@ async def test_deepseek_model_list_probe() -> None:
     finally:
         await client.aclose()
     assert models == ["deepseek-v4-flash", "deepseek-v4-pro"]
+
+
+@pytest.mark.asyncio
+async def test_deepseek_streaming_requires_requested_usage_summary() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = (
+            'data: {"id":"chat-no-usage","model":"deepseek-v4-pro",'
+            '"choices":[{"finish_reason":"stop","delta":{"content":"{}"}}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=body.encode("utf-8"),
+        )
+
+    client = DeepSeekClient(api_key="test-secret", streaming=True)
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(RuntimeError, match="final usage summary"):
+            await client.complete(
+                [{"role": "user", "content": "Return JSON."}],
+                temperature=0.0,
+                max_output_tokens=256,
+                json_mode=True,
+            )
+    finally:
+        await client.aclose()

@@ -21,7 +21,9 @@ def test_safe_expression_parser_rejects_arbitrary_python() -> None:
     assert str(parse_expression("(x+1)^2")) == "(x + 1)**2"
 
 
-def test_tool_broker_equivalence_and_counterexample(demo_config, artifact_store) -> None:
+def test_tool_broker_equivalence_and_counterexample(
+    demo_config, artifact_store
+) -> None:
     broker = ToolBroker(demo_config, artifact_store)
     equivalent = broker.execute(
         ToolRequest(

@@ -17,7 +17,9 @@ def _strategy(title: str, idea: str, success: float) -> StrategyCard:
     )
 
 
-def test_diverse_strategy_selection_avoids_near_duplicates(demo_config, artifact_store) -> None:
+def test_diverse_strategy_selection_avoids_near_duplicates(
+    demo_config, artifact_store
+) -> None:
     pool = AgentPool(demo_config)
     router = SparseTopologyRouter(demo_config, pool, artifact_store)
     strategies = [
@@ -31,11 +33,17 @@ def test_diverse_strategy_selection_avoids_near_duplicates(demo_config, artifact
     assert len(titles) == 2
 
 
-def test_claim_transfer_is_sparse_over_source_paths(demo_config, artifact_store) -> None:
+def test_claim_transfer_is_sparse_over_source_paths(
+    demo_config, artifact_store
+) -> None:
     pool = AgentPool(demo_config)
     router = SparseTopologyRouter(demo_config, pool, artifact_store)
     claims = []
-    for source, tag in [("path-1", "algebra"), ("path-2", "geometry"), ("path-3", "number")]:
+    for source, tag in [
+        ("path-1", "algebra"),
+        ("path-2", "geometry"),
+        ("path-3", "number"),
+    ]:
         for i in range(2):
             claims.append(
                 ClaimCard(

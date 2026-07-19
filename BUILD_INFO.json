@@ -1,6 +1,6 @@
 {
   "project": "MathProofMesh",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "validated_on": "2026-07-19",
   "python_requirement": ">=3.11",
   "deepseek_profile": {
@@ -14,39 +14,88 @@
     "stream_options_include_usage": true,
     "keys_persisted": false
   },
+  "continuation": {
+    "proof_delta_segmentation": true,
+    "verified_checkpoint_commit": true,
+    "same_key_request_retries": true,
+    "cross_key_failover": true,
+    "author_excluded_from_checkpoint_review": true,
+    "failed_agent_cooldown": true,
+    "process_resume": true,
+    "resume_before_first_stage_checkpoint": true,
+    "cumulative_budget_and_usage_restore": true,
+    "raw_reasoning_persisted": false
+  },
   "validation": {
     "compileall": "PASS",
-    "ruff": "PASS",
-    "pytest": "24 passed",
-    "source_demo": {
+    "ruff_check": "PASS",
+    "ruff_format_check": "PASS",
+    "pytest": "41 passed",
+    "source_continuation_demo": {
       "status": "verified",
-      "calls": 19
+      "calls": 22,
+      "tokens": 25969,
+      "proof_checkpoints": 6
     },
+    "completed_run_resume": {
+      "status": "PASS",
+      "calls_before": 22,
+      "calls_after": 22,
+      "tokens_before": 25969,
+      "tokens_after": 25969
+    },
+    "interrupted_run_resume": {
+      "status": "PASS",
+      "interrupted_status": "budget_exhausted",
+      "calls_before": 4,
+      "resume_status": "verified",
+      "calls_after": 13,
+      "resumed_from_partial_segment": 1,
+      "completed_segment": 2,
+      "stage_checkpoint_present_before_resume": false
+    },
+    "cross_agent_network_failover": "PASS",
+    "auth_key_failover_without_same_key_retry": "PASS",
+    "failed_agent_cooldown": "PASS",
+    "independent_checkpoint_reviewer_guard": "PASS",
+    "checkpoint_lineage_and_hash_guards": "PASS",
+    "self_dependent_claim_guard": "PASS",
+    "immutable_content_addressed_prompts": "PASS",
     "deepseek_non_streaming_http_mock": "PASS",
     "deepseek_sse_http_mock": "PASS",
     "sse_incomplete_stream_guard": "PASS",
+    "sse_missing_usage_guard": "PASS",
     "reasoning_content_redaction": "PASS",
-    "deepseek_config_parse": "PASS (5/5 agents streaming=true in full and smoke profiles)",
-    "secret_scan": "PASS (none of the five supplied keys or generic sk-* credential patterns found in tracked source files)",
+    "config_parse": "PASS (5/5 DeepSeek agents use streaming=true; generic default remains false)",
+    "source_secret_scan": "PASS (60 files; no supplied key or generic long sk-* credential pattern)",
+    "wheel_build": "PASS",
+    "sdist_build": "PASS",
     "wheel_install_target": "PASS",
     "wheel_demo": {
       "status": "verified",
-      "calls": 19
+      "calls": 22
     },
-    "real_provider_calls": "NOT RUN (credentials were intentionally not used during artifact build)",
-    "orchestrator_module_split": "PASS (facade + focused mixins; 24-test behavior preserved)"
+    "archive_secret_scan": "PASS",
+    "real_provider_calls": "NOT RUN (credentials intentionally not used during build)"
   },
   "counts": {
-    "source_python_files": 31,
-    "test_python_files": 10,
-    "documentation_files": 7,
-    "source_lines": 8528,
-    "test_lines": 807,
-    "documentation_lines": 1635
+    "source_python_files": 25,
+    "test_python_files": 13,
+    "documentation_files": 8,
+    "source_lines": 11036,
+    "test_lines": 1670,
+    "documentation_lines": 2094
   },
-  "wheel": {
-    "path": "dist/mathproofmesh-0.4.0-py3-none-any.whl",
-    "sha256": "7b195f1c8558ec66d1691e00ddf8faeabd157a1b4a176ef47f4131b4404382ae",
-    "bytes": 103655
+  "artifacts": {
+    "wheel": {
+      "path": "dist/mathproofmesh-0.5.0-py3-none-any.whl",
+      "sha256": "d60129a5f8f9b41367ae3f5cdbe19882ede791ef4546d17892f407d6e6d22aac",
+      "bytes": 114826
+    },
+    "sdist": {
+      "path": "dist/mathproofmesh-0.5.0.tar.gz",
+      "sha256": "7a711ca43ba82a2d6403b9c2dd44be98c1db752ecef9e553f7de8958fec50111",
+      "bytes": 151686
+    }
   }
 }

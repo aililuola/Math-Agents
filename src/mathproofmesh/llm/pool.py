@@ -22,6 +22,26 @@ from .openai_compatible import OpenAICompatibleClient
 logger = logging.getLogger(__name__)
 
 
+class AgentCallFailure(RuntimeError):
+    """Raised after one API key exhausts its call-level retry budget."""
+
+    def __init__(
+        self,
+        agent_id: str,
+        error: Exception | None,
+        *,
+        retryable: bool,
+        status_code: int | None = None,
+    ) -> None:
+        self.agent_id = agent_id
+        self.error = error
+        self.retryable = retryable
+        self.status_code = status_code
+        super().__init__(
+            f"agent {agent_id} failed after retries: {type(error).__name__ if error else 'unknown'}: {error}"
+        )
+
+
 class SlidingWindowRateLimiter:
     def __init__(self, requests_per_minute: int | None) -> None:
         self.limit = requests_per_minute
@@ -54,6 +74,8 @@ class AgentRuntime:
     trust_score: float = field(init=False)
     calls: int = 0
     failures: int = 0
+    consecutive_failures: int = 0
+    cooldown_until: float = 0.0
     active_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -76,11 +98,17 @@ class AgentRuntime:
     def supports_role(self, role: str) -> bool:
         return role in self.config.roles or "general" in self.config.roles
 
+    @property
+    def in_cooldown(self) -> bool:
+        return time.monotonic() < self.cooldown_until
+
     def specialty_score(self, hints: Iterable[str] | None) -> float:
         if not hints:
             return 0.0
         specialties = {s.lower() for s in self.config.specialties}
-        return sum(1.0 for hint in hints if hint.lower() in specialties) / max(1, len(set(hints)))
+        return sum(1.0 for hint in hints if hint.lower() in specialties) / max(
+            1, len(set(hints))
+        )
 
     async def call(
         self,
@@ -97,11 +125,15 @@ class AgentRuntime:
             self.active_calls += 1
             try:
                 last_error: Exception | None = None
+                last_retryable = True
+                last_status: int | None = None
                 for attempt in range(self.request_retries + 1):
                     try:
                         response = await self.client.complete(
                             messages,
-                            temperature=self.config.temperature if temperature is None else temperature,
+                            temperature=self.config.temperature
+                            if temperature is None
+                            else temperature,
                             max_output_tokens=(
                                 self.config.max_output_tokens
                                 if max_output_tokens is None
@@ -115,16 +147,29 @@ class AgentRuntime:
                         return response
                     except httpx.HTTPStatusError as exc:
                         last_error = exc
-                        status = exc.response.status_code
-                        retryable = status == 429 or status >= 500
-                        if not retryable or attempt >= self.request_retries:
+                        last_status = exc.response.status_code
+                        last_retryable = (
+                            last_status == 408
+                            or last_status == 409
+                            or last_status == 429
+                            or last_status >= 500
+                        )
+                        if not last_retryable or attempt >= self.request_retries:
                             break
-                    except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                    except (
+                        httpx.TimeoutException,
+                        httpx.NetworkError,
+                        httpx.RemoteProtocolError,
+                    ) as exc:
                         last_error = exc
+                        last_retryable = True
                         if attempt >= self.request_retries:
                             break
-                    except Exception as exc:  # Provider-specific parse/transport failures.
+                    except (
+                        Exception
+                    ) as exc:  # Provider-specific parse/transport failures.
                         last_error = exc
+                        last_retryable = True
                         if attempt >= self.request_retries:
                             break
                     delay = min(8.0, 0.5 * (2**attempt))
@@ -136,18 +181,32 @@ class AgentRuntime:
                     )
                     await asyncio.sleep(delay)
                 self.failures += 1
-                raise RuntimeError(f"agent {self.id} failed after retries: {last_error}") from last_error
+                self.consecutive_failures += 1
+                cooldown_seconds = min(
+                    120.0, 5.0 * (2 ** max(0, self.consecutive_failures - 1))
+                )
+                self.cooldown_until = time.monotonic() + cooldown_seconds
+                raise AgentCallFailure(
+                    self.id,
+                    last_error,
+                    retryable=last_retryable,
+                    status_code=last_status,
+                ) from last_error
             finally:
                 self.active_calls -= 1
 
     def _record(self, response: LLMResponse) -> None:
         self.calls += 1
+        self.consecutive_failures = 0
+        self.cooldown_until = 0.0
         self.input_tokens += response.input_tokens
         self.output_tokens += response.output_tokens
         self.total_latency_ms += response.latency_ms
         self.estimated_cost_usd += (
             response.input_tokens / 1_000_000 * self.config.pricing.input_per_million
-            + response.output_tokens / 1_000_000 * self.config.pricing.output_per_million
+            + response.output_tokens
+            / 1_000_000
+            * self.config.pricing.output_per_million
         )
 
     def update_trust(self, delta: float) -> None:
@@ -184,7 +243,9 @@ class AgentPool:
         for agent_config in config.agents:
             if not agent_config.enabled:
                 continue
-            client = self._make_client(agent_config, mock_responders.get(agent_config.id))
+            client = self._make_client(
+                agent_config, mock_responders.get(agent_config.id)
+            )
             self._agents[agent_config.id] = AgentRuntime(
                 config=agent_config,
                 client=client,
@@ -192,9 +253,13 @@ class AgentPool:
                 request_retries=config.runtime.request_retries,
             )
 
-    def _make_client(self, cfg: AgentConfig, mock_responder: MockResponder | None) -> LLMClient:
+    def _make_client(
+        self, cfg: AgentConfig, mock_responder: MockResponder | None
+    ) -> LLMClient:
         if cfg.provider == "mock":
-            return MockClient(model=cfg.model, responder=mock_responder, profile=cfg.mock_profile)
+            return MockClient(
+                model=cfg.model, responder=mock_responder, profile=cfg.mock_profile
+            )
         api_key = cfg.resolve_key()
         if cfg.provider == "openai_compatible":
             return OpenAICompatibleClient(
@@ -228,7 +293,8 @@ class AgentPool:
             return GeminiClient(
                 api_key=api_key,
                 model=cfg.model,
-                base_url=cfg.base_url or "https://generativelanguage.googleapis.com/v1beta",
+                base_url=cfg.base_url
+                or "https://generativelanguage.googleapis.com/v1beta",
                 timeout_seconds=cfg.timeout_seconds,
                 extra_headers=cfg.extra_headers,
             )
@@ -253,7 +319,19 @@ class AgentPool:
         prefer_provider_not: str | None = None,
     ) -> AgentRuntime:
         exclude = exclude or set()
-        candidates = [a for a in self.agents if a.id not in exclude and a.supports_role(role)]
+        candidates = [
+            a
+            for a in self.agents
+            if a.id not in exclude and a.supports_role(role) and not a.in_cooldown
+        ]
+        if not candidates:
+            candidates = [
+                a for a in self.agents if a.id not in exclude and a.supports_role(role)
+            ]
+        if not candidates:
+            candidates = [
+                a for a in self.agents if a.id not in exclude and not a.in_cooldown
+            ]
         if not candidates:
             candidates = [a for a in self.agents if a.id not in exclude]
         if not candidates:
@@ -265,14 +343,24 @@ class AgentPool:
         self._selection_counter += 1
 
         def score(agent: AgentRuntime) -> tuple[float, float, int, str]:
-            cross_provider = 0.12 if prefer_provider_not and agent.provider != prefer_provider_not else 0.0
+            cross_provider = (
+                0.12
+                if prefer_provider_not and agent.provider != prefer_provider_not
+                else 0.0
+            )
             specialty = 0.18 * agent.specialty_score(specialty_hints)
             load_penalty = 0.08 * agent.active_calls + 0.001 * agent.calls
             # Tiny deterministic round-robin perturbation prevents a single high-prior key from taking every role.
-            stable_id = int.from_bytes(hashlib.sha256(agent.id.encode("utf-8")).digest()[:4], "big")
+            stable_id = int.from_bytes(
+                hashlib.sha256(agent.id.encode("utf-8")).digest()[:4], "big"
+            )
             rotation = ((stable_id + self._selection_counter) % 17) / 10000.0
             return (
-                agent.trust_score + cross_provider + specialty - load_penalty + rotation,
+                agent.trust_score
+                + cross_provider
+                + specialty
+                - load_penalty
+                + rotation,
                 -agent.active_calls,
                 -agent.calls,
                 agent.id,
@@ -295,7 +383,9 @@ class AgentPool:
             try:
                 agent = self.select(
                     role,
-                    exclude=current_exclude if distinct_when_possible else (exclude or set()),
+                    exclude=current_exclude
+                    if distinct_when_possible
+                    else (exclude or set()),
                     specialty_hints=specialty_hints,
                 )
             except RuntimeError:
@@ -306,6 +396,58 @@ class AgentPool:
                 if len(current_exclude) >= len(self._agents):
                     current_exclude = set(exclude or set())
         return selected
+
+    def failover_candidates(
+        self,
+        role: str,
+        *,
+        exclude: set[str],
+        specialty_hints: list[str] | None = None,
+        prefer_provider_not: str | None = None,
+        limit: int = 2,
+    ) -> list[AgentRuntime]:
+        """Return distinct backup agents without weakening per-key isolation."""
+        candidates = [
+            agent
+            for agent in self.agents
+            if agent.id not in exclude
+            and not agent.in_cooldown
+            and (agent.supports_role(role) or role == "general")
+        ]
+        if not candidates:
+            candidates = [
+                agent
+                for agent in self.agents
+                if agent.id not in exclude
+                and (agent.supports_role(role) or role == "general")
+            ]
+        if not candidates:
+            candidates = [
+                agent
+                for agent in self.agents
+                if agent.id not in exclude and not agent.in_cooldown
+            ]
+        if not candidates:
+            candidates = [agent for agent in self.agents if agent.id not in exclude]
+
+        def score(agent: AgentRuntime) -> tuple[float, float, float, str]:
+            cross_provider = (
+                0.12
+                if prefer_provider_not and agent.provider != prefer_provider_not
+                else 0.0
+            )
+            specialty = 0.18 * agent.specialty_score(specialty_hints)
+            load_penalty = (
+                0.08 * agent.active_calls + 0.002 * agent.failures + 0.001 * agent.calls
+            )
+            return (
+                agent.trust_score + cross_provider + specialty - load_penalty,
+                -agent.active_calls,
+                -agent.failures,
+                agent.id,
+            )
+
+        return sorted(candidates, key=score, reverse=True)[: max(0, limit)]
 
     def total_calls(self) -> int:
         return sum(a.calls for a in self.agents)
@@ -319,5 +461,24 @@ class AgentPool:
     def metrics(self) -> list[AgentMetric]:
         return [a.metric() for a in sorted(self.agents, key=lambda x: x.id)]
 
+    def restore_metrics(self, metrics: Iterable[AgentMetric | dict[str, Any]]) -> None:
+        """Restore persisted usage counters without restoring provider hidden state."""
+        for raw in metrics:
+            metric = (
+                raw if isinstance(raw, AgentMetric) else AgentMetric.model_validate(raw)
+            )
+            agent = self._agents.get(metric.agent_id)
+            if agent is None:
+                continue
+            agent.calls = metric.calls
+            agent.input_tokens = metric.usage.input_tokens
+            agent.output_tokens = metric.usage.output_tokens
+            agent.estimated_cost_usd = metric.usage.estimated_cost_usd
+            agent.total_latency_ms = metric.usage.latency_ms
+            agent.trust_score = metric.trust_score
+            agent.failures = metric.failures
+
     async def aclose(self) -> None:
-        await asyncio.gather(*(agent.client.aclose() for agent in self.agents), return_exceptions=True)
+        await asyncio.gather(
+            *(agent.client.aclose() for agent in self.agents), return_exceptions=True
+        )

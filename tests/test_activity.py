@@ -18,8 +18,10 @@ from mathproofmesh.store import ArtifactStore
 def test_activity_stream_redacts_and_persists(tmp_path: Path) -> None:
     store = ArtifactStore(tmp_path / "runs", "activity-test")
     received = []
-    stream = ActivityStream(store, language="zh-CN", listener=received.append, persist=True)
-    leaked = "test-credential-abcdefghijklmnopqrstuvwxyz123456"
+    stream = ActivityStream(
+        store, language="zh-CN", listener=received.append, persist=True
+    )
+    leaked = "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
 
     task_id = stream.start_task(
         "stage",
@@ -63,7 +65,9 @@ def test_activity_stream_redacts_and_persists(tmp_path: Path) -> None:
     combined = raw_jsonl + timeline_json + timeline_md
     assert leaked not in combined
     assert "[REDACTED]" in combined
-    assert str(tmp_path) in combined  # arbitrary metric values are converted to JSON-safe text
+    assert (
+        str(tmp_path) in combined
+    )  # arbitrary metric values are converted to JSON-safe text
     assert "不包含任何模型的原始私有思考链" in timeline_md
 
     payload = json.loads(timeline_json)
@@ -139,3 +143,27 @@ def test_long_agent_call_emits_content_free_heartbeat(tmp_path: Path) -> None:
 
     event_types = asyncio.run(exercise())
     assert "agent_call_heartbeat" in event_types
+
+
+def test_activity_stream_continues_existing_timeline_after_restart(
+    tmp_path: Path,
+) -> None:
+    store = ArtifactStore(tmp_path / "runs", "activity-resume")
+    first = ActivityStream(store, persist=True)
+    first.info("before_restart", title="已提交检查点")
+    first.finalize()
+
+    resumed = ActivityStream(store, persist=True)
+    event = resumed.info("after_restart", title="从检查点继续")
+    resumed.finalize()
+
+    assert event.sequence == 2
+    assert event.elapsed_ms >= first.events[-1].elapsed_ms
+    payload = json.loads(
+        (store.root / "reports" / "activity_timeline.json").read_text(encoding="utf-8")
+    )
+    assert [item["event_type"] for item in payload] == [
+        "before_restart",
+        "after_restart",
+    ]
+    assert [item["sequence"] for item in payload] == [1, 2]

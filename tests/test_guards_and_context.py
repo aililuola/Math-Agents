@@ -16,7 +16,9 @@ from mathproofmesh.schemas import (
 
 def test_problem_hash_guard_overrides_a_model_pass(demo_config) -> None:
     orchestrator = ProofMeshOrchestrator(demo_config)
-    problem = ProblemContract(exact_statement="Prove P.", normalized_statement="Prove P.")
+    problem = ProblemContract(
+        exact_statement="Prove P.", normalized_statement="Prove P."
+    )
     attempt = ProofAttempt(
         problem_hash="wrong-hash",
         strategy_id="s",

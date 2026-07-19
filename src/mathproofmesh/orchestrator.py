@@ -1,36 +1,4339 @@
 from __future__ import annotations
 
-from ._orchestrator_attempt_verification import AttemptVerificationOrchestratorMixin
-from ._orchestrator_attempt_verification_b import AttemptVerificationBOrchestratorMixin
-from ._orchestrator_core import CoreOrchestratorMixin
-from ._orchestrator_exploration import ExplorationOrchestratorMixin
-from ._orchestrator_final_verification import FinalVerificationOrchestratorMixin
-from ._orchestrator_helpers_a import OrchestratorHelpersAMixin
-from ._orchestrator_helpers_b import OrchestratorHelpersBMixin
-from ._orchestrator_helpers_c import OrchestratorHelpersCMixin
-from ._orchestrator_helpers_d import OrchestratorHelpersDMixin
-from ._orchestrator_runtime import RuntimeOrchestratorMixin
-from ._orchestrator_types import SolveState, VerificationBundle
+import asyncio
+import json
+import logging
+import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Iterable, Sequence, TypeVar
+
+from pydantic import BaseModel
+
+from .activity import (
+    ActivityImportance,
+    ActivityListener,
+    ActivityStatus,
+    ActivityStream,
+)
+from .agents import (
+    BudgetExhaustedError,
+    StructuredAgentRunner,
+    StructuredCallResult,
+    StructuredOutputError,
+)
+from .budget import AdaptiveBudgetManager, SoftBudgetAllocator
+from .config import SystemConfig
+from .continuation import (
+    attempt_from_checkpoint,
+    local_delta_verification,
+    make_genesis_checkpoint,
+    merge_verified_delta,
+    normalize_delta_claims,
+)
+from .llm.mock import MockResponder
+from .llm.pool import AgentPool, AgentRuntime
+from .memory import LemmaMemory
+from .prompts import PromptBundle, PromptFactory
+from .report import write_run_report
+from .schemas import (
+    ActionKind,
+    AgentMetric,
+    AttemptStatus,
+    CandidateAssessment,
+    ClaimBatch,
+    ClaimCard,
+    ClaimStatus,
+    Difficulty,
+    EvidenceRef,
+    FailureLevel,
+    FinalProof,
+    MetaReview,
+    ProblemContract,
+    ProblemKind,
+    ProofAttempt,
+    ProofCheckpoint,
+    ProofDelta,
+    RunResult,
+    RunStatus,
+    Severity,
+    StrategyCard,
+    StrategySet,
+    TriageResult,
+    UsageRecord,
+    VerificationIssue,
+    VerificationReport,
+    VerificationStage,
+    VerificationVerdict,
+    new_id,
+    stable_hash,
+)
+from .store import ArtifactStore
+from .tools import ToolBroker
+from .topology import SparseTopologyRouter, jaccard_similarity, strategy_text
+
+logger = logging.getLogger(__name__)
+T = TypeVar("T", bound=BaseModel)
 
 
-class ProofMeshOrchestrator(
-    CoreOrchestratorMixin,
-    ExplorationOrchestratorMixin,
-    RuntimeOrchestratorMixin,
-    AttemptVerificationOrchestratorMixin,
-    AttemptVerificationBOrchestratorMixin,
-    FinalVerificationOrchestratorMixin,
-    OrchestratorHelpersAMixin,
-    OrchestratorHelpersBMixin,
-    OrchestratorHelpersCMixin,
-    OrchestratorHelpersDMixin,
-):
+@dataclass(slots=True)
+class VerificationBundle:
+    aggregate: VerificationReport
+    reports: list[VerificationReport]
+
+
+@dataclass(slots=True)
+class SolveState:
+    triage: TriageResult | None
+    strategies: list[StrategyCard]
+    attempts: list[ProofAttempt]
+    reports: list[VerificationReport]
+    aggregate_reports: dict[str, VerificationReport]
+    meta_reviews: list[MetaReview]
+    checkpoints: list[ProofCheckpoint]
+    resumed: bool = False
+    resumed_from_checkpoint_id: str | None = None
+    final_proof: FinalProof | None = None
+    final_verification: VerificationReport | None = None
+    budget_exhausted: bool = False
+
+
+class ProofMeshOrchestrator:
     """
     Sparse, verification-first multi-agent orchestrator for difficult mathematics.
 
-    The implementation is split into focused mixins so the orchestration stages,
-    verification gates, and local integrity guards remain reviewable in GitHub.
+    The default graph is deliberately not a round-table chat:
+      planner -> isolated explorers -> independent structural/detailed reviewers
+      -> meta-reviewer -> targeted widen/deepen -> synthesizer -> final verifier.
+
+    Raw model outputs are immutable artifacts. Inter-agent transfers use typed packets
+    with provenance, content hashes, dependency IDs, and verification status.
     """
 
+    def __init__(
+        self,
+        config: SystemConfig,
+        *,
+        mock_responders: dict[str, MockResponder] | None = None,
+        activity_listener: ActivityListener | None = None,
+    ) -> None:
+        self.config = config
+        self.mock_responders = mock_responders or {}
+        self.activity_listener = activity_listener
 
-__all__ = ["ProofMeshOrchestrator", "SolveState", "VerificationBundle"]
+    async def solve(self, problem_text: str, *, run_id: str | None = None) -> RunResult:
+        if not problem_text or not problem_text.strip():
+            raise ValueError("problem_text must be non-empty")
+
+        run_id = run_id or self._make_run_id(problem_text)
+        store = ArtifactStore(self.config.runtime.run_root, run_id)
+        activity = ActivityStream(
+            store,
+            language=self.config.runtime.output_language,
+            listener=self.activity_listener,
+            persist=self.config.runtime.activity_persist,
+        )
+        pool = AgentPool(self.config, mock_responders=self.mock_responders)
+        runner = StructuredAgentRunner(self.config, pool, store, activity=activity)
+        prompts = PromptFactory(self.config.runtime.output_language)
+        router = SparseTopologyRouter(self.config, pool, store)
+        budget_manager = AdaptiveBudgetManager(self.config)
+        allocator = SoftBudgetAllocator(self.config, runner.ledger)
+        memory = LemmaMemory(store)
+        tools = ToolBroker(self.config, store)
+
+        problem = ProblemContract(
+            exact_statement=problem_text,
+            normalized_statement=self._normalize_statement(problem_text),
+            problem_kind=ProblemKind.UNKNOWN,
+            deliverables=[
+                "Give a correct answer and an explicit, auditable derivation or proof."
+            ],
+            hard_constraints=[
+                "Do not change hypotheses, quantifiers, domains, or requested conclusions.",
+                "Distinguish proved claims from conjectures and unresolved gaps.",
+            ],
+            allowed_tools=self._allowed_tools(),
+            output_language=self.config.runtime.output_language,
+        )
+        store.write_json("structured", "problem_contract", problem)
+        store.write_json("structured", "config_redacted", self.config.redacted_dict())
+        store.append_event(
+            "run_started",
+            {
+                "problem_id": problem.problem_id,
+                "problem_hash": problem.integrity_hash,
+                "system_name": self.config.system_name,
+            },
+        )
+        run_activity_task = activity.start_task(
+            "run",
+            title=activity.text(
+                "启动多 Agent 数学求解", "Starting the multi-agent mathematics run"
+            ),
+            detail=activity.text(
+                f"已冻结原题；启用 {len(pool.agents)} 个隔离子 Agent",
+                f"Problem contract frozen; {len(pool.agents)} isolated sub-agents are available",
+            ),
+            stage="run",
+            importance=ActivityImportance.MAJOR,
+            metrics={
+                "agent_count": len(pool.agents),
+                "problem_hash": problem.integrity_hash,
+            },
+        )
+        activity.info(
+            "problem_contract_ready",
+            title=activity.text("题目契约已建立", "Problem contract created"),
+            detail=activity.text(
+                "后续阶段不得改变原题的条件、量词、定义域或目标结论",
+                "Later stages may not alter hypotheses, quantifiers, domains, or the requested conclusion",
+            ),
+            stage="run",
+            parent_task_id=run_activity_task,
+            importance=ActivityImportance.NORMAL,
+        )
+
+        state = SolveState(
+            triage=None,
+            strategies=[],
+            attempts=[],
+            reports=[],
+            aggregate_reports={},
+            meta_reviews=[],
+            checkpoints=[],
+        )
+
+        try:
+            triage_task = activity.start_task(
+                "stage",
+                title=activity.text(
+                    "分析题型、难度与证明风险",
+                    "Analyzing the problem type, difficulty, and risks",
+                ),
+                detail=activity.text(
+                    "识别题目结构并决定适合的证明组织方式",
+                    "Classifying the task and choosing an appropriate proof organization",
+                ),
+                stage="triage",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+            )
+            state.triage = await self._triage(problem, runner, prompts, store)
+            problem.problem_kind = state.triage.problem_kind
+            activity.complete_task(
+                triage_task,
+                title=activity.text("题目分析完成", "Problem triage completed"),
+                detail=activity.text(
+                    f"题型 {state.triage.problem_kind.value}；难度 {state.triage.difficulty.value}；建议 {state.triage.suggested_paths} 条路线",
+                    f"Kind {state.triage.problem_kind.value}; difficulty {state.triage.difficulty.value}; {state.triage.suggested_paths} paths suggested",
+                ),
+                stage="triage",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+                metrics={
+                    "problem_kind": state.triage.problem_kind.value,
+                    "difficulty": state.triage.difficulty.value,
+                    "suggested_paths": state.triage.suggested_paths,
+                },
+            )
+            self._checkpoint(store, "triage", state, memory, runner)
+
+            strategy_task = activity.start_task(
+                "stage",
+                title=activity.text(
+                    "生成差异化证明路线", "Generating diverse proof strategies"
+                ),
+                detail=activity.text(
+                    "要求各路线采用不同的关键数学机制，避免重复探索",
+                    "Requiring distinct mathematical mechanisms to avoid duplicate exploration",
+                ),
+                stage="strategy_generation",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+            )
+            state.strategies = await self._initial_strategies(
+                problem,
+                state.triage,
+                runner,
+                prompts,
+                router,
+                store,
+            )
+            assignments = router.assign_explorers(state.strategies)
+            strategy_names = "；".join(
+                strategy.title for strategy in state.strategies[:4]
+            )
+            if len(state.strategies) > 4:
+                strategy_names += "；…"
+            activity.complete_task(
+                strategy_task,
+                title=activity.text(
+                    "证明路线已生成并分配", "Proof strategies generated and assigned"
+                ),
+                detail=activity.text(
+                    f"保留 {len(state.strategies)} 条路线：{strategy_names}",
+                    f"Selected {len(state.strategies)} diverse routes for isolated exploration",
+                ),
+                stage="strategy_generation",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+                metrics={"strategy_count": len(state.strategies)},
+            )
+            for strategy, agent in assignments:
+                activity.info(
+                    "strategy_assignment",
+                    title=activity.text("分配探索路线", "Explorer route assigned"),
+                    detail=strategy.title,
+                    stage="strategy_assignment",
+                    parent_task_id=strategy_task,
+                    agent_id=agent.id,
+                    importance=ActivityImportance.NORMAL,
+                    metrics={"strategy_id": strategy.strategy_id},
+                )
+            self._checkpoint(store, "strategy_assignment", state, memory, runner)
+
+            exploration_task = activity.start_task(
+                "stage",
+                title=activity.text(
+                    "并行探索不同证明方向",
+                    "Exploring different proof directions in parallel",
+                ),
+                detail=activity.text(
+                    f"{len(assignments)} 个子 Agent 首轮相互隔离，分别深挖一条路线",
+                    f"{len(assignments)} sub-agents are independently deepening separate routes",
+                ),
+                stage="initial_exploration",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+                metrics={"path_count": len(assignments)},
+            )
+            initial_attempts = await self._parallel_initial_exploration(
+                problem,
+                assignments,
+                runner,
+                prompts,
+                router,
+                memory,
+                store,
+            )
+            state.attempts.extend(initial_attempts)
+            complete_count = sum(
+                a.status == AttemptStatus.COMPLETE for a in initial_attempts
+            )
+            partial_count = sum(
+                a.status == AttemptStatus.PARTIAL for a in initial_attempts
+            )
+            failed_count = sum(
+                a.status == AttemptStatus.FAILED for a in initial_attempts
+            )
+            activity.complete_task(
+                exploration_task,
+                title=activity.text(
+                    "首轮并行探索完成", "Initial parallel exploration completed"
+                ),
+                detail=activity.text(
+                    f"完整候选 {complete_count} 条；部分结果 {partial_count} 条；失败路线 {failed_count} 条",
+                    f"Complete {complete_count}; partial {partial_count}; failed {failed_count}",
+                ),
+                stage="initial_exploration",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+                metrics={
+                    "complete": complete_count,
+                    "partial": partial_count,
+                    "failed": failed_count,
+                },
+            )
+            claims_before = len(memory.claims)
+            claims_task = activity.start_task(
+                "stage",
+                title=activity.text("归纳可复用引理", "Extracting reusable lemmas"),
+                detail=activity.text(
+                    "将各路线结果压缩成带假设、依赖、来源和作用域的结构化 ClaimCard",
+                    "Compressing path results into structured ClaimCards with assumptions, dependencies, provenance, and scope",
+                ),
+                stage="claim_extraction",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+            )
+            await self._extract_claims_many(
+                problem,
+                initial_attempts,
+                runner,
+                prompts,
+                memory,
+                store,
+                budget_bucket="breadth",
+            )
+            claims_added = len(memory.claims) - claims_before
+            activity.complete_task(
+                claims_task,
+                title=activity.text("引理归纳完成", "Claim extraction completed"),
+                detail=activity.text(
+                    f"新增 {claims_added} 条候选引理；当前引理库共 {len(memory.claims)} 条",
+                    f"Added {claims_added} candidate claims; lemma memory now contains {len(memory.claims)} items",
+                ),
+                stage="claim_extraction",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+                metrics={
+                    "claims_added": claims_added,
+                    "claim_count": len(memory.claims),
+                },
+            )
+            self._checkpoint(store, "initial_exploration", state, memory, runner)
+
+            candidates = self._rank_attempts(state.attempts)[
+                : self.config.budget.candidates_to_verify
+            ]
+            verification_task = activity.start_task(
+                "stage",
+                title=activity.text("验证候选证明", "Verifying candidate proofs"),
+                detail=activity.text(
+                    f"对排名靠前的 {len(candidates)} 条候选依次执行结构审查与逐步核查",
+                    f"Running structural and step-level audits on {len(candidates)} leading candidates",
+                ),
+                stage="initial_verification",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+                metrics={"candidate_count": len(candidates)},
+            )
+            verification_bundles = await self._verify_attempts_many(
+                problem,
+                candidates,
+                runner,
+                prompts,
+                router,
+                memory,
+                tools,
+                store,
+            )
+            self._record_verification_bundles(state, verification_bundles)
+            verdict_counts = {verdict.value: 0 for verdict in VerificationVerdict}
+            for bundle in verification_bundles:
+                verdict_counts[bundle.aggregate.verdict.value] += 1
+            activity.complete_task(
+                verification_task,
+                title=activity.text(
+                    "首轮候选验证完成", "Initial candidate verification completed"
+                ),
+                detail=activity.text(
+                    f"通过 {verdict_counts['pass']}；不通过 {verdict_counts['fail']}；待定 {verdict_counts['uncertain']}",
+                    f"Pass {verdict_counts['pass']}; fail {verdict_counts['fail']}; uncertain {verdict_counts['uncertain']}",
+                ),
+                stage="initial_verification",
+                parent_task_id=run_activity_task,
+                importance=ActivityImportance.MAJOR,
+                metrics=verdict_counts,
+            )
+
+            if state.attempts and runner.ledger.remaining_calls > 0:
+                meta_task = activity.start_task(
+                    "stage",
+                    title=activity.text(
+                        "汇总审查结果", "Consolidating review evidence"
+                    ),
+                    detail=activity.text(
+                        "定位最早断裂的步骤，并判断应继续深挖、拓宽还是进入综合",
+                        "Locating the first broken step and deciding whether to deepen, widen, or synthesize",
+                    ),
+                    stage="meta_review",
+                    parent_task_id=run_activity_task,
+                    importance=ActivityImportance.MAJOR,
+                )
+                review = await self._meta_review(
+                    problem,
+                    state.attempts,
+                    state.aggregate_reports,
+                    runner,
+                    prompts,
+                    store,
+                )
+                state.meta_reviews.append(review)
+                meta_detail_zh = (
+                    "已有候选可进入综合"
+                    if review.can_synthesize
+                    else f"暂不综合；失败层级 {review.failure_level.value}"
+                )
+                meta_detail_en = (
+                    "A candidate is ready for synthesis"
+                    if review.can_synthesize
+                    else f"Synthesis deferred; failure level {review.failure_level.value}"
+                )
+                activity.complete_task(
+                    meta_task,
+                    title=activity.text("综合复核完成", "Meta-review completed"),
+                    detail=activity.text(meta_detail_zh, meta_detail_en),
+                    stage="meta_review",
+                    parent_task_id=run_activity_task,
+                    importance=ActivityImportance.MAJOR,
+                    metrics={
+                        "can_synthesize": review.can_synthesize,
+                        "selected_target_id": review.selected_target_id,
+                        "failure_level": review.failure_level.value,
+                    },
+                )
+            self._checkpoint(store, "initial_verification", state, memory, runner)
+
+            # Adaptive breadth/depth loop. Actions are selected from verified progress,
+            # novelty, uncertainty, gaps, stagnation, and protected future call reserves.
+            for round_index in range(1, self.config.budget.max_rounds):
+                round_task = activity.start_task(
+                    "adaptive_round",
+                    title=activity.text(
+                        f"自适应调度第 {round_index} 轮",
+                        f"Adaptive scheduling round {round_index}",
+                    ),
+                    detail=activity.text(
+                        "根据进展、新颖性、不确定性和剩余预算平衡广度、深度与验证",
+                        "Balancing breadth, depth, and verification from progress, novelty, uncertainty, and remaining budget",
+                    ),
+                    stage="adaptive_round",
+                    parent_task_id=run_activity_task,
+                    importance=ActivityImportance.MAJOR,
+                    metrics={"round_index": round_index},
+                )
+                if self._has_synthesis_ready_candidate(state):
+                    # A supported candidate exists; preserve calls for synthesis/final audit.
+                    if allocator.should_protect_finish(
+                        state.aggregate_reports.values()
+                    ):
+                        activity.complete_task(
+                            round_task,
+                            title=activity.text(
+                                "保留预算并进入最终综合",
+                                "Preserving budget and moving to final synthesis",
+                            ),
+                            detail=activity.text(
+                                "已出现支持充分的候选，不再扩大搜索",
+                                "A sufficiently supported candidate exists, so search expansion stops",
+                            ),
+                            stage="adaptive_round",
+                            parent_task_id=run_activity_task,
+                            importance=ActivityImportance.MAJOR,
+                        )
+                        break
+
+                stats = budget_manager.build_path_stats(
+                    state.strategies,
+                    state.attempts,
+                    list(state.aggregate_reports.values()),
+                )
+                decision = budget_manager.decide(
+                    stats,
+                    current_path_count=len(state.strategies),
+                    remaining_calls=runner.ledger.remaining_calls,
+                    final_verified=False,
+                    max_actions=2,
+                    bucket_pressure=allocator.pressure_snapshot(),
+                )
+                store.write_json(
+                    "structured",
+                    f"budget_decision_round_{round_index}",
+                    decision,
+                )
+                store.append_event("budget_decision", decision)
+                action_names = (
+                    ", ".join(action.action.value for action in decision.actions)
+                    or "none"
+                )
+                activity.info(
+                    "budget_decision",
+                    title=activity.text(
+                        "本轮调度决策已形成", "Adaptive decision formed"
+                    ),
+                    detail=activity.text(
+                        f"计划动作：{action_names}；全局不确定性 {decision.global_uncertainty:.2f}",
+                        f"Actions: {action_names}; global uncertainty {decision.global_uncertainty:.2f}",
+                    ),
+                    stage="adaptive_round",
+                    parent_task_id=round_task,
+                    importance=ActivityImportance.NORMAL,
+                    metrics={
+                        "actions": [action.action.value for action in decision.actions],
+                        "global_uncertainty": decision.global_uncertainty,
+                        "coverage": decision.coverage,
+                    },
+                )
+
+                performed = False
+                for action in decision.actions:
+                    if action.action in {ActionKind.STOP, ActionKind.SYNTHESIZE}:
+                        continue
+                    estimated_cost = allocator.estimate_action_calls(action.action)
+                    bucket = allocator.bucket_for_action(action.action)
+                    if not allocator.can_spend(
+                        bucket,
+                        estimated_cost,
+                        protect_finish=True,
+                        has_candidate=bool(state.attempts),
+                    ):
+                        continue
+
+                    action_label_zh = {
+                        ActionKind.DEEPEN: "深挖现有路线",
+                        ActionKind.WIDEN: "扩展新的证明方向",
+                        ActionKind.VERIFY: "追加独立验证",
+                        ActionKind.REVISE: "定向修订",
+                    }.get(action.action, action.action.value)
+                    activity.info(
+                        "adaptive_action",
+                        title=activity.text(
+                            action_label_zh, f"Adaptive action: {action.action.value}"
+                        ),
+                        detail=action.reason,
+                        stage="adaptive_round",
+                        parent_task_id=round_task,
+                        importance=ActivityImportance.NORMAL,
+                        metrics={
+                            "action": action.action.value,
+                            "strategy_id": action.strategy_id,
+                            "target_id": action.target_id,
+                            "score": action.score,
+                        },
+                    )
+
+                    if action.action == ActionKind.DEEPEN and action.strategy_id:
+                        attempt = await self._deepen_path(
+                            problem,
+                            action.strategy_id,
+                            round_index,
+                            state,
+                            runner,
+                            prompts,
+                            router,
+                            memory,
+                            store,
+                        )
+                        if attempt is not None:
+                            state.attempts.append(attempt)
+                            await self._extract_claims_many(
+                                problem,
+                                [attempt],
+                                runner,
+                                prompts,
+                                memory,
+                                store,
+                                budget_bucket="depth",
+                            )
+                            performed = True
+                    elif action.action == ActionKind.WIDEN:
+                        new_attempts = await self._widen(
+                            problem,
+                            state.triage,
+                            round_index,
+                            state,
+                            runner,
+                            prompts,
+                            router,
+                            memory,
+                            store,
+                        )
+                        if new_attempts:
+                            state.attempts.extend(new_attempts)
+                            await self._extract_claims_many(
+                                problem,
+                                new_attempts,
+                                runner,
+                                prompts,
+                                memory,
+                                store,
+                                budget_bucket="breadth",
+                            )
+                            performed = True
+                    elif action.action == ActionKind.VERIFY and action.target_id:
+                        target = next(
+                            (
+                                a
+                                for a in state.attempts
+                                if a.attempt_id == action.target_id
+                            ),
+                            None,
+                        )
+                        if target is not None:
+                            bundle = await self._verify_attempt(
+                                problem,
+                                target,
+                                runner,
+                                prompts,
+                                router,
+                                memory,
+                                tools,
+                                store,
+                            )
+                            self._record_verification_bundles(state, [bundle])
+                            performed = True
+
+                # Verify the best newly generated candidate when its marginal value is high.
+                unverified = [
+                    attempt
+                    for attempt in self._rank_attempts(state.attempts)
+                    if attempt.attempt_id not in state.aggregate_reports
+                ]
+                if (
+                    unverified
+                    and allocator.can_spend(
+                        "verification",
+                        allocator.estimate_action_calls(ActionKind.VERIFY),
+                        protect_finish=True,
+                        has_candidate=True,
+                    )
+                    and self._attempt_local_quality(unverified[0]) >= 0.48
+                ):
+                    bundle = await self._verify_attempt(
+                        problem,
+                        unverified[0],
+                        runner,
+                        prompts,
+                        router,
+                        memory,
+                        tools,
+                        store,
+                    )
+                    self._record_verification_bundles(state, [bundle])
+                    performed = True
+
+                if (
+                    performed
+                    and runner.ledger.remaining_calls > allocator.minimum_finish_reserve
+                ):
+                    review = await self._meta_review(
+                        problem,
+                        state.attempts,
+                        state.aggregate_reports,
+                        runner,
+                        prompts,
+                        store,
+                    )
+                    state.meta_reviews.append(review)
+
+                self._checkpoint(
+                    store, f"adaptive_round_{round_index}", state, memory, runner
+                )
+                activity.complete_task(
+                    round_task,
+                    title=activity.text(
+                        f"自适应调度第 {round_index} 轮完成",
+                        f"Adaptive scheduling round {round_index} completed",
+                    ),
+                    detail=activity.text(
+                        "已执行本轮高价值动作"
+                        if performed
+                        else "没有发现值得继续投入的动作",
+                        "High-value actions were executed"
+                        if performed
+                        else "No further high-value action was found",
+                    ),
+                    stage="adaptive_round",
+                    parent_task_id=run_activity_task,
+                    importance=ActivityImportance.MAJOR,
+                    metrics={"round_index": round_index, "performed": performed},
+                )
+                if not performed:
+                    break
+
+            # Form a final proof even when all paths are partial; caveats preserve honesty.
+            if state.attempts:
+                synthesis_task = activity.start_task(
+                    "stage",
+                    title=activity.text(
+                        "综合候选路线形成最终证明",
+                        "Synthesizing candidate routes into a final proof",
+                    ),
+                    detail=activity.text(
+                        "仅组合假设与作用域相容、且有验证支持的步骤",
+                        "Combining only compatible, verification-supported steps",
+                    ),
+                    stage="synthesis",
+                    parent_task_id=run_activity_task,
+                    importance=ActivityImportance.MAJOR,
+                )
+                state.final_proof, synthesizer = await self._synthesize(
+                    problem,
+                    state,
+                    runner,
+                    prompts,
+                    router,
+                    memory,
+                    store,
+                )
+                if state.final_proof is not None:
+                    activity.complete_task(
+                        synthesis_task,
+                        title=activity.text(
+                            "最终证明草稿已形成", "Final proof draft created"
+                        ),
+                        detail=activity.text(
+                            f"包含 {len(state.final_proof.proof_steps)} 个可审计步骤，来源路线 {len(state.final_proof.source_attempt_ids)} 条",
+                            f"Contains {len(state.final_proof.proof_steps)} auditable steps from {len(state.final_proof.source_attempt_ids)} source routes",
+                        ),
+                        stage="synthesis",
+                        parent_task_id=run_activity_task,
+                        importance=ActivityImportance.MAJOR,
+                        metrics={
+                            "proof_step_count": len(state.final_proof.proof_steps),
+                            "source_attempt_count": len(
+                                state.final_proof.source_attempt_ids
+                            ),
+                        },
+                    )
+                    final_verify_task = activity.start_task(
+                        "stage",
+                        title=activity.text(
+                            "执行最终独立审计", "Running the final independent audit"
+                        ),
+                        detail=activity.text(
+                            "先检查题意与依赖结构，再逐步核查关键推导",
+                            "Checking theorem integrity and dependencies before the step-level audit",
+                        ),
+                        stage="final_verification",
+                        parent_task_id=run_activity_task,
+                        importance=ActivityImportance.MAJOR,
+                    )
+                    final_bundle = await self._verify_final(
+                        problem,
+                        state.final_proof,
+                        synthesizer,
+                        runner,
+                        prompts,
+                        router,
+                        memory,
+                        tools,
+                        store,
+                    )
+                    state.reports.extend(final_bundle.reports)
+                    state.final_verification = final_bundle.aggregate
+                    initial_final_status = (
+                        ActivityStatus.COMPLETED
+                        if state.final_verification.verdict == VerificationVerdict.PASS
+                        else ActivityStatus.WARNING
+                    )
+                    activity.update_task(
+                        final_verify_task,
+                        title=activity.text("最终审计已返回", "Final audit returned"),
+                        detail=activity.text(
+                            f"结论 {state.final_verification.verdict.value}；置信度 {state.final_verification.confidence:.2f}",
+                            f"Verdict {state.final_verification.verdict.value}; confidence {state.final_verification.confidence:.2f}",
+                        ),
+                        status=initial_final_status,
+                        event_type="final_audit_result",
+                        stage="final_verification",
+                        parent_task_id=run_activity_task,
+                        importance=ActivityImportance.MAJOR,
+                        progress=(
+                            1.0
+                            if initial_final_status == ActivityStatus.COMPLETED
+                            else None
+                        ),
+                        metrics={
+                            "verdict": state.final_verification.verdict.value,
+                            "confidence": state.final_verification.confidence,
+                            "failure_level": state.final_verification.failure_level.value,
+                        },
+                    )
+
+                    revisions = 0
+                    while (
+                        state.final_verification.verdict != VerificationVerdict.PASS
+                        and revisions < self.config.budget.max_revisions
+                        and allocator.can_spend(
+                            "synthesis",
+                            allocator.estimate_revision_cycle_calls(),
+                            protect_finish=False,
+                            has_candidate=True,
+                        )
+                    ):
+                        # Strategy-level failure is not repaired by polishing the same proof.
+                        if (
+                            state.final_verification.failure_level
+                            == FailureLevel.STRATEGY
+                        ):
+                            activity.warn_task(
+                                final_verify_task,
+                                title=activity.text(
+                                    "最终审计发现策略级缺口",
+                                    "Final audit found a strategy-level gap",
+                                ),
+                                detail=activity.text(
+                                    "停止仅靠文字修订同一证明，保留未验证状态",
+                                    "Stopping local proof polishing and preserving the unverified status",
+                                ),
+                                event_type="strategy_level_gap",
+                                stage="final_verification",
+                                parent_task_id=run_activity_task,
+                                importance=ActivityImportance.MAJOR,
+                            )
+                            break
+                        revision_task = activity.start_task(
+                            "final_revision",
+                            title=activity.text(
+                                f"执行第 {revisions + 1} 次定向修订",
+                                f"Running targeted revision {revisions + 1}",
+                            ),
+                            detail=activity.text(
+                                "只修复审计定位的首个关键缺口",
+                                "Repairing only the first decisive gap identified by the audit",
+                            ),
+                            stage="final_revision",
+                            parent_task_id=final_verify_task,
+                            importance=ActivityImportance.MAJOR,
+                            metrics={"revision_index": revisions + 1},
+                        )
+                        revised = await self._revise_final(
+                            problem,
+                            state.final_proof,
+                            state.final_verification,
+                            synthesizer,
+                            runner,
+                            prompts,
+                            memory,
+                            store,
+                            revisions + 1,
+                        )
+                        if revised is None:
+                            activity.fail_task(
+                                revision_task,
+                                title=activity.text(
+                                    "定向修订未形成有效草稿",
+                                    "Targeted revision did not produce a valid draft",
+                                ),
+                                detail=activity.text(
+                                    "保留上一版证明与审计结论",
+                                    "Keeping the previous proof and audit result",
+                                ),
+                                event_type="final_revision_failed",
+                                stage="final_revision",
+                                parent_task_id=final_verify_task,
+                                importance=ActivityImportance.MAJOR,
+                            )
+                            break
+                        state.final_proof = revised
+                        final_bundle = await self._verify_final(
+                            problem,
+                            state.final_proof,
+                            synthesizer,
+                            runner,
+                            prompts,
+                            router,
+                            memory,
+                            tools,
+                            store,
+                        )
+                        state.reports.extend(final_bundle.reports)
+                        state.final_verification = final_bundle.aggregate
+                        revisions += 1
+                        revision_status = (
+                            ActivityStatus.COMPLETED
+                            if state.final_verification.verdict
+                            == VerificationVerdict.PASS
+                            else ActivityStatus.WARNING
+                        )
+                        activity.update_task(
+                            revision_task,
+                            title=activity.text(
+                                f"第 {revisions} 次修订与复核完成",
+                                f"Revision {revisions} and re-audit completed",
+                            ),
+                            detail=activity.text(
+                                f"最新结论 {state.final_verification.verdict.value}；置信度 {state.final_verification.confidence:.2f}",
+                                f"Latest verdict {state.final_verification.verdict.value}; confidence {state.final_verification.confidence:.2f}",
+                            ),
+                            status=revision_status,
+                            event_type="final_revision_completed",
+                            stage="final_revision",
+                            parent_task_id=final_verify_task,
+                            importance=ActivityImportance.MAJOR,
+                            progress=(
+                                1.0
+                                if revision_status == ActivityStatus.COMPLETED
+                                else None
+                            ),
+                            metrics={
+                                "revision_index": revisions,
+                                "verdict": state.final_verification.verdict.value,
+                                "confidence": state.final_verification.confidence,
+                            },
+                        )
+                        activity.update_task(
+                            final_verify_task,
+                            title=activity.text(
+                                "最终审计状态已更新", "Final audit status updated"
+                            ),
+                            detail=activity.text(
+                                f"结论 {state.final_verification.verdict.value}；已修订 {revisions} 次",
+                                f"Verdict {state.final_verification.verdict.value}; revisions {revisions}",
+                            ),
+                            status=revision_status,
+                            event_type="final_audit_updated",
+                            stage="final_verification",
+                            parent_task_id=run_activity_task,
+                            importance=ActivityImportance.MAJOR,
+                            progress=(
+                                1.0
+                                if revision_status == ActivityStatus.COMPLETED
+                                else None
+                            ),
+                            metrics={
+                                "verdict": state.final_verification.verdict.value,
+                                "revision_count": revisions,
+                            },
+                        )
+                else:
+                    activity.fail_task(
+                        synthesis_task,
+                        title=activity.text(
+                            "未形成可提交的最终证明",
+                            "No submit-ready final proof was produced",
+                        ),
+                        detail=activity.text(
+                            "已保留所有部分路线、失败信息和验证记录",
+                            "All partial routes, failures, and verification artifacts were preserved",
+                        ),
+                        event_type="synthesis_failed",
+                        stage="synthesis",
+                        parent_task_id=run_activity_task,
+                        importance=ActivityImportance.MAJOR,
+                    )
+            else:
+                activity.info(
+                    "no_attempts",
+                    title=activity.text(
+                        "没有可综合的证明路线",
+                        "No proof route is available for synthesis",
+                    ),
+                    detail=activity.text(
+                        "运行将以未验证状态结束，并保留审计记录",
+                        "The run will finish unverified while preserving the audit trail",
+                    ),
+                    stage="synthesis",
+                    parent_task_id=run_activity_task,
+                    importance=ActivityImportance.MAJOR,
+                )
+
+            self._checkpoint(store, "final", state, memory, runner)
+            status = self._run_status(state)
+            result = self._build_result(
+                run_id,
+                status,
+                problem,
+                state,
+                pool.metrics(),
+                runner,
+                pool,
+                store,
+                memory,
+            )
+            router.export()
+            store.write_json("structured", "run_result", result)
+            store.append_event(
+                "run_completed",
+                {
+                    "status": result.status.value,
+                    "total_calls": result.total_calls,
+                    "total_tokens": result.total_usage.total_tokens,
+                },
+            )
+            activity.complete_task(
+                run_activity_task,
+                title=activity.text("多 Agent 求解结束", "Multi-agent run completed"),
+                detail=activity.text(
+                    f"状态 {result.status.value}；调用 {result.total_calls} 次；共 {result.total_usage.total_tokens:,} tokens",
+                    f"Status {result.status.value}; {result.total_calls} calls; {result.total_usage.total_tokens:,} tokens",
+                ),
+                event_type="run_completed",
+                stage="run",
+                importance=ActivityImportance.MAJOR,
+                metrics={
+                    "status": result.status.value,
+                    "total_calls": result.total_calls,
+                    "total_tokens": result.total_usage.total_tokens,
+                },
+            )
+            activity.finalize()
+            write_run_report(store, result)
+            return result
+        except BudgetExhaustedError as exc:
+            state.budget_exhausted = True
+            logger.warning("Budget exhausted: %s", exc)
+            store.append_event("budget_exhausted", {"error": str(exc)})
+            result = self._build_result(
+                run_id,
+                RunStatus.BUDGET_EXHAUSTED,
+                problem,
+                state,
+                pool.metrics(),
+                runner,
+                pool,
+                store,
+                memory,
+                summary_override="Global call/token/cost budget was exhausted; partial artifacts were preserved.",
+            )
+            router.export()
+            store.write_json("structured", "run_result", result)
+            activity.close_open_tasks(
+                status=ActivityStatus.WARNING,
+                detail=activity.text(
+                    "由于预算耗尽，本阶段停止并保留当前产物",
+                    "This stage stopped because the budget was exhausted; current artifacts were preserved",
+                ),
+                exclude_task_ids={run_activity_task},
+            )
+            activity.warn_task(
+                run_activity_task,
+                title=activity.text(
+                    "预算耗尽，保留部分结果",
+                    "Budget exhausted; partial results preserved",
+                ),
+                detail=activity.text(
+                    f"已完成 {result.total_calls} 次调用；当前状态 {result.status.value}",
+                    f"Completed {result.total_calls} calls; current status {result.status.value}",
+                ),
+                event_type="budget_exhausted",
+                stage="run",
+                importance=ActivityImportance.MAJOR,
+                metrics={
+                    "status": result.status.value,
+                    "total_calls": result.total_calls,
+                    "total_tokens": result.total_usage.total_tokens,
+                },
+            )
+            activity.finalize()
+            write_run_report(store, result)
+            return result
+        except Exception as exc:
+            logger.exception("MathProofMesh run failed")
+            store.append_event(
+                "run_failed", {"type": type(exc).__name__, "error": str(exc)}
+            )
+            result = self._build_result(
+                run_id,
+                RunStatus.FAILED,
+                problem,
+                state,
+                pool.metrics(),
+                runner,
+                pool,
+                store,
+                memory,
+                summary_override=f"Run failed with {type(exc).__name__}: {exc}",
+            )
+            router.export()
+            store.write_json("structured", "run_result", result)
+            activity.close_open_tasks(
+                status=ActivityStatus.FAILED,
+                detail=activity.text(
+                    "由于运行异常，本阶段中止；已保留当前产物",
+                    "This stage was interrupted by a run error; current artifacts were preserved",
+                ),
+                exclude_task_ids={run_activity_task},
+            )
+            activity.fail_task(
+                run_activity_task,
+                title=activity.text("运行异常终止", "Run terminated with an error"),
+                detail=activity.text(
+                    f"错误类型 {type(exc).__name__}；已保存当前阶段的全部可用产物",
+                    f"Error type {type(exc).__name__}; all available artifacts were preserved",
+                ),
+                event_type="run_failed",
+                stage="run",
+                importance=ActivityImportance.MAJOR,
+                metrics={"error_type": type(exc).__name__},
+            )
+            activity.finalize()
+            write_run_report(store, result)
+            return result
+        finally:
+            await pool.aclose()
+
+    async def resume(self, run_id: str) -> RunResult:
+        """Resume a stopped run from persisted stage state and verified proof checkpoints."""
+        if not self.config.continuation.process_resume_enabled:
+            raise RuntimeError(
+                "process resume is disabled by continuation.process_resume_enabled"
+            )
+        store = ArtifactStore(self.config.runtime.run_root, run_id)
+        if not store.has_named_json("structured", "problem_contract"):
+            raise FileNotFoundError(
+                f"run {run_id!r} has no structured/problem_contract.json and cannot be resumed"
+            )
+        checkpoint_payload = store.latest_stage_checkpoint()
+        if checkpoint_payload is None:
+            # A process can stop after the immutable problem contract or runtime ledger
+            # has been persisted but before the first stage-level checkpoint exists.
+            # Resume conservatively from the frozen problem instead of forcing the user
+            # to start a new run ID and lose the existing audit trail.
+            resume_stage, payload = "problem_contract", {}
+        else:
+            resume_stage, payload = checkpoint_payload
+        # Recover durable structured artifacts when stage snapshots were disabled
+        # or the process stopped between a structured write and the next stage checkpoint.
+        if not payload.get("triage"):
+            for triage_name in ("triage", "triage_fallback"):
+                if store.has_named_json("structured", triage_name):
+                    payload["triage"] = store.read_named_json("structured", triage_name)
+                    break
+        if not payload.get("strategies") and store.has_named_json(
+            "structured", "selected_strategies"
+        ):
+            payload["strategies"] = store.read_named_json(
+                "structured", "selected_strategies"
+            )
+        problem = ProblemContract.model_validate(
+            store.read_named_json("structured", "problem_contract")
+        )
+
+        activity = ActivityStream(
+            store,
+            language=self.config.runtime.output_language,
+            listener=self.activity_listener,
+            persist=self.config.runtime.activity_persist,
+        )
+        pool = AgentPool(self.config, mock_responders=self.mock_responders)
+        runner = StructuredAgentRunner(self.config, pool, store, activity=activity)
+        prompts = PromptFactory(self.config.runtime.output_language)
+        router = SparseTopologyRouter(self.config, pool, store)
+        memory = LemmaMemory(store)
+        tools = ToolBroker(self.config, store)
+
+        state = self._restore_state_from_checkpoint(payload, store)
+        state.resumed = True
+        latest_proof_checkpoint = max(
+            state.checkpoints,
+            key=lambda checkpoint: checkpoint.created_at,
+            default=None,
+        )
+        state.resumed_from_checkpoint_id = (
+            latest_proof_checkpoint.checkpoint_id if latest_proof_checkpoint else None
+        )
+        persisted_claims: list[Any] = list(payload.get("claims", []))
+        if store.has_named_json("structured", "lemma_memory"):
+            lemma_payload = store.read_named_json("structured", "lemma_memory")
+            if isinstance(lemma_payload, list):
+                persisted_claims.extend(lemma_payload)
+        memory.add_many([ClaimCard.model_validate(item) for item in persisted_claims])
+        runtime_payload = (
+            store.read_named_json("checkpoints", "runtime_ledger")
+            if store.has_named_json("checkpoints", "runtime_ledger")
+            else payload
+        )
+        runner.ledger.calls_started = int(runtime_payload.get("calls_started", 0) or 0)
+        stage_calls = runtime_payload.get("stage_calls") or {}
+        runner.ledger.stage_calls = {
+            str(key): int(value or 0) for key, value in stage_calls.items()
+        }
+        bucket_calls = runtime_payload.get("bucket_calls") or {}
+        for key in runner.ledger.bucket_calls:
+            if key in bucket_calls:
+                runner.ledger.bucket_calls[key] = int(bucket_calls[key] or 0)
+        pool.restore_metrics(
+            runtime_payload.get("agent_metrics") or payload.get("agent_metrics") or []
+        )
+        runner.persist_runtime_state()
+
+        run_task = activity.start_task(
+            "run_resume",
+            title=activity.text(
+                "恢复多 Agent 数学求解", "Resuming the multi-agent mathematics run"
+            ),
+            detail=activity.text(
+                f"已加载阶段 {resume_stage}；从最近已验证证明状态继续",
+                f"Loaded stage {resume_stage}; continuing from the latest verified proof state",
+            ),
+            stage="run_resume",
+            importance=ActivityImportance.MAJOR,
+            metrics={
+                "resume_stage": resume_stage,
+                "resumed_from_checkpoint_id": state.resumed_from_checkpoint_id,
+            },
+        )
+        store.append_event(
+            "run_resumed",
+            {
+                "resume_stage": resume_stage,
+                "resumed_from_checkpoint_id": state.resumed_from_checkpoint_id,
+                "restored_calls_started": runner.ledger.calls_started,
+            },
+        )
+
+        try:
+            if (
+                state.final_proof is not None
+                and state.final_verification is not None
+                and state.final_verification.verdict == VerificationVerdict.PASS
+                and state.final_verification.confidence
+                >= self.config.budget.verification_pass_threshold
+            ):
+                state.checkpoints = store.list_proof_checkpoints()
+                result = self._build_result(
+                    run_id,
+                    RunStatus.VERIFIED,
+                    problem,
+                    state,
+                    pool.metrics(),
+                    runner,
+                    pool,
+                    store,
+                    memory,
+                    summary_override=(
+                        f"Completed run recovered from stage {resume_stage} and proof "
+                        f"checkpoint {state.resumed_from_checkpoint_id or 'none'} without "
+                        "new model calls."
+                    ),
+                )
+                store.write_json("structured", "run_result", result)
+                store.append_event(
+                    "run_resume_noop_completed",
+                    {
+                        "status": result.status.value,
+                        "total_calls": result.total_calls,
+                        "resumed_from_checkpoint_id": state.resumed_from_checkpoint_id,
+                    },
+                )
+                activity.complete_task(
+                    run_task,
+                    title=activity.text(
+                        "已恢复完成状态，无需重复调用模型",
+                        "Completed state restored without repeating model calls",
+                    ),
+                    detail=activity.text(
+                        f"最终审计已通过；调用计数保持 {result.total_calls}",
+                        f"Final audit already passed; call count remains {result.total_calls}",
+                    ),
+                    stage="run_resume",
+                    importance=ActivityImportance.MAJOR,
+                    metrics={
+                        "status": result.status.value,
+                        "no_new_model_calls": True,
+                        "resumed_from_checkpoint_id": state.resumed_from_checkpoint_id,
+                    },
+                )
+                activity.finalize()
+                write_run_report(store, result)
+                return result
+
+            if state.triage is None:
+                state.triage = await self._triage(problem, runner, prompts, store)
+            if not state.strategies:
+                state.strategies = await self._initial_strategies(
+                    problem,
+                    state.triage,
+                    runner,
+                    prompts,
+                    router,
+                    store,
+                )
+
+            max_resume_rounds = max(1, self.config.budget.max_rounds)
+            for resume_round in range(max_resume_rounds):
+                updated_attempts: list[ProofAttempt] = []
+                for strategy in state.strategies:
+                    path_attempts = [
+                        attempt
+                        for attempt in state.attempts
+                        if attempt.strategy_id == strategy.strategy_id
+                    ]
+                    previous = (
+                        max(path_attempts, key=lambda item: item.round_index)
+                        if path_attempts
+                        else None
+                    )
+                    if (
+                        previous is not None
+                        and previous.status == AttemptStatus.COMPLETE
+                    ):
+                        continue
+                    if runner.ledger.remaining_calls <= 0:
+                        break
+                    try:
+                        agent = (
+                            runner.pool.get(previous.agent_id)
+                            if previous is not None
+                            else runner.pool.select(
+                                "explorer", specialty_hints=strategy.tags
+                            )
+                        )
+                    except (KeyError, RuntimeError):
+                        agent = runner.pool.select(
+                            "explorer", specialty_hints=strategy.tags
+                        )
+                    feedback = (
+                        self._targeted_feedback(previous, state) if previous else []
+                    )
+                    updated = await self._explore_path(
+                        problem,
+                        strategy,
+                        agent,
+                        round_index=(
+                            previous.round_index + 1 if previous else resume_round
+                        ),
+                        runner=runner,
+                        prompts=prompts,
+                        router=router,
+                        memory=memory,
+                        store=store,
+                        targeted_feedback=feedback,
+                        previous_attempt=previous,
+                        budget_bucket="depth",
+                    )
+                    state.attempts = [
+                        item
+                        for item in state.attempts
+                        if item.attempt_id != updated.attempt_id
+                    ]
+                    state.attempts.append(updated)
+                    updated_attempts.append(updated)
+
+                if updated_attempts:
+                    await self._extract_claims_many(
+                        problem,
+                        updated_attempts,
+                        runner,
+                        prompts,
+                        memory,
+                        store,
+                        budget_bucket="depth",
+                    )
+
+                candidates = self._rank_attempts(state.attempts)[
+                    : self.config.budget.candidates_to_verify
+                ]
+                verification_bundles = await self._verify_attempts_many(
+                    problem,
+                    candidates,
+                    runner,
+                    prompts,
+                    router,
+                    memory,
+                    tools,
+                    store,
+                )
+                self._record_verification_bundles(state, verification_bundles)
+                if state.attempts and runner.ledger.remaining_calls > 0:
+                    review = await self._meta_review(
+                        problem,
+                        state.attempts,
+                        state.aggregate_reports,
+                        runner,
+                        prompts,
+                        store,
+                    )
+                    state.meta_reviews.append(review)
+                self._checkpoint(
+                    store,
+                    f"resume_round_{resume_round}",
+                    state,
+                    memory,
+                    runner,
+                )
+                if self._has_synthesis_ready_candidate(state):
+                    break
+                if not updated_attempts:
+                    break
+
+            if state.attempts:
+                state.final_proof, synthesizer = await self._synthesize(
+                    problem,
+                    state,
+                    runner,
+                    prompts,
+                    router,
+                    memory,
+                    store,
+                )
+                if state.final_proof is not None:
+                    final_bundle = await self._verify_final(
+                        problem,
+                        state.final_proof,
+                        synthesizer,
+                        runner,
+                        prompts,
+                        router,
+                        memory,
+                        tools,
+                        store,
+                    )
+                    state.reports.extend(final_bundle.reports)
+                    state.final_verification = final_bundle.aggregate
+
+            state.checkpoints = store.list_proof_checkpoints()
+            self._checkpoint(store, "resume_final", state, memory, runner)
+            status = self._run_status(state)
+            result = self._build_result(
+                run_id,
+                status,
+                problem,
+                state,
+                pool.metrics(),
+                runner,
+                pool,
+                store,
+                memory,
+                summary_override=(
+                    f"Run resumed from stage {resume_stage} and proof checkpoint "
+                    f"{state.resumed_from_checkpoint_id or 'none'}; {self._result_summary(status, state)}"
+                ),
+            )
+            router.export()
+            store.write_json("structured", "run_result", result)
+            store.append_event(
+                "run_resume_completed",
+                {
+                    "status": result.status.value,
+                    "total_calls": result.total_calls,
+                    "resumed_from_checkpoint_id": state.resumed_from_checkpoint_id,
+                },
+            )
+            activity.complete_task(
+                run_task,
+                title=activity.text("恢复运行完成", "Resumed run completed"),
+                detail=activity.text(
+                    f"状态 {result.status.value}；检查点 {state.resumed_from_checkpoint_id or '无'}",
+                    f"Status {result.status.value}; checkpoint {state.resumed_from_checkpoint_id or 'none'}",
+                ),
+                stage="run_resume",
+                importance=ActivityImportance.MAJOR,
+                metrics={
+                    "status": result.status.value,
+                    "resumed_from_checkpoint_id": state.resumed_from_checkpoint_id,
+                },
+            )
+            activity.finalize()
+            write_run_report(store, result)
+            return result
+        except BudgetExhaustedError as exc:
+            state.budget_exhausted = True
+            result = self._build_result(
+                run_id,
+                RunStatus.BUDGET_EXHAUSTED,
+                problem,
+                state,
+                pool.metrics(),
+                runner,
+                pool,
+                store,
+                memory,
+                summary_override=f"Resume budget exhausted: {exc}",
+            )
+            store.write_json("structured", "run_result", result)
+            activity.emit(
+                "run_resume_budget_exhausted",
+                status=ActivityStatus.WARNING,
+                title=activity.text("恢复运行预算耗尽", "Resume budget exhausted"),
+                detail=str(exc),
+                stage="run_resume",
+                task_id=run_task,
+                importance=ActivityImportance.MAJOR,
+            )
+            activity.finalize()
+            write_run_report(store, result)
+            return result
+        except Exception as exc:
+            logger.exception("MathProofMesh resume failed")
+            store.append_event(
+                "run_resume_failed",
+                {"type": type(exc).__name__, "error": str(exc)},
+            )
+            result = self._build_result(
+                run_id,
+                RunStatus.FAILED,
+                problem,
+                state,
+                pool.metrics(),
+                runner,
+                pool,
+                store,
+                memory,
+                summary_override=f"Resume failed with {type(exc).__name__}: {exc}",
+            )
+            store.write_json("structured", "run_result", result)
+            activity.close_open_tasks(
+                status=ActivityStatus.FAILED,
+                detail=activity.text(
+                    "恢复运行异常中止；已保留最近的已验证检查点",
+                    "Resume stopped with an error; the latest verified checkpoint was preserved",
+                ),
+                exclude_task_ids={run_task},
+            )
+            activity.fail_task(
+                run_task,
+                title=activity.text(
+                    "恢复运行异常终止", "Resume terminated with an error"
+                ),
+                detail=f"{type(exc).__name__}: {exc}",
+                event_type="run_resume_failed",
+                stage="run_resume",
+                importance=ActivityImportance.MAJOR,
+            )
+            activity.finalize()
+            write_run_report(store, result)
+            return result
+        finally:
+            await pool.aclose()
+
+    def _restore_state_from_checkpoint(
+        self,
+        payload: dict[str, Any],
+        store: ArtifactStore,
+    ) -> SolveState:
+        triage_raw = payload.get("triage")
+        aggregate_raw = payload.get("aggregate_reports") or {}
+        return SolveState(
+            triage=TriageResult.model_validate(triage_raw) if triage_raw else None,
+            strategies=[
+                StrategyCard.model_validate(item)
+                for item in payload.get("strategies", [])
+            ],
+            attempts=[
+                ProofAttempt.model_validate(item)
+                for item in payload.get("attempts", [])
+            ],
+            reports=[
+                VerificationReport.model_validate(item)
+                for item in payload.get("reports", [])
+            ],
+            aggregate_reports={
+                str(key): VerificationReport.model_validate(value)
+                for key, value in aggregate_raw.items()
+            },
+            meta_reviews=[
+                MetaReview.model_validate(item)
+                for item in payload.get("meta_reviews", [])
+            ],
+            checkpoints=store.list_proof_checkpoints(),
+            resumed=bool(payload.get("resumed", False)),
+            resumed_from_checkpoint_id=payload.get("resumed_from_checkpoint_id"),
+            final_proof=(
+                FinalProof.model_validate(payload["final_proof"])
+                if payload.get("final_proof")
+                else None
+            ),
+            final_verification=(
+                VerificationReport.model_validate(payload["final_verification"])
+                if payload.get("final_verification")
+                else None
+            ),
+            budget_exhausted=bool(payload.get("budget_exhausted", False)),
+        )
+
+    async def _triage(
+        self,
+        problem: ProblemContract,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        store: ArtifactStore,
+    ) -> TriageResult:
+        result = await self._safe_call(
+            runner,
+            "planner",
+            prompts.triage(problem),
+            budget_bucket="breadth",
+        )
+        if result is not None:
+            triage = result.value
+            store.write_json("structured", "triage", triage)
+            return triage
+        triage = TriageResult(
+            problem_kind=ProblemKind.UNKNOWN,
+            difficulty=Difficulty.HARD,
+            key_risks=[
+                "The solver may change the statement or omit cases.",
+                "A plausible key step may remain unproved.",
+            ],
+            likely_tools=self._allowed_tools(),
+            suggested_paths=self.config.budget.initial_paths,
+            suggested_rounds=self.config.budget.max_rounds,
+            proof_mode="hybrid",
+            rationale="Deterministic fallback triage after planner failure.",
+            confidence=0.25,
+        )
+        store.write_json("structured", "triage_fallback", triage)
+        return triage
+
+    async def _initial_strategies(
+        self,
+        problem: ProblemContract,
+        triage: TriageResult,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        store: ArtifactStore,
+    ) -> list[StrategyCard]:
+        requested = min(
+            self.config.budget.strategies_to_generate,
+            max(self.config.budget.initial_paths, triage.suggested_paths),
+        )
+        result = await self._safe_call(
+            runner,
+            "planner",
+            prompts.strategies(problem, triage, requested),
+            budget_bucket="breadth",
+        )
+        strategy_set = (
+            result.value
+            if result is not None
+            else self._fallback_strategy_set(problem, requested)
+        )
+        selected = router.select_diverse_strategies(
+            strategy_set.strategies,
+            min(self.config.budget.initial_paths, len(strategy_set.strategies)),
+        )
+        store.write_json("structured", "strategy_set", strategy_set)
+        store.write_json("structured", "selected_strategies", selected)
+        return selected
+
+    async def _parallel_initial_exploration(
+        self,
+        problem: ProblemContract,
+        assignments: list[tuple[StrategyCard, AgentRuntime]],
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+    ) -> list[ProofAttempt]:
+        async def one(strategy: StrategyCard, agent: AgentRuntime) -> ProofAttempt:
+            return await self._explore_path(
+                problem,
+                strategy,
+                agent,
+                round_index=0,
+                runner=runner,
+                prompts=prompts,
+                router=router,
+                memory=memory,
+                store=store,
+                targeted_feedback=[],
+                previous_attempt=None,
+                budget_bucket="breadth",
+            )
+
+        results = await asyncio.gather(
+            *(one(strategy, agent) for strategy, agent in assignments),
+            return_exceptions=True,
+        )
+        attempts: list[ProofAttempt] = []
+        for (strategy, agent), result in zip(assignments, results):
+            if isinstance(result, Exception):
+                store.append_event(
+                    "exploration_failed",
+                    {
+                        "strategy_id": strategy.strategy_id,
+                        "agent_id": agent.id,
+                        "error": str(result),
+                    },
+                )
+                attempts.append(
+                    self._failed_attempt(problem, strategy, agent.id, 0, result)
+                )
+            else:
+                attempts.append(result)
+        return attempts
+
+    async def _explore_path(
+        self,
+        problem: ProblemContract,
+        strategy: StrategyCard,
+        agent: AgentRuntime,
+        *,
+        round_index: int,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+        targeted_feedback: list[str],
+        previous_attempt: ProofAttempt | None,
+        budget_bucket: str,
+    ) -> ProofAttempt:
+        if self.config.continuation.enabled:
+            return await self._explore_path_segmented(
+                problem,
+                strategy,
+                agent,
+                round_index=round_index,
+                runner=runner,
+                prompts=prompts,
+                router=router,
+                memory=memory,
+                store=store,
+                targeted_feedback=targeted_feedback,
+                previous_attempt=previous_attempt,
+                budget_bucket=budget_bucket,
+            )
+        return await self._explore_path_legacy(
+            problem,
+            strategy,
+            agent,
+            round_index=round_index,
+            runner=runner,
+            prompts=prompts,
+            router=router,
+            memory=memory,
+            store=store,
+            targeted_feedback=targeted_feedback,
+            previous_attempt=previous_attempt,
+            budget_bucket=budget_bucket,
+        )
+
+    async def _explore_path_segmented(
+        self,
+        problem: ProblemContract,
+        strategy: StrategyCard,
+        agent: AgentRuntime,
+        *,
+        round_index: int,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+        targeted_feedback: list[str],
+        previous_attempt: ProofAttempt | None,
+        budget_bucket: str,
+    ) -> ProofAttempt:
+        cfg = self.config.continuation
+        path_id = (
+            previous_attempt.path_id
+            if previous_attempt and previous_attempt.path_id
+            else f"path_{strategy.strategy_id}"
+        )
+        checkpoint = store.load_latest_proof_checkpoint(path_id)
+        if checkpoint is not None:
+            if (
+                checkpoint.problem_hash != problem.integrity_hash
+                or checkpoint.strategy_id != strategy.strategy_id
+            ):
+                raise ValueError(
+                    f"resume checkpoint {checkpoint.checkpoint_id} does not match the current problem/strategy"
+                )
+            resumed_from = checkpoint.checkpoint_id
+            store.append_event(
+                "proof_path_resumed",
+                {
+                    "path_id": path_id,
+                    "strategy_id": strategy.strategy_id,
+                    "checkpoint_id": checkpoint.checkpoint_id,
+                    "segment_index": checkpoint.segment_index,
+                },
+            )
+            if runner.activity is not None:
+                runner.activity.info(
+                    "proof_checkpoint_resume",
+                    title=runner.activity.text(
+                        "从最近已验证检查点继续",
+                        "Continuing from the latest verified checkpoint",
+                    ),
+                    detail=runner.activity.text(
+                        f"{strategy.title}：检查点 {checkpoint.checkpoint_id}，下一段从步骤 {checkpoint.segment_index + 1} 开始",
+                        f"{strategy.title}: checkpoint {checkpoint.checkpoint_id}; next segment {checkpoint.segment_index + 1}",
+                    ),
+                    stage="proof_continuation",
+                    agent_id=agent.id,
+                    importance=ActivityImportance.MAJOR,
+                    metrics={
+                        "path_id": path_id,
+                        "checkpoint_id": checkpoint.checkpoint_id,
+                        "segment_index": checkpoint.segment_index,
+                    },
+                )
+        else:
+            checkpoint = make_genesis_checkpoint(
+                problem, strategy, source_agent_id=agent.id
+            )
+            store.commit_proof_checkpoint(checkpoint)
+            resumed_from = None
+
+        if (
+            checkpoint.proof_complete
+            or checkpoint.segment_index >= cfg.max_segments_per_path
+        ):
+            return attempt_from_checkpoint(
+                checkpoint,
+                strategy,
+                agent_id=checkpoint.source_agent_id or agent.id,
+                round_index=round_index,
+                previous_attempt=previous_attempt,
+                resumed_from_checkpoint_id=resumed_from,
+            )
+
+        cumulative_usage = UsageRecord()
+        latest_raw_ref: str | None = None
+        verified_delta_claims: list[ClaimCard] = []
+        failover_chain: list[str] = []
+        attempt_id = (
+            previous_attempt.attempt_id if previous_attempt else new_id("attempt")
+        )
+
+        for _ in range(cfg.segments_per_explore_call):
+            if (
+                checkpoint.proof_complete
+                or checkpoint.segment_index >= cfg.max_segments_per_path
+            ):
+                break
+            relevant = router.relevant_claims(
+                memory.claims, strategy, targeted_feedback
+            )
+            next_segment = checkpoint.segment_index + 1
+
+            def bundle_factory(current_agent: AgentRuntime) -> PromptBundle:
+                bundle = prompts.continue_proof(
+                    problem,
+                    strategy.model_dump(mode="json"),
+                    checkpoint,
+                    current_agent.id,
+                    round_index,
+                    next_segment,
+                    [claim.model_dump(mode="json") for claim in relevant],
+                    targeted_feedback,
+                    max_new_steps=cfg.max_new_steps_per_call,
+                    max_new_claims=cfg.max_new_claims_per_call,
+                    checkpoint_policy=cfg.checkpoint_policy,
+                    remaining_call_budget=runner.ledger.remaining_calls,
+                )
+                return PromptBundle(
+                    bundle.stage,
+                    bundle.system,
+                    bundle.user,
+                    bundle.response_model,
+                    temperature=bundle.temperature,
+                    max_output_tokens=min(
+                        cfg.max_output_tokens_per_segment,
+                        current_agent.config.max_output_tokens,
+                    ),
+                )
+
+            try:
+                result, tried_agents = await runner.call_with_failover(
+                    "explorer",
+                    bundle_factory,
+                    primary_agent=agent,
+                    specialty_hints=strategy.tags,
+                    budget_bucket=budget_bucket,
+                    max_failover_agents=cfg.max_failover_agents,
+                    allow_failover=cfg.resume_on_disconnect
+                    and cfg.allow_cross_agent_failover,
+                    failover_only_on_retryable=True,
+                )
+            except BudgetExhaustedError:
+                raise
+            except Exception as exc:
+                store.append_event(
+                    "proof_continuation_failed",
+                    {
+                        "path_id": path_id,
+                        "checkpoint_id": checkpoint.checkpoint_id,
+                        "segment_index": next_segment,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
+                targeted_feedback = [
+                    *targeted_feedback,
+                    f"Continuation call failed after retry/failover: {type(exc).__name__}. Resume from checkpoint {checkpoint.checkpoint_id}.",
+                ]
+                break
+
+            delta: ProofDelta = result.value
+            delta.problem_hash = problem.integrity_hash
+            delta.path_id = checkpoint.path_id
+            delta.strategy_id = strategy.strategy_id
+            delta.parent_checkpoint_id = checkpoint.checkpoint_id
+            delta.agent_id = result.agent.id
+            delta.round_index = round_index
+            delta.segment_index = next_segment
+            delta.raw_artifact_ref = result.raw_ref
+            delta.usage = result.usage
+            latest_raw_ref = result.raw_ref
+            failover_chain = self._deduplicate_strings([*failover_chain, *tried_agents])
+            cumulative_usage = self._sum_usage([cumulative_usage, result.usage])
+            store.save_proof_delta(delta.delta_id, delta)
+
+            local_report = local_delta_verification(problem, checkpoint, delta)
+            if len(delta.new_steps) > cfg.max_new_steps_per_call:
+                local_report.verdict = VerificationVerdict.FAIL
+                local_report.issues.append(
+                    VerificationIssue(
+                        phase="checkpoint_integrity",
+                        severity=Severity.ERROR,
+                        description=(
+                            f"Delta returned {len(delta.new_steps)} steps, exceeding the configured "
+                            f"limit {cfg.max_new_steps_per_call}."
+                        ),
+                    )
+                )
+            if len(delta.new_claims) > cfg.max_new_claims_per_call:
+                local_report.verdict = VerificationVerdict.FAIL
+                local_report.issues.append(
+                    VerificationIssue(
+                        phase="checkpoint_integrity",
+                        severity=Severity.ERROR,
+                        description=(
+                            f"Delta returned {len(delta.new_claims)} claims, exceeding the configured "
+                            f"limit {cfg.max_new_claims_per_call}."
+                        ),
+                    )
+                )
+            if (
+                cfg.checkpoint_policy == "verified_subgoal"
+                and not delta.completed_subgoal
+                and not delta.proof_complete
+                and not delta.detected_conflicts
+            ):
+                local_report.verdict = VerificationVerdict.FAIL
+                local_report.issues.append(
+                    VerificationIssue(
+                        phase="checkpoint_policy",
+                        severity=Severity.ERROR,
+                        description=(
+                            "The verified_subgoal policy requires completed_subgoal before "
+                            "advancing the persistent checkpoint."
+                        ),
+                        repair_hint=(
+                            "Complete one coherent subgoal, or use checkpoint_policy=verified_delta "
+                            "when smaller verified increments are intended."
+                        ),
+                    )
+                )
+            store.write_json(
+                "structured",
+                f"checkpoint_local_verification_{delta.delta_id}",
+                local_report,
+            )
+
+            reports = [local_report]
+            if (
+                local_report.verdict == VerificationVerdict.PASS
+                and cfg.verify_each_delta
+            ):
+                reports.extend(
+                    await self._verify_proof_delta(
+                        problem,
+                        strategy,
+                        checkpoint,
+                        delta,
+                        result.agent,
+                        runner,
+                        prompts,
+                        memory,
+                        store,
+                    )
+                )
+
+            independent = [
+                report
+                for report in reports
+                if report.agent_id != "local-integrity-guard"
+            ]
+            accepted = local_report.verdict == VerificationVerdict.PASS
+            if cfg.verify_each_delta:
+                accepted = (
+                    accepted
+                    and bool(independent)
+                    and all(
+                        report.verdict == VerificationVerdict.PASS
+                        for report in independent
+                    )
+                    and min(report.confidence for report in independent)
+                    >= cfg.checkpoint_pass_threshold
+                )
+
+            if not accepted:
+                if cfg.retain_rejected_deltas:
+                    store.save_proof_delta(delta.delta_id, delta, rejected=True)
+                feedback = next(
+                    (
+                        report.concise_feedback
+                        for report in reports
+                        if report.verdict != VerificationVerdict.PASS
+                    ),
+                    "The candidate delta did not pass checkpoint verification.",
+                )
+                store.append_event(
+                    "proof_checkpoint_rejected",
+                    {
+                        "delta_id": delta.delta_id,
+                        "checkpoint_id": checkpoint.checkpoint_id,
+                        "path_id": checkpoint.path_id,
+                        "feedback": feedback,
+                    },
+                )
+                if runner.activity is not None:
+                    runner.activity.emit(
+                        "proof_checkpoint_rejected",
+                        status=ActivityStatus.WARNING,
+                        title=runner.activity.text(
+                            "候选证明段未通过检查点验证",
+                            "Candidate proof segment failed checkpoint verification",
+                        ),
+                        detail=feedback,
+                        stage="checkpoint_verification",
+                        agent_id=delta.agent_id,
+                        importance=ActivityImportance.NORMAL,
+                        metrics={
+                            "delta_id": delta.delta_id,
+                            "path_id": checkpoint.path_id,
+                        },
+                    )
+                targeted_feedback = [*targeted_feedback, feedback]
+                break
+
+            claims = normalize_delta_claims(
+                delta,
+                attempt_id=attempt_id,
+                raw_ref=result.raw_ref,
+            )
+            for claim in claims:
+                if independent:
+                    claim.verification_confidence = min(
+                        report.confidence for report in independent
+                    )
+            memory.add_many(claims)
+            verified_delta_claims.extend(claims)
+            checkpoint = merge_verified_delta(
+                checkpoint,
+                delta,
+                reports,
+                failover_chain=tried_agents,
+            )
+            store.commit_proof_checkpoint(checkpoint)
+            store.write_json(
+                "structured",
+                f"proof_checkpoint_{checkpoint.checkpoint_id}",
+                checkpoint,
+            )
+            if runner.activity is not None:
+                runner.activity.info(
+                    "proof_checkpoint_committed",
+                    title=runner.activity.text(
+                        "已提交新的证明检查点",
+                        "A new proof checkpoint was committed",
+                    ),
+                    detail=runner.activity.text(
+                        f"{strategy.title}：已验证至第 {checkpoint.segment_index} 段，共 {len(checkpoint.verified_steps)} 个步骤",
+                        f"{strategy.title}: verified through segment {checkpoint.segment_index}, {len(checkpoint.verified_steps)} steps total",
+                    ),
+                    stage="checkpoint_verification",
+                    agent_id=delta.agent_id,
+                    importance=ActivityImportance.MAJOR,
+                    metrics={
+                        "checkpoint_id": checkpoint.checkpoint_id,
+                        "path_id": checkpoint.path_id,
+                        "segment_index": checkpoint.segment_index,
+                        "proof_complete": checkpoint.proof_complete,
+                    },
+                )
+
+        attempt = attempt_from_checkpoint(
+            checkpoint,
+            strategy,
+            agent_id=checkpoint.source_agent_id or agent.id,
+            round_index=round_index,
+            previous_attempt=previous_attempt,
+            proposed_lemmas=verified_delta_claims,
+            raw_artifact_ref=latest_raw_ref,
+            usage=cumulative_usage,
+            resumed_from_checkpoint_id=resumed_from,
+            failover_chain=failover_chain,
+        )
+        if not checkpoint.proof_complete and targeted_feedback:
+            attempt.unresolved_gaps = self._deduplicate_strings(
+                [*attempt.unresolved_gaps, *targeted_feedback]
+            )
+        store.write_json("structured", f"attempt_{attempt.attempt_id}", attempt)
+        store.append_event("attempt_completed", attempt)
+        return attempt
+
+    async def _verify_proof_delta(
+        self,
+        problem: ProblemContract,
+        strategy: StrategyCard,
+        checkpoint: ProofCheckpoint,
+        delta: ProofDelta,
+        author: AgentRuntime,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+    ) -> list[VerificationReport]:
+        reports: list[VerificationReport] = []
+        excluded = {author.id}
+        replicas = self.config.continuation.delta_verifier_replicas
+        for _ in range(replicas):
+            try:
+                verifier = runner.pool.select(
+                    "detailed_verifier",
+                    exclude=excluded,
+                    specialty_hints=strategy.tags,
+                    prefer_provider_not=author.provider,
+                )
+            except RuntimeError:
+                break
+
+            def bundle_factory(current_agent: AgentRuntime) -> PromptBundle:
+                return prompts.verify_delta(
+                    problem,
+                    strategy.model_dump(mode="json"),
+                    checkpoint,
+                    delta,
+                    current_agent.id,
+                    [claim.model_dump(mode="json") for claim in memory.verified()],
+                )
+
+            try:
+                result, tried = await runner.call_with_failover(
+                    "detailed_verifier",
+                    bundle_factory,
+                    primary_agent=verifier,
+                    specialty_hints=strategy.tags,
+                    budget_bucket="verification",
+                    max_failover_agents=self.config.continuation.max_failover_agents,
+                    allow_failover=self.config.continuation.allow_cross_agent_failover,
+                    failover_only_on_retryable=True,
+                    exclude_agent_ids={author.id},
+                )
+            except BudgetExhaustedError:
+                raise
+            except Exception as exc:
+                store.append_event(
+                    "checkpoint_verifier_failed",
+                    {
+                        "delta_id": delta.delta_id,
+                        "verifier_id": verifier.id,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
+                continue
+
+            if result.agent.id == author.id:
+                store.append_event(
+                    "checkpoint_verifier_not_independent",
+                    {
+                        "delta_id": delta.delta_id,
+                        "author_id": author.id,
+                        "verifier_id": result.agent.id,
+                    },
+                )
+                continue
+
+            report: VerificationReport = result.value
+            report.target_id = delta.delta_id
+            report.target_type = "proof_delta"
+            report.agent_id = result.agent.id
+            report.stage = VerificationStage.DETAILED
+            if delta.problem_hash != problem.integrity_hash:
+                report.problem_integrity_ok = False
+                report.verdict = VerificationVerdict.FAIL
+            report.raw_artifact_ref = result.raw_ref
+            report.usage = result.usage
+            reports.append(report)
+            excluded.update(tried)
+            store.write_json(
+                "structured",
+                f"checkpoint_verification_{delta.delta_id}_{report.agent_id}",
+                report,
+            )
+            store.append_event("checkpoint_verification_completed", report)
+        return reports
+
+    async def _explore_path_legacy(
+        self,
+        problem: ProblemContract,
+        strategy: StrategyCard,
+        agent: AgentRuntime,
+        *,
+        round_index: int,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+        targeted_feedback: list[str],
+        previous_attempt: ProofAttempt | None,
+        budget_bucket: str,
+    ) -> ProofAttempt:
+        relevant = router.relevant_claims(memory.claims, strategy, targeted_feedback)
+        bundle = prompts.explore(
+            problem,
+            strategy.model_dump(mode="json"),
+            agent.id,
+            round_index,
+            [c.model_dump(mode="json") for c in relevant],
+            targeted_feedback,
+            self._attempt_context_dict(previous_attempt, full=False)
+            if previous_attempt
+            else None,
+            runner.ledger.remaining_calls,
+        )
+        result = await self._safe_call(
+            runner,
+            "explorer",
+            bundle,
+            fixed_agent=agent,
+            budget_bucket=budget_bucket,
+        )
+        if result is None:
+            return self._failed_attempt(
+                problem,
+                strategy,
+                agent.id,
+                round_index,
+                RuntimeError("explorer returned no valid structured result"),
+            )
+        attempt: ProofAttempt = result.value
+        # Authoritative metadata is assigned by the orchestrator, not trusted from model text.
+        attempt.problem_hash = problem.integrity_hash
+        attempt.strategy_id = strategy.strategy_id
+        attempt.agent_id = agent.id
+        attempt.round_index = round_index
+        attempt.raw_artifact_ref = result.raw_ref
+        attempt.usage = result.usage
+        for lemma in attempt.proposed_lemmas:
+            lemma.source_attempt_id = attempt.attempt_id
+            lemma.source_agent_id = agent.id
+            if not any(e.artifact_ref == result.raw_ref for e in lemma.evidence_refs):
+                lemma.evidence_refs.append(
+                    EvidenceRef(
+                        artifact_ref=result.raw_ref,
+                        summary="Raw explorer response containing the proposed lemma.",
+                    )
+                )
+        store.write_json("structured", f"attempt_{attempt.attempt_id}", attempt)
+        store.append_event("attempt_completed", attempt)
+        if runner.activity is not None:
+            runner.activity.info(
+                "proof_route_result",
+                title=runner.activity.text(
+                    "一条证明路线已返回", "A proof route returned"
+                ),
+                detail=runner.activity.text(
+                    f"{strategy.title}：{attempt.status.value}；步骤 {len(attempt.proof_steps)}；未解缺口 {len(attempt.unresolved_gaps)}",
+                    f"{strategy.title}: {attempt.status.value}; {len(attempt.proof_steps)} steps; {len(attempt.unresolved_gaps)} unresolved gaps",
+                ),
+                stage="independent_exploration",
+                agent_id=agent.id,
+                importance=ActivityImportance.NORMAL,
+                metrics={
+                    "attempt_id": attempt.attempt_id,
+                    "strategy_id": strategy.strategy_id,
+                    "status": attempt.status.value,
+                    "proof_step_count": len(attempt.proof_steps),
+                    "unresolved_gap_count": len(attempt.unresolved_gaps),
+                },
+            )
+        return attempt
+
+    async def _extract_claims_many(
+        self,
+        problem: ProblemContract,
+        attempts: Sequence[ProofAttempt],
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+        *,
+        budget_bucket: str,
+    ) -> None:
+        async def one(attempt: ProofAttempt) -> ClaimBatch | None:
+            if attempt.status == AttemptStatus.FAILED:
+                return None
+            exclude = {attempt.agent_id} if len(runner.pool.agents) > 1 else set()
+            summarizer = runner.pool.select("summarizer", exclude=exclude)
+            bundle = prompts.summarize_claims(
+                problem,
+                attempt,
+                self._claim_dedup_index(memory.claims),
+            )
+            result = await self._safe_call(
+                runner,
+                "summarizer",
+                bundle,
+                fixed_agent=summarizer,
+                budget_bucket=budget_bucket,
+            )
+            if result is None:
+                # Explorer-supplied lemmas remain proposed; no silent loss.
+                if attempt.proposed_lemmas:
+                    self._normalize_claims(
+                        attempt.proposed_lemmas, attempt, attempt.raw_artifact_ref
+                    )
+                    memory.add_many(attempt.proposed_lemmas)
+                return None
+            batch: ClaimBatch = result.value
+            batch.attempt_id = attempt.attempt_id
+            self._normalize_claims(batch.claims, attempt, attempt.raw_artifact_ref)
+            memory.add_many(batch.claims)
+            store.write_json("structured", f"claim_batch_{attempt.attempt_id}", batch)
+            return batch
+
+        results = await asyncio.gather(
+            *(one(a) for a in attempts), return_exceptions=True
+        )
+        for attempt, result in zip(attempts, results):
+            if isinstance(result, Exception):
+                store.append_event(
+                    "claim_extraction_failed",
+                    {"attempt_id": attempt.attempt_id, "error": str(result)},
+                )
+                if attempt.proposed_lemmas:
+                    self._normalize_claims(
+                        attempt.proposed_lemmas, attempt, attempt.raw_artifact_ref
+                    )
+                    memory.add_many(attempt.proposed_lemmas)
+
+    async def _verify_attempts_many(
+        self,
+        problem: ProblemContract,
+        attempts: Sequence[ProofAttempt],
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        tools: ToolBroker,
+        store: ArtifactStore,
+    ) -> list[VerificationBundle]:
+        results = await asyncio.gather(
+            *(
+                self._verify_attempt(
+                    problem,
+                    attempt,
+                    runner,
+                    prompts,
+                    router,
+                    memory,
+                    tools,
+                    store,
+                )
+                for attempt in attempts
+            ),
+            return_exceptions=True,
+        )
+        bundles: list[VerificationBundle] = []
+        for attempt, result in zip(attempts, results):
+            if isinstance(result, Exception):
+                store.append_event(
+                    "verification_pipeline_failed",
+                    {"attempt_id": attempt.attempt_id, "error": str(result)},
+                )
+                aggregate = self._synthetic_verification_failure(
+                    attempt.attempt_id,
+                    "attempt",
+                    VerificationStage.DETAILED,
+                    f"Verification pipeline failed: {result}",
+                )
+                bundles.append(
+                    VerificationBundle(aggregate=aggregate, reports=[aggregate])
+                )
+            else:
+                bundles.append(result)
+        return bundles
+
+    async def _verify_attempt(
+        self,
+        problem: ProblemContract,
+        attempt: ProofAttempt,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        tools: ToolBroker,
+        store: ArtifactStore,
+    ) -> VerificationBundle:
+        reports: list[VerificationReport] = []
+
+        structural_reviewers = router.select_reviewers(
+            attempt,
+            role="structural_verifier",
+            count=1,
+        )
+        structural_reports = await self._call_structural_reviewers(
+            problem,
+            attempt,
+            structural_reviewers,
+            runner,
+            prompts,
+            store,
+        )
+        reports.extend(structural_reports)
+
+        # A structural fail/uncertainty triggers one independent confirmation instead of
+        # broadcasting to every reviewer.
+        if (
+            self.config.topology.conditional_cross_review
+            and structural_reports
+            and structural_reports[0].verdict != VerificationVerdict.PASS
+            and runner.ledger.remaining_calls > 0
+        ):
+            extra = router.select_reviewers(
+                attempt,
+                role="structural_verifier",
+                count=1,
+                exclude_extra={r.agent_id for r in structural_reports},
+            )
+            extra_reports = await self._call_structural_reviewers(
+                problem,
+                attempt,
+                extra,
+                runner,
+                prompts,
+                store,
+            )
+            structural_reports.extend(extra_reports)
+            reports.extend(extra_reports)
+
+        structural_aggregate = self._aggregate_reports(
+            attempt.attempt_id,
+            "attempt",
+            VerificationStage.STRUCTURAL,
+            structural_reports,
+        )
+        reports.append(structural_aggregate)
+        store.write_json(
+            "structured",
+            f"structural_aggregate_{attempt.attempt_id}",
+            structural_aggregate,
+        )
+
+        detailed_reports: list[VerificationReport] = []
+        may_detail = structural_aggregate.verdict == VerificationVerdict.PASS
+        if not self.config.verification.detailed_only_after_structural_pass:
+            may_detail = structural_aggregate.verdict != VerificationVerdict.FAIL
+
+        if may_detail and runner.ledger.remaining_calls > 0:
+            replica_count = router.verification_replicas(attempt, structural_reports)
+            detailed_reviewers = router.select_reviewers(
+                attempt,
+                role="detailed_verifier",
+                count=replica_count,
+                exclude_extra={r.agent_id for r in structural_reports},
+            )
+            detailed_reports = await self._call_detailed_reviewers(
+                problem,
+                attempt,
+                structural_aggregate,
+                detailed_reviewers,
+                runner,
+                prompts,
+                memory,
+                tools,
+                store,
+                stage="detailed",
+            )
+            reports.extend(detailed_reports)
+
+            disagreement = router.pairwise_disagreement(detailed_reports)
+            need_extra = bool(detailed_reports) and (
+                disagreement >= self.config.topology.disagreement_threshold
+                or any(r.verdict != VerificationVerdict.PASS for r in detailed_reports)
+                or min(r.confidence for r in detailed_reports)
+                < self.config.budget.verification_pass_threshold
+            )
+            if (
+                self.config.topology.conditional_cross_review
+                and need_extra
+                and len(detailed_reports)
+                < self.config.budget.high_risk_verifier_replicas
+                and runner.ledger.remaining_calls > 0
+            ):
+                extra = router.select_reviewers(
+                    attempt,
+                    role="detailed_verifier",
+                    count=1,
+                    exclude_extra={r.agent_id for r in reports},
+                )
+                extra_reports = await self._call_detailed_reviewers(
+                    problem,
+                    attempt,
+                    structural_aggregate,
+                    extra,
+                    runner,
+                    prompts,
+                    memory,
+                    tools,
+                    store,
+                    stage="detailed",
+                )
+                detailed_reports.extend(extra_reports)
+                reports.extend(extra_reports)
+
+        if structural_aggregate.verdict == VerificationVerdict.FAIL:
+            aggregate = VerificationReport(
+                target_id=attempt.attempt_id,
+                target_type="attempt",
+                agent_id="system-aggregate",
+                stage=VerificationStage.DETAILED,
+                problem_integrity_ok=structural_aggregate.problem_integrity_ok,
+                verdict=VerificationVerdict.FAIL,
+                first_error_step=structural_aggregate.first_error_step,
+                issues=structural_aggregate.issues,
+                checked_dependencies=structural_aggregate.checked_dependencies,
+                failure_level=structural_aggregate.failure_level,
+                confidence=structural_aggregate.confidence,
+                concise_feedback="Detailed verification skipped because the structural gate failed. "
+                + structural_aggregate.concise_feedback,
+            )
+        elif not detailed_reports:
+            aggregate = VerificationReport(
+                target_id=attempt.attempt_id,
+                target_type="attempt",
+                agent_id="system-aggregate",
+                stage=VerificationStage.DETAILED,
+                problem_integrity_ok=structural_aggregate.problem_integrity_ok,
+                verdict=VerificationVerdict.UNCERTAIN,
+                issues=structural_aggregate.issues,
+                checked_dependencies=structural_aggregate.checked_dependencies,
+                failure_level=structural_aggregate.failure_level,
+                confidence=max(0.1, structural_aggregate.confidence * 0.5),
+                concise_feedback="Structural gate did not lead to a completed detailed audit.",
+            )
+        else:
+            aggregate = self._aggregate_reports(
+                attempt.attempt_id,
+                "attempt",
+                VerificationStage.DETAILED,
+                detailed_reports,
+            )
+            if (
+                structural_aggregate.verdict == VerificationVerdict.UNCERTAIN
+                and aggregate.verdict == VerificationVerdict.PASS
+            ):
+                aggregate.verdict = VerificationVerdict.UNCERTAIN
+                aggregate.confidence = min(
+                    aggregate.confidence, structural_aggregate.confidence
+                )
+                aggregate.concise_feedback = (
+                    "Detailed reviewers passed, but the structural gate remains uncertain. "
+                    + aggregate.concise_feedback
+                )
+
+        reports.append(aggregate)
+        store.write_json(
+            "structured", f"verification_aggregate_{attempt.attempt_id}", aggregate
+        )
+        memory.mark_attempt_verified(attempt.attempt_id, aggregate)
+        self._update_agent_trust(attempt, reports, aggregate, runner.pool)
+        if runner.activity is not None:
+            runner.activity.info(
+                "candidate_verification_result",
+                title=runner.activity.text(
+                    "候选证明审查完成", "Candidate proof audit completed"
+                ),
+                detail=runner.activity.text(
+                    f"路线 {attempt.strategy_id}：{aggregate.verdict.value}；置信度 {aggregate.confidence:.2f}",
+                    f"Route {attempt.strategy_id}: {aggregate.verdict.value}; confidence {aggregate.confidence:.2f}",
+                ),
+                stage="detailed_verification",
+                importance=ActivityImportance.NORMAL,
+                metrics={
+                    "attempt_id": attempt.attempt_id,
+                    "strategy_id": attempt.strategy_id,
+                    "verdict": aggregate.verdict.value,
+                    "confidence": aggregate.confidence,
+                    "failure_level": aggregate.failure_level.value,
+                },
+            )
+        return VerificationBundle(aggregate=aggregate, reports=reports)
+
+    async def _call_structural_reviewers(
+        self,
+        problem: ProblemContract,
+        attempt: ProofAttempt,
+        reviewers: Sequence[AgentRuntime],
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        store: ArtifactStore,
+    ) -> list[VerificationReport]:
+        async def one(reviewer: AgentRuntime) -> VerificationReport:
+            bundle = prompts.structural_verify(
+                problem,
+                attempt.model_dump(mode="json"),
+                reviewer.id,
+            )
+            result = await self._safe_call(
+                runner,
+                "structural_verifier",
+                bundle,
+                fixed_agent=reviewer,
+                budget_bucket="verification",
+            )
+            if result is None:
+                return self._synthetic_verification_failure(
+                    attempt.attempt_id,
+                    "attempt",
+                    VerificationStage.STRUCTURAL,
+                    f"Structural verifier {reviewer.id} failed to return a valid report.",
+                    uncertain=True,
+                )
+            report: VerificationReport = result.value
+            self._normalize_report(
+                report,
+                target_id=attempt.attempt_id,
+                target_type="attempt",
+                agent_id=reviewer.id,
+                stage=VerificationStage.STRUCTURAL,
+                raw_ref=result.raw_ref,
+                usage=result.usage,
+            )
+            self._apply_local_attempt_integrity_guard(problem, attempt, report)
+            store.write_json("structured", f"report_{report.report_id}", report)
+            return report
+
+        results = await asyncio.gather(
+            *(one(r) for r in reviewers), return_exceptions=True
+        )
+        reports: list[VerificationReport] = []
+        for reviewer, result in zip(reviewers, results):
+            if isinstance(result, Exception):
+                reports.append(
+                    self._synthetic_verification_failure(
+                        attempt.attempt_id,
+                        "attempt",
+                        VerificationStage.STRUCTURAL,
+                        f"Structural verifier {reviewer.id} raised: {result}",
+                        uncertain=True,
+                    )
+                )
+            else:
+                reports.append(result)
+        return reports
+
+    async def _call_detailed_reviewers(
+        self,
+        problem: ProblemContract,
+        target: ProofAttempt | FinalProof,
+        structural_report: VerificationReport,
+        reviewers: Sequence[AgentRuntime],
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        memory: LemmaMemory,
+        tools: ToolBroker,
+        store: ArtifactStore,
+        *,
+        stage: str,
+    ) -> list[VerificationReport]:
+        target_id = (
+            target.attempt_id if isinstance(target, ProofAttempt) else "final_proof"
+        )
+        target_type = "attempt" if isinstance(target, ProofAttempt) else "final_proof"
+
+        async def one(reviewer: AgentRuntime) -> VerificationReport:
+            bundle = prompts.detailed_verify(
+                problem,
+                target.model_dump(mode="json"),
+                structural_report,
+                self._select_claim_context(
+                    memory.verified(),
+                    target.model_dump_json(),
+                    max_chars=max(2000, self.config.topology.max_context_chars // 4),
+                ),
+                reviewer.id,
+                stage=stage,
+            )
+            result = await self._safe_call(
+                runner,
+                "final_verifier" if stage == "final" else "detailed_verifier",
+                bundle,
+                fixed_agent=reviewer,
+                budget_bucket="verification",
+            )
+            if result is None:
+                return self._synthetic_verification_failure(
+                    target_id,
+                    target_type,
+                    VerificationStage.FINAL
+                    if stage == "final"
+                    else VerificationStage.DETAILED,
+                    f"Detailed verifier {reviewer.id} failed to return a valid report.",
+                    uncertain=True,
+                )
+            report: VerificationReport = result.value
+            self._normalize_report(
+                report,
+                target_id=target_id,
+                target_type=target_type,
+                agent_id=reviewer.id,
+                stage=VerificationStage.FINAL
+                if stage == "final"
+                else VerificationStage.DETAILED,
+                raw_ref=result.raw_ref,
+                usage=result.usage,
+            )
+            self._apply_local_target_integrity_guard(problem, target, report)
+
+            if report.tool_requests:
+                tool_results = tools.execute_many(report.tool_requests)
+                report.tool_results = tool_results
+                self._apply_deterministic_tool_guard(report)
+                # Let the same independent reviewer interpret its narrowly-scoped tool output.
+                if runner.ledger.remaining_calls > 0:
+                    follow_up = prompts.detailed_verify(
+                        problem,
+                        target.model_dump(mode="json"),
+                        structural_report,
+                        self._select_claim_context(
+                            memory.verified(),
+                            target.model_dump_json(),
+                            max_chars=max(
+                                2000, self.config.topology.max_context_chars // 4
+                            ),
+                        ),
+                        reviewer.id,
+                        [t.model_dump(mode="json") for t in tool_results],
+                        stage=stage,
+                    )
+                    follow_result = await self._safe_call(
+                        runner,
+                        "final_verifier" if stage == "final" else "detailed_verifier",
+                        follow_up,
+                        fixed_agent=reviewer,
+                        budget_bucket="verification",
+                    )
+                    if follow_result is not None:
+                        interpreted: VerificationReport = follow_result.value
+                        self._normalize_report(
+                            interpreted,
+                            target_id=target_id,
+                            target_type=target_type,
+                            agent_id=reviewer.id,
+                            stage=(
+                                VerificationStage.FINAL
+                                if stage == "final"
+                                else VerificationStage.DETAILED
+                            ),
+                            raw_ref=follow_result.raw_ref,
+                            usage=self._sum_usage([result.usage, follow_result.usage]),
+                        )
+                        interpreted.tool_requests = report.tool_requests
+                        interpreted.tool_results = tool_results
+                        self._apply_local_target_integrity_guard(
+                            problem, target, interpreted
+                        )
+                        self._apply_deterministic_tool_guard(interpreted)
+                        report = interpreted
+            store.write_json("structured", f"report_{report.report_id}", report)
+            return report
+
+        results = await asyncio.gather(
+            *(one(r) for r in reviewers), return_exceptions=True
+        )
+        reports: list[VerificationReport] = []
+        for reviewer, result in zip(reviewers, results):
+            if isinstance(result, Exception):
+                reports.append(
+                    self._synthetic_verification_failure(
+                        target_id,
+                        target_type,
+                        VerificationStage.FINAL
+                        if stage == "final"
+                        else VerificationStage.DETAILED,
+                        f"Detailed verifier {reviewer.id} raised: {result}",
+                        uncertain=True,
+                    )
+                )
+            else:
+                reports.append(result)
+        return reports
+
+    async def _meta_review(
+        self,
+        problem: ProblemContract,
+        attempts: Sequence[ProofAttempt],
+        aggregate_reports: dict[str, VerificationReport],
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        store: ArtifactStore,
+    ) -> MetaReview:
+        ranked = self._rank_attempts(attempts)
+        candidates = ranked[: max(1, min(5, len(ranked)))]
+        reports = [
+            aggregate_reports[a.attempt_id]
+            for a in candidates
+            if a.attempt_id in aggregate_reports
+        ]
+        result = await self._safe_call(
+            runner,
+            "meta_reviewer",
+            prompts.meta_review(
+                problem,
+                self._fit_json_items(
+                    [self._attempt_context_dict(a, full=False) for a in candidates],
+                    max_chars=max(
+                        3000, int(self.config.topology.max_context_chars * 0.65)
+                    ),
+                ),
+                self._fit_json_items(
+                    [r.model_dump(mode="json") for r in reports],
+                    max_chars=max(
+                        2000, int(self.config.topology.max_context_chars * 0.30)
+                    ),
+                ),
+            ),
+            budget_bucket="verification",
+        )
+        if result is not None:
+            review: MetaReview = result.value
+            valid_ids = {a.attempt_id for a in candidates}
+            if review.selected_target_id not in valid_ids:
+                review.selected_target_id = (
+                    candidates[0].attempt_id if candidates else None
+                )
+            store.write_json(
+                "structured",
+                f"meta_review_{len(list(store.root.glob('structured/meta_review_*.json')))}",
+                review,
+            )
+            return review
+        review = self._local_meta_review(candidates, aggregate_reports)
+        store.write_json("structured", f"meta_review_fallback_{new_id('r')}", review)
+        return review
+
+    async def _deepen_path(
+        self,
+        problem: ProblemContract,
+        strategy_id: str,
+        round_index: int,
+        state: SolveState,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+    ) -> ProofAttempt | None:
+        strategy = next(
+            (s for s in state.strategies if s.strategy_id == strategy_id), None
+        )
+        if strategy is None:
+            return None
+        previous_candidates = [
+            a for a in state.attempts if a.strategy_id == strategy_id
+        ]
+        if not previous_candidates:
+            return None
+        previous = max(previous_candidates, key=lambda a: a.round_index)
+        try:
+            agent = runner.pool.get(previous.agent_id)
+        except KeyError:
+            agent = runner.pool.select("explorer", specialty_hints=strategy.tags)
+        feedback = self._targeted_feedback(previous, state)
+        router.add_edge(
+            source="meta-reviewer",
+            target=agent.id,
+            stage="targeted_deepening",
+            payload_type="ContextPack",
+            reason="repair only the selected path using verified lemmas and focused first-error feedback",
+        )
+        return await self._explore_path(
+            problem,
+            strategy,
+            agent,
+            round_index=round_index,
+            runner=runner,
+            prompts=prompts,
+            router=router,
+            memory=memory,
+            store=store,
+            targeted_feedback=feedback,
+            previous_attempt=previous,
+            budget_bucket="depth",
+        )
+
+    async def _widen(
+        self,
+        problem: ProblemContract,
+        triage: TriageResult | None,
+        round_index: int,
+        state: SolveState,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+    ) -> list[ProofAttempt]:
+        if len(state.strategies) >= self.config.budget.max_paths:
+            return []
+        triage = triage or self._fallback_triage()
+        feedback: list[str] = []
+        if state.meta_reviews:
+            feedback.extend(state.meta_reviews[-1].unresolved_conflicts)
+            feedback.extend(state.meta_reviews[-1].required_actions)
+        count = min(2, self.config.budget.max_paths - len(state.strategies))
+        result = await self._safe_call(
+            runner,
+            "planner",
+            prompts.strategies(
+                problem,
+                triage,
+                count,
+                prior_strategy_titles=[s.title for s in state.strategies],
+                regulator_feedback=feedback,
+            ),
+            budget_bucket="breadth",
+        )
+        if result is None:
+            candidates = self._fallback_strategy_set(problem, count).strategies
+        else:
+            candidates = result.value.strategies
+
+        genuinely_new: list[StrategyCard] = []
+        for candidate in candidates:
+            max_similarity = max(
+                (
+                    jaccard_similarity(
+                        strategy_text(candidate), strategy_text(existing)
+                    )
+                    for existing in state.strategies
+                ),
+                default=0.0,
+            )
+            if max_similarity < self.config.topology.strategy_similarity_threshold:
+                genuinely_new.append(candidate)
+        if not genuinely_new:
+            return []
+        selected = router.select_diverse_strategies(genuinely_new, count)
+        state.strategies.extend(selected)
+        assignments = router.assign_explorers(selected)
+        return await self._parallel_round_exploration(
+            problem,
+            assignments,
+            round_index,
+            runner,
+            prompts,
+            router,
+            memory,
+            store,
+        )
+
+    async def _parallel_round_exploration(
+        self,
+        problem: ProblemContract,
+        assignments: list[tuple[StrategyCard, AgentRuntime]],
+        round_index: int,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+    ) -> list[ProofAttempt]:
+        results = await asyncio.gather(
+            *(
+                self._explore_path(
+                    problem,
+                    strategy,
+                    agent,
+                    round_index=round_index,
+                    runner=runner,
+                    prompts=prompts,
+                    router=router,
+                    memory=memory,
+                    store=store,
+                    targeted_feedback=[],
+                    previous_attempt=None,
+                    budget_bucket="breadth",
+                )
+                for strategy, agent in assignments
+            ),
+            return_exceptions=True,
+        )
+        attempts: list[ProofAttempt] = []
+        for (strategy, agent), result in zip(assignments, results):
+            if isinstance(result, Exception):
+                attempts.append(
+                    self._failed_attempt(
+                        problem, strategy, agent.id, round_index, result
+                    )
+                )
+            else:
+                attempts.append(result)
+        return attempts
+
+    async def _synthesize(
+        self,
+        problem: ProblemContract,
+        state: SolveState,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+    ) -> tuple[FinalProof | None, AgentRuntime | None]:
+        selected = self._select_for_synthesis(state)
+        if not selected:
+            return None, None
+        review = (
+            state.meta_reviews[-1]
+            if state.meta_reviews
+            else self._local_meta_review(
+                selected,
+                state.aggregate_reports,
+            )
+        )
+        exclude = (
+            {a.agent_id for a in selected} if len(runner.pool.agents) > 1 else set()
+        )
+        synthesizer = runner.pool.select("synthesizer", exclude=exclude)
+        for attempt in selected:
+            router.add_edge(
+                source=attempt.agent_id,
+                target=synthesizer.id,
+                stage="synthesis",
+                payload_type="ProofAttempt+VerificationReport",
+                reason="only selected, supported paths are sent to the synthesizer",
+            )
+        selected_contexts = self._fit_attempt_contexts(
+            selected,
+            max_chars=max(5000, int(self.config.topology.max_context_chars * 0.70)),
+        )
+        claim_query = " ".join(
+            f"{attempt.final_answer or ''} "
+            + " ".join(step.statement for step in attempt.proof_steps)
+            for attempt in selected
+        )
+        claim_context = self._select_claim_context(
+            memory.verified(),
+            claim_query,
+            max_chars=max(2000, int(self.config.topology.max_context_chars * 0.25)),
+        )
+        bundle = prompts.synthesize(
+            problem,
+            selected_contexts,
+            claim_context,
+            review,
+            synthesizer.id,
+        )
+        result = await self._safe_call(
+            runner,
+            "synthesizer",
+            bundle,
+            fixed_agent=synthesizer,
+            budget_bucket="synthesis",
+        )
+        if result is None:
+            proof = self._fallback_final_from_attempt(problem, selected[0])
+        else:
+            proof: FinalProof = result.value
+            proof.problem_hash = problem.integrity_hash
+            proof.source_attempt_ids = [
+                attempt_id
+                for attempt_id in proof.source_attempt_ids
+                if any(a.attempt_id == attempt_id for a in selected)
+            ] or [a.attempt_id for a in selected]
+        store.write_json("structured", "final_proof_draft", proof)
+        return proof, synthesizer
+
+    async def _verify_final(
+        self,
+        problem: ProblemContract,
+        proof: FinalProof,
+        synthesizer: AgentRuntime | None,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        tools: ToolBroker,
+        store: ArtifactStore,
+    ) -> VerificationBundle:
+        reports: list[VerificationReport] = []
+        exclude = {synthesizer.id} if synthesizer is not None else set()
+        structural = runner.pool.select(
+            "structural_verifier",
+            exclude=exclude,
+            prefer_provider_not=synthesizer.provider if synthesizer else None,
+        )
+        router.add_edge(
+            source=synthesizer.id if synthesizer else "synthesizer",
+            target=structural.id,
+            stage="final_structural_verification",
+            payload_type="FinalProof",
+            reason="independent final theorem-integrity and dependency gate",
+        )
+        result = await self._safe_call(
+            runner,
+            "structural_verifier",
+            prompts.structural_verify(
+                problem,
+                proof.model_dump(mode="json"),
+                structural.id,
+            ),
+            fixed_agent=structural,
+            budget_bucket="verification",
+        )
+        if result is None:
+            structural_report = self._synthetic_verification_failure(
+                "final_proof",
+                "final_proof",
+                VerificationStage.STRUCTURAL,
+                "Final structural verifier failed to return a valid report.",
+                uncertain=True,
+            )
+        else:
+            structural_report = result.value
+            self._normalize_report(
+                structural_report,
+                target_id="final_proof",
+                target_type="final_proof",
+                agent_id=structural.id,
+                stage=VerificationStage.STRUCTURAL,
+                raw_ref=result.raw_ref,
+                usage=result.usage,
+            )
+            self._apply_local_target_integrity_guard(problem, proof, structural_report)
+        reports.append(structural_report)
+
+        if structural_report.verdict != VerificationVerdict.PASS:
+            aggregate = VerificationReport(
+                target_id="final_proof",
+                target_type="final_proof",
+                agent_id="system-aggregate",
+                stage=VerificationStage.FINAL,
+                problem_integrity_ok=structural_report.problem_integrity_ok,
+                verdict=structural_report.verdict,
+                first_error_step=structural_report.first_error_step,
+                issues=structural_report.issues,
+                checked_dependencies=structural_report.checked_dependencies,
+                failure_level=structural_report.failure_level,
+                confidence=structural_report.confidence,
+                concise_feedback="Final detailed audit was blocked by the structural gate. "
+                + structural_report.concise_feedback,
+            )
+            reports.append(aggregate)
+            store.write_json(
+                "structured", f"final_verification_{new_id('v')}", aggregate
+            )
+            return VerificationBundle(aggregate=aggregate, reports=reports)
+
+        final_reviewers = runner.pool.select_many(
+            "final_verifier",
+            self.config.budget.base_verifier_replicas,
+            exclude=exclude | {structural.id},
+        )
+        if not final_reviewers:
+            final_reviewers = [runner.pool.select("final_verifier", exclude=exclude)]
+        for reviewer in final_reviewers:
+            router.add_edge(
+                source=synthesizer.id if synthesizer else "synthesizer",
+                target=reviewer.id,
+                stage="final_detailed_verification",
+                payload_type="FinalProof",
+                reason="independent first-error, step-level final audit",
+            )
+        detailed = await self._call_detailed_reviewers(
+            problem,
+            proof,
+            structural_report,
+            final_reviewers,
+            runner,
+            prompts,
+            memory,
+            tools,
+            store,
+            stage="final",
+        )
+        reports.extend(detailed)
+
+        if (
+            self.config.topology.conditional_cross_review
+            and detailed
+            and (
+                any(r.verdict != VerificationVerdict.PASS for r in detailed)
+                or min(r.confidence for r in detailed)
+                < self.config.budget.verification_pass_threshold
+            )
+            and len(detailed) < self.config.budget.high_risk_verifier_replicas
+            and runner.ledger.remaining_calls > 0
+        ):
+            extra = runner.pool.select_many(
+                "final_verifier",
+                1,
+                exclude=exclude | {structural.id} | {r.agent_id for r in detailed},
+            )
+            extra_reports = await self._call_detailed_reviewers(
+                problem,
+                proof,
+                structural_report,
+                extra,
+                runner,
+                prompts,
+                memory,
+                tools,
+                store,
+                stage="final",
+            )
+            detailed.extend(extra_reports)
+            reports.extend(extra_reports)
+
+        aggregate = self._aggregate_reports(
+            "final_proof",
+            "final_proof",
+            VerificationStage.FINAL,
+            detailed,
+        )
+        # Final PASS has a configured minimum confidence floor.
+        if (
+            aggregate.verdict == VerificationVerdict.PASS
+            and aggregate.confidence < self.config.budget.verification_pass_threshold
+        ):
+            aggregate.verdict = VerificationVerdict.UNCERTAIN
+            aggregate.concise_feedback = (
+                "All available reviewers passed, but aggregate confidence is below the configured threshold. "
+                + aggregate.concise_feedback
+            )
+        reports.append(aggregate)
+        store.write_json("structured", f"final_verification_{new_id('v')}", aggregate)
+        return VerificationBundle(aggregate=aggregate, reports=reports)
+
+    async def _revise_final(
+        self,
+        problem: ProblemContract,
+        proof: FinalProof,
+        verification: VerificationReport,
+        synthesizer: AgentRuntime | None,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+        revision_index: int,
+    ) -> FinalProof | None:
+        reviser = synthesizer or runner.pool.select("synthesizer")
+        result = await self._safe_call(
+            runner,
+            "synthesizer",
+            prompts.revise_final(
+                problem,
+                proof,
+                verification,
+                self._select_claim_context(
+                    memory.verified(),
+                    proof.model_dump_json(),
+                    max_chars=max(2000, self.config.topology.max_context_chars // 4),
+                ),
+                reviser.id,
+            ),
+            fixed_agent=reviser,
+            budget_bucket="synthesis",
+        )
+        if result is None:
+            return None
+        revised: FinalProof = result.value
+        revised.problem_hash = problem.integrity_hash
+        store.write_json(
+            "structured", f"final_proof_revision_{revision_index}", revised
+        )
+        return revised
+
+    async def _safe_call(
+        self,
+        runner: StructuredAgentRunner,
+        role: str,
+        bundle: PromptBundle,
+        *,
+        fixed_agent: AgentRuntime | None = None,
+        exclude: set[str] | None = None,
+        specialty_hints: list[str] | None = None,
+        prefer_provider_not: str | None = None,
+        budget_bucket: str,
+    ) -> StructuredCallResult[Any] | None:
+        try:
+            return await runner.call(
+                role,
+                bundle,
+                fixed_agent=fixed_agent,
+                exclude=exclude,
+                specialty_hints=specialty_hints,
+                prefer_provider_not=prefer_provider_not,
+                budget_bucket=budget_bucket,
+            )
+        except BudgetExhaustedError:
+            raise
+        except (StructuredOutputError, RuntimeError, ValueError) as exc:
+            logger.warning("Agent call failed at %s (%s): %s", bundle.stage, role, exc)
+            runner.store.append_event(
+                "agent_stage_failed",
+                {
+                    "stage": bundle.stage,
+                    "role": role,
+                    "agent_id": fixed_agent.id if fixed_agent else None,
+                    "error": str(exc),
+                },
+            )
+            return None
+
+    def _aggregate_reports(
+        self,
+        target_id: str,
+        target_type: str,
+        stage: VerificationStage,
+        reports: Sequence[VerificationReport],
+    ) -> VerificationReport:
+        if not reports:
+            return self._synthetic_verification_failure(
+                target_id,
+                target_type,
+                stage,
+                "No independent verification report was available.",
+                uncertain=True,
+            )
+        if any(not report.problem_integrity_ok for report in reports):
+            verdict = VerificationVerdict.FAIL
+        else:
+            verdicts = [r.verdict for r in reports]
+            deterministic_fail = any(
+                self._has_deterministic_refutation(r) for r in reports
+            )
+            if deterministic_fail:
+                verdict = VerificationVerdict.FAIL
+            elif all(v == VerificationVerdict.PASS for v in verdicts):
+                verdict = VerificationVerdict.PASS
+            elif all(v == VerificationVerdict.FAIL for v in verdicts):
+                verdict = VerificationVerdict.FAIL
+            else:
+                verdict = VerificationVerdict.UNCERTAIN
+
+        issues: list[VerificationIssue] = []
+        seen_issue_keys: set[tuple[str | None, str]] = set()
+        for report in reports:
+            for issue in report.issues:
+                key = (issue.step_id or issue.claim_id, issue.description)
+                if key not in seen_issue_keys:
+                    issues.append(issue)
+                    seen_issue_keys.add(key)
+
+        failure_level = max(
+            (r.failure_level for r in reports),
+            key=self._failure_rank,
+            default=FailureLevel.NONE,
+        )
+        if verdict == VerificationVerdict.PASS:
+            confidence = min(r.confidence for r in reports)
+        elif verdict == VerificationVerdict.FAIL:
+            fail_confidences = [
+                r.confidence for r in reports if r.verdict == VerificationVerdict.FAIL
+            ]
+            confidence = max(fail_confidences or [r.confidence for r in reports])
+        else:
+            # Uncertainty confidence is the confidence that more checking is needed, not a pass probability.
+            spread = max(r.confidence for r in reports) - min(
+                r.confidence for r in reports
+            )
+            confidence = min(0.95, 0.55 + 0.25 * spread + 0.05 * len(reports))
+
+        feedback_parts = []
+        for report in reports:
+            text = report.concise_feedback.strip()
+            if text and text not in feedback_parts:
+                feedback_parts.append(text)
+        first_error = next(
+            (r.first_error_step for r in reports if r.first_error_step), None
+        )
+        return VerificationReport(
+            target_id=target_id,
+            target_type=target_type,  # type: ignore[arg-type]
+            agent_id="system-aggregate",
+            stage=stage,
+            problem_integrity_ok=all(r.problem_integrity_ok for r in reports),
+            verdict=verdict,
+            first_error_step=first_error,
+            issues=issues,
+            checked_dependencies=sorted(
+                {
+                    dependency
+                    for report in reports
+                    for dependency in report.checked_dependencies
+                }
+            ),
+            tool_requests=[
+                request for report in reports for request in report.tool_requests
+            ],
+            tool_results=[
+                result for report in reports for result in report.tool_results
+            ],
+            failure_level=failure_level,
+            confidence=max(0.0, min(1.0, confidence)),
+            concise_feedback=" | ".join(feedback_parts)[:12000]
+            or "Independent reports were aggregated conservatively.",
+        )
+
+    def _apply_local_attempt_integrity_guard(
+        self,
+        problem: ProblemContract,
+        attempt: ProofAttempt,
+        report: VerificationReport,
+    ) -> None:
+        self._apply_local_target_integrity_guard(problem, attempt, report)
+        step_ids = {step.step_id for step in attempt.proof_steps}
+        claim_ids = {claim.claim_id for claim in attempt.proposed_lemmas}
+        known = step_ids | claim_ids
+        missing: set[str] = set()
+        for step in attempt.proof_steps:
+            for dep in step.dependencies:
+                if dep not in known and not dep.startswith("external:"):
+                    missing.add(dep)
+        if missing:
+            report.issues.append(
+                VerificationIssue(
+                    phase="local_dependency_guard",
+                    severity=Severity.ERROR,
+                    description=f"Missing dependency IDs: {sorted(missing)}",
+                    repair_hint="Add the missing derivation or replace the dependency with a verified claim ID.",
+                )
+            )
+            report.failure_level = max(
+                report.failure_level,
+                FailureLevel.PLAN,
+                key=self._failure_rank,
+            )
+            report.verdict = VerificationVerdict.FAIL
+            report.concise_feedback = (
+                "Deterministic dependency validation found missing IDs. "
+                + report.concise_feedback
+            )
+        if attempt.status == AttemptStatus.COMPLETE and not attempt.final_answer:
+            report.issues.append(
+                VerificationIssue(
+                    phase="local_completeness_guard",
+                    severity=Severity.ERROR,
+                    description="Attempt is marked complete but has no final_answer.",
+                )
+            )
+            report.verdict = VerificationVerdict.FAIL
+
+    def _apply_local_target_integrity_guard(
+        self,
+        problem: ProblemContract,
+        target: ProofAttempt | FinalProof,
+        report: VerificationReport,
+    ) -> None:
+        target_hash = target.problem_hash
+        if target_hash != problem.integrity_hash:
+            report.problem_integrity_ok = False
+            report.failure_level = FailureLevel.STRATEGY
+            report.issues.append(
+                VerificationIssue(
+                    phase="problem_integrity_guard",
+                    severity=Severity.CRITICAL,
+                    description=(
+                        f"Target problem_hash={target_hash} does not match immutable hash="
+                        f"{problem.integrity_hash}."
+                    ),
+                    repair_hint="Re-solve the exact original problem without modifying its statement.",
+                )
+            )
+            report.verdict = VerificationVerdict.FAIL
+            report.concise_feedback = (
+                "Problem-integrity hash mismatch. " + report.concise_feedback
+            )
+
+    def _apply_deterministic_tool_guard(self, report: VerificationReport) -> None:
+        for result in report.tool_results:
+            if not result.ok or not isinstance(result.result, dict):
+                continue
+            payload = result.result
+            refuted = (
+                result.kind == "numeric_counterexample"
+                and payload.get("counterexample_found") is True
+            )
+            lean_rejected = (
+                result.kind == "lean_check" and payload.get("accepted") is False
+            )
+            if refuted or lean_rejected:
+                report.issues.append(
+                    VerificationIssue(
+                        phase="deterministic_tool_guard",
+                        severity=Severity.CRITICAL if refuted else Severity.ERROR,
+                        description=(
+                            "Verifier-requested numeric formalization produced a counterexample."
+                            if refuted
+                            else "Submitted Lean fragment was rejected by the configured checker."
+                        ),
+                        counterexample=str(payload.get("assignment"))
+                        if refuted
+                        else None,
+                        repair_hint="Check the formalization mapping, then repair or remove the refuted inference.",
+                    )
+                )
+                report.failure_level = max(
+                    report.failure_level,
+                    FailureLevel.EXECUTION,
+                    key=self._failure_rank,
+                )
+                report.verdict = VerificationVerdict.FAIL
+                if report.first_error_step is None:
+                    report.first_error_step = "deterministic_tool_check"
+                report.concise_feedback = (
+                    "A deterministic check refuted a requested subclaim. "
+                    + report.concise_feedback
+                )
+
+    @staticmethod
+    def _has_deterministic_refutation(report: VerificationReport) -> bool:
+        return any(
+            result.ok
+            and isinstance(result.result, dict)
+            and (
+                (
+                    result.kind == "numeric_counterexample"
+                    and result.result.get("counterexample_found") is True
+                )
+                or (
+                    result.kind == "lean_check"
+                    and result.result.get("accepted") is False
+                )
+            )
+            for result in report.tool_results
+        )
+
+    def _normalize_report(
+        self,
+        report: VerificationReport,
+        *,
+        target_id: str,
+        target_type: str,
+        agent_id: str,
+        stage: VerificationStage,
+        raw_ref: str,
+        usage: UsageRecord,
+    ) -> None:
+        report.target_id = target_id
+        report.target_type = target_type  # type: ignore[assignment]
+        report.agent_id = agent_id
+        report.stage = stage
+        report.raw_artifact_ref = raw_ref
+        report.usage = usage
+        if report.verdict == VerificationVerdict.FAIL and not report.issues:
+            report.issues.append(
+                VerificationIssue(
+                    phase="normalization",
+                    severity=Severity.ERROR,
+                    description="Verifier returned FAIL without a concrete issue.",
+                )
+            )
+        if (
+            self.config.verification.require_first_error_step
+            and report.verdict == VerificationVerdict.FAIL
+            and report.first_error_step is None
+        ):
+            report.issues.append(
+                VerificationIssue(
+                    phase="verification_protocol",
+                    severity=Severity.WARNING,
+                    description="The verifier did not identify the first erroneous step.",
+                )
+            )
+
+    def _record_verification_bundles(
+        self,
+        state: SolveState,
+        bundles: Iterable[VerificationBundle],
+    ) -> None:
+        for bundle in bundles:
+            state.reports.extend(bundle.reports)
+            state.aggregate_reports[bundle.aggregate.target_id] = bundle.aggregate
+
+    def _select_for_synthesis(self, state: SolveState) -> list[ProofAttempt]:
+        ranked = self._rank_attempts(state.attempts)
+        passed = [
+            attempt
+            for attempt in ranked
+            if state.aggregate_reports.get(attempt.attempt_id)
+            and state.aggregate_reports[attempt.attempt_id].verdict
+            == VerificationVerdict.PASS
+        ]
+        uncertain_complete = [
+            attempt
+            for attempt in ranked
+            if attempt.status == AttemptStatus.COMPLETE
+            and attempt not in passed
+            and (
+                state.aggregate_reports.get(attempt.attempt_id) is None
+                or state.aggregate_reports[attempt.attempt_id].verdict
+                != VerificationVerdict.FAIL
+            )
+        ]
+        partial = [
+            attempt
+            for attempt in ranked
+            if attempt.status == AttemptStatus.PARTIAL
+            and (
+                state.aggregate_reports.get(attempt.attempt_id) is None
+                or state.aggregate_reports[attempt.attempt_id].verdict
+                != VerificationVerdict.FAIL
+            )
+        ]
+        selected: list[ProofAttempt] = []
+        for group in (passed, uncertain_complete, partial):
+            for attempt in group:
+                if attempt in selected:
+                    continue
+                selected.append(attempt)
+                if len(selected) >= 3:
+                    return selected
+        return selected
+
+    def _rank_attempts(self, attempts: Sequence[ProofAttempt]) -> list[ProofAttempt]:
+        return sorted(
+            attempts,
+            key=lambda a: (
+                self._attempt_local_quality(a),
+                a.round_index,
+                -a.usage.total_tokens,
+            ),
+            reverse=True,
+        )
+
+    @staticmethod
+    def _attempt_local_quality(attempt: ProofAttempt) -> float:
+        status_score = {
+            AttemptStatus.COMPLETE: 0.36,
+            AttemptStatus.PARTIAL: 0.18,
+            AttemptStatus.FAILED: 0.0,
+        }[attempt.status]
+        step_score = min(0.24, 0.025 * len(attempt.proof_steps))
+        key_steps = sum(1 for step in attempt.proof_steps if step.is_key_step)
+        key_score = min(0.08, 0.02 * key_steps)
+        lemma_score = min(0.08, 0.025 * len(attempt.proposed_lemmas))
+        confidence_score = 0.20 * attempt.self_confidence
+        gap_penalty = min(0.25, 0.05 * len(attempt.unresolved_gaps))
+        dead_end_penalty = min(0.12, 0.03 * len(attempt.dead_ends))
+        return max(
+            0.0,
+            min(
+                1.0,
+                status_score
+                + step_score
+                + key_score
+                + lemma_score
+                + confidence_score
+                - gap_penalty
+                - dead_end_penalty,
+            ),
+        )
+
+    def _targeted_feedback(self, attempt: ProofAttempt, state: SolveState) -> list[str]:
+        feedback: list[str] = []
+        report = state.aggregate_reports.get(attempt.attempt_id)
+        if report is not None:
+            if report.first_error_step:
+                feedback.append(f"First disputed step: {report.first_error_step}")
+            feedback.append(report.concise_feedback)
+            feedback.extend(
+                f"{issue.step_id or issue.claim_id or 'global'}: {issue.description}"
+                for issue in report.issues[:8]
+            )
+        feedback.extend(f"Unresolved gap: {gap}" for gap in attempt.unresolved_gaps[:8])
+        if state.meta_reviews:
+            feedback.extend(state.meta_reviews[-1].required_actions[:6])
+        return self._deduplicate_strings(feedback)
+
+    def _local_meta_review(
+        self,
+        attempts: Sequence[ProofAttempt],
+        reports: dict[str, VerificationReport],
+    ) -> MetaReview:
+        assessments: list[CandidateAssessment] = []
+        for attempt in attempts:
+            report = reports.get(attempt.attempt_id)
+            verification_component = 0.0
+            if report:
+                verification_component = {
+                    VerificationVerdict.PASS: 0.3 * report.confidence,
+                    VerificationVerdict.UNCERTAIN: 0.1 * report.confidence,
+                    VerificationVerdict.FAIL: -0.25 * report.confidence,
+                    VerificationVerdict.SKIPPED: 0.0,
+                }[report.verdict]
+            score = max(
+                0.0,
+                min(1.0, self._attempt_local_quality(attempt) + verification_component),
+            )
+            if (
+                report
+                and report.verdict == VerificationVerdict.PASS
+                and attempt.status == AttemptStatus.COMPLETE
+            ):
+                action = ActionKind.SYNTHESIZE
+            elif (
+                report
+                and report.verdict == VerificationVerdict.FAIL
+                and report.failure_level == FailureLevel.STRATEGY
+            ):
+                action = ActionKind.WIDEN
+            else:
+                action = ActionKind.DEEPEN
+            assessments.append(
+                CandidateAssessment(
+                    target_id=attempt.attempt_id,
+                    score=score,
+                    strengths=[f"{len(attempt.proof_steps)} explicit proof steps"],
+                    weaknesses=list(attempt.unresolved_gaps[:4]),
+                    recommended_action=action,
+                )
+            )
+        assessments.sort(key=lambda x: x.score, reverse=True)
+        selected = assessments[0].target_id if assessments else None
+        can_synthesize = bool(
+            selected
+            and any(
+                a.attempt_id == selected and a.status == AttemptStatus.COMPLETE
+                for a in attempts
+            )
+            and reports.get(selected)
+            and reports[selected].verdict == VerificationVerdict.PASS
+        )
+        return MetaReview(
+            selected_target_id=selected,
+            assessments=assessments,
+            shared_agreements=[],
+            unresolved_conflicts=[],
+            required_actions=[],
+            failure_level=(
+                reports[selected].failure_level
+                if selected and selected in reports
+                else FailureLevel.NONE
+            ),
+            can_synthesize=can_synthesize,
+            confidence=assessments[0].score if assessments else 0.0,
+            summary="Deterministic evidence-weighted fallback meta-review.",
+        )
+
+    def _fallback_final_from_attempt(
+        self,
+        problem: ProblemContract,
+        attempt: ProofAttempt,
+    ) -> FinalProof:
+        answer = (
+            attempt.final_answer
+            or "No complete proof was established; the following is the strongest partial derivation."
+        )
+        caveats = list(attempt.unresolved_gaps)
+        if attempt.status != AttemptStatus.COMPLETE:
+            caveats.insert(
+                0,
+                "Source attempt is partial and has not established the full requested conclusion.",
+            )
+        return FinalProof(
+            problem_hash=problem.integrity_hash,
+            answer=answer,
+            proof_steps=attempt.proof_steps,
+            dependencies=[claim.claim_id for claim in attempt.proposed_lemmas],
+            caveats=self._deduplicate_strings(caveats),
+            source_attempt_ids=[attempt.attempt_id],
+            confidence=min(0.45, attempt.self_confidence),
+        )
+
+    def _fallback_strategy_set(
+        self, problem: ProblemContract, count: int
+    ) -> StrategySet:
+        templates = [
+            (
+                "Direct invariant or monotonicity route",
+                "Identify a quantity preserved or monotonically changed by the hypotheses, then derive the target directly.",
+                "Invariant/ordering mechanism",
+                [
+                    "State the candidate invariant",
+                    "Prove preservation",
+                    "Connect it to the conclusion",
+                ],
+                "Finding an invariant strong enough to force the conclusion",
+                "Test the proposed invariant on small and extremal instances.",
+                ["invariant", "direct"],
+            ),
+            (
+                "Extremal-minimal counterexample route",
+                "Assume failure and choose a minimal or extremal counterexample; use its extremality to force a contradiction.",
+                "Minimal-counterexample mechanism",
+                [
+                    "Existence of an extremal counterexample",
+                    "Reduction preserving hypotheses",
+                ],
+                "Constructing a strictly smaller valid counterexample",
+                "Check whether the reduction truly preserves every hypothesis.",
+                ["extremal", "contradiction"],
+            ),
+            (
+                "Structural decomposition route",
+                "Decompose the object into independently checkable lemmas and solve the dependency DAG bottom-up.",
+                "Lemma-DAG decomposition",
+                ["Base structural lemma", "Compatibility lemma", "Assembly lemma"],
+                "Avoiding circular dependencies between sublemmas",
+                "Topologically sort dependencies and check each interface assumption.",
+                ["decomposition", "dag"],
+            ),
+            (
+                "Algebraic or analytic transformation route",
+                "Transform the statement into an equivalent algebraic, generating-function, inequality, or analytic form.",
+                "Representation-change mechanism",
+                ["Prove equivalence of formulations", "Solve transformed statement"],
+                "The transformation may lose boundary cases or introduce extra assumptions",
+                "Verify both directions of equivalence and all domain restrictions.",
+                ["algebra", "transformation"],
+            ),
+            (
+                "Constructive algorithmic route",
+                "Build the requested object or sequence explicitly and prove termination, feasibility, and optimality.",
+                "Construction/algorithm mechanism",
+                ["Construction", "Invariant", "Termination", "Optimality"],
+                "Showing the construction handles every allowed input",
+                "Run the construction on boundary cases and verify termination measure decreases.",
+                ["construction", "algorithm"],
+            ),
+            (
+                "Dual or complementary formulation route",
+                "Pass to a complement, dual object, contrapositive, or equivalent game/value formulation where the obstruction is simpler.",
+                "Duality/complement mechanism",
+                ["Equivalence lemma", "Dual bound", "Transfer back"],
+                "Proving exact equivalence rather than a one-way implication",
+                "Check a small instance in both formulations and verify inverse mapping.",
+                ["duality", "contrapositive"],
+            ),
+        ]
+        strategies: list[StrategyCard] = []
+        for index, template in enumerate(templates[: max(1, count)]):
+            title, core, basis, lemmas, bottleneck, falsification, tags = template
+            strategies.append(
+                StrategyCard(
+                    title=title,
+                    core_idea=core,
+                    independence_basis=basis,
+                    expected_lemmas=lemmas,
+                    bottleneck=bottleneck,
+                    key_original_step=lemmas[-1] if lemmas else None,
+                    falsification_test=falsification,
+                    estimated_success=max(0.2, 0.55 - 0.04 * index),
+                    estimated_cost=min(0.9, 0.45 + 0.05 * index),
+                    tags=tags,
+                )
+            )
+        return StrategySet(
+            strategies=strategies,
+            coverage_notes="Deterministic fallback spans invariant, extremal, decomposition, transformation, construction, and duality mechanisms.",
+            omitted_directions=[],
+        )
+
+    def _fallback_triage(self) -> TriageResult:
+        return TriageResult(
+            problem_kind=ProblemKind.UNKNOWN,
+            difficulty=Difficulty.HARD,
+            key_risks=["unproved key step"],
+            likely_tools=self._allowed_tools(),
+            suggested_paths=self.config.budget.initial_paths,
+            suggested_rounds=self.config.budget.max_rounds,
+            proof_mode="hybrid",
+            rationale="Fallback triage",
+            confidence=0.2,
+        )
+
+    def _failed_attempt(
+        self,
+        problem: ProblemContract,
+        strategy: StrategyCard,
+        agent_id: str,
+        round_index: int,
+        error: Exception,
+    ) -> ProofAttempt:
+        return ProofAttempt(
+            problem_hash=problem.integrity_hash,
+            strategy_id=strategy.strategy_id,
+            agent_id=agent_id,
+            round_index=round_index,
+            status=AttemptStatus.FAILED,
+            dead_ends=[f"Agent execution failed: {type(error).__name__}: {error}"],
+            unresolved_gaps=["No valid structured proof attempt was produced."],
+            self_confidence=0.0,
+        )
+
+    def _synthetic_verification_failure(
+        self,
+        target_id: str,
+        target_type: str,
+        stage: VerificationStage,
+        message: str,
+        *,
+        uncertain: bool = False,
+    ) -> VerificationReport:
+        verdict = (
+            VerificationVerdict.UNCERTAIN if uncertain else VerificationVerdict.FAIL
+        )
+        issues = []
+        if verdict == VerificationVerdict.FAIL:
+            issues.append(
+                VerificationIssue(
+                    phase="orchestration",
+                    severity=Severity.ERROR,
+                    description=message,
+                )
+            )
+        return VerificationReport(
+            target_id=target_id,
+            target_type=target_type,  # type: ignore[arg-type]
+            agent_id="system-fallback",
+            stage=stage,
+            verdict=verdict,
+            issues=issues,
+            failure_level=FailureLevel.EXECUTION,
+            confidence=0.25 if uncertain else 0.65,
+            concise_feedback=message,
+        )
+
+    def _normalize_claims(
+        self,
+        claims: Sequence[ClaimCard],
+        attempt: ProofAttempt,
+        raw_ref: str | None,
+    ) -> None:
+        for claim in claims:
+            claim.source_attempt_id = attempt.attempt_id
+            claim.source_agent_id = attempt.agent_id
+            # Extracted claims always enter as proposed. Only an aggregate verifier may upgrade them.
+            claim.status = ClaimStatus.PROPOSED
+            if raw_ref and not any(
+                e.artifact_ref == raw_ref for e in claim.evidence_refs
+            ):
+                claim.evidence_refs.append(
+                    EvidenceRef(
+                        artifact_ref=raw_ref,
+                        summary="Immutable raw source response for this claim.",
+                    )
+                )
+
+    @staticmethod
+    def _fit_json_items(
+        items: Sequence[dict[str, Any]],
+        *,
+        max_chars: int,
+        preserve_first: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Keep whole typed packets under a soft character budget; never truncate JSON fields."""
+        selected: list[dict[str, Any]] = []
+        used = 0
+        for index, item in enumerate(items):
+            encoded = json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+            size = len(encoded)
+            mandatory = preserve_first and index == 0
+            if not mandatory and used + size > max_chars:
+                continue
+            selected.append(item)
+            used += size
+        return selected
+
+    def _fit_attempt_contexts(
+        self,
+        attempts: Sequence[ProofAttempt],
+        *,
+        max_chars: int,
+    ) -> list[dict[str, Any]]:
+        """Retain the best path in full; add other paths as compact packets while budget permits."""
+        if not attempts:
+            return []
+        packets = [self._attempt_context_dict(attempts[0], full=True)]
+        packets.extend(self._attempt_context_dict(a, full=False) for a in attempts[1:])
+        return self._fit_json_items(packets, max_chars=max_chars, preserve_first=True)
+
+    def _select_claim_context(
+        self,
+        claims: Sequence[ClaimCard],
+        query: str,
+        *,
+        max_chars: int,
+    ) -> list[dict[str, Any]]:
+        """Rank verified claims by relevance and include dependency closures without field truncation."""
+        if not claims:
+            return []
+        by_id = {claim.claim_id: claim for claim in claims}
+        ranked = sorted(
+            claims,
+            key=lambda claim: (
+                jaccard_similarity(
+                    query,
+                    f"{claim.statement} {claim.conclusion} {' '.join(claim.tags)}",
+                ),
+                claim.verification_confidence or 0.0,
+                claim.self_confidence,
+            ),
+            reverse=True,
+        )
+        selected: list[ClaimCard] = []
+        selected_ids: set[str] = set()
+        used = 0
+
+        def closure(
+            claim: ClaimCard, visiting: set[str] | None = None
+        ) -> list[ClaimCard]:
+            visiting = set(visiting or set())
+            if claim.claim_id in visiting:
+                return []
+            visiting.add(claim.claim_id)
+            ordered: list[ClaimCard] = []
+            for dep_id in claim.dependencies:
+                dep = by_id.get(dep_id)
+                if dep is not None:
+                    ordered.extend(closure(dep, visiting))
+            ordered.append(claim)
+            deduped: list[ClaimCard] = []
+            seen: set[str] = set()
+            for item in ordered:
+                if item.claim_id not in seen:
+                    deduped.append(item)
+                    seen.add(item.claim_id)
+            return deduped
+
+        for claim in ranked:
+            packet = [
+                item for item in closure(claim) if item.claim_id not in selected_ids
+            ]
+            if not packet:
+                continue
+            encoded = [
+                json.dumps(
+                    item.model_dump(mode="json"),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                for item in packet
+            ]
+            packet_size = sum(len(value) for value in encoded)
+            if selected and used + packet_size > max_chars:
+                continue
+            for item in packet:
+                if item.claim_id not in selected_ids:
+                    selected.append(item)
+                    selected_ids.add(item.claim_id)
+            used += packet_size
+            if len(selected) >= self.config.topology.max_verified_claims_per_context:
+                break
+        return [claim.model_dump(mode="json") for claim in selected]
+
+    def _claim_dedup_index(self, claims: Sequence[ClaimCard]) -> list[dict[str, Any]]:
+        """Minimal lossless-for-dedup index instead of rebroadcasting every full proof packet."""
+        compact = [
+            {
+                "claim_id": claim.claim_id,
+                "content_hash": claim.content_hash,
+                "statement": claim.statement,
+                "conclusion": claim.conclusion,
+                "status": claim.status.value,
+                "source_attempt_id": claim.source_attempt_id,
+            }
+            for claim in claims
+        ]
+        return self._fit_json_items(
+            compact,
+            max_chars=max(2000, self.config.topology.max_context_chars // 4),
+            preserve_first=False,
+        )
+
+    def _attempt_context_dict(
+        self, attempt: ProofAttempt, *, full: bool
+    ) -> dict[str, Any]:
+        data = attempt.model_dump(mode="json")
+        if full:
+            return data
+        return {
+            "attempt_id": data["attempt_id"],
+            "problem_hash": data["problem_hash"],
+            "strategy_id": data["strategy_id"],
+            "agent_id": data["agent_id"],
+            "round_index": data["round_index"],
+            "status": data["status"],
+            "final_answer": data["final_answer"],
+            "proof_steps": [
+                {
+                    "step_id": step["step_id"],
+                    "statement": step["statement"],
+                    "justification": step["justification"],
+                    "dependencies": step["dependencies"],
+                    "is_key_step": step["is_key_step"],
+                    "confidence": step["confidence"],
+                }
+                for step in data["proof_steps"]
+            ],
+            "unresolved_gaps": data["unresolved_gaps"],
+            "dead_ends": data["dead_ends"],
+            "raw_artifact_ref": data["raw_artifact_ref"],
+        }
+
+    def _update_agent_trust(
+        self,
+        attempt: ProofAttempt,
+        reports: Sequence[VerificationReport],
+        aggregate: VerificationReport,
+        pool: AgentPool,
+    ) -> None:
+        try:
+            prover = pool.get(attempt.agent_id)
+            if aggregate.verdict == VerificationVerdict.PASS:
+                prover.update_trust(0.03)
+            elif aggregate.verdict == VerificationVerdict.FAIL:
+                prover.update_trust(-0.03)
+        except KeyError:
+            pass
+        for report in reports:
+            if report.agent_id.startswith("system-"):
+                continue
+            try:
+                reviewer = pool.get(report.agent_id)
+            except KeyError:
+                continue
+            if aggregate.verdict == VerificationVerdict.UNCERTAIN:
+                continue
+            reviewer.update_trust(
+                0.01 if report.verdict == aggregate.verdict else -0.015
+            )
+
+    def _has_synthesis_ready_candidate(self, state: SolveState) -> bool:
+        return any(
+            attempt.status == AttemptStatus.COMPLETE
+            and state.aggregate_reports.get(attempt.attempt_id) is not None
+            and state.aggregate_reports[attempt.attempt_id].verdict
+            == VerificationVerdict.PASS
+            and state.aggregate_reports[attempt.attempt_id].confidence
+            >= self.config.budget.synthesis_threshold
+            for attempt in state.attempts
+        )
+
+    def _run_status(self, state: SolveState) -> RunStatus:
+        if (
+            state.final_verification is not None
+            and state.final_verification.verdict == VerificationVerdict.PASS
+            and state.final_verification.confidence
+            >= self.config.budget.verification_pass_threshold
+        ):
+            return RunStatus.VERIFIED
+        if state.budget_exhausted:
+            return RunStatus.BUDGET_EXHAUSTED
+        if state.final_proof is not None:
+            return RunStatus.UNVERIFIED
+        return RunStatus.FAILED
+
+    def _build_result(
+        self,
+        run_id: str,
+        status: RunStatus,
+        problem: ProblemContract,
+        state: SolveState,
+        metrics: list[AgentMetric],
+        runner: StructuredAgentRunner,
+        pool: AgentPool,
+        store: ArtifactStore,
+        memory: LemmaMemory,
+        *,
+        summary_override: str | None = None,
+    ) -> RunResult:
+        total_usage = self._sum_usage([metric.usage for metric in metrics])
+        summary = summary_override or self._result_summary(status, state)
+        return RunResult(
+            run_id=run_id,
+            status=status,
+            problem=problem,
+            final_proof=state.final_proof,
+            final_verification=state.final_verification,
+            attempts=state.attempts,
+            claims=memory.claims,
+            verification_reports=state.reports,
+            meta_reviews=state.meta_reviews,
+            proof_checkpoints=store.list_proof_checkpoints(),
+            resumed=state.resumed,
+            resumed_from_checkpoint_id=state.resumed_from_checkpoint_id,
+            agent_metrics=metrics,
+            total_calls=runner.ledger.calls_started,
+            total_usage=total_usage,
+            run_directory=str(store.root),
+            summary=summary,
+        )
+
+    @staticmethod
+    def _result_summary(status: RunStatus, state: SolveState) -> str:
+        if status == RunStatus.VERIFIED:
+            return "A final proof passed independent structural and step-level verification under the configured threshold."
+        if status == RunStatus.UNVERIFIED:
+            verdict = (
+                state.final_verification.verdict.value
+                if state.final_verification
+                else "missing"
+            )
+            return f"A final answer/proof draft was produced, but final verification is {verdict}; inspect caveats and reports."
+        if status == RunStatus.BUDGET_EXHAUSTED:
+            return "The configured inference budget was exhausted; all partial attempts and evidence were preserved."
+        return "No final proof could be formed; inspect failed paths and structured artifacts."
+
+    def _checkpoint(
+        self,
+        store: ArtifactStore,
+        stage: str,
+        state: SolveState,
+        memory: LemmaMemory,
+        runner: StructuredAgentRunner,
+    ) -> None:
+        if not self.config.runtime.checkpoint_every_stage:
+            return
+        store.checkpoint(
+            stage,
+            {
+                "triage": state.triage,
+                "strategies": state.strategies,
+                "attempts": state.attempts,
+                "reports": state.reports,
+                "aggregate_reports": state.aggregate_reports,
+                "meta_reviews": state.meta_reviews,
+                "proof_checkpoints": store.list_proof_checkpoints(),
+                "resumed": state.resumed,
+                "resumed_from_checkpoint_id": state.resumed_from_checkpoint_id,
+                "final_proof": state.final_proof,
+                "final_verification": state.final_verification,
+                "budget_exhausted": state.budget_exhausted,
+                "claims": memory.claims,
+                "calls_started": runner.ledger.calls_started,
+                "stage_calls": runner.ledger.stage_calls,
+                "bucket_calls": runner.ledger.bucket_calls,
+                "agent_metrics": runner.pool.metrics(),
+            },
+        )
+        runner.persist_runtime_state()
+
+    def _allowed_tools(self) -> list[str]:
+        tools: list[str] = []
+        if self.config.verification.enable_sympy_tools:
+            tools.extend(["sympy_simplify", "sympy_equivalent", "polynomial_factor"])
+        if self.config.verification.enable_numeric_counterexamples:
+            tools.append("numeric_counterexample")
+        if self.config.verification.enable_lean:
+            tools.append("lean_check")
+        return tools
+
+    @staticmethod
+    def _normalize_statement(text: str) -> str:
+        return re.sub(r"\s+", " ", text).strip()
+
+    @staticmethod
+    def _make_run_id(problem_text: str) -> str:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        return f"run_{timestamp}_{stable_hash(problem_text)[:10]}"
+
+    @staticmethod
+    def _failure_rank(level: FailureLevel) -> int:
+        return {
+            FailureLevel.NONE: 0,
+            FailureLevel.EXECUTION: 1,
+            FailureLevel.PLAN: 2,
+            FailureLevel.STRATEGY: 3,
+        }[level]
+
+    @staticmethod
+    def _sum_usage(usages: Iterable[UsageRecord]) -> UsageRecord:
+        usage_list = list(usages)
+        return UsageRecord(
+            input_tokens=sum(u.input_tokens for u in usage_list),
+            output_tokens=sum(u.output_tokens for u in usage_list),
+            total_tokens=sum(u.total_tokens for u in usage_list),
+            estimated_cost_usd=sum(u.estimated_cost_usd for u in usage_list),
+            latency_ms=sum(u.latency_ms for u in usage_list),
+        )
+
+    @staticmethod
+    def _deduplicate_strings(values: Iterable[str]) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            normalized = value.strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                result.append(normalized)
+        return result

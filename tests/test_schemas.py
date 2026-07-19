@@ -10,7 +10,9 @@ def test_usage_and_contract_hashes_are_inferred_without_recursion() -> None:
     usage = UsageRecord(input_tokens=7, output_tokens=11)
     assert usage.total_tokens == 18
 
-    problem = ProblemContract(exact_statement="Prove x=x.", normalized_statement="Prove x=x.")
+    problem = ProblemContract(
+        exact_statement="Prove x=x.", normalized_statement="Prove x=x."
+    )
     assert problem.integrity_hash == stable_hash("Prove x=x.")
 
 

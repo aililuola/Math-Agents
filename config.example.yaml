@@ -110,6 +110,25 @@ verification:
   lean_command: lake env lean
   external_tool_timeout_seconds: 20
 
+continuation:
+  # Off by default for backward compatibility. Enable to split long proofs into
+  # verified deltas, resume from committed checkpoints, and fail over across keys.
+  enabled: false
+  checkpoint_policy: verified_subgoal
+  max_new_steps_per_call: 3
+  max_new_claims_per_call: 3
+  max_output_tokens_per_segment: 12000
+  segments_per_explore_call: 1
+  max_segments_per_path: 12
+  verify_each_delta: true
+  delta_verifier_replicas: 1
+  checkpoint_pass_threshold: 0.78
+  resume_on_disconnect: true
+  allow_cross_agent_failover: true
+  max_failover_agents: 2
+  process_resume_enabled: true
+  retain_rejected_deltas: true
+
 runtime:
   run_root: runs
   output_language: zh-CN

@@ -62,7 +62,9 @@ class GeminiClient(LLMClient):
             "generationConfig": generation_config,
         }
         if system_parts:
-            payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
+            payload["systemInstruction"] = {
+                "parts": [{"text": "\n\n".join(system_parts)}]
+            }
 
         model = quote(self.model, safe="-._/")
         url = f"{self.base_url}/models/{model}:generateContent?key={quote(self.api_key, safe='')}"
@@ -72,11 +74,7 @@ class GeminiClient(LLMClient):
         data = response.json()
         elapsed = (time.perf_counter() - started) * 1000.0
 
-        parts = (
-            data.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [])
-        )
+        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
         text = "".join(part.get("text", "") for part in parts if isinstance(part, dict))
         usage = data.get("usageMetadata") or {}
         return LLMResponse(

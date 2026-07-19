@@ -7,7 +7,8 @@
 1. **搜索有效性**：并行 Agent 必须探索不同数学机制，而不是生成同义改写；
 2. **通信保真性**：中间结果在压缩和转交时不能丢失假设、依赖、适用范围和失败信息；
 3. **验证可靠性**：生成者不能自证，最终答案不能只靠多数票；
-4. **成本可控性**：通信、详细审稿和修订应按预期价值触发。
+4. **成本可控性**：通信、详细审稿和修订应按预期价值触发；
+5. **可恢复性**：网络或进程中断不得迫使所有已验证数学进展从头重算。
 
 这四个目标存在张力。更多并行路径增加覆盖，但会增加验证成本；更长上下文保留信息，却提高费用并导致注意力稀释；更多 Reviewer 降低单点错误，却可能产生相关误判。因此系统采用显式状态、软预算和分层门控，而不是固定 DAG。
 
@@ -108,6 +109,25 @@
 - 找到反例可以否定对应全称断言或暴露形式化错误；
 - 没找到反例不构成证明。
 
+### 2.7 `ProofDelta` / `ProofCheckpoint`
+
+启用 continuation 后，Explorer 不再一次生成整篇长证明，而是从最近检查点只产生少量新增步骤：
+
+- `ProofDelta`：候选增量，包含父检查点、步骤、Claim、当前/剩余子目标、风险和完成标记；
+- `ProofCheckpoint`：经本地完整性检查与独立 Reviewer 通过后形成的持久状态；
+- `runtime_ledger.json`：持久化调用预算和累计 Agent 使用量；
+- `latest.json`：每条证明路径的原子恢复指针。
+
+检查点形成有向父子链：
+
+```text
+C0(genesis) → C1 → C2 → C3
+                         ├─ 被拒绝的 D4-a（不推进）
+                         └─ 通过的 D4-b → C4
+```
+
+`ArtifactStore` 强制父检查点必须等于当前 latest，段号只能加一，且问题/路径/策略身份不变。这阻止旧进程、竞态调用或错误 Agent 覆盖更新后的证明状态。
+
 ## 3. 状态机
 
 ### Stage 0：冻结题目
@@ -149,6 +169,26 @@ s^*=\arg\max_s\left[0.7\min_{q\in S_{\rm selected}}
 - 剩余调用预算。
 
 首轮不发送其他候选答案，从协议上保护方向多样性。
+
+### Stage 3.5：分段续推与检查点提交
+
+当 `continuation.enabled=true` 时，每条路径执行以下循环：
+
+1. 读取路径自己的最新 `committed` 检查点；不存在时创建 genesis；
+2. 生成最多若干个新 `ProofStep` 和 `ClaimCard`；
+3. 本地检查 problem hash、父节点、段号、依赖闭包和 ID 唯一性；
+4. 由与作者不同的 Detailed Verifier 审查新增步骤；
+5. 只有全部报告 PASS 且达到 `checkpoint_pass_threshold`，才提交新检查点；
+6. 断线时丢弃未完成段，从旧检查点重试；原 key 重试耗尽后可切换备用 Agent；
+7. 进程重启后，CLI `resume` 同时恢复阶段快照、独立持久化的 Triage/Strategy/LemmaMemory、runtime ledger 和各路径 latest 指针；第一个阶段快照尚未生成时也可从 ProblemContract 重新进入。
+
+因此，跨 Agent 通信单位从“长 transcript”变为：
+
+\[
+\text{ProblemContract}+\text{StrategyCard}+\text{ProofCheckpoint}+\text{VerifiedClaims}+\text{CurrentGoal}.
+\]
+
+这既缩短上下文，也明确哪些结论可以安全复用。
 
 ### Stage 4：Claim 提取
 
@@ -366,4 +406,10 @@ Q_{wide}=0.35(1-c)+0.30u+0.20\min(1,\bar s)+0.15(1-p_{max}),
 
 ### 8.4 故障恢复
 
-每阶段写 checkpoint。当前版本保存了恢复所需状态，但 CLI 尚未提供“从任意 checkpoint 自动续跑”的完整命令；这属于可扩展点。已有运行即使失败，也会保留报告、原始响应和部分结果。
+系统实现三层恢复：
+
+1. **调用级重试**：同一 key 对超时、网络、远端协议错误、408/409/429 和 5xx 进行有限指数退避；401/403 不在同一 key 上重复请求；
+2. **跨 key 接力**：重试耗尽后，备用 Agent 收到同一最新已验证检查点和子目标；401/403 可直接换 key，失败 Agent 会短暂冷却，证明作者被排除在自己的 checkpoint 审查链之外；
+3. **进程级恢复**：`mathproofmesh resume <run_id>` 恢复阶段状态、独立结构化产物、证明路径、累计预算/token/费用和 Activity 时间线；没有阶段快照时从冻结原题重新进入。
+
+未收到完整 SSE 结束标记或 usage 摘要的响应不会进入结构化状态。恢复不保存供应商私有 `reasoning_content`，也不声称恢复模型隐藏状态；它从最近已验证的外部数学状态发起一个新请求。详细协议见 [CHECKPOINT_RESUME.md](CHECKPOINT_RESUME.md)。

@@ -49,7 +49,9 @@ class OpenAICompatibleClient(LLMClient):
             payload["response_format"] = {"type": "json_object"}
 
         started = time.perf_counter()
-        response = await self._client.post(f"{self.base_url}/chat/completions", json=payload)
+        response = await self._client.post(
+            f"{self.base_url}/chat/completions", json=payload
+        )
         response.raise_for_status()
         data = response.json()
         elapsed = (time.perf_counter() - started) * 1000.0
@@ -58,7 +60,8 @@ class OpenAICompatibleClient(LLMClient):
         content = choice.get("message", {}).get("content", "")
         if isinstance(content, list):
             content = "".join(
-                item.get("text", "") if isinstance(item, dict) else str(item) for item in content
+                item.get("text", "") if isinstance(item, dict) else str(item)
+                for item in content
             )
         usage = data.get("usage") or {}
         return LLMResponse(

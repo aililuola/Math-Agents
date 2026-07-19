@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from .activity import ActivityMode, ConsoleActivityView
-from .config import SystemConfig, load_config
+from .config import ContinuationConfig, SystemConfig, load_config
 from .llm.deepseek import DeepSeekClient
 from .llm.pool import AgentPool
 from .mock_demo import build_demo_config, demo_responders
@@ -42,7 +42,11 @@ def _resolve_activity_mode(
     json_output: bool = False,
 ) -> ActivityMode:
     # Machine-readable JSON remains clean unless activity was explicitly requested.
-    raw = override if override is not None else ("off" if json_output else config.runtime.activity_mode)
+    raw = (
+        override
+        if override is not None
+        else ("off" if json_output else config.runtime.activity_mode)
+    )
     normalized = raw.strip().lower()
     if normalized not in _VALID_ACTIVITY_MODES:
         raise typer.BadParameter("--activity must be one of: off, compact, detailed")
@@ -75,12 +79,43 @@ def _run_solver_with_activity(
         )
 
 
+def _run_resume_with_activity(
+    config: SystemConfig,
+    *,
+    run_id: str,
+    mode: ActivityMode,
+    mock_responders=None,
+):
+    config.runtime.activity_mode = mode
+    view = ConsoleActivityView(
+        language=config.runtime.output_language,
+        mode=mode,
+        max_items=config.runtime.activity_max_visible,
+        console=activity_console,
+    )
+    listener = view.handle if mode != "off" else None
+    with view:
+        return asyncio.run(
+            ProofMeshOrchestrator(
+                config,
+                mock_responders=mock_responders,
+                activity_listener=listener,
+            ).resume(run_id)
+        )
+
+
 @app.command()
 def solve(
     problem: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
-    config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False, readable=True),
-    run_id: Optional[str] = typer.Option(None, help="Optional deterministic run directory name."),
-    json_output: bool = typer.Option(False, "--json", help="Print the full RunResult JSON."),
+    config: Path = typer.Option(
+        ..., "--config", "-c", exists=True, dir_okay=False, readable=True
+    ),
+    run_id: Optional[str] = typer.Option(
+        None, help="Optional deterministic run directory name."
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Print the full RunResult JSON."
+    ),
     activity: Optional[str] = typer.Option(
         None,
         "--activity",
@@ -94,9 +129,13 @@ def solve(
     text = problem.read_text(encoding="utf-8")
     result = _run_solver_with_activity(cfg, text, run_id=run_id, mode=mode)
     if json_output:
-        console.print_json(json.dumps(result.model_dump(mode="json"), ensure_ascii=False))
+        console.print_json(
+            json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
+        )
         return
-    verdict = result.final_verification.verdict.value if result.final_verification else "none"
+    verdict = (
+        result.final_verification.verdict.value if result.final_verification else "none"
+    )
     timeline = (
         str(Path(result.run_directory) / "reports" / "activity_timeline.md")
         if cfg.runtime.activity_persist
@@ -118,8 +157,56 @@ def solve(
 
 
 @app.command()
+def resume(
+    run_id: str = typer.Argument(..., help="Existing run directory name to resume."),
+    config: Path = typer.Option(
+        ..., "--config", "-c", exists=True, dir_okay=False, readable=True
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Print the full RunResult JSON."
+    ),
+    activity: Optional[str] = typer.Option(
+        None,
+        "--activity",
+        help="Live progress timeline: off, compact, or detailed.",
+    ),
+) -> None:
+    """Resume from the latest stage snapshot and verified proof checkpoint."""
+    cfg = load_config(config)
+    _configure_logging(cfg.runtime.log_level)
+    mode = _resolve_activity_mode(cfg, activity, json_output=json_output)
+    result = _run_resume_with_activity(cfg, run_id=run_id, mode=mode)
+    if json_output:
+        console.print_json(
+            json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
+        )
+        return
+    verdict = (
+        result.final_verification.verdict.value if result.final_verification else "none"
+    )
+    console.print(
+        Panel.fit(
+            f"status: [bold]{result.status.value}[/bold]\n"
+            f"resumed: {result.resumed}\n"
+            f"resume checkpoint: {result.resumed_from_checkpoint_id or 'none'}\n"
+            f"final verification: {verdict}\n"
+            f"calls recorded: {result.total_calls}\n"
+            f"run directory: {result.run_directory}",
+            title="MathProofMesh resume",
+        )
+    )
+    if result.final_proof:
+        console.print("\n[bold]Answer[/bold]\n" + result.final_proof.answer)
+
+
+@app.command()
 def demo(
     run_root: Path = typer.Option(Path("runs"), help="Directory for demo artifacts."),
+    continuation: bool = typer.Option(
+        False,
+        "--continuation",
+        help="Exercise verified proof checkpoints and segmented continuation.",
+    ),
     activity: Optional[str] = typer.Option(
         None,
         "--activity",
@@ -128,6 +215,15 @@ def demo(
 ) -> None:
     """Run a deterministic end-to-end smoke test without external API calls."""
     cfg = build_demo_config(str(run_root))
+    if continuation:
+        cfg.continuation = ContinuationConfig(
+            enabled=True,
+            segments_per_explore_call=1,
+            max_segments_per_path=4,
+            max_failover_agents=1,
+            process_resume_enabled=True,
+        )
+        cfg.budget.max_total_calls = max(cfg.budget.max_total_calls, 80)
     _configure_logging(cfg.runtime.log_level)
     mode = _resolve_activity_mode(cfg, activity)
     problem = "Prove that for every positive integer n, 1+3+...+(2n-1)=n^2."
@@ -158,7 +254,9 @@ def demo(
 
 @app.command()
 def probe(
-    config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False, readable=True),
+    config: Path = typer.Option(
+        ..., "--config", "-c", exists=True, dir_okay=False, readable=True
+    ),
     completion: bool = typer.Option(
         False,
         "--completion",
@@ -187,12 +285,17 @@ def probe(
                 else:
                     entry["credential_ok"] = None
                     entry["model_visible"] = None
-                    entry["note"] = "model-list probe is implemented for DeepSeek agents"
+                    entry["note"] = (
+                        "model-list probe is implemented for DeepSeek agents"
+                    )
 
                 if completion:
                     response = await runtime.call(
                         [
-                            {"role": "system", "content": "Return one JSON object only."},
+                            {
+                                "role": "system",
+                                "content": "Return one JSON object only.",
+                            },
                             {
                                 "role": "user",
                                 "content": '{"probe":"Reply with {\\"ok\\":true}."}',
@@ -205,7 +308,9 @@ def probe(
                     entry["completion_ok"] = bool(response.text.strip())
                     entry["input_tokens"] = response.input_tokens
                     entry["output_tokens"] = response.output_tokens
-            except Exception as exc:  # The command reports per-agent failures without leaking secrets.
+            except (
+                Exception
+            ) as exc:  # The command reports per-agent failures without leaking secrets.
                 entry["credential_ok"] = False
                 entry["error_type"] = type(exc).__name__
                 entry["error"] = str(exc)[:240]
@@ -222,7 +327,9 @@ def probe(
 
 @app.command("serve")
 def serve_command(
-    config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False, readable=True),
+    config: Path = typer.Option(
+        ..., "--config", "-c", exists=True, dir_okay=False, readable=True
+    ),
     host: str = typer.Option("127.0.0.1"),
     port: int = typer.Option(8000, min=1, max=65535),
 ) -> None:
@@ -230,7 +337,9 @@ def serve_command(
     try:
         import uvicorn
     except ImportError as exc:
-        raise typer.BadParameter("Install with: pip install 'mathproofmesh[server]'") from exc
+        raise typer.BadParameter(
+            "Install with: pip install 'mathproofmesh[server]'"
+        ) from exc
     os.environ["MATHPROOFMESH_CONFIG"] = str(config.resolve())
     uvicorn.run("mathproofmesh.server:create_app", factory=True, host=host, port=port)
 

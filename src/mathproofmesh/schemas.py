@@ -18,7 +18,9 @@ def stable_hash(value: Any) -> str:
     if isinstance(value, str):
         raw = value.encode("utf-8")
     else:
-        raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        raw = json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 
 
@@ -27,7 +29,9 @@ def new_id(prefix: str) -> str:
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", validate_assignment=True, str_strip_whitespace=True)
+    model_config = ConfigDict(
+        extra="forbid", validate_assignment=True, str_strip_whitespace=True
+    )
 
 
 class ProblemKind(StrEnum):
@@ -60,6 +64,13 @@ class ClaimStatus(StrEnum):
     VERIFIED = "verified"
     REJECTED = "rejected"
     UNCERTAIN = "uncertain"
+
+
+class CheckpointStatus(StrEnum):
+    TENTATIVE = "tentative"
+    VERIFIED = "verified"
+    REJECTED = "rejected"
+    COMMITTED = "committed"
 
 
 class VerificationVerdict(StrEnum):
@@ -109,7 +120,9 @@ class UsageRecord(StrictModel):
     @model_validator(mode="after")
     def infer_total(self) -> "UsageRecord":
         if self.total_tokens == 0 and (self.input_tokens or self.output_tokens):
-            object.__setattr__(self, "total_tokens", self.input_tokens + self.output_tokens)
+            object.__setattr__(
+                self, "total_tokens", self.input_tokens + self.output_tokens
+            )
         return self
 
 
@@ -273,6 +286,12 @@ class ProofAttempt(StrictModel):
     unresolved_gaps: list[str] = Field(default_factory=list)
     falsification_checks: list[str] = Field(default_factory=list)
     self_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    path_id: str | None = None
+    latest_checkpoint_id: str | None = None
+    checkpoint_ids: list[str] = Field(default_factory=list)
+    resumed_from_checkpoint_id: str | None = None
+    segment_count: int = Field(default=0, ge=0)
+    failover_chain: list[str] = Field(default_factory=list)
     raw_artifact_ref: str | None = None
     usage: UsageRecord = Field(default_factory=UsageRecord)
 
@@ -280,6 +299,98 @@ class ProofAttempt(StrictModel):
     def complete_requires_answer(self) -> "ProofAttempt":
         if self.status == AttemptStatus.COMPLETE and not self.final_answer:
             raise ValueError("complete attempt requires final_answer")
+        return self
+
+
+class ProofDelta(StrictModel):
+    delta_id: str = Field(default_factory=lambda: new_id("delta"))
+    problem_hash: str
+    path_id: str
+    strategy_id: str
+    parent_checkpoint_id: str
+    agent_id: str
+    round_index: int = Field(ge=0)
+    segment_index: int = Field(ge=1)
+    completed_subgoal: str | None = None
+    new_steps: list[ProofStep] = Field(default_factory=list)
+    new_claims: list[ClaimCard] = Field(default_factory=list)
+    active_assumptions: list[str] = Field(default_factory=list)
+    remaining_subgoals: list[str] = Field(default_factory=list)
+    current_goal: str | None = None
+    known_risks: list[str] = Field(default_factory=list)
+    detected_conflicts: list[str] = Field(default_factory=list)
+    candidate_final_answer: str | None = None
+    proof_complete: bool = False
+    ready_for_verification: bool = True
+    self_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    raw_artifact_ref: str | None = None
+    usage: UsageRecord = Field(default_factory=UsageRecord)
+
+    @model_validator(mode="after")
+    def complete_delta_is_closed(self) -> "ProofDelta":
+        if self.proof_complete and not self.candidate_final_answer:
+            raise ValueError("proof_complete delta requires candidate_final_answer")
+        if self.proof_complete and self.remaining_subgoals:
+            raise ValueError("proof_complete delta cannot retain remaining_subgoals")
+        if not self.new_steps and not self.detected_conflicts:
+            raise ValueError(
+                "delta must add at least one proof step or report a conflict"
+            )
+        return self
+
+
+class ProofCheckpoint(StrictModel):
+    checkpoint_id: str = Field(default_factory=lambda: new_id("checkpoint"))
+    parent_checkpoint_id: str | None = None
+    problem_hash: str
+    path_id: str
+    strategy_id: str
+    source_agent_id: str | None = None
+    source_delta_id: str | None = None
+    segment_index: int = Field(default=0, ge=0)
+    verified_steps: list[ProofStep] = Field(default_factory=list)
+    verified_claim_ids: list[str] = Field(default_factory=list)
+    active_assumptions: list[str] = Field(default_factory=list)
+    remaining_subgoals: list[str] = Field(default_factory=list)
+    current_goal: str | None = None
+    known_risks: list[str] = Field(default_factory=list)
+    final_answer: str | None = None
+    proof_complete: bool = False
+    status: CheckpointStatus = CheckpointStatus.COMMITTED
+    verification_report_ids: list[str] = Field(default_factory=list)
+    failover_chain: list[str] = Field(default_factory=list)
+    created_at: str = Field(default_factory=utc_now_iso)
+    content_hash: str = ""
+
+    @model_validator(mode="after")
+    def validate_checkpoint(self) -> "ProofCheckpoint":
+        if self.proof_complete and not self.final_answer:
+            raise ValueError("proof_complete checkpoint requires final_answer")
+        if self.proof_complete and self.remaining_subgoals:
+            raise ValueError(
+                "proof_complete checkpoint cannot retain remaining_subgoals"
+            )
+        payload = {
+            "parent_checkpoint_id": self.parent_checkpoint_id,
+            "problem_hash": self.problem_hash,
+            "path_id": self.path_id,
+            "strategy_id": self.strategy_id,
+            "segment_index": self.segment_index,
+            "verified_steps": [
+                step.model_dump(mode="json") for step in self.verified_steps
+            ],
+            "verified_claim_ids": self.verified_claim_ids,
+            "active_assumptions": self.active_assumptions,
+            "remaining_subgoals": self.remaining_subgoals,
+            "current_goal": self.current_goal,
+            "known_risks": self.known_risks,
+            "final_answer": self.final_answer,
+            "proof_complete": self.proof_complete,
+        }
+        expected = stable_hash(payload)
+        if self.content_hash and self.content_hash != expected:
+            raise ValueError("checkpoint content_hash mismatch")
+        object.__setattr__(self, "content_hash", expected)
         return self
 
 
@@ -305,7 +416,7 @@ class VerificationIssue(StrictModel):
 class VerificationReport(StrictModel):
     report_id: str = Field(default_factory=lambda: new_id("verify"))
     target_id: str
-    target_type: Literal["attempt", "claim", "final_proof"]
+    target_type: Literal["attempt", "claim", "proof_delta", "checkpoint", "final_proof"]
     agent_id: str
     stage: VerificationStage
     problem_integrity_ok: bool = True
@@ -324,7 +435,9 @@ class VerificationReport(StrictModel):
     @model_validator(mode="after")
     def failed_report_has_issue(self) -> "VerificationReport":
         if self.verdict == VerificationVerdict.FAIL and not self.issues:
-            raise ValueError("failed verification report must contain at least one issue")
+            raise ValueError(
+                "failed verification report must contain at least one issue"
+            )
         return self
 
 
@@ -358,6 +471,7 @@ class ContextPack(StrictModel):
     round_index: int = 0
     remaining_call_budget: int = 0
     notes: list[str] = Field(default_factory=list)
+    proof_checkpoint: ProofCheckpoint | None = None
 
 
 class PathStats(StrictModel):
@@ -424,6 +538,9 @@ class RunResult(StrictModel):
     claims: list[ClaimCard] = Field(default_factory=list)
     verification_reports: list[VerificationReport] = Field(default_factory=list)
     meta_reviews: list[MetaReview] = Field(default_factory=list)
+    proof_checkpoints: list[ProofCheckpoint] = Field(default_factory=list)
+    resumed: bool = False
+    resumed_from_checkpoint_id: str | None = None
     agent_metrics: list[AgentMetric] = Field(default_factory=list)
     total_calls: int = Field(default=0, ge=0)
     total_usage: UsageRecord = Field(default_factory=UsageRecord)

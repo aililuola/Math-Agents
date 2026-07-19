@@ -7,7 +7,13 @@ from typing import Iterable
 
 from .config import SystemConfig
 from .llm.pool import AgentPool, AgentRuntime
-from .schemas import ClaimCard, ProofAttempt, StrategyCard, VerificationReport, VerificationVerdict
+from .schemas import (
+    ClaimCard,
+    ProofAttempt,
+    StrategyCard,
+    VerificationReport,
+    VerificationVerdict,
+)
 from .store import ArtifactStore
 
 
@@ -63,7 +69,9 @@ class SparseTopologyRouter:
     Cross-path edges are created only for explicit conflicts or complementary dependencies.
     """
 
-    def __init__(self, config: SystemConfig, pool: AgentPool, store: ArtifactStore) -> None:
+    def __init__(
+        self, config: SystemConfig, pool: AgentPool, store: ArtifactStore
+    ) -> None:
         self.config = config
         self.pool = pool
         self.store = store
@@ -106,12 +114,18 @@ class SparseTopologyRouter:
         selected = [first]
         remaining.remove(first)
         while remaining and len(selected) < count:
+
             def diversity_score(candidate: StrategyCard) -> float:
                 min_distance = min(
-                    1.0 - jaccard_similarity(strategy_text(candidate), strategy_text(existing))
+                    1.0
+                    - jaccard_similarity(
+                        strategy_text(candidate), strategy_text(existing)
+                    )
                     for existing in selected
                 )
-                feasibility = candidate.estimated_success - 0.2 * candidate.estimated_cost
+                feasibility = (
+                    candidate.estimated_success - 0.2 * candidate.estimated_cost
+                )
                 return 0.7 * min_distance + 0.3 * feasibility
 
             chosen = max(remaining, key=diversity_score)
@@ -119,13 +133,17 @@ class SparseTopologyRouter:
             remaining.remove(chosen)
         return selected
 
-    def assign_explorers(self, strategies: list[StrategyCard]) -> list[tuple[StrategyCard, AgentRuntime]]:
+    def assign_explorers(
+        self, strategies: list[StrategyCard]
+    ) -> list[tuple[StrategyCard, AgentRuntime]]:
         assignments: list[tuple[StrategyCard, AgentRuntime]] = []
         used: set[str] = set()
         for strategy in strategies:
             hints = strategy.tags + [strategy.title]
             try:
-                agent = self.pool.select("explorer", exclude=used, specialty_hints=hints)
+                agent = self.pool.select(
+                    "explorer", exclude=used, specialty_hints=hints
+                )
             except RuntimeError:
                 agent = self.pool.select("explorer", specialty_hints=hints)
             strategy.assigned_agent_id = agent.id
@@ -158,7 +176,9 @@ class SparseTopologyRouter:
                 role,
                 exclude=exclude,
                 prefer_provider_not=(
-                    prover.provider if self.config.topology.prefer_cross_provider_review else None
+                    prover.provider
+                    if self.config.topology.prefer_cross_provider_review
+                    else None
                 ),
             )
             selected.append(reviewer)
@@ -206,7 +226,9 @@ class SparseTopologyRouter:
         ranked = sorted(
             verified,
             key=lambda c: (
-                jaccard_similarity(query, f"{c.statement} {c.conclusion} {' '.join(c.tags)}"),
+                jaccard_similarity(
+                    query, f"{c.statement} {c.conclusion} {' '.join(c.tags)}"
+                ),
                 c.verification_confidence or 0.0,
                 c.self_confidence,
             ),
@@ -227,7 +249,8 @@ class SparseTopologyRouter:
         sparse_ranked = [
             claim
             for claim in ranked
-            if (claim.source_attempt_id or claim.source_agent_id or claim.claim_id) in allowed_sources
+            if (claim.source_attempt_id or claim.source_agent_id or claim.claim_id)
+            in allowed_sources
         ]
 
         # Loss-aware context cap. The first/top claim is retained even when unusually
@@ -237,7 +260,9 @@ class SparseTopologyRouter:
         selected: list[ClaimCard] = []
         used = 0
         for claim in sparse_ranked:
-            encoded = json.dumps(claim.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":"))
+            encoded = json.dumps(
+                claim.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":")
+            )
             size = len(encoded)
             if selected and used + size > char_budget:
                 continue
@@ -259,16 +284,24 @@ class SparseTopologyRouter:
         values = [verdict_values[r.verdict] for r in reports]
         mean = sum(values) / len(values)
         variance = sum((x - mean) ** 2 for x in values) / len(values)
-        confidence_spread = max(r.confidence for r in reports) - min(r.confidence for r in reports)
+        confidence_spread = max(r.confidence for r in reports) - min(
+            r.confidence for r in reports
+        )
         return min(1.0, 4.0 * variance + 0.25 * confidence_spread)
 
     def export(self) -> str:
-        ref = self.store.write_json("reports", "communication_graph", [e.as_dict() for e in self.edges])
+        ref = self.store.write_json(
+            "reports", "communication_graph", [e.as_dict() for e in self.edges]
+        )
         mermaid = ["flowchart LR"]
         for edge in self.edges:
             source = re.sub(r"[^A-Za-z0-9_]", "_", edge.source)
             target = re.sub(r"[^A-Za-z0-9_]", "_", edge.target)
             label = edge.stage.replace('"', "'")
-            mermaid.append(f'  {source}["{edge.source}"] -->|"{label}"| {target}["{edge.target}"]')
-        self.store.write_text("reports", "communication_graph", "\n".join(mermaid), suffix=".mmd")
+            mermaid.append(
+                f'  {source}["{edge.source}"] -->|"{label}"| {target}["{edge.target}"]'
+            )
+        self.store.write_text(
+            "reports", "communication_graph", "\n".join(mermaid), suffix=".mmd"
+        )
         return ref

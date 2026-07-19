@@ -36,7 +36,9 @@ class ActivityImportance(StrEnum):
 class ActivityEvent(BaseModel):
     """A concise, user-facing progress event; never a model chain of thought."""
 
-    model_config = ConfigDict(extra="forbid", validate_assignment=True, str_strip_whitespace=True)
+    model_config = ConfigDict(
+        extra="forbid", validate_assignment=True, str_strip_whitespace=True
+    )
 
     sequence: int = Field(ge=1)
     timestamp: str
@@ -77,6 +79,10 @@ _STAGE_LABELS_ZH = {
     "targeted_deepening": "针对当前缺口继续深挖",
     "final_structural_verification": "执行最终结构审查",
     "final_detailed_verification": "执行最终逐步审查",
+    "proof_continuation": "从已验证检查点继续证明",
+    "checkpoint_verification": "验证并提交证明检查点",
+    "agent_failover": "切换备用 Agent 继续当前任务",
+    "run_resume": "恢复中断的多 Agent 运行",
 }
 
 _STAGE_LABELS_EN = {
@@ -93,6 +99,10 @@ _STAGE_LABELS_EN = {
     "targeted_deepening": "Deepen the current route around its main gap",
     "final_structural_verification": "Run the final structural audit",
     "final_detailed_verification": "Run the final step-level audit",
+    "proof_continuation": "Continue from a verified proof checkpoint",
+    "checkpoint_verification": "Verify and commit a proof checkpoint",
+    "agent_failover": "Fail over to a backup agent",
+    "run_resume": "Resume an interrupted multi-agent run",
 }
 
 
@@ -122,7 +132,11 @@ def sanitize_activity_value(value: Any, *, depth: int = 0) -> Any:
         return value
     if isinstance(value, float):
         # JSON has no portable representation for NaN or infinities.
-        return value if value == value and value not in {float("inf"), float("-inf")} else str(value)
+        return (
+            value
+            if value == value and value not in {float("inf"), float("-inf")}
+            else str(value)
+        )
     if isinstance(value, str):
         return redact_activity_text(value, limit=400)
     if isinstance(value, dict):
@@ -152,11 +166,15 @@ def redact_activity_value(value: Any, *, depth: int = 0) -> Any:
     if isinstance(value, dict):
         items = list(value.items())[:64]
         return {
-            redact_activity_text(str(key), limit=120): redact_activity_value(item, depth=depth + 1)
+            redact_activity_text(str(key), limit=120): redact_activity_value(
+                item, depth=depth + 1
+            )
             for key, item in items
         }
     if isinstance(value, (list, tuple, set)):
-        return [redact_activity_value(item, depth=depth + 1) for item in list(value)[:64]]
+        return [
+            redact_activity_value(item, depth=depth + 1) for item in list(value)[:64]
+        ]
     if isinstance(value, (int, float, bool)) or value is None:
         return value
     return redact_activity_text(str(value), limit=400)
@@ -170,7 +188,11 @@ def stage_label(stage: str, language: str = "zh-CN") -> str:
         "detailed_verification",
         "final_verification",
     }:
-        normalized = "final_verification" if normalized.startswith("final") else "detailed_verification"
+        normalized = (
+            "final_verification"
+            if normalized.startswith("final")
+            else "detailed_verification"
+        )
     labels = _STAGE_LABELS_ZH if language.lower().startswith("zh") else _STAGE_LABELS_EN
     return labels.get(normalized, normalized.replace("_", " ").strip().capitalize())
 
@@ -199,12 +221,35 @@ class ActivityStream:
         self.language = language
         self.listener = listener
         self.persist = persist
-        self.started_monotonic = time.monotonic()
+        self.path = self.store.root / "activity.jsonl"
         self.events: list[ActivityEvent] = []
         self._sequence = 0
         self._lock = threading.Lock()
         self._finalized = False
-        self.path = self.store.root / "activity.jsonl"
+        elapsed_offset_ms = self._load_existing_events() if self.persist else 0
+        self.started_monotonic = time.monotonic() - elapsed_offset_ms / 1000.0
+
+    def _load_existing_events(self) -> int:
+        """Continue one persisted timeline across process restarts."""
+        if not self.path.exists():
+            return 0
+        max_elapsed = 0
+        try:
+            with self.path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = ActivityEvent.model_validate_json(line)
+                    except (ValueError, json.JSONDecodeError):
+                        continue
+                    self.events.append(event)
+                    self._sequence = max(self._sequence, event.sequence)
+                    max_elapsed = max(max_elapsed, event.elapsed_ms)
+        except OSError:
+            return 0
+        return max_elapsed
 
     @property
     def is_zh(self) -> bool:
@@ -233,7 +278,9 @@ class ActivityStream:
             event = ActivityEvent(
                 sequence=self._sequence,
                 timestamp=utc_now_iso(),
-                elapsed_ms=max(0, int((time.monotonic() - self.started_monotonic) * 1000)),
+                elapsed_ms=max(
+                    0, int((time.monotonic() - self.started_monotonic) * 1000)
+                ),
                 event_type=event_type,
                 status=status,
                 importance=importance,
@@ -242,7 +289,9 @@ class ActivityStream:
                 parent_task_id=parent_task_id,
                 title=redact_activity_text(title, limit=240),
                 detail=redact_activity_text(detail, limit=800),
-                agent_id=redact_activity_text(agent_id, limit=120) if agent_id else None,
+                agent_id=redact_activity_text(agent_id, limit=120)
+                if agent_id
+                else None,
                 progress=progress,
                 metrics=sanitize_activity_value(metrics or {}),
             )
@@ -250,7 +299,11 @@ class ActivityStream:
             if self.persist:
                 with self.path.open("a", encoding="utf-8") as handle:
                     handle.write(
-                        json.dumps(event.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
+                        json.dumps(
+                            event.model_dump(mode="json"),
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        )
                         + "\n"
                     )
         if self.listener is not None:
@@ -564,7 +617,9 @@ class ConsoleActivityView:
             self._live.stop()
             self._live = None
 
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
         yield self._render()
 
     def _render(self) -> Panel:
@@ -582,7 +637,10 @@ class ConsoleActivityView:
         for event in events:
             icon = Text(self._icon(event.status), style=self._icon_style(event.status))
             elapsed_text = Text(format_elapsed(event.elapsed_ms / 1000), style="dim")
-            headline = Text(event.title, style="bold" if event.importance == ActivityImportance.MAJOR else "")
+            headline = Text(
+                event.title,
+                style="bold" if event.importance == ActivityImportance.MAJOR else "",
+            )
             if event.agent_id:
                 headline.append(f"  {event.agent_id}", style="dim")
             renderables: list[Any] = [headline]
@@ -604,12 +662,18 @@ class ConsoleActivityView:
         )
 
     def _visible_events(self) -> list[ActivityEvent]:
-        events = [event for event in self._latest.values() if self._show_in_current_mode(event)]
+        events = [
+            event
+            for event in self._latest.values()
+            if self._show_in_current_mode(event)
+        ]
         if len(events) <= self.max_items:
             return events
         running = [event for event in events if event.status == ActivityStatus.RUNNING]
         tail = events[-self.max_items :]
-        merged: OrderedDict[str, ActivityEvent] = OrderedDict((event.task_id, event) for event in tail)
+        merged: OrderedDict[str, ActivityEvent] = OrderedDict(
+            (event.task_id, event) for event in tail
+        )
         for event in running:
             merged[event.task_id] = event
         return list(merged.values())[-self.max_items :]
@@ -626,11 +690,16 @@ class ConsoleActivityView:
         # In an interactive compact panel, keep only currently active Agent calls.
         # Their completed rows disappear once the containing major stage is summarized.
         # Redirected logs retain only milestones so CI output remains short.
-        return self._interactive and event.event_type in {
-            "agent_call",
-            "agent_call_heartbeat",
-            "agent_call_retry",
-        } and event.status == ActivityStatus.RUNNING
+        return (
+            self._interactive
+            and event.event_type
+            in {
+                "agent_call",
+                "agent_call_heartbeat",
+                "agent_call_retry",
+            }
+            and event.status == ActivityStatus.RUNNING
+        )
 
     @staticmethod
     def _icon(status: ActivityStatus) -> str:

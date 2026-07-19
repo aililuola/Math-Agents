@@ -20,7 +20,9 @@ def _proof_steps_markdown(steps) -> str:
 
 
 def write_run_report(store: ArtifactStore, result: RunResult) -> str:
-    verdict_counts = Counter(report.verdict.value for report in result.verification_reports)
+    verdict_counts = Counter(
+        report.verdict.value for report in result.verification_reports
+    )
     lines = [
         f"# {store.run_id}：MathProofMesh 运行报告",
         "",
@@ -34,6 +36,9 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
         f"- Token：{result.total_usage.total_tokens}",
         f"- 估算费用：${result.total_usage.estimated_cost_usd:.4f}",
         f"- 验证报告：{dict(verdict_counts)}",
+        f"- 已提交证明检查点：{len(result.proof_checkpoints)}",
+        f"- 本次是否为恢复运行：{'是' if result.resumed else '否'}",
+        f"- 恢复起点：`{result.resumed_from_checkpoint_id or '无'}`",
         "- 运行时间线：`activity_timeline.md`（仅含阶段状态与结构化摘要，不含模型原始思考链）",
         "",
         "## 最终结果",
@@ -80,17 +85,42 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
         lines.append(
             f"- `{attempt.attempt_id}` / `{attempt.strategy_id}` / {attempt.agent_id}："
             f"{attempt.status.value}，自评 {attempt.self_confidence:.2f}，"
-            f"步骤 {len(attempt.proof_steps)}，未解缺口 {len(attempt.unresolved_gaps)}"
+            f"步骤 {len(attempt.proof_steps)}，证明段 {attempt.segment_count}，"
+            f"未解缺口 {len(attempt.unresolved_gaps)}，"
+            f"最新检查点 `{attempt.latest_checkpoint_id or '无'}`"
         )
+        if attempt.failover_chain:
+            lines.append(
+                f"  - API-key/Agent 接力链：{' → '.join(attempt.failover_chain)}"
+            )
     lines.append("")
-    verified_claims = [claim for claim in result.claims if claim.status.value == "verified"]
+    verified_claims = [
+        claim for claim in result.claims if claim.status.value == "verified"
+    ]
     lines.append(f"已验证引理数：{len(verified_claims)}")
     for claim in verified_claims:
         lines.append(f"- `{claim.claim_id}`：{claim.statement}")
     lines.append("")
 
+    lines.extend(["## 检查点与恢复", ""])
+    if not result.proof_checkpoints:
+        lines.append("本次运行未启用或未形成证明步骤级检查点。")
+    else:
+        by_path: dict[str, list] = {}
+        for checkpoint in result.proof_checkpoints:
+            by_path.setdefault(checkpoint.path_id, []).append(checkpoint)
+        for path_id, checkpoints in sorted(by_path.items()):
+            latest = max(checkpoints, key=lambda item: item.segment_index)
+            lines.append(
+                f"- `{path_id}`：{len(checkpoints)} 个已提交检查点；"
+                f"最新为 `{latest.checkpoint_id}`（第 {latest.segment_index} 段，"
+                f"完成={latest.proof_complete}）"
+            )
     lines.extend(
         [
+            "",
+            "断线时，未完成的 SSE/JSON 不会进入事实库；系统只从最近一个已验证并提交的检查点重试或切换备用 Agent。",
+            "",
             "## 运行时间线",
             "",
             "- 实时事件：`activity.jsonl`",

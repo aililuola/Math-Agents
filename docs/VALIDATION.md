@@ -1,68 +1,165 @@
 # 可复现验证记录
 
-**验证日期：2026 年 7 月 19 日。** 这一记录区分三种层级：源码静态质量、确定性 Mock/HTTP Mock 行为、真实供应商联调。前两类已经执行；第三类因当前构建容器无法解析外部 API 域名而未完成。
+**验证日期：2026 年 7 月 19 日。** 本记录严格区分源码静态质量、确定性 Mock/HTTP Mock 行为、安装产物验证和真实供应商联调。前三类已经执行；构建过程中未使用用户的真实 API key 发起付费请求。
 
 ## 1. 一键复验
 
 安装开发依赖后运行：
 
 ```bash
-./scripts/validate.sh
+bash scripts/validate.sh
 ```
 
 脚本依次执行：
 
 ```text
-compileall → Ruff → pytest → deterministic Mock demo
+compileall(src + tests)
+→ Ruff lint
+→ Ruff format check
+→ pytest
+→ deterministic continuation demo
 ```
 
-Mock demo 不发出任何外部 API 请求。它验证从题目冻结、策略生成、隔离探索、Claim 提取、结构/详细审稿、Meta-review、综合到最终审计的完整调用链，并检查运行报告和通信图等产物。
+演示不访问外部 API。它完整经过题目冻结、策略生成、隔离探索、`ProofDelta`、独立检查点验证、`ProofCheckpoint` 提交、Claim 传递、候选验证、Meta-review、综合和最终审计。
 
-## 2. 本次交付的实际结果
+## 2. 最终源码验证结果
 
 | 检查 | 结果 |
-|---|---|
+|---|---:|
 | `python -m compileall -q src tests` | PASS |
-| Ruff | PASS |
-| `PYTHONPATH=src pytest -q` | **24 passed** |
-| 源码模式 deterministic demo | `status=verified`，19 calls |
-| 构建 `mathproofmesh-0.4.0-py3-none-any.whl` | PASS |
-| 将 wheel 安装到隔离 target 目录 | PASS |
-| 从已安装 wheel 执行 CLI demo | `status=verified`，19 calls |
-| 示例配置解析与预算比例校验 | PASS |
-| 五个用户提供 key 的精确秘密扫描 | 源码、Wheel 和交付目录均无匹配；测试中保留一个专用于脱敏测试的伪造 `sk-*` 字符串 |
-| DeepSeek 官方域名真实请求 | 本轮构建未使用用户凭据；应在本机运行 `probe` 验证 |
+| `ruff check .` | PASS |
+| `ruff format --check .` | PASS |
+| `PYTHONPATH=src pytest -q` | **41 passed** |
+| continuation deterministic demo | `verified`，22 calls，25,969 tokens |
+| demo 证明检查点 | 3 条路径，共 6 个 checkpoint（3 个 genesis + 3 个已验证完成段） |
+| DeepSeek 非流式 HTTP Mock | PASS |
+| DeepSeek SSE HTTP Mock | PASS |
+| SSE `[DONE]` 缺失守卫 | PASS |
+| 请求 usage 但尾部 usage 摘要缺失守卫 | PASS |
+| `reasoning_content` 增量脱敏 | PASS |
+| YAML 配置解析 | PASS |
+| 源码秘密扫描 | 60 个候选文件，真实 key 与通用长 `sk-*` 模式均为 0 匹配 |
 
-演示定理为前 `n` 个正奇数之和等于 `n^2`。这里选择简单定理是为了对状态机和审计链做稳定、确定性的基础设施测试，不能把它解释为系统已经证明了研究级开放问题。
+演示定理为前 `n` 个正奇数之和等于 `n^2`。选择简单定理是为了使状态机、故障恢复和审计链测试可重复，不能据此声称系统已经解决研究级开放问题。
 
-## 3. 测试覆盖
+## 3. 断线、接力与进程恢复验证
 
-自动化测试包括：
+### 3.1 已完成运行的幂等恢复
 
-- 题目契约、Claim 内容哈希与篡改检测；
-- 模型自由文本中的平衡 JSON 对象提取；
-- 非法工具表达式拒绝；
-- SymPy 等价检查、因式分解与有界反例搜索；
-- 确定性反例强制覆盖模型错误 PASS；
-- Claim 缺失依赖、依赖闭包和循环风险；
-- 策略差异化、稀疏来源限制和上下文软预算；
-- Agent 选择的跨进程可复现性；
-- DeepSeek V4 Pro 请求体：`thinking.type=enabled`、`reasoning_effort=max`、JSON mode、`user_id`；
-- DeepSeek 非流式兼容行为，以及 SSE `stream=true`、`stream_options.include_usage=true`、
-  usage-only 尾块、本地内容聚合和 `reasoning_content` 增量哈希脱敏；
-- DeepSeek 模型列表解析与 `reasoning_content` 脱敏；
-- Activity 事件及嵌套 metrics 的凭据脱敏、JSON 安全化、监听回调、JSONL 追加和 JSON/Markdown 导出；
-- CLI compact 时间线渲染与长 API 调用的低频无内容心跳；
-- 多 Agent 全链运行、最终验证状态和 Activity/审计产物。
+先完成一次 continuation demo，再对同一 `run_id` 调用 `resume`：
 
-## 4. 尚未实机验证的部分
+```text
+首次：verified，22 calls，25,969 tokens，6 checkpoints
+恢复：verified，22 calls，25,969 tokens，6 checkpoints
+```
 
-本轮构建没有使用聊天中出现的真实凭据，也没有向 DeepSeek 发起计费请求。尚未验证：
+最终审计已经通过时，恢复不会重复调用模型，也不会重复计费本地已记录的 token。
 
-- 当前具体模型名和账户权限；
-- OpenAI-compatible 第三方网关的字段差异；
-- Anthropic、Gemini 与兼容网关的实时限流/错误响应；
-- 特定模型对长 JSON Schema 输出的遵循率；
-- 大规模多 key 并发下的真实费用与时延。
+### 3.2 未完成检查点后的继续推理
 
-这些边界不会被 Mock 测试掩盖。真实联调应先运行 `mathproofmesh probe`，再使用低预算冒烟配置，详见 [DEEPSEEK_V4_PRO.md](DEEPSEEK_V4_PRO.md) 与 [DEPLOYMENT.md](DEPLOYMENT.md)。
+测试构造了两段证明：第 1 段只完成连续平方差恒等式，第 2 段完成望远镜求和。首次运行将总调用上限设为 4，并关闭阶段级快照，以模拟更苛刻的中断：
+
+```text
+中断前：budget_exhausted，4 calls
+最新恢复点：segment 1，proof_complete=false
+阶段快照：不存在
+```
+
+随后把总调用上限提高至 40，并对同一 `run_id` 执行 `resume`：
+
+```text
+恢复后：verified，累计 13 calls
+恢复来源：原 segment-1 committed checkpoint
+新状态：segment 2，proof_complete=true
+```
+
+这同时验证了：
+
+- 没有阶段快照时从 `ProblemContract` 和独立持久化的 Strategy/LemmaMemory 恢复；
+- 未完成路线从自己的 `latest.json` 继续，而不是重新生成第 1 段；
+- 预算、usage 和 Activity 序号跨进程累计；
+- 已提交父检查点保留在不可变链中。
+
+### 3.3 跨 API-key/Agent 接力
+
+集成测试令首选 Explorer 在 `ProofDelta` 请求中抛出网络断连，备用 Explorer 返回合法增量。结果为：
+
+```text
+primary key 正常调用级重试耗尽
+→ backup key 接收同一 checkpoint + current goal
+→ 独立 Reviewer 验证
+→ checkpoint source_agent_id=backup
+→ failover_chain=[primary, backup]
+```
+
+还验证了：
+
+- 401/403 在原 key 上不重复请求，但可以切换另一个 key；
+- 连续失败的 key 进入短暂冷却，后续调度优先健康 Agent；
+- checkpoint Reviewer 的首选和故障转移候选均排除当前 Delta 作者；
+- 所有备用 Agent 均失败时，原 committed checkpoint 不被覆盖。
+
+## 4. 检查点与信息完整性测试
+
+自动化测试覆盖：
+
+- `ProblemContract`、Claim 和 `ProofCheckpoint` 内容哈希；
+- checkpoint 父节点必须等于当前 `latest.json`；
+- segment 必须严格加一；
+- problem/path/strategy 身份不可改变；
+- proof step ID、Claim ID 不可重复；
+- 新步骤只能依赖已提交对象或同一 Delta 中更早的步骤；
+- Claim 自依赖、前向依赖和未验证依赖会被本地守卫拒绝；
+- Reviewer FAIL/UNCERTAIN 时 Delta 只能进入 rejected 目录；
+- prompt 使用内容寻址归档，重复阶段不会覆盖旧提示词；
+- 比阶段快照更新的 `lemma_memory.json` 会在恢复时被重新加载；
+- 被截断的 SSE、半截 JSON 和私有 `reasoning_content` 不会成为恢复点。
+
+## 5. 安装产物验证
+
+构建命令：
+
+```bash
+uv build
+```
+
+结果：
+
+| 产物 | 结果 |
+|---|---:|
+| `dist/mathproofmesh-0.5.0.tar.gz` | PASS |
+| `dist/mathproofmesh-0.5.0-py3-none-any.whl` | PASS |
+| wheel 安装到隔离 target | PASS |
+| 从已安装 wheel 执行 continuation demo | `verified`，22 calls |
+| wheel/sdist 秘密扫描 | 真实 key 与通用长 `sk-*` 模式均为 0 匹配 |
+
+SHA-256：
+
+```text
+wheel: d60129a5f8f9b41367ae3f5cdbe19882ede791ef4546d17892f407d6e6d22aac
+sdist: 7a711ca43ba82a2d6403b9c2dd44be98c1db752ecef9e553f7de8958fec50111
+```
+
+## 6. GitHub CI
+
+仓库包含 `.github/workflows/ci.yml`，对功能分支 push 和 Pull Request 执行：
+
+```text
+Python 3.11
+→ pip install -e ".[dev,server]"
+→ bash scripts/validate.sh
+```
+
+该工作流只运行确定性 Mock 测试，不读取 DeepSeek secrets，也不会产生真实模型费用。远程 CI 状态应以相应 GitHub commit/PR 页面为准。
+
+## 7. 尚未实机验证的部分
+
+本次构建没有使用聊天中提供的真实 DeepSeek key。尚需在用户本机验证：
+
+- 五个 key 的当前有效性、余额、账户级并发限制和模型可见性；
+- 真实 DeepSeek V4 Pro 对长 `ProofDelta` JSON Schema 的遵循率；
+- 真实 SSE 长连接在本地网络、代理和防火墙下的稳定性；
+- 真实 429/5xx 的 `Retry-After` 行为和供应商计费；
+- 多 key 大规模并行下的实际成本、延迟和错误相关性。
+
+真实联调应先执行 `mathproofmesh probe`，再使用 `config.deepseek-v4-pro.smoke.yaml`，最后切换正式配置。详见 [DEEPSEEK_V4_PRO.md](DEEPSEEK_V4_PRO.md)、[CHECKPOINT_RESUME.md](CHECKPOINT_RESUME.md) 与 [DEPLOYMENT.md](DEPLOYMENT.md)。

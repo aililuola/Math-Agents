@@ -6,7 +6,9 @@ from typing import Any, Callable
 from .base import LLMClient, LLMResponse, Message
 
 
-MockResponder = Callable[[str | None, list[Message], dict[str, Any] | None], dict[str, Any] | str]
+MockResponder = Callable[
+    [str | None, list[Message], dict[str, Any] | None], dict[str, Any] | str
+]
 
 
 class MockClient(LLMClient):
@@ -37,7 +39,11 @@ class MockClient(LLMClient):
             payload: dict[str, Any] | str = {"mock": True, "schema_name": schema_name}
         else:
             payload = self.responder(schema_name, messages, schema)
-        text = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
+        text = (
+            payload
+            if isinstance(payload, str)
+            else json.dumps(payload, ensure_ascii=False)
+        )
         return LLMResponse(
             text=text,
             model=self.model,

@@ -30,7 +30,9 @@ class LemmaMemory:
                 existing.evidence_refs.extend(
                     e for e in claim.evidence_refs if e.artifact_ref not in known_refs
                 )
-                existing.self_confidence = max(existing.self_confidence, claim.self_confidence)
+                existing.self_confidence = max(
+                    existing.self_confidence, claim.self_confidence
+                )
                 existing.scope_limitations = sorted(
                     set(existing.scope_limitations) | set(claim.scope_limitations)
                 )
@@ -42,7 +44,9 @@ class LemmaMemory:
         self._persist()
         return added
 
-    def mark_attempt_verified(self, attempt_id: str, report: VerificationReport) -> list[ClaimCard]:
+    def mark_attempt_verified(
+        self, attempt_id: str, report: VerificationReport
+    ) -> list[ClaimCard]:
         changed: list[ClaimCard] = []
         for claim in self._claims.values():
             if claim.source_attempt_id != attempt_id:
@@ -92,10 +96,18 @@ class LemmaMemory:
         ]
 
     def rejected(self) -> list[ClaimCard]:
-        return [claim for claim in self._claims.values() if claim.status == ClaimStatus.REJECTED]
+        return [
+            claim
+            for claim in self._claims.values()
+            if claim.status == ClaimStatus.REJECTED
+        ]
 
     def _valid_verified_ids(self) -> set[str]:
-        verified = {c.claim_id: c for c in self._claims.values() if c.status == ClaimStatus.VERIFIED}
+        verified = {
+            c.claim_id: c
+            for c in self._claims.values()
+            if c.status == ClaimStatus.VERIFIED
+        }
         valid: set[str] = set()
         changed = True
         while changed:
@@ -103,7 +115,9 @@ class LemmaMemory:
             for claim_id, claim in verified.items():
                 if claim_id in valid:
                     continue
-                claim_dependencies = [d for d in claim.dependencies if not d.startswith("external:")]
+                claim_dependencies = [
+                    d for d in claim.dependencies if not d.startswith("external:")
+                ]
                 if all(dep in valid for dep in claim_dependencies):
                     valid.add(claim_id)
                     changed = True
@@ -113,7 +127,9 @@ class LemmaMemory:
         graph: dict[str, list[str]] = defaultdict(list)
         indegree: dict[str, int] = {}
         verified_ids = {
-            c.claim_id for c in self._claims.values() if c.status == ClaimStatus.VERIFIED
+            c.claim_id
+            for c in self._claims.values()
+            if c.status == ClaimStatus.VERIFIED
         }
         for claim_id in verified_ids:
             indegree.setdefault(claim_id, 0)

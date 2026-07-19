@@ -12,6 +12,8 @@ from .schemas import (
     MetaReview,
     ProblemContract,
     ProofAttempt,
+    ProofCheckpoint,
+    ProofDelta,
     StrategySet,
     TriageResult,
     VerificationReport,
@@ -66,7 +68,9 @@ IMMUTABLE PROBLEM CONTRACT:
 JSON SCHEMA:
 {_schema(TriageResult)}
 """.strip()
-        return PromptBundle("triage", COMMON_SYSTEM, user, TriageResult, temperature=0.0)
+        return PromptBundle(
+            "triage", COMMON_SYSTEM, user, TriageResult, temperature=0.0
+        )
 
     def strategies(
         self,
@@ -101,7 +105,9 @@ REGULATOR FEEDBACK:
 JSON SCHEMA:
 {_schema(StrategySet)}
 """.strip()
-        return PromptBundle("strategy_generation", COMMON_SYSTEM, user, StrategySet, temperature=0.5)
+        return PromptBundle(
+            "strategy_generation", COMMON_SYSTEM, user, StrategySet, temperature=0.5
+        )
 
     def explore(
         self,
@@ -145,7 +151,122 @@ OUTPUT LANGUAGE: {self.output_language}
 JSON SCHEMA:
 {_schema(ProofAttempt)}
 """.strip()
-        return PromptBundle("independent_exploration", COMMON_SYSTEM, user, ProofAttempt, temperature=0.45)
+        return PromptBundle(
+            "independent_exploration",
+            COMMON_SYSTEM,
+            user,
+            ProofAttempt,
+            temperature=0.45,
+        )
+
+    def continue_proof(
+        self,
+        problem: ProblemContract,
+        strategy: dict[str, Any],
+        checkpoint: ProofCheckpoint,
+        agent_id: str,
+        round_index: int,
+        segment_index: int,
+        verified_claims: list[dict[str, Any]],
+        targeted_feedback: list[str] | None = None,
+        max_new_steps: int = 3,
+        max_new_claims: int = 3,
+        checkpoint_policy: str = "verified_subgoal",
+        remaining_call_budget: int = 0,
+    ) -> PromptBundle:
+        targeted_feedback = targeted_feedback or []
+        user = f"""
+[STAGE:proof_continuation]
+You are explorer {agent_id}. Continue one proof path from a verified external checkpoint.
+The checkpoint is authoritative mathematical state, not a suggestion. Do not re-prove committed steps unless you identify an explicit contradiction; if a contradiction exists, report it in detected_conflicts and do not silently overwrite the checkpoint.
+Produce at most {max_new_steps} new logically complete proof steps and at most {max_new_claims} new reusable claims. Each new step must name all dependencies and may depend only on committed step IDs, verified claim IDs, explicit external theorems, or earlier steps in this same delta.
+Work on the checkpoint's current_goal first. Finish a coherent subgoal rather than emitting a long unfinished transcript.
+CHECKPOINT POLICY: {checkpoint_policy}. When this is "verified_subgoal", completed_subgoal must explicitly name the coherent subgoal completed by this delta unless the full proof is complete or a contradiction with the checkpoint is being reported.
+Set proof_complete=true only when the original immutable problem is fully solved, candidate_final_answer is self-contained, and remaining_subgoals is empty.
+The response must retain problem_hash, path_id, strategy_id, parent_checkpoint_id, round_index, and segment_index exactly as supplied.
+Reason privately, but output only the next auditable mathematical delta; never output hidden scratch work.
+
+IMMUTABLE PROBLEM CONTRACT:
+{_json(problem)}
+
+ASSIGNED STRATEGY:
+{_json(strategy)}
+
+LATEST VERIFIED CHECKPOINT:
+{_json(checkpoint)}
+
+VERIFIED LEMMA LIBRARY:
+{_json(verified_claims)}
+
+TARGETED FEEDBACK:
+{_json(targeted_feedback)}
+
+AUTHORITATIVE IDS:
+agent_id={agent_id!r}
+round_index={round_index}
+segment_index={segment_index}
+parent_checkpoint_id={checkpoint.checkpoint_id!r}
+REMAINING GLOBAL CALL BUDGET: {remaining_call_budget}
+OUTPUT LANGUAGE: {self.output_language}
+
+JSON SCHEMA:
+{_schema(ProofDelta)}
+""".strip()
+        return PromptBundle(
+            "proof_continuation",
+            COMMON_SYSTEM,
+            user,
+            ProofDelta,
+            temperature=0.25,
+        )
+
+    def verify_delta(
+        self,
+        problem: ProblemContract,
+        strategy: dict[str, Any],
+        checkpoint: ProofCheckpoint,
+        delta: ProofDelta,
+        verifier_id: str,
+        verified_claims: list[dict[str, Any]],
+    ) -> PromptBundle:
+        user = f"""
+[STAGE:checkpoint_verification]
+You are independent checkpoint verifier {verifier_id}. The delta author is a different agent.
+Decide whether the proposed proof delta may be committed as the next persistent resume point. Perform both structural and step-level checks in one cost-aware review:
+1. Confirm the immutable problem, path, strategy, parent checkpoint, and segment index are unchanged.
+2. Confirm every dependency is already committed, verified, external with explicit hypotheses, or an earlier step in this delta.
+3. Check every new inference, calculation, inequality direction, quantifier, case split, and boundary condition.
+4. Locate the first invalid or unjustified new step. A later correct statement cannot repair an earlier gap.
+5. Check that claimed completed_subgoal/current_goal/remaining_subgoals accurately reflect the mathematical state.
+6. Permit proof_complete only if the full original problem is solved with no hidden assumptions or remaining subgoals.
+7. Return PASS only when the entire delta is safe to append to the verified checkpoint. Otherwise return FAIL or UNCERTAIN and give a focused repair instruction.
+Set target_id to the delta_id, target_type="proof_delta", agent_id={verifier_id!r}, and stage="detailed".
+
+IMMUTABLE PROBLEM CONTRACT:
+{_json(problem)}
+
+ASSIGNED STRATEGY:
+{_json(strategy)}
+
+PARENT VERIFIED CHECKPOINT:
+{_json(checkpoint)}
+
+VERIFIED LEMMA LIBRARY:
+{_json(verified_claims)}
+
+CANDIDATE PROOF DELTA:
+{_json(delta)}
+
+JSON SCHEMA:
+{_schema(VerificationReport)}
+""".strip()
+        return PromptBundle(
+            "checkpoint_verification",
+            COMMON_SYSTEM,
+            user,
+            VerificationReport,
+            temperature=0.0,
+        )
 
     def summarize_claims(
         self,
@@ -174,7 +295,9 @@ EXISTING CLAIM LIBRARY:
 JSON SCHEMA:
 {_schema(ClaimBatch)}
 """.strip()
-        return PromptBundle("claim_extraction", COMMON_SYSTEM, user, ClaimBatch, temperature=0.0)
+        return PromptBundle(
+            "claim_extraction", COMMON_SYSTEM, user, ClaimBatch, temperature=0.0
+        )
 
     def structural_verify(
         self,
@@ -210,7 +333,13 @@ Set agent_id={verifier_id!r}, stage="structural", and target_type appropriately.
 JSON SCHEMA:
 {_schema(VerificationReport)}
 """.strip()
-        return PromptBundle("structural_verification", COMMON_SYSTEM, user, VerificationReport, temperature=0.0)
+        return PromptBundle(
+            "structural_verification",
+            COMMON_SYSTEM,
+            user,
+            VerificationReport,
+            temperature=0.0,
+        )
 
     def detailed_verify(
         self,
@@ -253,7 +382,13 @@ Set agent_id={verifier_id!r}, stage={stage!r}, and target_type appropriately.
 JSON SCHEMA:
 {_schema(VerificationReport)}
 """.strip()
-        return PromptBundle(f"{stage}_verification", COMMON_SYSTEM, user, VerificationReport, temperature=0.0)
+        return PromptBundle(
+            f"{stage}_verification",
+            COMMON_SYSTEM,
+            user,
+            VerificationReport,
+            temperature=0.0,
+        )
 
     def meta_review(
         self,
@@ -284,7 +419,9 @@ INDEPENDENT VERIFICATION REPORTS:
 JSON SCHEMA:
 {_schema(MetaReview)}
 """.strip()
-        return PromptBundle("meta_review", COMMON_SYSTEM, user, MetaReview, temperature=0.0)
+        return PromptBundle(
+            "meta_review", COMMON_SYSTEM, user, MetaReview, temperature=0.0
+        )
 
     def synthesize(
         self,
@@ -320,7 +457,9 @@ OUTPUT LANGUAGE: {self.output_language}
 JSON SCHEMA:
 {_schema(FinalProof)}
 """.strip()
-        return PromptBundle("synthesis", COMMON_SYSTEM, user, FinalProof, temperature=0.1)
+        return PromptBundle(
+            "synthesis", COMMON_SYSTEM, user, FinalProof, temperature=0.1
+        )
 
     def revise_final(
         self,
@@ -354,4 +493,6 @@ Set problem_hash exactly to the immutable problem's integrity_hash. OUTPUT LANGU
 JSON SCHEMA:
 {_schema(FinalProof)}
 """.strip()
-        return PromptBundle("final_revision", COMMON_SYSTEM, user, FinalProof, temperature=0.1)
+        return PromptBundle(
+            "final_revision", COMMON_SYSTEM, user, FinalProof, temperature=0.1
+        )

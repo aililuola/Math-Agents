@@ -10,7 +10,6 @@ agents:
     user_id: mathproofmesh-agent-1
     thinking_enabled: true
     reasoning_effort: max
-    # Receive long DeepSeek responses as SSE chunks; final structured output is still aggregated locally.
     streaming: true
     roles: [planner, meta_reviewer, final_verifier]
     specialties: [problem_decomposition, strategy_generation, failure_classification, meta_review]
@@ -137,6 +136,24 @@ verification:
   enable_lean: false
   lean_command: lake env lean
   external_tool_timeout_seconds: 30
+
+continuation:
+  # Segment long proofs into independently verified, persistent mathematical checkpoints.
+  enabled: true
+  checkpoint_policy: verified_subgoal
+  max_new_steps_per_call: 3
+  max_new_claims_per_call: 3
+  max_output_tokens_per_segment: 12000
+  segments_per_explore_call: 1
+  max_segments_per_path: 12
+  verify_each_delta: true
+  delta_verifier_replicas: 1
+  checkpoint_pass_threshold: 0.80
+  resume_on_disconnect: true
+  allow_cross_agent_failover: true
+  max_failover_agents: 2
+  process_resume_enabled: true
+  retain_rejected_deltas: true
 
 runtime:
   run_root: runs

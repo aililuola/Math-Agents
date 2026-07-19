@@ -17,6 +17,9 @@ Activity · 07:42
 ✓ 04:11  引理归纳完成
 ◐ 04:12  验证候选证明
 ✓ 05:46  首轮候选验证完成
+✓ 04:35  已提交证明检查点 C3
+! 05:10  原 API 重试耗尽，切换备用 Agent
+◐ 05:11  从 C3 继续当前子目标
 ✓ 06:18  综合复核完成
 ◐ 06:19  综合候选路线形成最终证明
 ✓ 07:42  多 Agent 求解结束
@@ -135,15 +138,22 @@ result
 
 前端只需按 `task_id` 更新同一行：`running` 事件显示旋转图标，`completed` 显示完成标记，`warning`/`failed` 显示相应状态。这样可以构造与截图相近的可折叠时间线界面，而无需访问模型私有思考内容。
 
-### 两条 SSE 通道的区别
+恢复运行使用：
 
-DeepSeek Agent 配置中的 `streaming: true` 与本节的 `/solve/stream` 是两条方向不同的流：
-
-```text
-DeepSeek API --模型响应分块--> MathProofMesh
-MathProofMesh --Activity 事件--> 浏览器前端
+```bash
+curl -N -X POST http://127.0.0.1:8000/resume/stream \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $MATHPROOFMESH_SERVER_TOKEN" \
+  -d '{"run_id":"problem-001"}'
 ```
 
-前者用于让后端逐块接收 DeepSeek 的长响应；后者用于把安全的阶段进度展示给用户。
-二者可以同时启用。模型响应流不会把 token 或 `reasoning_content` 原样转发到前端，
-Activity 流仍只包含阶段状态、结构化结果摘要和无内容心跳。
+`ActivityStream` 会读取已有 `activity.jsonl`，继续原序号和累计耗时，并在最终 JSON/Markdown 时间线中保留恢复前后的全部事件。
+
+## 7. 与 DeepSeek 响应流的区别
+
+项目中存在两个彼此独立的 SSE 通道：
+
+1. `AgentConfig.streaming: true`：**DeepSeek API → MathProofMesh 后端**。后端逐块接收模型响应，在本地聚合完整 JSON、usage 和非敏感传输元数据；不会把未完成片段或 `reasoning_content` 直接展示给用户。
+2. `/solve/stream` 与 `/resume/stream`：**MathProofMesh 后端 → 浏览器前端**。它们只推送 Activity 阶段事件，例如“正在探索”“提交检查点”“切换备用 Agent”“综合完成”。
+
+因此，开启 DeepSeek 流式读取并不等于显示模型逐 token 思考。它主要改善长响应的传输方式、连接可观测性和中断检测；用户看到的仍是经过整理的 Activity 时间线。
