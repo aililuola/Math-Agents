@@ -20,41 +20,48 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.ref == 'automation/mathproofmesh-v0.5.1-scheduler'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
+
     steps:
       - name: Check out trusted target branch
         uses: actions/checkout@v4
         with:
           ref: feature/mathproofmesh-v0.5.0-resumable-checkpoints
-          path: repo
           fetch-depth: 0
 
-      - name: Check out staged patch data
-        uses: actions/checkout@v4
-        with:
-          ref: automation/mathproofmesh-v0.5.1-scheduler
-          path: staging
-          fetch-depth: 1
-
-      - name: Verify trusted base and apply content-addressed patch
+      - name: Verify staged target and reconstruct content-addressed patch
         shell: bash
         run: |
           set -euo pipefail
-          cd repo
-          test "$(git rev-parse HEAD^)" = "30c251f4409b3b82237998472768e70e9d8c93e0"
-          test "$(git diff --name-only 30c251f4409b3b82237998472768e70e9d8c93e0..HEAD)" = ".github/workflows/publish-v0.5.1-scheduler.yml"
-          cd ..
+          git merge-base --is-ancestor 30c251f4409b3b82237998472768e70e9d8c93e0 HEAD
+          test -f .github/workflows/publish-v0.5.1-scheduler.yml
+          test -f .github/workflows/apply-v0.5.1.yml
+          test "$(find .automation -maxdepth 1 -type f -name 'v0.5.1.patch.xz.b64.*' | wc -l)" -eq 15
 
-          cat staging/.github/patches/v0.5.1-scheduler/part-*.b64 \
-            | base64 --decode \
-            | gzip --decompress \
-            > /tmp/mathproofmesh-v0.5.1-scheduler.patch
-          echo "e8ac91960941b43ec9179f6d7eabe7806a1d7cb81d703233b07863949a709d7d  /tmp/mathproofmesh-v0.5.1-scheduler.patch" | sha256sum -c -
+          python - <<'PY'
+          import json
+          from pathlib import Path
 
-          cd repo
-          git apply --check /tmp/mathproofmesh-v0.5.1-scheduler.patch
-          git apply /tmp/mathproofmesh-v0.5.1-scheduler.patch
-          rm .github/workflows/publish-v0.5.1-scheduler.yml
+          info = json.loads(Path("BUILD_INFO.json").read_text(encoding="utf-8"))
+          assert info["version"] == "0.5.0", info["version"]
+          PY
+
+          cat .automation/v0.5.1.patch.xz.b64.* > /tmp/mathproofmesh-v0.5.1.patch.xz.b64
+          base64 --decode /tmp/mathproofmesh-v0.5.1.patch.xz.b64 > /tmp/mathproofmesh-v0.5.1.patch.xz
+          echo "4515a27a6a1b6d57bc2f6dfa01992ad932c762242e1210c5e27260869e3ff000  /tmp/mathproofmesh-v0.5.1.patch.xz" | sha256sum -c -
+          xz --decompress --stdout /tmp/mathproofmesh-v0.5.1.patch.xz > /tmp/mathproofmesh-v0.5.1.patch
+          test "$(wc -c < /tmp/mathproofmesh-v0.5.1.patch)" -eq 88844
+          echo "5ed135a5c5bdec4d3ee37527696d2d63c96c71d31e0b1661e16cc24aa25a85f1  /tmp/mathproofmesh-v0.5.1.patch" | sha256sum -c -
+
+      - name: Apply scheduler patch and remove one-shot transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check /tmp/mathproofmesh-v0.5.1.patch
+          git apply /tmp/mathproofmesh-v0.5.1.patch
+          rm -rf .automation
+          rm -f .github/workflows/apply-v0.5.1.yml
+          rm -f .github/workflows/publish-v0.5.1-scheduler.yml
 
           test -f tests/test_budget_scheduler.py
           grep -q 'version = "0.5.1"' pyproject.toml
@@ -65,20 +72,35 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: repo/pyproject.toml
+          cache-dependency-path: pyproject.toml
 
       - name: Install package and development dependencies
-        working-directory: repo
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,server]"
 
-      - name: Run deterministic validation
-        working-directory: repo
+      - name: Run complete deterministic validation
+        shell: bash
         run: bash scripts/validate.sh
 
-      - name: Commit and push validated source to the existing feature branch
-        working-directory: repo
+      - name: Verify release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          info = json.loads(Path("BUILD_INFO.json").read_text(encoding="utf-8"))
+          assert info["version"] == "0.5.1"
+          assert info["validation"]["pytest"] == "48 passed"
+          assert Path("tests/test_budget_scheduler.py").is_file()
+          assert not Path(".automation").exists()
+          assert not Path(".github/workflows/apply-v0.5.1.yml").exists()
+          assert not Path(".github/workflows/publish-v0.5.1-scheduler.yml").exists()
+          PY
+
+      - name: Commit and push complete v0.5.1 source
         shell: bash
         run: |
           set -euo pipefail
@@ -86,5 +108,5 @@ jobs:
           git config user.email "noreply@users.noreply.github.com"
           git add -A
           git diff --cached --quiet && { echo "No changes to commit"; exit 1; }
-          git commit -m "fix: make scheduler failure-aware and preserve widening"
+          git commit -m "fix: diversify failed proof search and reserve repair budget"
           git push origin HEAD:feature/mathproofmesh-v0.5.0-resumable-checkpoints
