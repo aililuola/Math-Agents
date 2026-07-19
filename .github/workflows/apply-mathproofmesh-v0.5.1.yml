@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "7258fa22a5c6841c83f43b44adbc2be5d1b43fab"
+          test "$(git rev-parse HEAD)" = "30335e78c4b56cdc2eb1b19ca721a0f47ec527cb"
           test -f .github/workflows/publish-v0.5.1-scheduler.yml
           test -f .github/workflows/apply-v0.5.1.yml
           python - <<'PY'
@@ -44,26 +44,20 @@ jobs:
           assert info["version"] == "0.5.0", info["version"]
           PY
 
-      - name: Verify staged chunk inventory
+      - name: Verify staged binary chunk inventory
         shell: bash
         run: |
           set -euo pipefail
           find .automation -maxdepth 1 -type f -name 'v0.5.1.patch.xz.b64.*' -print | sort
           test "$(find .automation -maxdepth 1 -type f -name 'v0.5.1.patch.xz.b64.*' | wc -l)" -eq 15
 
-      - name: Assemble and verify Base64 transport
+      - name: Assemble and verify exact XZ transport
         shell: bash
         run: |
           set -euo pipefail
-          cat .automation/v0.5.1.patch.xz.b64.* > /tmp/mathproofmesh-v0.5.1.patch.xz.b64
-          test "$(wc -c < /tmp/mathproofmesh-v0.5.1.patch.xz.b64)" -eq 27184
-          echo "9b1ddac1b539969f7c4839a4e55ef7bf677eca82f80050020201d2390f96b75b  /tmp/mathproofmesh-v0.5.1.patch.xz.b64" | sha256sum -c -
-
-      - name: Decode and verify XZ transport
-        shell: bash
-        run: |
-          set -euo pipefail
-          base64 --decode /tmp/mathproofmesh-v0.5.1.patch.xz.b64 > /tmp/mathproofmesh-v0.5.1.patch.xz
+          # Git's blob API decoded the uploaded Base64 arguments, so the staged
+          # files are raw binary XZ segments despite their temporary names.
+          cat .automation/v0.5.1.patch.xz.b64.* > /tmp/mathproofmesh-v0.5.1.patch.xz
           test "$(wc -c < /tmp/mathproofmesh-v0.5.1.patch.xz)" -eq 20388
           echo "4515a27a6a1b6d57bc2f6dfa01992ad932c762242e1210c5e27260869e3ff000  /tmp/mathproofmesh-v0.5.1.patch.xz" | sha256sum -c -
           xz --test /tmp/mathproofmesh-v0.5.1.patch.xz
