@@ -125,7 +125,7 @@ $env:DEEPSEEK_AGENT_5_KEY="..."
 
 ## 5. 实时运行时间线
 
-DeepSeek 处于长推理模式时，单次请求可能持续较长时间。v0.5.0 在 CLI 中默认开启 `compact` Activity 面板，按时间顺序显示题目分析、路线生成、并行探索、Claim 提取、两级验证、Meta-review、综合和终审；每个长调用还会按 `activity_heartbeat_seconds` 发出低频“仍在处理”状态。
+DeepSeek 处于长推理模式时，单次请求可能持续较长时间。v0.5.1 在 CLI 中默认开启 `compact` Activity 面板，按时间顺序显示题目分析、路线生成、并行探索、Claim 提取、两级验证、Meta-review、综合和终审；每个长调用还会按 `activity_heartbeat_seconds` 发出低频“仍在处理”状态。
 
 ```bash
 mathproofmesh solve problem.txt \

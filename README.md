@@ -65,7 +65,7 @@ flowchart LR
 - **一 key 一 Agent**：DeepSeek V4、OpenAI-compatible、Anthropic、Gemini 和 Mock 适配器；每个 Agent 有独立 semaphore、RPM 限制、重试、价格和使用量统计。
 - **提示词逐阶段演化**：从不可变题目契约、策略卡、隔离探索、引理包、结构审计、详细审计、Meta-review，到最终综合和修订；每阶段输出均由 Pydantic JSON Schema 约束。
 - **信息传输不丢关键语义**：假设、结论、依赖、证明步骤、适用范围、反例风险、证据引用和验证状态均为独立字段；不会用一段自由文本摘要替代全部数学结构。
-- **广度—深度自适应**：软预算默认 30% 广度、35% 深度、25% 验证、10% 综合，并保留最终综合与审计所需的调用储备；这些比例是可调的工程初值，不是普适最优定理。
+- **失败感知的广度—深度自适应**：覆盖率按 `current_paths / max_paths` 计算；结构失败、策略失败和连续停滞会降低旧路线优先级。若全部已探索路线均被独立审查拒绝且仍有容量，调度器在预算允许时强制保留一次 `widen`，同时只给局部执行错误有限的定向修补机会。所有路线数、动作数、修补次数、冷却轮次和最终修订储备均由配置控制。
 - **双层验证**：廉价结构门先查题意漂移、缺项、依赖图、循环、引用和关键步骤标记；通过后才进行逐步重证与反例搜索。
 - **确定性工具覆盖模型判断**：安全的 SymPy 化简/等价/因式分解和有界数值反例搜索；若工具找到反例，即使模型输出 PASS，系统也强制改为 FAIL。
 - **防篡改与追溯**：题目、Claim 和原始响应均有内容哈希；每次调用保存 prompt、原始响应、结构化结果、通信边、工具证据、检查点和最终报告。
@@ -337,10 +337,32 @@ budget:
 ```
 
 - `initial_paths` 决定初始并行广度；
-- `max_paths` 限制策略膨胀；
+- `max_paths` 限制策略膨胀，并作为调度覆盖率的分母；
 - `candidates_to_verify` 避免对所有低质量草稿做昂贵详细审计；
-- 额外 Reviewer 仅由高风险、失败、低置信度或分歧触发；
-- 最少保留约三次调用用于综合、结构终审和详细终审。
+- 额外 Reviewer 仅由高风险、失败、低置信度或分歧触发。
+
+### 失败感知调度
+
+```yaml
+scheduler:
+  max_actions_per_round: 2
+  widen_paths_per_action: 2
+  force_widen_when_all_failed: true
+  max_execution_repairs_per_path: 1
+  max_plan_repairs_per_path: 1
+  allow_strategy_failure_repair: false
+  failed_path_cooldown_rounds: 1
+  reserve_revision_cycles: 1
+  include_post_action_verification_in_cost: true
+  include_meta_review_in_cost: true
+  verification_call_safety_margin: 0
+  diagnostics_enabled: true
+  diagnostic_candidate_limit: 12
+```
+
+这些数字只是默认策略参数，不针对某一道题写死。`max_actions_per_round`、每次扩展的路线数、各类失败允许的修补次数、冷却轮次和最终修订周期均可独立调整。调度器只把通过验证、验证分数提升或关键缺口减少视为实质进展；单纯增加证明步数不能抵消高置信度 FAIL。一次 `widen` 的调用成本根据实际新增路线数、分段续推、Delta Reviewer、Claim 提取、候选复核和 Meta-review 动态估算。最终储备为“综合与终审”加上 `reserve_revision_cycles` 个“修订与复核”周期，而不是固定三次调用。
+
+详细模式会在 Activity 时间线和 `budget_decision_round_*.json` 中记录每个候选动作的分数、排名、预计调用数、是否入选以及未选或被预算阻断的原因。
 
 ### 稀疏通信
 
@@ -408,7 +430,7 @@ Lean 可能执行元程序，只有在可信、隔离的容器中才应启用。
 PYTHONPATH=src pytest -q
 ```
 
-当前版本本地测试为 **41 passed**，并通过 Ruff、`ruff format --check` 与 `compileall`。测试覆盖：
+当前版本本地测试为 **48 passed**，并通过 Ruff、`ruff format --check` 与 `compileall`。测试覆盖：
 
 - 题目和 Claim 哈希完整性；
 - 结构化 JSON 的平衡括号提取；
@@ -432,6 +454,8 @@ PYTHONPATH=src pytest -q
 - 内容寻址的不可变 prompt 归档；
 - `solve` 后的无重复调用恢复、预算中断后的逐段恢复，以及尚无阶段快照时从 `ProblemContract` 恢复；
 - 比阶段快照更新的持久化 LemmaMemory 恢复；
+- 全部路线失败时的强制拓宽回归测试、`max_paths` 覆盖率、结构报告接线和失败层级修补策略；
+- 动态动作成本、可配置最终修订储备以及调度候选诊断字段；
 - 完整 Mock 端到端运行及审计产物。
 
 ## 八、文档

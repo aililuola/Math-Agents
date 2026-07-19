@@ -87,6 +87,37 @@ budget:
   verification_share: 0.25
   synthesis_share: 0.10
 
+scheduler:
+  # The scheduler is generic: change these values for different problems and budgets.
+  max_actions_per_round: 2
+  widen_paths_per_action: 2
+  force_widen_when_all_failed: true
+  max_execution_repairs_per_path: 1
+  max_plan_repairs_per_path: 1
+  max_unknown_failure_repairs_per_path: 1
+  allow_strategy_failure_repair: false
+  failed_path_cooldown_rounds: 1
+  meaningful_progress_threshold: 0.04
+  unverified_progress_discount: 0.55
+  uncertain_progress_discount: 0.40
+  failed_progress_discount: 0.10
+  structural_failure_progress_cap: 0.10
+  execution_failure_progress_cap: 0.45
+  plan_failure_progress_cap: 0.18
+  strategy_failure_progress_cap: 0.05
+  structural_failure_penalty: 0.30
+  execution_failure_penalty: 0.12
+  plan_failure_penalty: 0.30
+  strategy_failure_penalty: 0.50
+  repeated_failure_penalty: 0.15
+  reserve_revision_cycles: 1
+  include_post_action_verification_in_cost: true
+  include_meta_review_in_cost: true
+  verification_call_safety_margin: 0
+  finish_transition_buffer_calls: 1
+  diagnostics_enabled: true
+  diagnostic_candidate_limit: 12
+
 topology:
   neighbor_k: 2
   prefer_cross_provider_review: true

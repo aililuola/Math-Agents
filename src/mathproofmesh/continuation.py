@@ -242,6 +242,7 @@ def attempt_from_checkpoint(
     agent_id: str,
     round_index: int,
     previous_attempt: ProofAttempt | None = None,
+    attempt_id: str | None = None,
     proposed_lemmas: list[ClaimCard] | None = None,
     raw_artifact_ref: str | None = None,
     usage: UsageRecord | None = None,
@@ -261,9 +262,7 @@ def attempt_from_checkpoint(
         ]
     )
     return ProofAttempt(
-        attempt_id=previous_attempt.attempt_id
-        if previous_attempt
-        else new_id("attempt"),
+        attempt_id=attempt_id or new_id("attempt"),
         problem_hash=checkpoint.problem_hash,
         strategy_id=strategy.strategy_id,
         agent_id=agent_id,

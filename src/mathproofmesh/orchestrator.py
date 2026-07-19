@@ -518,15 +518,23 @@ class ProofMeshOrchestrator:
                 stats = budget_manager.build_path_stats(
                     state.strategies,
                     state.attempts,
-                    list(state.aggregate_reports.values()),
+                    state.reports,
+                    state.aggregate_reports,
                 )
                 decision = budget_manager.decide(
                     stats,
                     current_path_count=len(state.strategies),
                     remaining_calls=runner.ledger.remaining_calls,
+                    current_round=round_index,
                     final_verified=False,
-                    max_actions=2,
+                    max_actions=self.config.scheduler.max_actions_per_round,
                     bucket_pressure=allocator.pressure_snapshot(),
+                )
+                decision = allocator.admit_decision(
+                    decision,
+                    current_path_count=len(state.strategies),
+                    has_candidate=bool(state.attempts),
+                    max_actions=self.config.scheduler.max_actions_per_round,
                 )
                 store.write_json(
                     "structured",
@@ -554,21 +562,79 @@ class ProofMeshOrchestrator:
                         "actions": [action.action.value for action in decision.actions],
                         "global_uncertainty": decision.global_uncertainty,
                         "coverage": decision.coverage,
+                        "failure_rate": decision.failure_rate,
+                        "forced_widen": decision.forced_widen,
+                        "finish_reserve_calls": decision.finish_reserve_calls,
                     },
                 )
+                if self.config.scheduler.diagnostics_enabled:
+                    diagnostics = decision.candidates[
+                        : self.config.scheduler.diagnostic_candidate_limit
+                    ]
+                    diagnostic_text = "; ".join(
+                        (
+                            f"#{candidate.rank} {candidate.action.value}"
+                            f"({candidate.strategy_id or 'global'}), "
+                            f"score={candidate.score:.3f}, "
+                            f"estimated_calls={candidate.estimated_calls}: "
+                            + (
+                                "selected"
+                                if candidate.selected
+                                else candidate.blocked_reason or "not selected"
+                            )
+                        )
+                        for candidate in diagnostics
+                    )
+                    activity.info(
+                        "budget_candidate_diagnostics",
+                        title=activity.text(
+                            "调度候选排名与阻断原因",
+                            "Scheduler candidate ranking and blocking reasons",
+                        ),
+                        detail=diagnostic_text,
+                        stage="adaptive_round",
+                        parent_task_id=round_task,
+                        importance=ActivityImportance.DETAIL,
+                        metrics={
+                            "candidates": [
+                                candidate.model_dump(mode="json")
+                                for candidate in diagnostics
+                            ]
+                        },
+                    )
 
                 performed = False
                 for action in decision.actions:
                     if action.action in {ActionKind.STOP, ActionKind.SYNTHESIZE}:
                         continue
-                    estimated_cost = allocator.estimate_action_calls(action.action)
+                    estimated_cost = (
+                        action.estimated_calls
+                        or allocator.estimate_action_calls(
+                            action.action,
+                            current_path_count=len(state.strategies),
+                            widen_path_count=action.planned_paths or None,
+                        )
+                    )
                     bucket = allocator.bucket_for_action(action.action)
-                    if not allocator.can_spend(
+                    blocked_reason = allocator.spend_block_reason(
                         bucket,
                         estimated_cost,
                         protect_finish=True,
                         has_candidate=bool(state.attempts),
-                    ):
+                    )
+                    if blocked_reason is not None:
+                        action.selected = False
+                        action.blocked_reason = blocked_reason
+                        store.append_event(
+                            "adaptive_action_blocked",
+                            {
+                                "round_index": round_index,
+                                "action": action.action.value,
+                                "strategy_id": action.strategy_id,
+                                "estimated_calls": estimated_cost,
+                                "reason": blocked_reason,
+                            },
+                        )
                         continue
 
                     action_label_zh = {
@@ -629,6 +695,7 @@ class ProofMeshOrchestrator:
                             router,
                             memory,
                             store,
+                            requested_count=action.planned_paths or None,
                         )
                         if new_attempts:
                             state.attempts.extend(new_attempts)
@@ -675,7 +742,10 @@ class ProofMeshOrchestrator:
                     unverified
                     and allocator.can_spend(
                         "verification",
-                        allocator.estimate_action_calls(ActionKind.VERIFY),
+                        allocator.estimate_action_calls(
+                            ActionKind.VERIFY,
+                            current_path_count=len(state.strategies),
+                        ),
                         protect_finish=True,
                         has_candidate=True,
                     )
@@ -1844,6 +1914,7 @@ class ProofMeshOrchestrator:
             store.commit_proof_checkpoint(checkpoint)
             resumed_from = None
 
+        attempt_id = new_id("attempt")
         if (
             checkpoint.proof_complete
             or checkpoint.segment_index >= cfg.max_segments_per_path
@@ -1854,6 +1925,7 @@ class ProofMeshOrchestrator:
                 agent_id=checkpoint.source_agent_id or agent.id,
                 round_index=round_index,
                 previous_attempt=previous_attempt,
+                attempt_id=attempt_id,
                 resumed_from_checkpoint_id=resumed_from,
             )
 
@@ -1861,9 +1933,6 @@ class ProofMeshOrchestrator:
         latest_raw_ref: str | None = None
         verified_delta_claims: list[ClaimCard] = []
         failover_chain: list[str] = []
-        attempt_id = (
-            previous_attempt.attempt_id if previous_attempt else new_id("attempt")
-        )
 
         for _ in range(cfg.segments_per_explore_call):
             if (
@@ -2130,6 +2199,7 @@ class ProofMeshOrchestrator:
             agent_id=checkpoint.source_agent_id or agent.id,
             round_index=round_index,
             previous_attempt=previous_attempt,
+            attempt_id=attempt_id,
             proposed_lemmas=verified_delta_claims,
             raw_artifact_ref=latest_raw_ref,
             usage=cumulative_usage,
@@ -2949,6 +3019,8 @@ class ProofMeshOrchestrator:
         router: SparseTopologyRouter,
         memory: LemmaMemory,
         store: ArtifactStore,
+        *,
+        requested_count: int | None = None,
     ) -> list[ProofAttempt]:
         if len(state.strategies) >= self.config.budget.max_paths:
             return []
@@ -2957,7 +3029,10 @@ class ProofMeshOrchestrator:
         if state.meta_reviews:
             feedback.extend(state.meta_reviews[-1].unresolved_conflicts)
             feedback.extend(state.meta_reviews[-1].required_actions)
-        count = min(2, self.config.budget.max_paths - len(state.strategies))
+        count = min(
+            requested_count or self.config.scheduler.widen_paths_per_action,
+            self.config.budget.max_paths - len(state.strategies),
+        )
         result = await self._safe_call(
             runner,
             "planner",

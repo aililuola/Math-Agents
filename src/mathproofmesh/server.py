@@ -46,7 +46,7 @@ def create_app(config_path: str | None = None):
     run_semaphore = asyncio.Semaphore(max_runs)
     server_token = os.getenv("MATHPROOFMESH_SERVER_TOKEN")
 
-    app = FastAPI(title="MathProofMesh", version="0.5.0")
+    app = FastAPI(title="MathProofMesh", version="0.5.1")
 
     def authorize(authorization: str | None) -> None:
         if not server_token:

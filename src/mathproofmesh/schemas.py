@@ -479,11 +479,19 @@ class PathStats(StrictModel):
     attempt_id: str | None = None
     complete: bool = False
     progress: float = Field(default=0.0, ge=0.0, le=1.0)
+    marginal_progress: float = Field(default=0.0, ge=-1.0, le=1.0)
+    gap_reduction: float = Field(default=0.0, ge=-1.0, le=1.0)
     novelty: float = Field(default=0.5, ge=0.0, le=1.0)
     uncertainty: float = Field(default=1.0, ge=0.0, le=1.0)
     verification_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    latest_verdict: VerificationVerdict | None = None
+    failure_level: FailureLevel = FailureLevel.NONE
+    failure_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    consecutive_failures: int = Field(default=0, ge=0)
+    failed_repair_attempts: int = Field(default=0, ge=0)
     unresolved_gap_count: int = Field(default=0, ge=0)
     stagnation_rounds: int = Field(default=0, ge=0)
+    last_round_index: int = Field(default=0, ge=0)
     tokens_spent: int = Field(default=0, ge=0)
     structurally_valid: bool | None = None
 
@@ -494,12 +502,24 @@ class BudgetAction(StrictModel):
     target_id: str | None = None
     score: float
     reason: str
+    rank: int | None = Field(default=None, ge=1)
+    eligible: bool = True
+    selected: bool = False
+    forced: bool = False
+    estimated_calls: int = Field(default=0, ge=0)
+    planned_paths: int = Field(default=0, ge=0)
+    blocked_reason: str | None = None
 
 
 class BudgetDecision(StrictModel):
     actions: list[BudgetAction]
+    candidates: list[BudgetAction] = Field(default_factory=list)
     global_uncertainty: float = Field(ge=0.0, le=1.0)
     coverage: float = Field(ge=0.0, le=1.0)
+    failure_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    all_evaluated_paths_failed: bool = False
+    forced_widen: bool = False
+    finish_reserve_calls: int = Field(default=0, ge=0)
     rationale: str
 
 

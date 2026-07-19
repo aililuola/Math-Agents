@@ -1,6 +1,6 @@
 {
   "project": "MathProofMesh",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "validated_on": "2026-07-19",
   "python_requirement": ">=3.11",
   "deepseek_profile": {
@@ -30,11 +30,11 @@
     "compileall": "PASS",
     "ruff_check": "PASS",
     "ruff_format_check": "PASS",
-    "pytest": "41 passed",
+    "pytest": "48 passed",
     "source_continuation_demo": {
       "status": "verified",
-      "calls": 22,
-      "tokens": 25969,
+      "calls": 25,
+      "tokens": 29818,
       "proof_checkpoints": 6
     },
     "completed_run_resume": {
@@ -67,7 +67,7 @@
     "sse_missing_usage_guard": "PASS",
     "reasoning_content_redaction": "PASS",
     "config_parse": "PASS (5/5 DeepSeek agents use streaming=true; generic default remains false)",
-    "source_secret_scan": "PASS (60 files; no supplied key or generic long sk-* credential pattern)",
+    "source_secret_scan": "PASS (62 tracked candidate files; no supplied key or generic long sk-* credential pattern)",
     "wheel_build": "PASS",
     "sdist_build": "PASS",
     "wheel_install_target": "PASS",
@@ -76,26 +76,41 @@
       "calls": 22
     },
     "archive_secret_scan": "PASS",
-    "real_provider_calls": "NOT RUN (credentials intentionally not used during build)"
+    "real_provider_calls": "NOT RUN (credentials intentionally not used during build)",
+    "scheduler_regression_tests": "PASS",
+    "deterministic_scheduler_demo": {
+      "status": "verified",
+      "calls": 25,
+      "tokens": 29818
+    },
+    "scheduler_replay_all_failed_paths": "PASS (widen selected when capacity and budget permit)"
   },
   "counts": {
     "source_python_files": 25,
-    "test_python_files": 13,
+    "test_python_files": 14,
     "documentation_files": 8,
-    "source_lines": 11036,
-    "test_lines": 1670,
-    "documentation_lines": 2094
+    "source_lines": 11790,
+    "test_lines": 2070,
+    "documentation_lines": 2114
   },
   "artifacts": {
-    "wheel": {
-      "path": "dist/mathproofmesh-0.5.0-py3-none-any.whl",
-      "sha256": "d60129a5f8f9b41367ae3f5cdbe19882ede791ef4546d17892f407d6e6d22aac",
-      "bytes": 114826
-    },
-    "sdist": {
-      "path": "dist/mathproofmesh-0.5.0.tar.gz",
-      "sha256": "7a711ca43ba82a2d6403b9c2dd44be98c1db752ecef9e553f7de8958fec50111",
-      "bytes": 151686
+    "status": "NOT REBUILT FOR SOURCE-ONLY 0.5.1 SCHEDULER PATCH",
+    "previous_release": {
+      "version": "0.5.0",
+      "wheel_sha256": "d60129a5f8f9b41367ae3f5cdbe19882ede791ef4546d17892f407d6e6d22aac",
+      "sdist_sha256": "7a711ca43ba82a2d6403b9c2dd44be98c1db752ecef9e553f7de8958fec50111"
     }
+  },
+  "scheduler": {
+    "coverage_uses_max_paths": true,
+    "structural_and_aggregate_reports_connected": true,
+    "verification_discounted_progress": true,
+    "failure_level_repair_limits": true,
+    "failed_path_cooldown": true,
+    "force_widen_when_all_failed": true,
+    "dynamic_action_costs": true,
+    "configurable_revision_reserve": true,
+    "candidate_diagnostics": true,
+    "all_limits_configurable": true
   }
 }
