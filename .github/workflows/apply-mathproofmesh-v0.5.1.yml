@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "30335e78c4b56cdc2eb1b19ca721a0f47ec527cb"
+          test "$(git rev-parse HEAD)" = "7258fa22a5c6841c83f43b44adbc2be5d1b43fab"
           test -f .github/workflows/publish-v0.5.1-scheduler.yml
           test -f .github/workflows/apply-v0.5.1.yml
           python - <<'PY'
