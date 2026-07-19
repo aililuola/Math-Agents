@@ -27,25 +27,26 @@
     "sse_incomplete_stream_guard": "PASS",
     "reasoning_content_redaction": "PASS",
     "deepseek_config_parse": "PASS (5/5 agents streaming=true in full and smoke profiles)",
-    "secret_scan": "PASS (none of the five supplied keys found; one intentional synthetic sk-* fixture remains in a redaction unit test)",
+    "secret_scan": "PASS (none of the five supplied keys or generic sk-* credential patterns found in tracked source files)",
     "wheel_install_target": "PASS",
     "wheel_demo": {
       "status": "verified",
       "calls": 19
     },
-    "real_provider_calls": "NOT RUN (credentials were intentionally not used during artifact build)"
+    "real_provider_calls": "NOT RUN (credentials were intentionally not used during artifact build)",
+    "orchestrator_module_split": "PASS (facade + focused mixins; 24-test behavior preserved)"
   },
   "counts": {
-    "source_python_files": 24,
+    "source_python_files": 31,
     "test_python_files": 10,
     "documentation_files": 7,
-    "source_lines": 8135,
+    "source_lines": 8528,
     "test_lines": 807,
     "documentation_lines": 1635
   },
   "wheel": {
     "path": "dist/mathproofmesh-0.4.0-py3-none-any.whl",
-    "sha256": "c4c9d52983cbfe5eb25e9f4f8a07e6ee25cc87f470394eff081afaad64442e43",
-    "bytes": 95174
+    "sha256": "7b195f1c8558ec66d1691e00ddf8faeabd157a1b4a176ef47f4131b4404382ae",
+    "bytes": 103655
   }
 }

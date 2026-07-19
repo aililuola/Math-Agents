@@ -19,7 +19,7 @@ def test_activity_stream_redacts_and_persists(tmp_path: Path) -> None:
     store = ArtifactStore(tmp_path / "runs", "activity-test")
     received = []
     stream = ActivityStream(store, language="zh-CN", listener=received.append, persist=True)
-    leaked = "sk-abcdefghijklmnopqrstuvwxyz123456"
+    leaked = "test-credential-abcdefghijklmnopqrstuvwxyz123456"
 
     task_id = stream.start_task(
         "stage",

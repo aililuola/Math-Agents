@@ -1,8 +1,7 @@
 system_name: MathProofMesh-DeepSeek-V4-Pro-Smoke
 
 agents:
-  -
-    id: ds-planner
+  - id: ds-planner
     provider: deepseek
     model: deepseek-v4-pro
     base_url: https://api.deepseek.com
@@ -19,6 +18,7 @@ agents:
     max_output_tokens: 8000
     timeout_seconds: 600
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
+
   - id: ds-explorer-a
     provider: deepseek
     model: deepseek-v4-pro
@@ -35,6 +35,7 @@ agents:
     max_output_tokens: 12000
     timeout_seconds: 600
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
+
   - id: ds-explorer-b
     provider: deepseek
     model: deepseek-v4-pro
@@ -51,6 +52,7 @@ agents:
     max_output_tokens: 12000
     timeout_seconds: 600
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
+
   - id: ds-verifier
     provider: deepseek
     model: deepseek-v4-pro
@@ -67,6 +69,7 @@ agents:
     max_output_tokens: 10000
     timeout_seconds: 600
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
+
   - id: ds-synthesizer
     provider: deepseek
     model: deepseek-v4-pro
