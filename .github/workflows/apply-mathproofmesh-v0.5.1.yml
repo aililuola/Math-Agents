@@ -45,23 +45,34 @@ jobs:
           test "$(git rev-parse HEAD)" = "8e87624a601c4852ed086e9c3080a188c7e85d44"
           test -f .github/workflows/publish-v0.5.1-scheduler.yml
 
-      - name: Reassemble staged patch
+      - name: Concatenate and verify encoded chunks
         shell: bash
         run: |
           set -euxo pipefail
           ls -l staging/.github/patches/v0.5.1-scheduler/part-*.b64
           cat staging/.github/patches/v0.5.1-scheduler/part-*.b64 > /tmp/mathproofmesh-v0.5.1-scheduler.patch.b64
-          wc -c /tmp/mathproofmesh-v0.5.1-scheduler.patch.b64
-          base64 --decode /tmp/mathproofmesh-v0.5.1-scheduler.patch.b64 > /tmp/mathproofmesh-v0.5.1-scheduler.patch.gz
-          gzip --test /tmp/mathproofmesh-v0.5.1-scheduler.patch.gz
-          gzip --decompress --stdout /tmp/mathproofmesh-v0.5.1-scheduler.patch.gz > /tmp/mathproofmesh-v0.5.1-scheduler.patch
-          wc -c -l /tmp/mathproofmesh-v0.5.1-scheduler.patch
+          test "$(wc -c < /tmp/mathproofmesh-v0.5.1-scheduler.patch.b64)" = "34652"
+          echo "57952a2e0ec7b0119a4afc15ac6a1269979a07e0034c632dfb9e85a9990d9757  /tmp/mathproofmesh-v0.5.1-scheduler.patch.b64" | sha256sum -c -
 
-      - name: Verify patch digest
+      - name: Decode encoded patch
         shell: bash
         run: |
           set -euxo pipefail
-          sha256sum /tmp/mathproofmesh-v0.5.1-scheduler.patch
+          base64 --decode /tmp/mathproofmesh-v0.5.1-scheduler.patch.b64 > /tmp/mathproofmesh-v0.5.1-scheduler.patch.gz
+
+      - name: Verify compressed patch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gzip --test /tmp/mathproofmesh-v0.5.1-scheduler.patch.gz
+
+      - name: Decompress and verify patch digest
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gzip --decompress --stdout /tmp/mathproofmesh-v0.5.1-scheduler.patch.gz > /tmp/mathproofmesh-v0.5.1-scheduler.patch
+          test "$(wc -c < /tmp/mathproofmesh-v0.5.1-scheduler.patch)" = "104724"
+          test "$(wc -l < /tmp/mathproofmesh-v0.5.1-scheduler.patch)" = "2475"
           echo "e8ac91960941b43ec9179f6d7eabe7806a1d7cb81d703233b07863949a709d7d  /tmp/mathproofmesh-v0.5.1-scheduler.patch" | sha256sum -c -
 
       - name: Apply scheduler patch
