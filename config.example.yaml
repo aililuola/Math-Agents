@@ -1,0 +1,129 @@
+system_name: MathProofMesh
+
+# Each entry is one isolated sub-agent and consumes one API key.
+# Keys are read from environment variables and are never written to run logs.
+agents:
+  - id: planner-1
+    provider: openai_compatible
+    model: your-planner-model
+    base_url: https://api.openai.com/v1
+    api_key_env: AGENT_PLANNER_KEY
+    roles: [planner, meta_reviewer]
+    specialties: [problem_decomposition, strategy_selection]
+    max_concurrency: 1
+    temperature: 0.2
+    max_output_tokens: 12000
+
+  - id: explorer-1
+    provider: openai_compatible
+    model: your-reasoning-model
+    base_url: https://api.openai.com/v1
+    api_key_env: AGENT_EXPLORER_1_KEY
+    roles: [explorer, summarizer]
+    specialties: [algebra, number_theory, combinatorics]
+    max_concurrency: 1
+    temperature: 0.45
+    max_output_tokens: 24000
+
+  - id: explorer-2
+    provider: anthropic
+    model: your-anthropic-model
+    api_key_env: AGENT_EXPLORER_2_KEY
+    roles: [explorer, summarizer]
+    specialties: [geometry, analysis, inequalities]
+    max_concurrency: 1
+    temperature: 0.45
+    max_output_tokens: 24000
+
+  - id: verifier-1
+    provider: openai_compatible
+    model: your-verifier-model
+    base_url: https://api.openai.com/v1
+    api_key_env: AGENT_VERIFIER_1_KEY
+    roles: [structural_verifier, detailed_verifier]
+    specialties: [proof_audit, counterexample_search]
+    max_concurrency: 1
+    temperature: 0.0
+    max_output_tokens: 16000
+
+  - id: verifier-2
+    provider: gemini
+    model: your-gemini-model
+    api_key_env: AGENT_VERIFIER_2_KEY
+    roles: [detailed_verifier, final_verifier]
+    specialties: [independent_verification, symbolic_checks]
+    max_concurrency: 1
+    temperature: 0.0
+    max_output_tokens: 16000
+
+  - id: synthesizer-1
+    provider: openai_compatible
+    model: your-synthesis-model
+    base_url: https://api.openai.com/v1
+    api_key_env: AGENT_SYNTHESIZER_KEY
+    roles: [synthesizer, final_verifier]
+    specialties: [proof_writing, rigorous_exposition]
+    max_concurrency: 1
+    temperature: 0.1
+    max_output_tokens: 24000
+
+budget:
+  max_total_calls: 48
+  max_rounds: 4
+  initial_paths: 4
+  max_paths: 8
+  strategies_to_generate: 7
+  candidates_to_verify: 3
+  max_revisions: 3
+  base_verifier_replicas: 1
+  high_risk_verifier_replicas: 2
+  high_risk_threshold: 0.45
+  verification_pass_threshold: 0.78
+  synthesis_threshold: 0.72
+  max_total_tokens: null
+  max_cost_usd: null
+  breadth_share: 0.30
+  depth_share: 0.35
+  verification_share: 0.25
+  synthesis_share: 0.10
+
+topology:
+  neighbor_k: 2
+  prefer_cross_provider_review: true
+  isolate_initial_exploration: true
+  conditional_cross_review: true
+  disagreement_threshold: 0.35
+  strategy_similarity_threshold: 0.72
+  max_context_chars: 90000
+  max_verified_claims_per_context: 24
+  preserve_raw_evidence: true
+
+verification:
+  structural_first: true
+  detailed_only_after_structural_pass: true
+  verify_problem_integrity: true
+  require_first_error_step: true
+  require_key_step_tagging: true
+  enable_sympy_tools: true
+  enable_numeric_counterexamples: true
+  enable_lean: false
+  lean_command: lake env lean
+  external_tool_timeout_seconds: 20
+
+runtime:
+  run_root: runs
+  output_language: zh-CN
+  max_parallel_calls: 8
+  parse_retries: 1
+  request_retries: 3
+  checkpoint_every_stage: true
+  save_raw_provider_responses: true
+  redact_prompts_in_console: true
+  # Live progress shows only stage summaries and structured outcomes, never raw chain of thought.
+  activity_mode: compact
+  activity_max_visible: 18
+  activity_persist: true
+  activity_include_agent_calls: true
+  activity_heartbeat_seconds: 20
+  log_level: INFO
+  random_seed: 20260719

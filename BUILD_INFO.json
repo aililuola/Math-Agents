@@ -1,0 +1,51 @@
+{
+  "project": "MathProofMesh",
+  "version": "0.4.0",
+  "validated_on": "2026-07-19",
+  "python_requirement": ">=3.11",
+  "deepseek_profile": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "thinking_enabled": true,
+    "reasoning_effort": "max",
+    "agent_count": 5,
+    "sse_streaming_enabled_in_deepseek_profiles": true,
+    "streaming_default_for_other_configs": false,
+    "stream_options_include_usage": true,
+    "keys_persisted": false
+  },
+  "validation": {
+    "compileall": "PASS",
+    "ruff": "PASS",
+    "pytest": "24 passed",
+    "source_demo": {
+      "status": "verified",
+      "calls": 19
+    },
+    "deepseek_non_streaming_http_mock": "PASS",
+    "deepseek_sse_http_mock": "PASS",
+    "sse_incomplete_stream_guard": "PASS",
+    "reasoning_content_redaction": "PASS",
+    "deepseek_config_parse": "PASS (5/5 agents streaming=true in full and smoke profiles)",
+    "secret_scan": "PASS (none of the five supplied keys found; one intentional synthetic sk-* fixture remains in a redaction unit test)",
+    "wheel_install_target": "PASS",
+    "wheel_demo": {
+      "status": "verified",
+      "calls": 19
+    },
+    "real_provider_calls": "NOT RUN (credentials were intentionally not used during artifact build)"
+  },
+  "counts": {
+    "source_python_files": 24,
+    "test_python_files": 10,
+    "documentation_files": 7,
+    "source_lines": 8135,
+    "test_lines": 807,
+    "documentation_lines": 1635
+  },
+  "wheel": {
+    "path": "dist/mathproofmesh-0.4.0-py3-none-any.whl",
+    "sha256": "c4c9d52983cbfe5eb25e9f4f8a07e6ee25cc87f470394eff081afaad64442e43",
+    "bytes": 95174
+  }
+}

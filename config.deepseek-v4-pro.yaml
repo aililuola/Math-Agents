@@ -1,0 +1,158 @@
+system_name: MathProofMesh-DeepSeek-V4-Pro
+
+# One environment variable per isolated sub-agent. Never place a real key in this file.
+agents:
+  - id: ds-planner
+    provider: deepseek
+    model: deepseek-v4-pro
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_AGENT_1_KEY
+    user_id: mathproofmesh-agent-1
+    thinking_enabled: true
+    reasoning_effort: max
+    # Receive long DeepSeek responses as SSE chunks; final structured output is still aggregated locally.
+    streaming: true
+    roles: [planner, meta_reviewer, final_verifier]
+    specialties: [problem_decomposition, strategy_generation, failure_classification, meta_review]
+    max_concurrency: 1
+    temperature: 0.0
+    max_output_tokens: 24000
+    timeout_seconds: 900
+    trust_prior: 0.55
+    pricing: {input_per_million: 0.435, output_per_million: 0.87}
+
+  - id: ds-explorer-a
+    provider: deepseek
+    model: deepseek-v4-pro
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_AGENT_2_KEY
+    user_id: mathproofmesh-agent-2
+    thinking_enabled: true
+    reasoning_effort: max
+    streaming: true
+    roles: [explorer, summarizer, detailed_verifier, final_verifier]
+    specialties: [number_theory, algebra, combinatorics, invariants, extremal_arguments]
+    max_concurrency: 1
+    temperature: 0.0
+    max_output_tokens: 48000
+    timeout_seconds: 900
+    trust_prior: 0.52
+    pricing: {input_per_million: 0.435, output_per_million: 0.87}
+
+  - id: ds-explorer-b
+    provider: deepseek
+    model: deepseek-v4-pro
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_AGENT_3_KEY
+    user_id: mathproofmesh-agent-3
+    thinking_enabled: true
+    reasoning_effort: max
+    streaming: true
+    roles: [explorer, summarizer, detailed_verifier, final_verifier]
+    specialties: [analysis, inequalities, geometry, probability, analytic_methods]
+    max_concurrency: 1
+    temperature: 0.0
+    max_output_tokens: 48000
+    timeout_seconds: 900
+    trust_prior: 0.52
+    pricing: {input_per_million: 0.435, output_per_million: 0.87}
+
+  - id: ds-explorer-c-verifier
+    provider: deepseek
+    model: deepseek-v4-pro
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_AGENT_4_KEY
+    user_id: mathproofmesh-agent-4
+    thinking_enabled: true
+    reasoning_effort: max
+    streaming: true
+    roles: [explorer, summarizer, structural_verifier, detailed_verifier, final_verifier]
+    specialties: [logic, graph_theory, constructive_proofs, counterexample_search, dependency_audit]
+    max_concurrency: 1
+    temperature: 0.0
+    max_output_tokens: 40000
+    timeout_seconds: 900
+    trust_prior: 0.54
+    pricing: {input_per_million: 0.435, output_per_million: 0.87}
+
+  - id: ds-synthesizer-verifier
+    provider: deepseek
+    model: deepseek-v4-pro
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_AGENT_5_KEY
+    user_id: mathproofmesh-agent-5
+    thinking_enabled: true
+    reasoning_effort: max
+    streaming: true
+    roles: [synthesizer, structural_verifier, detailed_verifier, final_verifier]
+    specialties: [proof_synthesis, rigorous_exposition, proof_audit, symbolic_checks]
+    max_concurrency: 1
+    temperature: 0.0
+    max_output_tokens: 48000
+    timeout_seconds: 900
+    trust_prior: 0.56
+    pricing: {input_per_million: 0.435, output_per_million: 0.87}
+
+budget:
+  max_total_calls: 42
+  max_rounds: 4
+  initial_paths: 3
+  max_paths: 6
+  strategies_to_generate: 6
+  candidates_to_verify: 3
+  max_revisions: 3
+  base_verifier_replicas: 1
+  high_risk_verifier_replicas: 2
+  high_risk_threshold: 0.45
+  verification_pass_threshold: 0.80
+  synthesis_threshold: 0.74
+  max_total_tokens: 2000000
+  max_cost_usd: 5.0
+  breadth_share: 0.30
+  depth_share: 0.35
+  verification_share: 0.25
+  synthesis_share: 0.10
+
+topology:
+  neighbor_k: 2
+  # All five agents use the same provider/model, so independence is enforced by key,
+  # user_id, isolated first-pass prompts, and author exclusion rather than provider diversity.
+  prefer_cross_provider_review: false
+  isolate_initial_exploration: true
+  conditional_cross_review: true
+  disagreement_threshold: 0.30
+  strategy_similarity_threshold: 0.70
+  max_context_chars: 180000
+  max_verified_claims_per_context: 30
+  preserve_raw_evidence: true
+
+verification:
+  structural_first: true
+  detailed_only_after_structural_pass: true
+  verify_problem_integrity: true
+  require_first_error_step: true
+  require_key_step_tagging: true
+  enable_sympy_tools: true
+  enable_numeric_counterexamples: true
+  enable_lean: false
+  lean_command: lake env lean
+  external_tool_timeout_seconds: 30
+
+runtime:
+  run_root: runs
+  output_language: zh-CN
+  max_parallel_calls: 5
+  parse_retries: 1
+  request_retries: 3
+  checkpoint_every_stage: true
+  # DeepSeek reasoning_content is stripped by the provider adapter before raw metadata is saved.
+  save_raw_provider_responses: true
+  redact_prompts_in_console: true
+  # Live progress shows only stage summaries and structured outcomes, never raw chain of thought.
+  activity_mode: compact
+  activity_max_visible: 18
+  activity_persist: true
+  activity_include_agent_calls: true
+  activity_heartbeat_seconds: 20
+  log_level: INFO
+  random_seed: 20260719
