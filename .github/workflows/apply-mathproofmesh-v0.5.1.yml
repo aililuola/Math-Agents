@@ -36,22 +36,42 @@ jobs:
           path: repo
           fetch-depth: 0
 
-      - name: Reassemble, verify, and apply patch
+      - name: Verify exact target base
+        working-directory: repo
         shell: bash
         run: |
-          set -euo pipefail
-          cat staging/.github/patches/v0.5.1-scheduler/part-*.b64 \
-            | base64 --decode \
-            | gzip --decompress \
-            > /tmp/mathproofmesh-v0.5.1-scheduler.patch
+          set -euxo pipefail
+          git rev-parse HEAD
+          test "$(git rev-parse HEAD)" = "8e87624a601c4852ed086e9c3080a188c7e85d44"
+          test -f .github/workflows/publish-v0.5.1-scheduler.yml
+
+      - name: Reassemble staged patch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ls -l staging/.github/patches/v0.5.1-scheduler/part-*.b64
+          cat staging/.github/patches/v0.5.1-scheduler/part-*.b64 > /tmp/mathproofmesh-v0.5.1-scheduler.patch.b64
+          wc -c /tmp/mathproofmesh-v0.5.1-scheduler.patch.b64
+          base64 --decode /tmp/mathproofmesh-v0.5.1-scheduler.patch.b64 > /tmp/mathproofmesh-v0.5.1-scheduler.patch.gz
+          gzip --test /tmp/mathproofmesh-v0.5.1-scheduler.patch.gz
+          gzip --decompress --stdout /tmp/mathproofmesh-v0.5.1-scheduler.patch.gz > /tmp/mathproofmesh-v0.5.1-scheduler.patch
+          wc -c -l /tmp/mathproofmesh-v0.5.1-scheduler.patch
+
+      - name: Verify patch digest
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sha256sum /tmp/mathproofmesh-v0.5.1-scheduler.patch
           echo "e8ac91960941b43ec9179f6d7eabe7806a1d7cb81d703233b07863949a709d7d  /tmp/mathproofmesh-v0.5.1-scheduler.patch" | sha256sum -c -
 
-          cd repo
-          test "$(git rev-parse HEAD)" = "8e87624a601c4852ed086e9c3080a188c7e85d44"
+      - name: Apply scheduler patch
+        working-directory: repo
+        shell: bash
+        run: |
+          set -euxo pipefail
           git apply --check /tmp/mathproofmesh-v0.5.1-scheduler.patch
           git apply /tmp/mathproofmesh-v0.5.1-scheduler.patch
           rm .github/workflows/publish-v0.5.1-scheduler.yml
-
           test -f tests/test_budget_scheduler.py
           grep -q 'version = "0.5.1"' pyproject.toml
           grep -q '__version__ = "0.5.1"' src/mathproofmesh/__init__.py
