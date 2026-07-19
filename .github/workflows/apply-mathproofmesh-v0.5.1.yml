@@ -1,14 +1,14 @@
 name: Apply MathProofMesh v0.5.1 scheduler patch
 
 on:
-  push:
+  pull_request:
+    types: [opened, synchronize, reopened]
     branches:
-      - automation/mathproofmesh-v0.5.1-scheduler
-    paths:
-      - ".github/workflows/apply-mathproofmesh-v0.5.1.yml"
+      - "feature/mathproofmesh-v0.5.0-resumable-checkpoints"
 
 permissions:
   contents: write
+  pull-requests: read
 
 concurrency:
   group: mathproofmesh-v0.5.1-scheduler-publish
@@ -16,6 +16,9 @@ concurrency:
 
 jobs:
   apply:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'automation/mathproofmesh-v0.5.1-scheduler'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -44,9 +47,10 @@ jobs:
           echo "e8ac91960941b43ec9179f6d7eabe7806a1d7cb81d703233b07863949a709d7d  /tmp/mathproofmesh-v0.5.1-scheduler.patch" | sha256sum -c -
 
           cd repo
-          test "$(git rev-parse HEAD)" = "30c251f4409b3b82237998472768e70e9d8c93e0"
+          test "$(git rev-parse HEAD)" = "8e87624a601c4852ed086e9c3080a188c7e85d44"
           git apply --check /tmp/mathproofmesh-v0.5.1-scheduler.patch
           git apply /tmp/mathproofmesh-v0.5.1-scheduler.patch
+          rm .github/workflows/publish-v0.5.1-scheduler.yml
 
           test -f tests/test_budget_scheduler.py
           grep -q 'version = "0.5.1"' pyproject.toml
@@ -80,9 +84,3 @@ jobs:
           git diff --cached --quiet && { echo "No changes to commit"; exit 1; }
           git commit -m "fix: make scheduler failure-aware and preserve widening"
           git push origin HEAD:feature/mathproofmesh-v0.5.0-resumable-checkpoints
-
-      - name: Remove temporary staging branch
-        if: success()
-        working-directory: repo
-        shell: bash
-        run: git push origin --delete automation/mathproofmesh-v0.5.1-scheduler || true
