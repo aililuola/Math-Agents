@@ -5,4 +5,4 @@ from .orchestrator import ProofMeshOrchestrator
 from .schemas import RunResult
 
 __all__ = ["ProofMeshOrchestrator", "RunResult", "SystemConfig", "load_config"]
-__version__ = "0.6.0"
+__version__ = "0.7.0"

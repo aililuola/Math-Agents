@@ -119,6 +119,8 @@ scheduler:
   diagnostic_candidate_limit: 12
 
 topology:
+  # v0.7 features are opt-in here so old installations retain v0.6 behavior.
+  mode: legacy_sparse
   neighbor_k: 2
   prefer_cross_provider_review: true
   isolate_initial_exploration: true

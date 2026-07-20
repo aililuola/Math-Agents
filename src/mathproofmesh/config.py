@@ -34,6 +34,20 @@ RoleName = Literal[
     "synthesizer",
     "final_verifier",
     "experimenter",
+    "route_prover",
+    "route_skeptic",
+    "tool_specialist",
+    "route_referee",
+    "bridge_prover",
+    "conflict_resolver",
+    "counterexample_hunter",
+    "representation_switchboard",
+    "analogy_agent",
+    "construction_inventor",
+    "invariant_hypothesis_agent",
+    "reverse_goal_analyzer",
+    "meta_strategist",
+    "inspiration_referee",
     "general",
 ]
 
@@ -179,6 +193,224 @@ class SchedulerConfig(ConfigModel):
     diagnostics_enabled: bool = True
     diagnostic_candidate_limit: int = Field(default=12, ge=1, le=128)
 
+    # Hierarchical topology and proof-debt signals. Defaults preserve legacy
+    # scheduling because they are only consumed in active graph/topology mode.
+    proof_debt_reduction_weight: float = Field(default=0.22, ge=0.0, le=4.0)
+    verified_fact_gain_weight: float = Field(default=0.24, ge=0.0, le=4.0)
+    shared_bottleneck_weight: float = Field(default=0.18, ge=0.0, le=4.0)
+    message_utility_weight: float = Field(default=0.10, ge=0.0, le=4.0)
+    route_redundancy_penalty: float = Field(default=0.24, ge=0.0, le=4.0)
+    contradiction_priority_weight: float = Field(default=0.36, ge=0.0, le=4.0)
+    counterexample_priority_weight: float = Field(default=0.42, ge=0.0, le=4.0)
+    bridge_priority_weight: float = Field(default=0.28, ge=0.0, le=4.0)
+    inspiration_novelty_weight: float = Field(default=0.20, ge=0.0, le=4.0)
+    representation_switch_weight: float = Field(default=0.16, ge=0.0, le=4.0)
+    analogy_relevance_weight: float = Field(default=0.12, ge=0.0, le=4.0)
+    construction_relevance_weight: float = Field(default=0.14, ge=0.0, le=4.0)
+    surprise_exploration_weight: float = Field(default=0.10, ge=0.0, le=4.0)
+    meta_replan_weight: float = Field(default=0.15, ge=0.0, le=4.0)
+
+    # Proof-obligation weights used by ProofGraphStore.proof_debt().
+    obligation_base_weight: float = Field(default=1.0, ge=0.0, le=100.0)
+    obligation_main_goal_weight: float = Field(default=2.0, ge=0.0, le=100.0)
+    obligation_centrality_weight: float = Field(default=1.0, ge=0.0, le=100.0)
+    obligation_dependency_weight: float = Field(default=0.25, ge=0.0, le=100.0)
+    obligation_shared_route_weight: float = Field(default=0.40, ge=0.0, le=100.0)
+    obligation_failure_weight: float = Field(default=0.30, ge=0.0, le=100.0)
+    obligation_conflict_weight: float = Field(default=0.75, ge=0.0, le=100.0)
+
+
+class TypedCommunicationConfig(ConfigModel):
+    enabled: bool = False
+    schema_version: str = "1"
+    require_problem_hash: bool = True
+    require_content_hash: bool = True
+    require_receipt: bool = True
+    exactly_once_delivery: bool = True
+    max_message_chars: int = Field(default=24000, ge=1000, le=500000)
+    max_assumptions: int = Field(default=24, ge=0, le=256)
+    max_dependencies: int = Field(default=64, ge=0, le=1024)
+
+
+class RouteTeamConfig(ConfigModel):
+    enabled: bool = False
+    max_members_per_route: int = Field(default=3, ge=1, le=8)
+    local_review_rounds: int = Field(default=1, ge=0, le=8)
+    skeptic_on_high_risk_only: bool = True
+    skeptic_risk_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
+    tool_agent_on_demand: bool = True
+    referee_required_before_global_share: bool = True
+    referee_must_differ_from_author: bool = True
+    allow_role_reuse_after_stage: bool = True
+
+
+class CrossRouteConfig(ConfigModel):
+    enabled: bool = False
+    initial_isolation_rounds: int = Field(default=1, ge=0, le=16)
+    max_neighbors_per_route: int = Field(default=2, ge=0, le=32)
+    max_messages_per_route_per_round: int = Field(default=6, ge=0, le=128)
+    max_global_messages_per_round: int = Field(default=24, ge=1, le=1024)
+    share_verified_facts: bool = True
+    share_counterexamples: bool = True
+    share_open_obligations: bool = True
+    share_unverified_insights: bool = False
+    share_failure_records: bool = True
+    message_ttl_rounds: int = Field(default=2, ge=1, le=32)
+
+
+class BrokerConfig(ConfigModel):
+    contradiction_detection: bool = True
+    bridge_detection: bool = True
+    duplicate_route_detection: bool = True
+    contradiction_similarity_threshold: float = Field(default=0.82, ge=0.0, le=1.0)
+    bridge_similarity_threshold: float = Field(default=0.78, ge=0.0, le=1.0)
+    duplicate_strategy_threshold: float = Field(default=0.84, ge=0.0, le=1.0)
+    min_routes_for_bridge: int = Field(default=2, ge=2, le=32)
+    max_bridge_tasks_per_round: int = Field(default=2, ge=0, le=32)
+    max_conflict_tasks_per_round: int = Field(default=2, ge=0, le=32)
+    deterministic_matching_first: bool = True
+    use_llm_matching_on_ambiguous: bool = True
+    ambiguous_match_low: float = Field(default=0.55, ge=0.0, le=1.0)
+    ambiguous_match_high: float = Field(default=0.82, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_match_band(self) -> "BrokerConfig":
+        if self.ambiguous_match_low > self.ambiguous_match_high:
+            raise ValueError("ambiguous_match_low cannot exceed ambiguous_match_high")
+        return self
+
+
+class ProofGraphConfig(ConfigModel):
+    enabled: bool = False
+    mode: Literal["off", "shadow", "active"] = "shadow"
+    max_nodes: int = Field(default=5000, ge=100, le=100000)
+    max_edges: int = Field(default=20000, ge=100, le=500000)
+    allow_cycles: bool = False
+    close_obligation_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
+    shared_bottleneck_min_routes: int = Field(default=2, ge=2, le=32)
+    freeze_before_synthesis: bool = True
+
+
+class TypedMemoryConfig(ConfigModel):
+    enabled: bool = False
+    strict_fact_gate: bool = True
+    fact_pass_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
+    counterexample_is_global_negative: bool = True
+    retain_rejected_claims: bool = True
+    retain_expired_insights: bool = True
+    max_fact_context: int = Field(default=32, ge=1, le=512)
+    max_insight_context: int = Field(default=16, ge=0, le=512)
+    max_negative_context: int = Field(default=16, ge=0, le=512)
+
+
+class InspirationConfig(ConfigModel):
+    enabled: bool = False
+    mode: Literal["off", "shadow", "active"] = "shadow"
+
+    stagnation_rounds: int = Field(default=2, ge=1, le=32)
+    minimum_verified_gain: int = Field(default=1, ge=0, le=128)
+    proof_debt_min_reduction: float = Field(default=0.03, ge=0.0, le=1.0)
+    repeated_error_threshold: int = Field(default=2, ge=1, le=32)
+    route_redundancy_trigger: float = Field(default=0.80, ge=0.0, le=1.0)
+    route_budget_share_trigger: float = Field(default=0.50, ge=0.0, le=1.0)
+    all_routes_failed_trigger: bool = True
+    shared_bottleneck_trigger: bool = True
+    final_repair_failure_trigger: bool = True
+
+    representation_switchboard: bool = True
+    analogy_agent: bool = True
+    auxiliary_construction_inventor: bool = True
+    invariant_hypothesis_agent: bool = True
+    reverse_goal_analysis: bool = True
+    bridge_lemma_generator: bool = True
+    persistent_meta_strategist: bool = True
+    surprise_exploration: bool = True
+
+    surprise_budget_fraction: float = Field(default=0.08, ge=0.0, le=0.50)
+    surprise_budget_min_calls: int = Field(default=1, ge=0, le=64)
+    surprise_budget_max_calls: int = Field(default=4, ge=0, le=128)
+    max_inspiration_tasks_per_round: int = Field(default=2, ge=0, le=32)
+    max_proposals_per_task: int = Field(default=3, ge=1, le=16)
+    max_new_routes_per_trigger: int = Field(default=2, ge=0, le=16)
+    protect_finalization_reserve: bool = True
+    max_consecutive_surprise_rejections: int = Field(default=2, ge=1, le=32)
+    surprise_cooldown_rounds: int = Field(default=2, ge=0, le=32)
+
+    novelty_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
+    mechanism_duplicate_threshold: float = Field(default=0.86, ge=0.0, le=1.0)
+    require_inspiration_referee: bool = True
+    proposals_enter_fact_memory: bool = False
+    novelty_representation_weight: float = Field(default=0.24, ge=0.0, le=1.0)
+    novelty_mechanism_weight: float = Field(default=0.24, ge=0.0, le=1.0)
+    novelty_object_weight: float = Field(default=0.16, ge=0.0, le=1.0)
+    novelty_transformation_weight: float = Field(default=0.16, ge=0.0, le=1.0)
+    novelty_principle_weight: float = Field(default=0.10, ge=0.0, le=1.0)
+    novelty_obligation_weight: float = Field(default=0.10, ge=0.0, le=1.0)
+
+    analogy_library_enabled: bool = True
+    analogy_library_path: str = "benchmarks/analogy_library.jsonl"
+    analogy_top_k: int = Field(default=6, ge=1, le=64)
+    allow_external_retrieval: bool = False
+
+    @model_validator(mode="after")
+    def validate_inspiration(self) -> "InspirationConfig":
+        if self.surprise_budget_min_calls > self.surprise_budget_max_calls:
+            raise ValueError(
+                "surprise_budget_min_calls cannot exceed surprise_budget_max_calls"
+            )
+        if self.proposals_enter_fact_memory:
+            raise ValueError("inspiration proposals must enter InsightMemory first")
+        novelty_total = (
+            self.novelty_representation_weight
+            + self.novelty_mechanism_weight
+            + self.novelty_object_weight
+            + self.novelty_transformation_weight
+            + self.novelty_principle_weight
+            + self.novelty_obligation_weight
+        )
+        if novelty_total <= 0:
+            raise ValueError("at least one novelty weight must be positive")
+        return self
+
+
+class ValidationEscalationConfig(ConfigModel):
+    enabled: bool = True
+    deterministic_checks_first: bool = True
+    blind_same_model_review: bool = True
+    adversarial_prompt_review: bool = True
+    cross_provider_review: bool = False
+    tool_or_formal_check_on_high_risk: bool = True
+    high_risk_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
+    escalate_on_reviewer_disagreement: bool = True
+    escalate_before_fact_promotion: bool = True
+    escalate_final_proof: bool = True
+
+
+class AgentCapabilityConfig(ConfigModel):
+    enabled: bool = True
+    min_observations_before_trust_update: int = Field(default=5, ge=1, le=10000)
+    recency_decay: float = Field(default=0.98, ge=0.0, le=1.0)
+    mutation_benchmark_weight: float = Field(default=0.30, ge=0.0, le=1.0)
+    tool_agreement_weight: float = Field(default=0.25, ge=0.0, le=1.0)
+    first_error_accuracy_weight: float = Field(default=0.25, ge=0.0, le=1.0)
+    overturn_rate_penalty: float = Field(default=0.20, ge=0.0, le=1.0)
+    use_self_reported_confidence: bool = False
+
+    @model_validator(mode="after")
+    def reject_self_reported_confidence(self) -> "AgentCapabilityConfig":
+        if self.use_self_reported_confidence:
+            raise ValueError("self-reported confidence cannot update capability")
+        return self
+
+
+class FinalTopologyConfig(ConfigModel):
+    freeze_graph_before_synthesis: bool = True
+    blind_structural_review: bool = True
+    blind_detailed_review: bool = True
+    remove_agent_identity: bool = True
+    remove_route_ranking: bool = True
+    remove_self_confidence: bool = True
+
 
 class TopologyConfig(ConfigModel):
     neighbor_k: int = Field(default=2, ge=1, le=16)
@@ -190,6 +422,37 @@ class TopologyConfig(ConfigModel):
     max_context_chars: int = Field(default=90000, ge=4000, le=2_000_000)
     max_verified_claims_per_context: int = Field(default=24, ge=1, le=500)
     preserve_raw_evidence: bool = True
+    mode: Literal["legacy_sparse", "hierarchical_sparse"] = "legacy_sparse"
+    typed_communication: TypedCommunicationConfig = Field(
+        default_factory=TypedCommunicationConfig
+    )
+    route_teams: RouteTeamConfig = Field(default_factory=RouteTeamConfig)
+    cross_route: CrossRouteConfig = Field(default_factory=CrossRouteConfig)
+    broker: BrokerConfig = Field(default_factory=BrokerConfig)
+    proof_graph: ProofGraphConfig = Field(default_factory=ProofGraphConfig)
+    typed_memory: TypedMemoryConfig = Field(default_factory=TypedMemoryConfig)
+    final_stage: FinalTopologyConfig = Field(default_factory=FinalTopologyConfig)
+    inspiration: InspirationConfig = Field(default_factory=InspirationConfig)
+    validation_escalation: ValidationEscalationConfig = Field(
+        default_factory=ValidationEscalationConfig
+    )
+    agent_capability: AgentCapabilityConfig = Field(
+        default_factory=AgentCapabilityConfig
+    )
+
+    @model_validator(mode="after")
+    def validate_hierarchical_topology(self) -> "TopologyConfig":
+        if self.mode == "legacy_sparse":
+            return self
+        if self.proof_graph.mode != "off" and not self.proof_graph.enabled:
+            raise ValueError("proof_graph.mode requires proof_graph.enabled=true")
+        if self.route_teams.enabled and not self.typed_communication.enabled:
+            raise ValueError("route teams require typed communication")
+        if self.cross_route.enabled and not self.typed_communication.enabled:
+            raise ValueError("cross-route routing requires typed communication")
+        if self.inspiration.mode != "off" and not self.inspiration.enabled:
+            raise ValueError("inspiration.mode requires inspiration.enabled=true")
+        return self
 
 
 class VerificationConfig(ConfigModel):
@@ -309,6 +572,37 @@ class SystemConfig(ConfigModel):
         if len(ids) != len(set(ids)):
             raise ValueError("agent ids must be unique")
         return agents
+
+    @model_validator(mode="after")
+    def validate_hierarchical_budget_reserve(self) -> "SystemConfig":
+        inspiration = self.topology.inspiration
+        if (
+            self.topology.mode != "hierarchical_sparse"
+            or not inspiration.enabled
+            or inspiration.mode == "off"
+            or not inspiration.protect_finalization_reserve
+        ):
+            return self
+        verification_calls = (
+            1
+            + self.budget.high_risk_verifier_replicas
+            + self.scheduler.verification_call_safety_margin
+        )
+        revision_cycles = min(
+            self.scheduler.reserve_revision_cycles,
+            self.budget.max_revisions,
+        )
+        requested_reserve = 1 + verification_calls
+        requested_reserve += revision_cycles * (1 + verification_calls)
+        requested_reserve += self.scheduler.finish_transition_buffer_calls
+        reserve = min(self.budget.max_total_calls, requested_reserve)
+        exploratory_calls = self.budget.max_total_calls - reserve
+        if inspiration.surprise_budget_min_calls > exploratory_calls:
+            raise ValueError(
+                "surprise_budget_min_calls would consume the protected "
+                "finalization reserve"
+            )
+        return self
 
     def redacted_dict(self) -> dict[str, Any]:
         data = self.model_dump(

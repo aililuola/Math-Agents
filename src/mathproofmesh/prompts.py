@@ -7,17 +7,30 @@ from typing import Any, Type
 from pydantic import BaseModel
 
 from .schemas import (
+    AnalogyMapping,
+    BlindReviewPacket,
+    BlindVerificationReport,
+    BrokerDecision,
     ClaimBatch,
+    ConstructionProposal,
     ContinuationTurn,
     ExperimentProgram,
     ExperimentSpec,
     FinalProof,
     InitialExplorationTurn,
+    InspirationProposal,
+    InspirationReview,
+    InvariantHypothesis,
+    MessageEnvelope,
+    MessageReceipt,
     MetaReview,
+    MetaStrategyDecision,
     ProblemContract,
     ProofAttempt,
     ProofCheckpoint,
     ProofDelta,
+    RepresentationCandidate,
+    ReverseGoalPlan,
     StrategySet,
     TriageResult,
     VerificationReport,
@@ -32,6 +45,27 @@ class PromptBundle:
     response_model: Type[BaseModel]
     temperature: float | None = None
     max_output_tokens: int | None = None
+
+
+BLIND_REVIEW_FORBIDDEN_TOKENS = (
+    "agent_id",
+    "route_id",
+    "route_score",
+    "self_confidence",
+    "previous review",
+    "vote",
+)
+
+
+def assert_blind_prompt_safe(bundle: PromptBundle) -> None:
+    """Fail closed if identity or social-evaluation metadata leaks into blind audit."""
+
+    if not bundle.stage.startswith("blind_"):
+        return
+    payload = f"{bundle.system}\n{bundle.user}".casefold()
+    leaked = [token for token in BLIND_REVIEW_FORBIDDEN_TOKENS if token in payload]
+    if leaked:
+        raise ValueError(f"blind review prompt contains forbidden metadata: {leaked}")
 
 
 def _json(value: Any) -> str:
@@ -498,6 +532,75 @@ JSON SCHEMA:
             temperature=0.0,
         )
 
+    def blind_structural_review(
+        self,
+        packet: BlindReviewPacket,
+    ) -> PromptBundle:
+        user = f"""
+[STAGE:blind_structural_verification]
+Conduct an independent structural examination using only the packet below.
+1. Compare the claimed theorem with the immutable statement, including every quantifier, hypothesis, domain, and requested part.
+2. Check completeness and dependency integrity: no missing dependencies, circular claims, orphan conclusions, or uncertain material presented as established fact.
+3. Check every named theorem structurally: its invoked form and all applicability conditions must be explicit.
+4. Flag vague placeholders that conceal a nontrivial step.
+Do not infer authorship, provenance, ranking, or any assessment made outside this packet.
+Do not perform an expensive line-by-line reconstruction unless needed to identify a structural defect.
+Set problem_integrity_ok=false if the proof changes the statement. Classify a defect as execution, plan, or strategy.
+
+BLIND REVIEW PACKET:
+{_json(packet)}
+
+JSON SCHEMA:
+{_schema(BlindVerificationReport)}
+""".strip()
+        return PromptBundle(
+            "blind_structural_verification",
+            COMMON_SYSTEM,
+            user,
+            BlindVerificationReport,
+            temperature=0.0,
+        )
+
+    def blind_detailed_review(
+        self,
+        packet: BlindReviewPacket,
+        *,
+        tool_results: list[dict[str, Any]] | None = None,
+        experiment_results: list[dict[str, Any]] | None = None,
+    ) -> PromptBundle:
+        tool_results = tool_results or []
+        experiment_results = experiment_results or []
+        user = f"""
+[STAGE:blind_detailed_verification]
+Independently audit the mathematical process using only the packet and auditable evidence below.
+For every proof step, identify the exact assertion and dependencies, test whether the stated justification implies it, verify algebra and inequalities, and check all cases and boundary conditions.
+Locate the first invalid or unjustified step. A later correct conclusion does not repair an earlier gap.
+Actively try to falsify decisive claims with exact small cases, extremal cases, dimensional checks, substitutions, or counterexamples.
+Treat not_refuted, heuristic, and bounded_evidence experiments as non-proofs. Validate any finite-reduction mapping behind an exhaustive certificate. A tool exception is inconclusive, not a mathematical failure.
+When a deterministic calculation would materially resolve uncertainty, emit a narrowly scoped ToolRequest. Never request arbitrary code execution.
+Return PASS only when every requested conclusion and decisive step is supported. Use UNCERTAIN when a genuine gap remains.
+Do not infer authorship, provenance, ranking, or any assessment made outside this packet.
+
+BLIND REVIEW PACKET:
+{_json(packet)}
+
+AVAILABLE TOOL RESULTS:
+{_json(tool_results)}
+
+AUDITABLE EXPERIMENT RESULTS:
+{_json(experiment_results)}
+
+JSON SCHEMA:
+{_schema(BlindVerificationReport)}
+""".strip()
+        return PromptBundle(
+            "blind_detailed_verification",
+            COMMON_SYSTEM,
+            user,
+            BlindVerificationReport,
+            temperature=0.0,
+        )
+
     def meta_review(
         self,
         problem: ProblemContract,
@@ -539,7 +642,12 @@ JSON SCHEMA:
         verified_claims: list[dict[str, Any]],
         review: MetaReview,
         synthesizer_id: str,
+        *,
+        open_obligations: list[dict[str, Any]] | None = None,
+        forbidden_claims: list[str] | None = None,
     ) -> PromptBundle:
+        open_obligations = open_obligations or []
+        forbidden_claims = forbidden_claims or []
         user = f"""
 [STAGE:synthesis]
 You are synthesizer {synthesizer_id}. Produce one self-contained final solution to the immutable problem using only supported material below.
@@ -558,6 +666,12 @@ SELECTED ATTEMPTS:
 
 VERIFIED LEMMA LIBRARY:
 {_json(verified_claims)}
+
+OPEN OBLIGATIONS (must not be presented as proved):
+{_json(open_obligations)}
+
+NEGATIVE MEMORY / FORBIDDEN CLAIMS:
+{_json(forbidden_claims)}
 
 META-REVIEW:
 {_json(review)}
@@ -605,4 +719,171 @@ JSON SCHEMA:
 """.strip()
         return PromptBundle(
             "final_revision", COMMON_SYSTEM, user, FinalProof, temperature=0.1
+        )
+
+    def _typed_stage(
+        self,
+        stage: str,
+        instruction: str,
+        response_model: Type[BaseModel],
+        context: dict[str, Any],
+        *,
+        temperature: float = 0.0,
+    ) -> PromptBundle:
+        user = f"""
+[STAGE:{stage}]
+{instruction}
+Do not emit a private chain of thought or any route transcript. Return only the
+auditable mathematical artifact. State assumptions, scope, dependencies,
+quantifiers, target obligations, and a falsification condition explicitly.
+
+SANITIZED CONTEXT:
+{_json(context)}
+
+OUTPUT LANGUAGE: {self.output_language}
+
+JSON SCHEMA:
+{_schema(response_model)}
+""".strip()
+        return PromptBundle(
+            stage,
+            COMMON_SYSTEM,
+            user,
+            response_model,
+            temperature=temperature,
+        )
+
+    def route_prove(
+        self,
+        problem: ProblemContract,
+        **context: Any,
+    ) -> PromptBundle:
+        return self._typed_stage(
+            "route_prove",
+            "Continue only the assigned mechanism. Use Fact inbox items as premises, label Insight items as non-premises, honor NegativeMemory, and expose every new obligation.",
+            ContinuationTurn,
+            {"problem": problem, **context},
+            temperature=0.25,
+        )
+
+    def route_skeptic(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "route_skeptic",
+            "Search first for the smallest counterexample, boundary failure, quantifier error, circular dependency, or first invalid step. Do not reward proof length and do not supply a replacement proof unless repair_request is true.",
+            VerificationReport,
+            context,
+        )
+
+    def route_referee(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "route_referee",
+            "Judge only global admissibility, memory tier, scope, dependencies, quantifiers, and need for escalation. Do not invent new proof steps.",
+            BrokerDecision,
+            context,
+        )
+
+    def bridge_lemma(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "bridge_lemma",
+            "Prove only the shared obligation from the supplied verified facts and failure records. You do not receive or reconstruct full route transcripts.",
+            MessageEnvelope,
+            context,
+            temperature=0.15,
+        )
+
+    def resolve_contradiction(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "resolve_contradiction",
+            "Return exactly one scoped resolution: A refutes B, B refutes A, different scopes, both unsupported, compatible after normalization, or requires tool/formal check.",
+            MessageEnvelope,
+            context,
+        )
+
+    def acknowledge_message(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "acknowledge_message",
+            "Restate parsed assumptions and conclusion without extending them, then compute the semantic receipt fields.",
+            MessageReceipt,
+            context,
+        )
+
+    def counterexample_search(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "counterexample_search",
+            "Try to falsify the exact scoped claim. A finite search that finds nothing is not verification; a candidate counterexample must be independently replayable.",
+            MessageEnvelope,
+            context,
+        )
+
+    def representation_switchboard(
+        self, problem: ProblemContract, **context: Any
+    ) -> PromptBundle:
+        return self._typed_stage(
+            "representation_switchboard",
+            "Select an applicable alternative representation, not every representation. Give a reversible object mapping, preserved properties, lost conditions, novelty source, targeted open obligations, and fast failure tests.",
+            RepresentationCandidate,
+            {"problem": problem, **context},
+            temperature=0.35,
+        )
+
+    def structural_analogy_search(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "structural_analogy_search",
+            "Use only the supplied verified local records. Map objects and operations, identify transferable bridge lemmas, and explicitly list non-transferable conditions and transfer risks. Return no analogy rather than fabricate a source.",
+            AnalogyMapping,
+            context,
+            temperature=0.2,
+        )
+
+    def invent_auxiliary_construction(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "invent_auxiliary_construction",
+            "Define a new auxiliary object bound to open obligations. State expected relations, proof-debt benefit, minimal falsification tests, and failure conditions.",
+            ConstructionProposal,
+            context,
+            temperature=0.4,
+        )
+
+    def hypothesize_invariant(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "hypothesize_invariant",
+            "Propose only a candidate invariant or monovariant. Define state and legal operations, give the expression, check a nontrivial boundary case, and request independent falsification.",
+            InvariantHypothesis,
+            context,
+            temperature=0.35,
+        )
+
+    def reverse_goal_analysis(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "reverse_goal_analysis",
+            "Work backward from the goal to sufficient intermediate claims, mark those supported by existing Facts, and isolate the smallest unsupported bridge gaps.",
+            ReverseGoalPlan,
+            context,
+            temperature=0.2,
+        )
+
+    def persistent_meta_strategy(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "persistent_meta_strategy",
+            "Choose one portfolio action from observable route scores, proof-debt history, verified gain, repeated first errors, redundancy, message utility, conflicts, and protected budget. Never modify FactMemory.",
+            MetaStrategyDecision,
+            context,
+            temperature=0.1,
+        )
+
+    def surprise_exploration(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "surprise_exploration",
+            "Propose a high-novelty mechanism under the protected surprise budget. It must differ structurally, target an open obligation, and remain quickly falsifiable; changed notation or wording is invalid.",
+            InspirationProposal,
+            context,
+            temperature=0.5,
+        )
+
+    def inspiration_referee(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "inspiration_referee",
+            "Independently assess mechanism novelty, relevance, coherence, hidden assumptions, and immediate counterexamples. Novelty is not correctness and the proposal cannot become a Fact.",
+            InspirationReview,
+            context,
         )

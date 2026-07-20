@@ -261,6 +261,162 @@ def demo_responder(
             },
             "dependencies": [],
         }
+    if schema_name == "RepresentationCandidate":
+        obligation_ids = re.findall(r'"obligation_id"\s*:\s*"([^"]+)"', text)
+        target = obligation_ids[0] if obligation_ids else "obl_mock"
+        return {
+            "source_problem_hash": "0" * 64,
+            "representation_name": "finite-state recurrence",
+            "rewritten_problem_view": "Encode the evolving residue data as a finite state and prove the target on transitions.",
+            "object_mapping": {"original configuration": "finite state"},
+            "preserved_invariants": ["legal transitions", "target truth value"],
+            "lost_conditions": ["geometric intuition is not retained automatically"],
+            "new_candidate_tools": ["recurrence_check"],
+            "expected_advantage": "The open step becomes a finite transition lemma.",
+            "failure_risks": [
+                "the proposed state may omit information needed by the target"
+            ],
+            "fast_failure_tests": [
+                "find two configurations with one state but different target behavior"
+            ],
+            "novelty_signature": {
+                "representation_tags": ["finite_state", "recurrence"],
+                "mechanism_tags": ["representation_switch"],
+                "core_objects": ["states", "transitions"],
+                "key_transformations": ["encode"],
+                "proof_principles": ["induction_on_transitions"],
+                "targeted_obligation_ids": [target],
+            },
+        }
+    if schema_name == "AnalogyMapping":
+        return {
+            "source_record_id": "verified-local-telescoping",
+            "source_problem_summary": "A verified local proof reduces a sum to consecutive differences.",
+            "target_problem_hash": "0" * 64,
+            "object_correspondence": {"source term": "target term"},
+            "operation_correspondence": {"finite summation": "finite summation"},
+            "transferable_lemmas": ["consecutive differences telescope"],
+            "non_transferable_conditions": [
+                "the target term still needs an exact difference identity"
+            ],
+            "transfer_risks": ["matching syntax alone does not establish the identity"],
+            "required_bridge_lemmas": [
+                "derive the target consecutive-difference formula"
+            ],
+            "novelty_signature": {
+                "representation_tags": ["difference_sequence"],
+                "mechanism_tags": ["structural_analogy"],
+                "core_objects": ["partial_sums"],
+                "key_transformations": ["telescope"],
+                "proof_principles": ["finite_sum_identity"],
+                "targeted_obligation_ids": ["obl_mock"],
+            },
+        }
+    if schema_name == "ConstructionProposal":
+        obligation_ids = re.findall(r'"obligation_id"\s*:\s*"([^"]+)"', text)
+        target = obligation_ids[0] if obligation_ids else "obl_mock"
+        return {
+            "construction_type": "auxiliary_sequence",
+            "constructed_objects": ["partial-sum sequence S_k"],
+            "definition": "Define S_k as the sum of the first k target terms, with S_0=0.",
+            "intended_obligations": [target],
+            "expected_invariant_or_relation": "S_k-S_{k-1} equals the kth target term.",
+            "expected_proof_debt_reduction": "Replaces a global identity by one local recurrence and a base case.",
+            "falsification_tests": [
+                "check the recurrence exactly for k=1 and the first nontrivial boundary"
+            ],
+            "failure_conditions": [
+                "the recurrence does not determine the requested quantity"
+            ],
+            "novelty_signature": {
+                "representation_tags": ["sequence"],
+                "mechanism_tags": ["auxiliary_construction"],
+                "core_objects": ["partial_sums"],
+                "key_transformations": ["take_difference"],
+                "proof_principles": ["induction"],
+                "targeted_obligation_ids": [target],
+            },
+        }
+    if schema_name == "InvariantHypothesis":
+        obligation_ids = re.findall(r'"obligation_id"\s*:\s*"([^"]+)"', text)
+        target = obligation_ids[0] if obligation_ids else "obl_mock"
+        return {
+            "target_obligation_ids": [target],
+            "state_definition": "The state is the current partial sum and index k.",
+            "allowed_operations": ["append the next term"],
+            "candidate_expression": "S_k-k^2",
+            "behavior": "invariant",
+            "boundary_case": "k=1",
+            "boundary_result": "S_1-1=0",
+            "falsification_request": "Check the transition from k to k+1 symbolically and search for a smallest counterexample.",
+            "novelty_signature": {
+                "representation_tags": ["state_process"],
+                "mechanism_tags": ["invariant_hypothesis"],
+                "core_objects": ["partial_sum", "index"],
+                "key_transformations": ["append_term"],
+                "proof_principles": ["invariant"],
+                "targeted_obligation_ids": [target],
+            },
+        }
+    if schema_name == "ReverseGoalPlan":
+        obligation_ids = re.findall(r'"obligation_id"\s*:\s*"([^"]+)"', text)
+        target = obligation_ids[0] if obligation_ids else "obl_mock"
+        return {
+            "target_obligation_id": target,
+            "goal": "Close the selected proof obligation.",
+            "sufficient_intermediate_claims": [
+                "establish the exact one-step difference identity"
+            ],
+            "fact_supported_claims": [],
+            "minimal_gaps": [
+                "prove the one-step identity under the original assumptions"
+            ],
+            "bridge_requests": ["prove the one-step identity independently"],
+            "novelty_signature": {
+                "representation_tags": ["backward_reasoning"],
+                "mechanism_tags": ["reverse_goal_analysis"],
+                "core_objects": ["target", "bridge_lemma"],
+                "key_transformations": ["weaken_goal"],
+                "proof_principles": ["sufficient_condition"],
+                "targeted_obligation_ids": [target],
+            },
+        }
+    if schema_name == "MetaStrategyDecision":
+        return {
+            "round_index": 0,
+            "action": "switch_representation",
+            "affected_route_ids": [],
+            "selected_mechanism": "representation_switch",
+            "observable_metrics": {"verified_fact_gain_recent": 0},
+            "reason": "The observable verified-gain signal is flat, so test a distinct representation.",
+            "estimated_calls": 1,
+        }
+    if schema_name == "InspirationReview":
+        proposal_ids = re.findall(r'"proposal_id"\s*:\s*"([^"]+)"', text)
+        return {
+            "proposal_id": proposal_ids[0] if proposal_ids else "inspiration_mock",
+            "reviewer_agent_id": "mock-inspiration-referee",
+            "semantically_distinct": True,
+            "relevant_to_open_obligation": True,
+            "internally_coherent": True,
+            "hidden_assumptions": [],
+            "immediate_counterexamples": [],
+            "recommendation": "store_insight",
+            "confidence": 0.9,
+        }
+    if schema_name == "BlindVerificationReport":
+        return {
+            "problem_integrity_ok": True,
+            "verdict": "pass",
+            "first_error_step": None,
+            "issues": [],
+            "checked_dependencies": ["f1", "f2"],
+            "tool_requests": [],
+            "tool_results": [],
+            "failure_level": "none",
+            "confidence": 0.96,
+            "concise_feedback": "The immutable statement and each displayed proof step pass the independent audit.",
+        }
     if schema_name == "VerificationReport":
         if "[STAGE:structural_verification]" in text:
             stage = "structural"
@@ -362,31 +518,67 @@ def build_demo_config(run_root: str = "runs") -> SystemConfig:
             id="planner",
             provider="mock",
             model="mock",
-            roles=["planner", "meta_reviewer", "experimenter"],
+            roles=[
+                "planner",
+                "meta_reviewer",
+                "experimenter",
+                "meta_strategist",
+                "inspiration_referee",
+                "conflict_resolver",
+            ],
         ),
         AgentConfig(
             id="explorer-a",
             provider="mock",
             model="mock",
-            roles=["explorer", "summarizer"],
+            roles=[
+                "explorer",
+                "summarizer",
+                "route_prover",
+                "route_skeptic",
+                "analogy_agent",
+                "invariant_hypothesis_agent",
+            ],
         ),
         AgentConfig(
             id="explorer-b",
             provider="mock",
             model="mock",
-            roles=["explorer", "summarizer"],
+            roles=[
+                "explorer",
+                "summarizer",
+                "route_prover",
+                "construction_inventor",
+                "representation_switchboard",
+                "reverse_goal_analyzer",
+            ],
         ),
         AgentConfig(
             id="verifier-a",
             provider="mock",
             model="mock",
-            roles=["structural_verifier", "detailed_verifier", "final_verifier"],
+            roles=[
+                "structural_verifier",
+                "detailed_verifier",
+                "final_verifier",
+                "route_referee",
+                "tool_specialist",
+                "bridge_prover",
+                "counterexample_hunter",
+            ],
         ),
         AgentConfig(
             id="verifier-b",
             provider="mock",
             model="mock",
-            roles=["structural_verifier", "detailed_verifier", "final_verifier"],
+            roles=[
+                "structural_verifier",
+                "detailed_verifier",
+                "final_verifier",
+                "route_referee",
+                "route_skeptic",
+                "inspiration_referee",
+            ],
         ),
         AgentConfig(
             id="synthesizer",

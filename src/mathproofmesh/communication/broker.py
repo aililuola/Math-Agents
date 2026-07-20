@@ -1,0 +1,515 @@
+from __future__ import annotations
+
+from collections import defaultdict
+from typing import TYPE_CHECKING, Any
+
+from ..activity import ActivityStream
+from ..config import SystemConfig
+from ..schemas import (
+    BrokerDecision,
+    EvidenceType,
+    MessageEnvelope,
+    MessageReceipt,
+    ReceiptStatus,
+    stable_hash,
+)
+from ..store import ArtifactStore
+from .policies import (
+    cross_route_share_allowed,
+    validate_artifact_refs,
+    validate_evidence_tier,
+)
+from .route_registry import RouteRegistry
+
+if TYPE_CHECKING:
+    from ..memory import TypedMemory
+    from ..proof_graph.store import ProofGraphStore
+
+
+def delivery_key(message_id: str, target_route_id: str) -> str:
+    return stable_hash((message_id, target_route_id))
+
+
+class MessageBroker:
+    """Single gate for typed cross-route artifacts and exactly-once delivery."""
+
+    def __init__(
+        self,
+        config: SystemConfig,
+        store: ArtifactStore | None,
+        activity: ActivityStream | None,
+        route_registry: RouteRegistry,
+        proof_graph: "ProofGraphStore",
+        typed_memory: "TypedMemory",
+    ) -> None:
+        self.config = config
+        self.store = store
+        self.activity = activity
+        self.route_registry = route_registry
+        self.proof_graph = proof_graph
+        self.typed_memory = typed_memory
+        self._messages: dict[str, MessageEnvelope] = {}
+        self._dedup: dict[str, str] = {}
+        self._decisions: list[BrokerDecision] = []
+        self._deliveries: dict[str, dict[str, Any]] = {}
+        self._route_queues: dict[str, list[str]] = defaultdict(list)
+        self._receipts: dict[str, MessageReceipt] = {}
+        self._isolation_pending: dict[str, list[str]] = defaultdict(list)
+        self._round_route_counts: dict[str, int] = defaultdict(int)
+        self._round_global_counts: dict[int, int] = defaultdict(int)
+
+    @property
+    def decisions(self) -> list[BrokerDecision]:
+        return list(self._decisions)
+
+    @property
+    def receipts(self) -> list[MessageReceipt]:
+        return list(self._receipts.values())
+
+    def _dedup_key(self, message: MessageEnvelope) -> str:
+        return stable_hash(
+            (
+                message.problem_hash,
+                message.message_type.value,
+                message.normalized_statement,
+                tuple(sorted(message.assumptions)),
+                tuple(sorted(message.dependencies)),
+                message.evidence_type.value,
+                message.memory_tier.value,
+            )
+        )
+
+    def _reject(self, message: MessageEnvelope, reason: str) -> BrokerDecision:
+        decision = BrokerDecision(
+            message_id=message.message_id,
+            accepted=False,
+            rejection_reason=reason,
+        )
+        self._record_decision(decision, "message_rejected")
+        return decision
+
+    def _record_decision(self, decision: BrokerDecision, event_type: str) -> None:
+        self._decisions.append(decision)
+        if self.store is not None:
+            self.store.append_event(event_type, decision)
+            self.store.append_message_event(event_type, decision)
+            self.store.write_json("communication", "broker_state", self.export_state())
+        if self.activity is not None:
+            self.activity.info(
+                event_type,
+                title=(
+                    "Typed message accepted"
+                    if decision.accepted
+                    else "Typed message rejected"
+                ),
+                detail=decision.rejection_reason or "",
+                stage="message_broker",
+                metrics={
+                    "message_id": decision.message_id,
+                    "targets": decision.selected_targets,
+                    "duplicate_of": decision.duplicate_of,
+                },
+            )
+
+    def _emit_delivery_event(
+        self, event_type: str, payload: MessageReceipt | dict[str, Any]
+    ) -> None:
+        if self.store is not None:
+            self.store.append_event(event_type, payload)
+            self.store.append_message_event(event_type, payload)
+        if self.activity is not None:
+            metrics = (
+                payload.model_dump(mode="json")
+                if isinstance(payload, MessageReceipt)
+                else payload
+            )
+            self.activity.info(
+                event_type,
+                title=event_type.replace("_", " ").title(),
+                detail=str(metrics.get("reason", "")),
+                stage="message_broker",
+                metrics=metrics,
+            )
+
+    def publish(
+        self,
+        message: MessageEnvelope,
+        *,
+        referee_agent_id: str | None,
+        current_round: int,
+    ) -> BrokerDecision:
+        typed = self.config.topology.typed_communication
+        cross = self.config.topology.cross_route
+
+        # 1-6: schema, identity, limits, scope, and immutable hash.
+        if message.schema_version != typed.schema_version:
+            return self._reject(message, "unsupported message schema version")
+        if not self.route_registry.problem_hash:
+            self.route_registry.problem_hash = message.problem_hash
+        if (
+            typed.require_problem_hash
+            and message.problem_hash != self.route_registry.problem_hash
+        ):
+            return self._reject(message, "problem_hash mismatch")
+        if not self.route_registry.owns_agent(
+            message.source_route_id, message.source_agent_id, message.source_role
+        ):
+            return self._reject(message, "source agent/role does not belong to route")
+        if len(message.model_dump_json()) > typed.max_message_chars:
+            return self._reject(message, "message exceeds max_message_chars")
+        if len(message.assumptions) > typed.max_assumptions:
+            return self._reject(message, "message exceeds max_assumptions")
+        if len(message.dependencies) > typed.max_dependencies:
+            return self._reject(message, "message exceeds max_dependencies")
+        if typed.require_content_hash and (
+            message.content_hash != message.expected_content_hash()
+        ):
+            return self._reject(message, "content_hash mismatch")
+        artifact_gate = validate_artifact_refs(
+            [*message.artifact_refs]
+            + ([message.raw_source_ref] if message.raw_source_ref else [])
+        )
+        if not artifact_gate.accepted:
+            return self._reject(message, artifact_gate.reason)
+        if self.store is not None:
+            try:
+                for ref in [*message.artifact_refs] + (
+                    [message.raw_source_ref] if message.raw_source_ref else []
+                ):
+                    self.store.resolve(ref)
+            except (ValueError, OSError):
+                return self._reject(message, "artifact reference is outside this run")
+
+        # 7: deduplication never upgrades evidence by popularity.
+        duplicate_key = self._dedup_key(message)
+        duplicate_id = self._dedup.get(duplicate_key)
+        if duplicate_id is not None:
+            existing = self._messages[duplicate_id]
+            existing.artifact_refs = list(
+                dict.fromkeys(existing.artifact_refs + message.artifact_refs)
+            )
+            decision = BrokerDecision(
+                message_id=message.message_id,
+                accepted=True,
+                duplicate_of=duplicate_id,
+            )
+            self._record_decision(decision, "message_deduplicated")
+            return decision
+
+        dependencies_resolved = self.typed_memory.dependencies_resolved(
+            message.dependencies
+        )
+        dependency_cycle = self.typed_memory.would_create_cycle(
+            message.message_id, message.dependencies
+        )
+        known_counterexample = self.typed_memory.has_counterexample(
+            message.normalized_statement
+        )
+        gate = validate_evidence_tier(
+            message,
+            self.config,
+            referee_agent_id=referee_agent_id,
+            dependencies_resolved=dependencies_resolved,
+            dependency_cycle=dependency_cycle,
+            known_counterexample=known_counterexample,
+        )
+        if not gate.accepted:
+            return self._reject(message, gate.reason)
+
+        # 8-12: isolation, global-share gate, matching, and rate limits.
+        explicit = list(dict.fromkeys(message.target_route_ids))
+        if message.evidence_type == EvidenceType.COUNTEREXAMPLE:
+            explicit.extend(
+                self.typed_memory.affected_routes_for_counterexample(
+                    message.normalized_statement
+                )
+            )
+        candidate_targets = explicit or self.route_registry.neighbors(
+            message.source_route_id, current_round
+        )
+        source_neighbors = set(
+            self.route_registry.neighbors(message.source_route_id, current_round)
+        )
+        selected: list[str] = []
+        rejected: dict[str, str] = {}
+        can_share = cross_route_share_allowed(message, self.config)
+        max_neighbors = cross.max_neighbors_per_route
+        for target in dict.fromkeys(candidate_targets):
+            if target == message.source_route_id:
+                continue
+            try:
+                self.route_registry.get(target)
+            except KeyError:
+                rejected[target] = "unknown target route"
+                continue
+            if not cross.enabled or not can_share:
+                rejected[target] = "cross-route sharing disabled for this message"
+                continue
+            if (
+                message.evidence_type != EvidenceType.COUNTEREXAMPLE
+                and target not in source_neighbors
+            ):
+                rejected[target] = "target is not a sparse neighbor"
+                continue
+            if len(selected) >= max_neighbors:
+                rejected[target] = "neighbor cap reached"
+                continue
+            route_count_key = f"{current_round}:{target}"
+            if (
+                self._round_route_counts[route_count_key]
+                >= cross.max_messages_per_route_per_round
+            ):
+                rejected[target] = "per-route round message cap reached"
+                continue
+            if (
+                self._round_global_counts[current_round]
+                >= cross.max_global_messages_per_round
+            ):
+                rejected[target] = "global round message cap reached"
+                continue
+            selected.append(target)
+
+        self._messages[message.message_id] = message
+        self._dedup[duplicate_key] = message.message_id
+
+        # 13-14: memory and graph write happen even for a route-local insight.
+        self.typed_memory.add_message(message, referee_agent_id=referee_agent_id)
+        self.proof_graph.ingest_message(message)
+
+        isolated = (
+            current_round < cross.initial_isolation_rounds
+            and message.evidence_type != EvidenceType.COUNTEREXAMPLE
+        )
+        for target in selected:
+            if isolated:
+                self._isolation_pending[message.message_id].append(target)
+                continue
+            self._enqueue(message, target, current_round)
+
+        if message.evidence_type == EvidenceType.COUNTEREXAMPLE:
+            self.typed_memory.apply_counterexample(message)
+            self.proof_graph.apply_counterexample(message)
+
+        decision = BrokerDecision(
+            message_id=message.message_id,
+            accepted=True,
+            selected_targets=selected,
+            rejected_targets=rejected,
+            score_breakdown={
+                "selected_target_count": float(len(selected)),
+                "queued_by_initial_isolation": float(len(selected) if isolated else 0),
+            },
+        )
+        self._record_decision(decision, "message_published")
+        return decision
+
+    def _enqueue(
+        self, message: MessageEnvelope, target_route_id: str, current_round: int
+    ) -> None:
+        key = delivery_key(message.message_id, target_route_id)
+        if key in self._deliveries:
+            return
+        self._deliveries[key] = {
+            "delivery_key": key,
+            "message_id": message.message_id,
+            "target_route_id": target_route_id,
+            "delivered_round": current_round,
+            "prompt_consumed": False,
+            "acknowledged": False,
+            "status": "pending",
+        }
+        self._route_queues[target_route_id].append(key)
+        count_key = f"{current_round}:{target_route_id}"
+        self._round_route_counts[count_key] += 1
+        self._round_global_counts[current_round] += 1
+
+    def _release_isolation(self, current_round: int) -> None:
+        if current_round < self.config.topology.cross_route.initial_isolation_rounds:
+            return
+        cross = self.config.topology.cross_route
+        for message_id, targets in list(self._isolation_pending.items()):
+            message = self._messages.get(message_id)
+            if message is None:
+                continue
+            deferred: list[str] = []
+            for target in targets:
+                route_key = f"{current_round}:{target}"
+                if (
+                    self._round_route_counts[route_key]
+                    >= cross.max_messages_per_route_per_round
+                    or self._round_global_counts[current_round]
+                    >= cross.max_global_messages_per_round
+                ):
+                    deferred.append(target)
+                    continue
+                self._enqueue(message, target, current_round)
+            if deferred:
+                self._isolation_pending[message_id] = deferred
+            else:
+                del self._isolation_pending[message_id]
+
+    def inbox(
+        self,
+        route_id: str,
+        *,
+        current_round: int,
+        max_messages: int | None = None,
+    ) -> list[MessageEnvelope]:
+        self.route_registry.get(route_id)
+        self._release_isolation(current_round)
+        self.expire(current_round)
+        limit = max_messages
+        if limit is None:
+            limit = self.config.topology.cross_route.max_messages_per_route_per_round
+        result: list[MessageEnvelope] = []
+        for key in self._route_queues.get(route_id, []):
+            delivery = self._deliveries[key]
+            if delivery["status"] != "pending" or delivery["prompt_consumed"]:
+                continue
+            message = self._messages[delivery["message_id"]]
+            result.append(message)
+            delivery["prompt_consumed"] = True
+            self._emit_delivery_event(
+                "message_delivered",
+                {
+                    "message_id": message.message_id,
+                    "source_route_id": message.source_route_id,
+                    "target_route_id": route_id,
+                    "message_type": message.message_type.value,
+                    "memory_tier": message.memory_tier.value,
+                    "delivered_round": delivery["delivered_round"],
+                },
+            )
+            if len(result) >= limit:
+                break
+        return result
+
+    def acknowledge(self, receipt: MessageReceipt) -> None:
+        key = delivery_key(receipt.message_id, receipt.target_route_id)
+        delivery = self._deliveries.get(key)
+        if delivery is None:
+            raise ValueError("receipt does not correspond to a delivery")
+        message = self._messages[receipt.message_id]
+        expected = message.expected_semantic_hash()
+        parsed_hash = stable_hash(
+            {
+                "assumptions": receipt.parsed_assumptions,
+                "conclusion": receipt.parsed_conclusion,
+                "quantifiers": [
+                    item.model_dump(mode="json") for item in message.quantifiers
+                ],
+            }
+        )
+        if receipt.semantic_hash != expected or parsed_hash != expected:
+            receipt.status = ReceiptStatus.REJECTED
+            receipt.reason = "semantic hash mismatch"
+        delivery["acknowledged"] = True
+        delivery["status"] = receipt.status.value
+        self._receipts[key] = receipt
+        self._emit_delivery_event("message_acknowledged", receipt)
+
+    def expire(self, current_round: int) -> list[str]:
+        expired: list[str] = []
+        for key, delivery in self._deliveries.items():
+            if delivery["status"] != "pending":
+                continue
+            message = self._messages[delivery["message_id"]]
+            if current_round >= message.round_created + message.ttl_rounds:
+                delivery["status"] = ReceiptStatus.EXPIRED.value
+                expired.append(key)
+                self._emit_delivery_event(
+                    "message_expired",
+                    {
+                        "message_id": message.message_id,
+                        "target_route_id": delivery["target_route_id"],
+                        "current_round": current_round,
+                    },
+                )
+        return expired
+
+    def export_state(self) -> dict[str, Any]:
+        return {
+            "messages": {
+                key: value.model_dump(mode="json")
+                for key, value in self._messages.items()
+            },
+            "dedup": dict(self._dedup),
+            "decisions": [item.model_dump(mode="json") for item in self._decisions],
+            "deliveries": dict(self._deliveries),
+            "route_queues": dict(self._route_queues),
+            "receipts": {
+                key: value.model_dump(mode="json")
+                for key, value in self._receipts.items()
+            },
+            "isolation_pending": dict(self._isolation_pending),
+            "round_route_counts": dict(self._round_route_counts),
+            "round_global_counts": dict(self._round_global_counts),
+        }
+
+    @classmethod
+    def from_state(
+        cls,
+        state: dict[str, Any],
+        *,
+        config: SystemConfig,
+        store: ArtifactStore | None,
+        activity: ActivityStream | None,
+        route_registry: RouteRegistry,
+        proof_graph: "ProofGraphStore",
+        typed_memory: "TypedMemory",
+    ) -> "MessageBroker":
+        broker = cls(
+            config,
+            store,
+            activity,
+            route_registry,
+            proof_graph,
+            typed_memory,
+        )
+        broker._messages = {
+            str(key): MessageEnvelope.model_validate(value)
+            for key, value in dict(state.get("messages", {})).items()
+        }
+        broker._dedup = {
+            str(key): str(value) for key, value in dict(state.get("dedup", {})).items()
+        }
+        broker._decisions = [
+            BrokerDecision.model_validate(item) for item in state.get("decisions", [])
+        ]
+        broker._deliveries = {
+            str(key): dict(value)
+            for key, value in dict(state.get("deliveries", {})).items()
+        }
+        broker._route_queues = defaultdict(
+            list,
+            {
+                str(key): list(value)
+                for key, value in dict(state.get("route_queues", {})).items()
+            },
+        )
+        broker._receipts = {
+            str(key): MessageReceipt.model_validate(value)
+            for key, value in dict(state.get("receipts", {})).items()
+        }
+        broker._isolation_pending = defaultdict(
+            list,
+            {
+                str(key): list(value)
+                for key, value in dict(state.get("isolation_pending", {})).items()
+            },
+        )
+        broker._round_route_counts = defaultdict(
+            int,
+            {
+                str(key): int(value)
+                for key, value in dict(state.get("round_route_counts", {})).items()
+            },
+        )
+        broker._round_global_counts = defaultdict(
+            int,
+            {
+                int(key): int(value)
+                for key, value in dict(state.get("round_global_counts", {})).items()
+            },
+        )
+        return broker

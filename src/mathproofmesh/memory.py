@@ -1,9 +1,19 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from typing import Iterable
+from typing import Any, Iterable
 
-from .schemas import ClaimCard, ClaimStatus, VerificationReport, VerificationVerdict
+from .config import SystemConfig
+from .schemas import (
+    ClaimCard,
+    ClaimStatus,
+    EvidenceType,
+    InspirationProposal,
+    MemoryTier,
+    MessageEnvelope,
+    VerificationReport,
+    VerificationVerdict,
+)
 from .store import ArtifactStore
 
 
@@ -178,3 +188,515 @@ class LemmaMemory:
             "lemma_memory",
             [claim.model_dump(mode="json") for claim in self._claims.values()],
         )
+
+
+class TypedMemory:
+    """Fact/Insight/Negative memory with provenance-preserving promotion gates."""
+
+    def __init__(
+        self,
+        store: ArtifactStore | None,
+        config: SystemConfig | None = None,
+        *,
+        lemma_memory: LemmaMemory | None = None,
+    ) -> None:
+        self.store = store
+        self.config = config
+        self.lemma_memory = lemma_memory or (
+            LemmaMemory(store) if store is not None else None
+        )
+        self._messages: dict[str, MessageEnvelope] = {}
+        self._proposals: dict[str, InspirationProposal] = {}
+        self._tiers: dict[str, MemoryTier] = {}
+        self._content_index: dict[str, str] = {}
+        self._provenance: dict[str, set[str]] = defaultdict(set)
+        self._invalidated: dict[str, str] = {}
+
+    @property
+    def facts(self) -> list[MessageEnvelope]:
+        return [
+            self._messages[item_id]
+            for item_id, tier in self._tiers.items()
+            if tier == MemoryTier.FACT and item_id in self._messages
+        ]
+
+    @property
+    def insights(self) -> list[MessageEnvelope | InspirationProposal]:
+        result: list[MessageEnvelope | InspirationProposal] = []
+        for item_id, tier in self._tiers.items():
+            if tier != MemoryTier.INSIGHT:
+                continue
+            if item_id in self._messages:
+                result.append(self._messages[item_id])
+            elif item_id in self._proposals:
+                result.append(self._proposals[item_id])
+        return result
+
+    @property
+    def negatives(self) -> list[MessageEnvelope | InspirationProposal]:
+        result: list[MessageEnvelope | InspirationProposal] = []
+        for item_id, tier in self._tiers.items():
+            if tier != MemoryTier.NEGATIVE:
+                continue
+            if item_id in self._messages:
+                result.append(self._messages[item_id])
+            elif item_id in self._proposals:
+                result.append(self._proposals[item_id])
+        return result
+
+    def add_message(
+        self, message: MessageEnvelope, *, referee_agent_id: str | None = None
+    ) -> MessageEnvelope:
+        existing_id = self._content_index.get(message.content_hash)
+        if existing_id is not None:
+            existing = self._messages[existing_id]
+            existing.artifact_refs = list(
+                dict.fromkeys(existing.artifact_refs + message.artifact_refs)
+            )
+            self._provenance[existing_id].add(message.source_agent_id)
+            return existing
+        if message.memory_tier == MemoryTier.FACT:
+            return self.add_fact(message, referee_agent_id=referee_agent_id)
+        if message.memory_tier == MemoryTier.NEGATIVE:
+            return self.add_negative(message)
+        return self.add_insight(message)
+
+    def add_fact(
+        self,
+        message: MessageEnvelope,
+        *,
+        referee_agent_id: str | None = None,
+    ) -> MessageEnvelope:
+        if message.memory_tier != MemoryTier.FACT:
+            raise ValueError("add_fact requires memory_tier=fact")
+        if message.verification_status != ClaimStatus.VERIFIED:
+            raise ValueError("facts must be independently verified")
+        threshold = (
+            self.config.topology.typed_memory.fact_pass_threshold
+            if self.config is not None
+            else 0.8
+        )
+        if message.verification_confidence < threshold:
+            raise ValueError("verification confidence is below the fact gate")
+        if message.normalization_confidence < threshold:
+            raise ValueError("quantifier/scope normalization is incomplete")
+        if message.evidence_type not in {
+            EvidenceType.NATURAL_PROOF_AUDITED,
+            EvidenceType.EXACT_SYMBOLIC_IDENTITY,
+            EvidenceType.COMPLETE_FINITE_ENUMERATION,
+            EvidenceType.SAT_SMT_CERTIFICATE,
+            EvidenceType.FORMAL_KERNEL_CERTIFICATE,
+        }:
+            raise ValueError("this evidence cannot establish a reusable fact")
+        if referee_agent_id is None or referee_agent_id == message.source_agent_id:
+            raise ValueError("facts require an independent referee")
+        if not self.dependencies_resolved(message.dependencies):
+            raise ValueError("fact dependencies are unresolved")
+        if self.would_create_cycle(message.message_id, message.dependencies):
+            raise ValueError("fact dependency cycle detected")
+        if self.has_counterexample(message.normalized_statement):
+            raise ValueError("known counterexample blocks fact promotion")
+        result = self._store_message(message, MemoryTier.FACT)
+        self._event(
+            "fact_promoted",
+            {"message_id": message.message_id, "content_hash": message.content_hash},
+        )
+        return result
+
+    def add_insight(
+        self, item: MessageEnvelope | InspirationProposal
+    ) -> MessageEnvelope | InspirationProposal:
+        if isinstance(item, MessageEnvelope):
+            if item.memory_tier != MemoryTier.INSIGHT:
+                raise ValueError("add_insight requires memory_tier=insight")
+            return self._store_message(item, MemoryTier.INSIGHT)
+        existing = self._proposals.get(item.proposal_id)
+        if existing is not None:
+            return existing
+        self._proposals[item.proposal_id] = item
+        self._tiers[item.proposal_id] = MemoryTier.INSIGHT
+        self._content_index.setdefault(
+            item.novelty_signature.normalized_hash, item.proposal_id
+        )
+        self._provenance[item.proposal_id].add(item.source_agent_id)
+        self._persist()
+        return item
+
+    def add_negative(
+        self,
+        item: MessageEnvelope | InspirationProposal,
+        *,
+        reason: str = "",
+    ) -> MessageEnvelope | InspirationProposal:
+        if isinstance(item, MessageEnvelope):
+            if item.memory_tier != MemoryTier.NEGATIVE:
+                raise ValueError("add_negative requires memory_tier=negative")
+            result = self._store_message(item, MemoryTier.NEGATIVE)
+            if reason:
+                self._invalidated[item.message_id] = reason
+            self._event(
+                "negative_added",
+                {"message_id": item.message_id, "reason": reason},
+            )
+            return result
+        self._proposals[item.proposal_id] = item
+        self._tiers[item.proposal_id] = MemoryTier.NEGATIVE
+        if reason:
+            self._invalidated[item.proposal_id] = reason
+        self._persist()
+        self._event(
+            "negative_added",
+            {"proposal_id": item.proposal_id, "reason": reason},
+        )
+        return item
+
+    def _store_message(
+        self, message: MessageEnvelope, tier: MemoryTier
+    ) -> MessageEnvelope:
+        self._messages[message.message_id] = message
+        self._tiers[message.message_id] = tier
+        self._content_index.setdefault(message.content_hash, message.message_id)
+        self._provenance[message.message_id].add(message.source_agent_id)
+        self._persist()
+        return message
+
+    def facts_for_route(
+        self, route_id: str, *, max_items: int | None = None
+    ) -> list[MessageEnvelope]:
+        limit = max_items or (
+            self.config.topology.typed_memory.max_fact_context
+            if self.config is not None
+            else 32
+        )
+        return self._for_route(self.facts, route_id)[:limit]
+
+    def insights_for_route(
+        self, route_id: str, *, max_items: int | None = None
+    ) -> list[MessageEnvelope | InspirationProposal]:
+        limit = max_items or (
+            self.config.topology.typed_memory.max_insight_context
+            if self.config is not None
+            else 16
+        )
+        return self._for_route(self.insights, route_id)[:limit]
+
+    def negatives_for_route(
+        self, route_id: str, *, max_items: int | None = None
+    ) -> list[MessageEnvelope | InspirationProposal]:
+        limit = max_items or (
+            self.config.topology.typed_memory.max_negative_context
+            if self.config is not None
+            else 16
+        )
+        return self._for_route(self.negatives, route_id, global_negative=True)[:limit]
+
+    @staticmethod
+    def _for_route(
+        values: list[MessageEnvelope | InspirationProposal],
+        route_id: str,
+        *,
+        global_negative: bool = False,
+    ) -> list[MessageEnvelope | InspirationProposal]:
+        return [
+            item
+            for item in values
+            if global_negative
+            or (
+                isinstance(item, MessageEnvelope)
+                and (
+                    item.source_route_id == route_id
+                    or route_id in item.target_route_ids
+                )
+            )
+            or (
+                isinstance(item, InspirationProposal)
+                and route_id in item.target_route_ids
+            )
+        ]
+
+    def promote(
+        self,
+        message_id: str,
+        *,
+        referee_agent_id: str,
+        confidence: float | None = None,
+    ) -> MessageEnvelope:
+        message = self._messages[message_id]
+        if referee_agent_id == message.source_agent_id:
+            raise ValueError("the author cannot promote its own insight")
+        if message.evidence_type in {
+            EvidenceType.NUMERICAL_HEURISTIC,
+            EvidenceType.BOUNDED_EXPERIMENT,
+            EvidenceType.UNVERIFIED_IDEA,
+        }:
+            raise ValueError("this evidence cannot be promoted to FactMemory")
+        threshold = (
+            self.config.topology.typed_memory.fact_pass_threshold
+            if self.config is not None
+            else 0.8
+        )
+        final_confidence = (
+            message.verification_confidence if confidence is None else confidence
+        )
+        if final_confidence < threshold:
+            raise ValueError("verification confidence is below the fact gate")
+        if message.normalization_confidence < threshold:
+            raise ValueError("quantifier/scope normalization is incomplete")
+        if not self.dependencies_resolved(message.dependencies):
+            raise ValueError("dependencies are unresolved")
+        if self.would_create_cycle(message.message_id, message.dependencies):
+            raise ValueError("fact dependency cycle detected")
+        if self.has_counterexample(message.normalized_statement):
+            raise ValueError("known counterexample blocks promotion")
+        payload = message.model_dump(mode="json")
+        old_hash = message.content_hash
+        payload.update(
+            {
+                "verification_status": ClaimStatus.VERIFIED.value,
+                "verification_confidence": final_confidence,
+                "memory_tier": MemoryTier.FACT.value,
+                "content_hash": "",
+            }
+        )
+        message = MessageEnvelope.model_validate(payload)
+        self._messages[message_id] = message
+        if self._content_index.get(old_hash) == message_id:
+            del self._content_index[old_hash]
+        self._content_index[message.content_hash] = message_id
+        self._tiers[message_id] = MemoryTier.FACT
+        self._persist()
+        self._event(
+            "fact_promoted",
+            {
+                "message_id": message_id,
+                "referee_agent_id": referee_agent_id,
+                "verification_confidence": final_confidence,
+            },
+        )
+        return message
+
+    def demote(
+        self,
+        item_id: str,
+        *,
+        to_tier: MemoryTier = MemoryTier.INSIGHT,
+        reason: str,
+    ) -> None:
+        if to_tier == MemoryTier.FACT:
+            raise ValueError("demote cannot target FactMemory")
+        if item_id not in self._tiers:
+            raise KeyError(item_id)
+        self._tiers[item_id] = to_tier
+        self._invalidated[item_id] = reason
+        message = self._messages.get(item_id)
+        if message is not None:
+            old_hash = message.content_hash
+            payload = message.model_dump(mode="json")
+            payload.update(
+                {
+                    "memory_tier": to_tier.value,
+                    "verification_status": (
+                        ClaimStatus.REJECTED.value
+                        if to_tier == MemoryTier.NEGATIVE
+                        else ClaimStatus.UNCERTAIN.value
+                    ),
+                    "content_hash": "",
+                }
+            )
+            message = MessageEnvelope.model_validate(payload)
+            self._messages[item_id] = message
+            if self._content_index.get(old_hash) == item_id:
+                del self._content_index[old_hash]
+            self._content_index[message.content_hash] = item_id
+        self._persist()
+        self._event(
+            "fact_demoted",
+            {"item_id": item_id, "to_tier": to_tier.value, "reason": reason},
+        )
+
+    def dependencies_resolved(self, dependencies: Iterable[str]) -> bool:
+        fact_ids = {item.message_id for item in self.facts}
+        fact_hashes = {item.content_hash for item in self.facts}
+        legacy_ids = (
+            {item.claim_id for item in self.lemma_memory.verified()}
+            if self.lemma_memory is not None
+            else set()
+        )
+        return all(
+            dep.startswith("external:")
+            or dep in fact_ids
+            or dep in fact_hashes
+            or dep in legacy_ids
+            for dep in dependencies
+        )
+
+    def would_create_cycle(self, node_id: str, dependencies: Iterable[str]) -> bool:
+        graph: dict[str, list[str]] = {
+            item.message_id: list(item.dependencies) for item in self.facts
+        }
+        graph[node_id] = list(dependencies)
+
+        def reaches(start: str, target: str, seen: set[str]) -> bool:
+            if start == target:
+                return True
+            if start in seen:
+                return False
+            seen.add(start)
+            return any(reaches(item, target, seen) for item in graph.get(start, []))
+
+        return any(reaches(dep, node_id, set()) for dep in graph[node_id])
+
+    def has_counterexample(self, normalized_statement: str) -> bool:
+        return any(
+            isinstance(item, MessageEnvelope)
+            and item.evidence_type == EvidenceType.COUNTEREXAMPLE
+            and item.normalized_statement == normalized_statement
+            for item in self.negatives
+        )
+
+    def affected_routes_for_counterexample(
+        self, normalized_statement: str
+    ) -> list[str]:
+        routes: set[str] = set()
+        for fact in self.facts:
+            if fact.normalized_statement == normalized_statement:
+                routes.add(fact.source_route_id)
+                routes.update(fact.target_route_ids)
+        return sorted(routes)
+
+    def apply_counterexample(self, counterexample: MessageEnvelope) -> list[str]:
+        affected = [
+            fact.message_id
+            for fact in self.facts
+            if fact.normalized_statement == counterexample.normalized_statement
+            or counterexample.conclusion in fact.normalized_statement
+        ]
+        invalidated = self.invalidate_dependents(
+            affected,
+            reason=f"counterexample:{counterexample.message_id}",
+            rejected=True,
+        )
+        return invalidated
+
+    def invalidate_dependents(
+        self,
+        item_ids: Iterable[str],
+        *,
+        reason: str,
+        rejected: bool = False,
+    ) -> list[str]:
+        pending = deque(item_ids)
+        invalidated: list[str] = []
+        while pending:
+            item_id = pending.popleft()
+            if item_id in invalidated:
+                continue
+            if item_id in self._tiers:
+                target_tier = MemoryTier.NEGATIVE if rejected else MemoryTier.INSIGHT
+                self.demote(item_id, to_tier=target_tier, reason=reason)
+                invalidated.append(item_id)
+            for fact in list(self.facts):
+                if item_id in fact.dependencies or any(
+                    self._messages.get(item_id) is not None
+                    and self._messages[item_id].content_hash == dep
+                    for dep in fact.dependencies
+                ):
+                    pending.append(fact.message_id)
+        if self.store is not None and invalidated:
+            self.store.append_event(
+                "typed_memory_invalidated",
+                {"item_ids": invalidated, "reason": reason},
+            )
+        return invalidated
+
+    # Legacy compatibility surface.
+    def add_many(self, claims: Iterable[ClaimCard]) -> list[ClaimCard]:
+        if self.lemma_memory is None:
+            raise RuntimeError("legacy LemmaMemory requires an ArtifactStore")
+        return self.lemma_memory.add_many(claims)
+
+    def apply_claim_report(self, report: VerificationReport) -> ClaimCard | None:
+        if self.lemma_memory is None:
+            return None
+        return self.lemma_memory.apply_claim_report(report)
+
+    def mark_attempt_verified(
+        self, attempt_id: str, report: VerificationReport
+    ) -> list[ClaimCard]:
+        if self.lemma_memory is None:
+            return []
+        return self.lemma_memory.mark_attempt_verified(attempt_id, report)
+
+    def verified(self) -> list[ClaimCard]:
+        return self.lemma_memory.verified() if self.lemma_memory is not None else []
+
+    def uncertain(self) -> list[ClaimCard]:
+        return self.lemma_memory.uncertain() if self.lemma_memory is not None else []
+
+    def rejected(self) -> list[ClaimCard]:
+        return self.lemma_memory.rejected() if self.lemma_memory is not None else []
+
+    def export_state(self) -> dict[str, Any]:
+        return {
+            "messages": {
+                key: value.model_dump(mode="json")
+                for key, value in self._messages.items()
+            },
+            "proposals": {
+                key: value.model_dump(mode="json")
+                for key, value in self._proposals.items()
+            },
+            "tiers": {key: value.value for key, value in self._tiers.items()},
+            "content_index": dict(self._content_index),
+            "provenance": {
+                key: sorted(value) for key, value in self._provenance.items()
+            },
+            "invalidated": dict(self._invalidated),
+        }
+
+    @classmethod
+    def from_state(
+        cls,
+        state: dict[str, Any],
+        *,
+        store: ArtifactStore | None,
+        config: SystemConfig | None = None,
+        lemma_memory: LemmaMemory | None = None,
+    ) -> "TypedMemory":
+        memory = cls(store, config, lemma_memory=lemma_memory)
+        memory._messages = {
+            str(key): MessageEnvelope.model_validate(value)
+            for key, value in dict(state.get("messages", {})).items()
+        }
+        memory._proposals = {
+            str(key): InspirationProposal.model_validate(value)
+            for key, value in dict(state.get("proposals", {})).items()
+        }
+        memory._tiers = {
+            str(key): MemoryTier(value)
+            for key, value in dict(state.get("tiers", {})).items()
+        }
+        memory._content_index = {
+            str(key): str(value)
+            for key, value in dict(state.get("content_index", {})).items()
+        }
+        memory._provenance = defaultdict(
+            set,
+            {
+                str(key): set(value)
+                for key, value in dict(state.get("provenance", {})).items()
+            },
+        )
+        memory._invalidated = {
+            str(key): str(value)
+            for key, value in dict(state.get("invalidated", {})).items()
+        }
+        return memory
+
+    def _persist(self) -> None:
+        if self.store is not None:
+            self.store.write_json("structured", "typed_memory", self.export_state())
+
+    def _event(self, event_type: str, payload: dict[str, Any]) -> None:
+        if self.store is not None:
+            self.store.append_event(event_type, payload)

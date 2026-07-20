@@ -100,6 +100,19 @@ class ActionKind(StrEnum):
     VERIFY = "verify"
     SYNTHESIZE = "synthesize"
     REVISE = "revise"
+    BRIDGE = "bridge"
+    RESOLVE_CONFLICT = "resolve_conflict"
+    SEARCH_COUNTEREXAMPLE = "search_counterexample"
+    MERGE_ROUTE = "merge_route"
+    COOLDOWN_ROUTE = "cooldown_route"
+    SWITCH_REPRESENTATION = "switch_representation"
+    TRIGGER_INSPIRATION = "trigger_inspiration"
+    SEARCH_ANALOGY = "search_analogy"
+    INVENT_CONSTRUCTION = "invent_construction"
+    GENERATE_INVARIANT = "generate_invariant"
+    REVERSE_GOAL = "reverse_goal"
+    META_REPLAN = "meta_replan"
+    SURPRISE_WIDEN = "surprise_widen"
     STOP = "stop"
 
 
@@ -145,6 +158,110 @@ class EvidenceStrength(StrEnum):
     COUNTEREXAMPLE = "counterexample"
     EXHAUSTIVE_CERTIFICATE = "exhaustive_certificate"
     FORMAL_CERTIFICATE = "formal_certificate"
+
+
+class RouteRole(StrEnum):
+    PROVER = "prover"
+    SKEPTIC = "skeptic"
+    TOOL_SPECIALIST = "tool_specialist"
+    REFEREE = "referee"
+    BRIDGE_PROVER = "bridge_prover"
+    CONFLICT_RESOLVER = "conflict_resolver"
+    COUNTEREXAMPLE_HUNTER = "counterexample_hunter"
+
+
+class RouteStatus(StrEnum):
+    ACTIVE = "active"
+    COOLING = "cooling"
+    MERGED = "merged"
+    ABANDONED = "abandoned"
+    COMPLETED = "completed"
+
+
+class MessageType(StrEnum):
+    CLAIM_PROPOSAL = "claim_proposal"
+    VERIFIED_LEMMA = "verified_lemma"
+    PROOF_OBLIGATION = "proof_obligation"
+    COUNTEREXAMPLE = "counterexample"
+    CONTRADICTION_NOTICE = "contradiction_notice"
+    COMPUTATION_PLAN = "computation_plan"
+    COMPUTATION_CERTIFICATE = "computation_certificate"
+    FORMAL_CERTIFICATE = "formal_certificate"
+    REPAIR_REQUEST = "repair_request"
+    BRIDGE_LEMMA_REQUEST = "bridge_lemma_request"
+    STRATEGY_REWRITE_REQUEST = "strategy_rewrite_request"
+    FAILURE_RECORD = "failure_record"
+    ROUTE_CHECKPOINT = "route_checkpoint"
+
+
+class EvidenceType(StrEnum):
+    UNVERIFIED_IDEA = "unverified_idea"
+    NUMERICAL_HEURISTIC = "numerical_heuristic"
+    BOUNDED_EXPERIMENT = "bounded_experiment"
+    EXACT_SYMBOLIC_IDENTITY = "exact_symbolic_identity"
+    COMPLETE_FINITE_ENUMERATION = "complete_finite_enumeration"
+    SAT_SMT_CERTIFICATE = "sat_smt_certificate"
+    COUNTEREXAMPLE = "counterexample"
+    NATURAL_PROOF_AUDITED = "natural_proof_audited"
+    FORMAL_KERNEL_CERTIFICATE = "formal_kernel_certificate"
+
+
+class MemoryTier(StrEnum):
+    FACT = "fact"
+    INSIGHT = "insight"
+    NEGATIVE = "negative"
+
+
+class ObligationKind(StrEnum):
+    MAIN_GOAL = "main_goal"
+    SUBGOAL = "subgoal"
+    LEMMA = "lemma"
+    CASE_BRANCH = "case_branch"
+    CONSTRUCTION = "construction"
+    COMPUTATION_QUESTION = "computation_question"
+    FORMALIZATION_TASK = "formalization_task"
+    CONTRADICTION = "contradiction"
+
+
+class GraphEdgeType(StrEnum):
+    DEPENDS_ON = "depends_on"
+    IMPLIES = "implies"
+    REFUTES = "refutes"
+    EQUIVALENT_TO = "equivalent_to"
+    STRENGTHENS = "strengthens"
+    WEAKENS = "weakens"
+    USES_CONSTRUCTION = "uses_construction"
+    CLOSES = "closes"
+
+
+class ReceiptStatus(StrEnum):
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    DUPLICATE = "duplicate"
+    EXPIRED = "expired"
+    DEFERRED = "deferred"
+
+
+class InspirationTriggerType(StrEnum):
+    STAGNATION = "stagnation"
+    REPEATED_FIRST_ERROR = "repeated_first_error"
+    HIGH_ROUTE_REDUNDANCY = "high_route_redundancy"
+    ALL_ROUTES_FAILED = "all_routes_failed"
+    SHARED_BOTTLENECK = "shared_bottleneck"
+    PROOF_DEBT_PLATEAU = "proof_debt_plateau"
+    FINAL_REPAIR_FAILED = "final_repair_failed"
+    MANUAL = "manual"
+
+
+class InspirationMechanism(StrEnum):
+    REPRESENTATION_SWITCH = "representation_switch"
+    STRUCTURAL_ANALOGY = "structural_analogy"
+    AUXILIARY_CONSTRUCTION = "auxiliary_construction"
+    INVARIANT_HYPOTHESIS = "invariant_hypothesis"
+    REVERSE_GOAL_ANALYSIS = "reverse_goal_analysis"
+    BRIDGE_LEMMA = "bridge_lemma"
+    SURPRISE_EXPLORATION = "surprise_exploration"
+    META_REPLAN = "meta_replan"
 
 
 class ExperimentOutcome(StrEnum):
@@ -199,6 +316,476 @@ class CitationRecord(StrictModel):
     exact_statement: str | None = None
     applicability_conditions: list[str] = Field(default_factory=list)
     verified: bool = False
+
+
+class QuantifierSpec(StrictModel):
+    order: int = Field(ge=0)
+    kind: Literal["forall", "exists", "exists_unique"]
+    variable_id: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    domain: str = Field(min_length=1)
+    restrictions: list[str] = Field(default_factory=list)
+
+
+class VariableBinding(StrictModel):
+    variable_id: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    domain: str = Field(min_length=1)
+    owner_scope: str = Field(min_length=1)
+    aliases: list[str] = Field(default_factory=list)
+
+
+class MessageEnvelope(StrictModel):
+    schema_version: str = "1"
+    message_id: str = Field(default_factory=lambda: new_id("msg"))
+    problem_hash: str = Field(min_length=1)
+    source_agent_id: str = Field(min_length=1)
+    source_route_id: str = Field(min_length=1)
+    source_role: RouteRole
+    target_route_ids: list[str] = Field(default_factory=list)
+    message_type: MessageType
+
+    statement: str = Field(min_length=1)
+    normalized_statement: str = Field(min_length=1)
+    assumptions: list[str] = Field(default_factory=list)
+    conclusion: str = Field(min_length=1)
+    quantifiers: list[QuantifierSpec] = Field(default_factory=list)
+    variable_bindings: list[VariableBinding] = Field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list)
+    scope_limitations: list[str] = Field(default_factory=list)
+
+    evidence_type: EvidenceType
+    memory_tier: MemoryTier
+    verification_status: ClaimStatus
+    verification_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    normalization_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    artifact_refs: list[str] = Field(default_factory=list)
+    raw_source_ref: str | None = None
+    round_created: int = Field(ge=0)
+    ttl_rounds: int = Field(default=2, ge=1)
+    content_hash: str = ""
+    created_at: str = Field(default_factory=utc_now_iso)
+
+    def immutable_payload(self) -> dict[str, Any]:
+        return {
+            "problem_hash": self.problem_hash,
+            "source_route_id": self.source_route_id,
+            "message_type": self.message_type.value,
+            "normalized_statement": self.normalized_statement,
+            "assumptions": self.assumptions,
+            "conclusion": self.conclusion,
+            "quantifiers": [item.model_dump(mode="json") for item in self.quantifiers],
+            "dependencies": self.dependencies,
+            "evidence_type": self.evidence_type.value,
+            "memory_tier": self.memory_tier.value,
+        }
+
+    def expected_content_hash(self) -> str:
+        return stable_hash(self.immutable_payload())
+
+    def expected_semantic_hash(self) -> str:
+        return stable_hash(
+            {
+                "assumptions": self.assumptions,
+                "conclusion": self.conclusion,
+                "quantifiers": [
+                    item.model_dump(mode="json") for item in self.quantifiers
+                ],
+            }
+        )
+
+    @model_validator(mode="after")
+    def validate_scope_and_hash(self) -> "MessageEnvelope":
+        orders = [item.order for item in self.quantifiers]
+        if len(orders) != len(set(orders)):
+            raise ValueError("quantifier orders must be unique")
+        if orders and sorted(orders) != list(range(len(orders))):
+            raise ValueError("quantifier orders must be contiguous and start at zero")
+        binding_ids = [item.variable_id for item in self.variable_bindings]
+        if len(binding_ids) != len(set(binding_ids)):
+            raise ValueError("variable binding IDs must be unique")
+        bindings = {item.variable_id: item for item in self.variable_bindings}
+        for quantifier in self.quantifiers:
+            binding = bindings.get(quantifier.variable_id)
+            if binding is None:
+                raise ValueError(
+                    f"quantified variable {quantifier.variable_id!r} has no binding"
+                )
+            if binding.domain != quantifier.domain:
+                raise ValueError("quantifier and binding domains must agree")
+        expected = self.expected_content_hash()
+        if self.content_hash and self.content_hash != expected:
+            raise ValueError("message content_hash mismatch")
+        object.__setattr__(self, "content_hash", expected)
+        return self
+
+
+class MessageReceipt(StrictModel):
+    receipt_id: str = Field(default_factory=lambda: new_id("receipt"))
+    message_id: str
+    target_route_id: str
+    status: ReceiptStatus
+    parsed_assumptions: list[str] = Field(default_factory=list)
+    parsed_conclusion: str = ""
+    semantic_hash: str = ""
+    reason: str = ""
+    delivered_round: int = Field(ge=0)
+    acknowledged_at: str = Field(default_factory=utc_now_iso)
+
+
+class RouteMember(StrictModel):
+    agent_id: str
+    role: RouteRole
+    assigned_round: int = Field(ge=0)
+
+
+class RouteDescriptor(StrictModel):
+    route_id: str
+    strategy_id: str
+    mechanism_signature: list[str]
+    status: RouteStatus = RouteStatus.ACTIVE
+    members: list[RouteMember] = Field(default_factory=list)
+    neighbor_route_ids: list[str] = Field(default_factory=list)
+    latest_attempt_id: str | None = None
+    latest_checkpoint_id: str | None = None
+    failure_count: int = Field(default=0, ge=0)
+    stagnation_rounds: int = Field(default=0, ge=0)
+    cooldown_until_round: int | None = Field(default=None, ge=0)
+    merged_into_route_id: str | None = None
+
+
+class ProofObligation(StrictModel):
+    obligation_id: str = Field(default_factory=lambda: new_id("obl"))
+    problem_hash: str
+    route_ids: list[str]
+    kind: ObligationKind
+    statement: str
+    normalized_statement: str
+    assumptions: list[str] = Field(default_factory=list)
+    quantifiers: list[QuantifierSpec] = Field(default_factory=list)
+    dependency_ids: list[str] = Field(default_factory=list)
+    status: Literal["open", "tentative", "closed", "refuted", "blocked"] = "open"
+    priority: float = Field(default=0.5, ge=0.0, le=1.0)
+    centrality: float = Field(default=0.0, ge=0.0, le=1.0)
+    evidence_message_ids: list[str] = Field(default_factory=list)
+    first_error_fingerprint: str | None = None
+    content_hash: str = ""
+
+    @model_validator(mode="after")
+    def validate_obligation(self) -> "ProofObligation":
+        payload = {
+            "problem_hash": self.problem_hash,
+            "normalized_statement": self.normalized_statement,
+            "assumptions": self.assumptions,
+            "quantifiers": [item.model_dump(mode="json") for item in self.quantifiers],
+            "kind": self.kind.value,
+        }
+        expected = stable_hash(payload)
+        if self.content_hash and self.content_hash != expected:
+            raise ValueError("obligation content_hash mismatch")
+        if self.status == "closed" and not self.evidence_message_ids:
+            raise ValueError("closed obligation requires reusable evidence")
+        object.__setattr__(self, "content_hash", expected)
+        return self
+
+
+class ProofGraphEdge(StrictModel):
+    edge_id: str = Field(default_factory=lambda: new_id("pge"))
+    source_id: str
+    target_id: str
+    edge_type: GraphEdgeType
+    route_id: str | None = None
+    evidence_message_id: str | None = None
+
+
+class BrokerDecision(StrictModel):
+    message_id: str
+    accepted: bool
+    rejection_reason: str | None = None
+    selected_targets: list[str] = Field(default_factory=list)
+    rejected_targets: dict[str, str] = Field(default_factory=dict)
+    duplicate_of: str | None = None
+    bridge_task_id: str | None = None
+    contradiction_id: str | None = None
+    score_breakdown: dict[str, float] = Field(default_factory=dict)
+
+
+class BridgeTask(StrictModel):
+    task_id: str = Field(default_factory=lambda: new_id("bridge"))
+    obligation_ids: list[str]
+    route_ids: list[str]
+    normalized_goal: str
+    allowed_fact_ids: list[str] = Field(default_factory=list)
+    forbidden_negative_ids: list[str] = Field(default_factory=list)
+    priority: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_bridge_scope(self) -> "BridgeTask":
+        if len(set(self.obligation_ids)) < 2 or len(set(self.route_ids)) < 2:
+            raise ValueError(
+                "a bridge task must connect at least two obligations/routes"
+            )
+        return self
+
+
+class NoveltySignature(StrictModel):
+    representation_tags: list[str] = Field(default_factory=list)
+    mechanism_tags: list[str] = Field(default_factory=list)
+    core_objects: list[str] = Field(default_factory=list)
+    key_transformations: list[str] = Field(default_factory=list)
+    proof_principles: list[str] = Field(default_factory=list)
+    targeted_obligation_ids: list[str] = Field(default_factory=list)
+    normalized_hash: str = ""
+
+    def normalized_payload(self) -> dict[str, list[str]]:
+        return {
+            "representation_tags": sorted(set(self.representation_tags)),
+            "mechanism_tags": sorted(set(self.mechanism_tags)),
+            "core_objects": sorted(set(self.core_objects)),
+            "key_transformations": sorted(set(self.key_transformations)),
+            "proof_principles": sorted(set(self.proof_principles)),
+            "targeted_obligation_ids": sorted(set(self.targeted_obligation_ids)),
+        }
+
+    @model_validator(mode="after")
+    def set_normalized_hash(self) -> "NoveltySignature":
+        expected = stable_hash(self.normalized_payload())
+        if self.normalized_hash and self.normalized_hash != expected:
+            raise ValueError("novelty signature hash mismatch")
+        object.__setattr__(self, "normalized_hash", expected)
+        return self
+
+
+class InspirationTrigger(StrictModel):
+    trigger_id: str = Field(default_factory=lambda: new_id("trigger"))
+    trigger_type: InspirationTriggerType
+    round_index: int = Field(ge=0)
+    affected_route_ids: list[str]
+    evidence_refs: list[str] = Field(default_factory=list)
+    proof_debt_before: float = Field(default=0.0, ge=0.0)
+    verified_gain_recent: int = Field(default=0, ge=0)
+    repeated_error_fingerprints: list[str] = Field(default_factory=list)
+    reason: str
+
+
+class RepresentationCandidate(StrictModel):
+    candidate_id: str = Field(default_factory=lambda: new_id("representation"))
+    source_problem_hash: str
+    representation_name: str
+    rewritten_problem_view: str
+    object_mapping: dict[str, str]
+    preserved_invariants: list[str]
+    lost_conditions: list[str] = Field(default_factory=list)
+    new_candidate_tools: list[str] = Field(default_factory=list)
+    expected_advantage: str
+    failure_risks: list[str]
+    fast_failure_tests: list[str] = Field(default_factory=list)
+    novelty_signature: NoveltySignature
+
+    @model_validator(mode="after")
+    def require_auditable_mapping(self) -> "RepresentationCandidate":
+        if not self.object_mapping:
+            raise ValueError("representation candidate requires an object mapping")
+        if not self.failure_risks:
+            raise ValueError("representation candidate requires failure risks")
+        return self
+
+
+class AnalogyMapping(StrictModel):
+    analogy_id: str = Field(default_factory=lambda: new_id("analogy"))
+    source_record_id: str
+    source_problem_summary: str
+    target_problem_hash: str
+    object_correspondence: dict[str, str]
+    operation_correspondence: dict[str, str]
+    transferable_lemmas: list[str]
+    non_transferable_conditions: list[str]
+    transfer_risks: list[str]
+    required_bridge_lemmas: list[str] = Field(default_factory=list)
+    novelty_signature: NoveltySignature
+
+    @model_validator(mode="after")
+    def require_transfer_limits(self) -> "AnalogyMapping":
+        if not self.object_correspondence or not self.operation_correspondence:
+            raise ValueError("analogy requires object and operation correspondence")
+        if not self.non_transferable_conditions:
+            raise ValueError("analogy must state non-transferable conditions")
+        if not self.transfer_risks:
+            raise ValueError("analogy must state transfer risks")
+        return self
+
+
+class ConstructionProposal(StrictModel):
+    proposal_id: str = Field(default_factory=lambda: new_id("construction"))
+    construction_type: str
+    constructed_objects: list[str]
+    definition: str = Field(min_length=1)
+    intended_obligations: list[str]
+    expected_invariant_or_relation: str
+    expected_proof_debt_reduction: str = ""
+    falsification_tests: list[str]
+    failure_conditions: list[str] = Field(default_factory=list)
+    novelty_signature: NoveltySignature
+
+    @model_validator(mode="after")
+    def require_testable_construction(self) -> "ConstructionProposal":
+        if not self.constructed_objects:
+            raise ValueError("construction requires at least one constructed object")
+        if not self.intended_obligations:
+            raise ValueError("construction must target an open obligation")
+        if not self.falsification_tests:
+            raise ValueError("construction requires a falsification test")
+        return self
+
+
+class InvariantHypothesis(StrictModel):
+    hypothesis_id: str = Field(default_factory=lambda: new_id("invariant"))
+    target_obligation_ids: list[str]
+    state_definition: str = Field(min_length=1)
+    allowed_operations: list[str]
+    candidate_expression: str = Field(min_length=1)
+    behavior: Literal["invariant", "nondecreasing", "nonincreasing"]
+    boundary_case: str = Field(min_length=1)
+    boundary_result: str = Field(min_length=1)
+    falsification_request: str = Field(min_length=1)
+    novelty_signature: NoveltySignature
+
+    @model_validator(mode="after")
+    def require_invariant_scope(self) -> "InvariantHypothesis":
+        if not self.target_obligation_ids or not self.allowed_operations:
+            raise ValueError("invariant hypothesis requires targets and operations")
+        return self
+
+
+class ReverseGoalPlan(StrictModel):
+    plan_id: str = Field(default_factory=lambda: new_id("reverse_goal"))
+    target_obligation_id: str
+    goal: str
+    sufficient_intermediate_claims: list[str]
+    fact_supported_claims: list[str] = Field(default_factory=list)
+    minimal_gaps: list[str]
+    bridge_requests: list[str]
+    novelty_signature: NoveltySignature
+
+    @model_validator(mode="after")
+    def require_reverse_gap(self) -> "ReverseGoalPlan":
+        if not self.sufficient_intermediate_claims or not self.minimal_gaps:
+            raise ValueError(
+                "reverse goal analysis must expose a sufficient claim and gap"
+            )
+        return self
+
+
+class MetaStrategyDecision(StrictModel):
+    decision_id: str = Field(default_factory=lambda: new_id("meta"))
+    round_index: int = Field(ge=0)
+    action: Literal[
+        "continue_current_mechanism",
+        "local_repair",
+        "rewrite_plan",
+        "switch_representation",
+        "search_analogy",
+        "invent_auxiliary_construction",
+        "surprise_exploration",
+        "merge_route",
+        "split_route",
+        "cooldown_route",
+        "abandon_route",
+    ]
+    affected_route_ids: list[str] = Field(default_factory=list)
+    selected_mechanism: InspirationMechanism | None = None
+    observable_metrics: dict[str, float | int | str | bool] = Field(
+        default_factory=dict
+    )
+    reason: str
+    estimated_calls: int = Field(default=0, ge=0)
+
+
+class SurpriseBudgetState(StrictModel):
+    total_calls: int = Field(default=0, ge=0)
+    used_calls: int = Field(default=0, ge=0)
+    finalization_reserve_calls: int = Field(default=0, ge=0)
+    rejection_streak: int = Field(default=0, ge=0)
+    cooldown_until_round: int | None = Field(default=None, ge=0)
+
+    @property
+    def remaining_calls(self) -> int:
+        return max(0, self.total_calls - self.used_calls)
+
+
+class InspirationProposal(StrictModel):
+    proposal_id: str = Field(default_factory=lambda: new_id("inspiration"))
+    trigger_id: str
+    mechanism: InspirationMechanism
+    source_agent_id: str
+    target_route_ids: list[str]
+    statement: str
+    rationale_summary: str
+    generated_obligations: list[str]
+    representation: RepresentationCandidate | None = None
+    analogy: AnalogyMapping | None = None
+    construction: ConstructionProposal | None = None
+    invariant: InvariantHypothesis | None = None
+    reverse_goal: ReverseGoalPlan | None = None
+    novelty_signature: NoveltySignature
+    novelty_score: float = Field(ge=0.0, le=1.0)
+    expected_information_gain: float = Field(ge=0.0, le=1.0)
+    estimated_cost: int = Field(ge=0)
+    evidence_type: EvidenceType = EvidenceType.UNVERIFIED_IDEA
+
+    @model_validator(mode="after")
+    def enforce_insight_only_proposal(self) -> "InspirationProposal":
+        if self.evidence_type != EvidenceType.UNVERIFIED_IDEA:
+            raise ValueError("inspiration proposals begin as unverified ideas")
+        if not self.generated_obligations:
+            raise ValueError("inspiration proposal must target or create an obligation")
+        return self
+
+
+class InspirationReview(StrictModel):
+    proposal_id: str
+    reviewer_agent_id: str
+    semantically_distinct: bool
+    relevant_to_open_obligation: bool
+    internally_coherent: bool
+    hidden_assumptions: list[str] = Field(default_factory=list)
+    immediate_counterexamples: list[str] = Field(default_factory=list)
+    recommendation: Literal[
+        "reject",
+        "store_insight",
+        "attach_to_existing_route",
+        "create_new_route",
+        "request_computation",
+        "request_bridge_verification",
+    ]
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class InspirationTask(StrictModel):
+    task_id: str = Field(default_factory=lambda: new_id("inspiration_task"))
+    trigger_id: str
+    mechanism: InspirationMechanism
+    target_route_ids: list[str] = Field(default_factory=list)
+    target_obligation_ids: list[str] = Field(default_factory=list)
+    reason: str
+    max_proposals: int = Field(default=1, ge=1)
+
+
+class InspirationMaterialization(StrictModel):
+    proposal_id: str
+    action: Literal[
+        "shadow_only",
+        "rejected",
+        "stored_insight",
+        "attached",
+        "route_created",
+        "computation_requested",
+        "bridge_requested",
+    ]
+    route_id: str | None = None
+    obligation_ids: list[str] = Field(default_factory=list)
+    reason: str = ""
 
 
 class ComputationHint(StrictModel):
@@ -389,6 +976,89 @@ class ExperimentResult(StrictModel):
         return self
 
 
+class ComputationPlan(StrictModel):
+    """Cross-route description of an approved experiment, never executable code."""
+
+    plan_id: str = Field(default_factory=lambda: new_id("compute_plan"))
+    experiment_id: str
+    request_hash: str
+    target_claim: str
+    assumptions: list[str] = Field(default_factory=list)
+    method: ComputationMethod
+    decision_use: str
+    bounded_scope: dict[str, Any] = Field(default_factory=dict)
+    exact_arithmetic: bool = True
+    source_artifact_ref: str | None = None
+
+    @classmethod
+    def from_spec(cls, spec: ExperimentSpec) -> "ComputationPlan":
+        return cls(
+            experiment_id=spec.experiment_id,
+            request_hash=spec.request_hash,
+            target_claim=spec.target_claim,
+            assumptions=spec.assumptions,
+            method=spec.method,
+            decision_use=spec.decision_if_refuted,
+            bounded_scope=spec.domains,
+            exact_arithmetic=spec.exact_arithmetic,
+        )
+
+
+class ComputationCertificate(StrictModel):
+    certificate_id: str = Field(default_factory=lambda: new_id("compute_cert"))
+    experiment_id: str
+    request_hash: str
+    result_hash: str
+    target_claim: str
+    outcome: ExperimentOutcome
+    evidence_type: EvidenceType
+    scope: dict[str, Any] = Field(default_factory=dict)
+    independently_verified: bool = False
+    artifact_refs: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_result(cls, result: ExperimentResult) -> "ComputationCertificate":
+        evidence_map = {
+            EvidenceStrength.HEURISTIC: EvidenceType.NUMERICAL_HEURISTIC,
+            EvidenceStrength.BOUNDED_EVIDENCE: EvidenceType.BOUNDED_EXPERIMENT,
+            EvidenceStrength.COUNTEREXAMPLE: EvidenceType.COUNTEREXAMPLE,
+            EvidenceStrength.EXHAUSTIVE_CERTIFICATE: EvidenceType.COMPLETE_FINITE_ENUMERATION,
+            EvidenceStrength.FORMAL_CERTIFICATE: EvidenceType.FORMAL_KERNEL_CERTIFICATE,
+        }
+        return cls(
+            experiment_id=result.experiment_id,
+            request_hash=result.request_hash,
+            result_hash=result.result_hash,
+            target_claim=result.target_claim,
+            outcome=result.outcome,
+            evidence_type=evidence_map[result.evidence_strength],
+            scope=result.scope,
+            independently_verified=result.independently_verified,
+            artifact_refs=[ref.artifact_ref for ref in result.artifact_refs],
+        )
+
+
+class FormalStatementPacket(StrictModel):
+    packet_id: str = Field(default_factory=lambda: new_id("formal_statement"))
+    problem_hash: str
+    obligation_id: str
+    statement: str
+    assumptions: list[str] = Field(default_factory=list)
+    quantifiers: list[QuantifierSpec] = Field(default_factory=list)
+    target_language: str = "lean4"
+
+
+class FormalCertificateRef(StrictModel):
+    certificate_id: str = Field(default_factory=lambda: new_id("formal_cert"))
+    packet_id: str
+    backend: str
+    status: Literal["verified", "failed", "pending", "unavailable"]
+    artifact_ref: str | None = None
+    statement_hash: str
+    compiler_output_hash: str | None = None
+    diagnostics: list[str] = Field(default_factory=list)
+
+
 class ComputationDecision(StrictModel):
     experiment_id: str
     request_hash: str
@@ -448,6 +1118,13 @@ class ProblemContract(StrictModel):
             raise ValueError("integrity_hash does not match exact_statement")
         object.__setattr__(self, "integrity_hash", expected)
         return self
+
+
+class BlindReviewPacket(StrictModel):
+    problem: ProblemContract
+    final_proof_text: str
+    cited_fact_packets: list[dict[str, Any]] = Field(default_factory=list)
+    forbidden_claims: list[str] = Field(default_factory=list)
 
 
 class TriageResult(StrictModel):
@@ -741,6 +1418,27 @@ class VerificationIssue(StrictModel):
     repair_hint: str | None = None
 
 
+class BlindVerificationReport(StrictModel):
+    """Identity-free verifier output expanded with provenance after the call."""
+
+    problem_integrity_ok: bool = True
+    verdict: VerificationVerdict
+    first_error_step: str | None = None
+    issues: list[VerificationIssue] = Field(default_factory=list)
+    checked_dependencies: list[str] = Field(default_factory=list)
+    tool_requests: list[ToolRequest] = Field(default_factory=list)
+    tool_results: list[ToolResult] = Field(default_factory=list)
+    failure_level: FailureLevel = FailureLevel.NONE
+    confidence: float = Field(ge=0.0, le=1.0)
+    concise_feedback: str
+
+    @model_validator(mode="after")
+    def failed_report_has_issue(self) -> "BlindVerificationReport":
+        if self.verdict == VerificationVerdict.FAIL and not self.issues:
+            raise ValueError("failed blind report must contain at least one issue")
+        return self
+
+
 class VerificationReport(StrictModel):
     report_id: str = Field(default_factory=lambda: new_id("verify"))
     target_id: str
@@ -823,6 +1521,23 @@ class PathStats(StrictModel):
     last_round_index: int = Field(default=0, ge=0)
     tokens_spent: int = Field(default=0, ge=0)
     structurally_valid: bool | None = None
+    proof_debt: float = Field(default=0.0, ge=0.0)
+    proof_debt_reduction: float = 0.0
+    verified_fact_gain: int = Field(default=0, ge=0)
+    shared_obligation_count: int = Field(default=0, ge=0)
+    high_centrality_obligation_count: int = Field(default=0, ge=0)
+    contradiction_count: int = Field(default=0, ge=0)
+    counterexample_count: int = Field(default=0, ge=0)
+    message_utility: float = Field(default=0.0, ge=0.0, le=1.0)
+    route_redundancy: float = Field(default=0.0, ge=0.0, le=1.0)
+    bridge_opportunity: float = Field(default=0.0, ge=0.0, le=1.0)
+    negative_memory_hits: int = Field(default=0, ge=0)
+    inspiration_trigger_count: int = Field(default=0, ge=0)
+    novelty_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    representation_diversity: float = Field(default=0.0, ge=0.0, le=1.0)
+    analogy_opportunity: float = Field(default=0.0, ge=0.0, le=1.0)
+    construction_opportunity: float = Field(default=0.0, ge=0.0, le=1.0)
+    surprise_budget_remaining: int = Field(default=0, ge=0)
 
 
 class BudgetAction(StrictModel):

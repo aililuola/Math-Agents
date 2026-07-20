@@ -1,9 +1,137 @@
 from __future__ import annotations
 
 from collections import Counter
+import re
+from typing import Any
 
 from .schemas import RunResult
 from .store import ArtifactStore
+
+
+def _mermaid_id(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_]", "_", value)
+
+
+def write_hierarchical_reports(
+    store: ArtifactStore,
+    *,
+    route_registry: dict[str, Any],
+    message_broker: dict[str, Any],
+    proof_graph: dict[str, Any],
+    typed_memory: dict[str, Any],
+    bridge_broker: dict[str, Any],
+    contradiction_broker: dict[str, Any],
+    inspiration_engine: dict[str, Any],
+) -> None:
+    """Write the stable v0.7 topology, graph, diagnostics, and metric artifacts."""
+    routes = list(route_registry.get("routes", []))
+    messages = dict(message_broker.get("messages", {}))
+    deliveries = dict(message_broker.get("deliveries", {}))
+    decisions = list(message_broker.get("decisions", []))
+    receipts = dict(message_broker.get("receipts", {}))
+    obligations = dict(proof_graph.get("obligations", {}))
+    edges = dict(proof_graph.get("edges", {}))
+    tiers = dict(typed_memory.get("tiers", {}))
+
+    topology = {
+        "routes": routes,
+        "messages": messages,
+        "deliveries": deliveries,
+        "receipts": receipts,
+    }
+    store.write_json("reports", "communication_topology", topology)
+    topology_mmd = ["flowchart LR"]
+    for route in routes:
+        route_id = str(route["route_id"])
+        topology_mmd.append(f'  {_mermaid_id(route_id)}["{route_id}"]')
+        for neighbor in route.get("neighbor_route_ids", []):
+            topology_mmd.append(
+                f"  {_mermaid_id(route_id)} --> {_mermaid_id(str(neighbor))}"
+            )
+    for delivery in deliveries.values():
+        message = messages.get(str(delivery.get("message_id")), {})
+        source = str(message.get("source_route_id", "unknown"))
+        target = str(delivery.get("target_route_id", "unknown"))
+        label = str(message.get("message_type", "message"))
+        topology_mmd.append(
+            f'  {_mermaid_id(source)} -. "{label}" .-> {_mermaid_id(target)}'
+        )
+    store.write_text(
+        "reports", "communication_topology", "\n".join(topology_mmd), suffix=".mmd"
+    )
+
+    store.write_json("reports", "proof_graph", proof_graph)
+    graph_mmd = ["flowchart TD"]
+    for obligation_id, obligation in obligations.items():
+        label = str(obligation.get("status", "open"))
+        graph_mmd.append(
+            f'  {_mermaid_id(str(obligation_id))}["{obligation_id}: {label}"]'
+        )
+    for edge in edges.values():
+        graph_mmd.append(
+            f"  {_mermaid_id(str(edge['source_id']))} -->|{edge['edge_type']}| "
+            f"{_mermaid_id(str(edge['target_id']))}"
+        )
+    store.write_text("reports", "proof_graph", "\n".join(graph_mmd), suffix=".mmd")
+
+    diagnostic_lines = ["# Typed Message Diagnostics", ""]
+    if not decisions:
+        diagnostic_lines.append("No typed messages have been evaluated.")
+    for item in decisions:
+        status = "accepted" if item.get("accepted") else "rejected"
+        reason = item.get("rejection_reason") or "gate passed"
+        diagnostic_lines.append(
+            f"- `{item.get('message_id', 'unknown')}`: **{status}** - {reason}"
+        )
+    store.write_text(
+        "reports", "message_diagnostics", "\n".join(diagnostic_lines), suffix=".md"
+    )
+
+    published = sum(bool(item.get("accepted")) for item in decisions)
+    rejected = len(decisions) - published
+    duplicates = sum(bool(item.get("duplicate_of")) for item in decisions)
+    acknowledged = sum(item.get("status") == "accepted" for item in receipts.values())
+    cross_route_chars = sum(
+        len(str(messages.get(str(item.get("message_id")), {})))
+        for item in deliveries.values()
+    )
+    metrics = {
+        "route_count": len(routes),
+        "active_route_count": sum(item.get("status") == "active" for item in routes),
+        "merged_route_count": sum(item.get("status") == "merged" for item in routes),
+        "fact_count": sum(value == "fact" for value in tiers.values()),
+        "insight_count": sum(value == "insight" for value in tiers.values()),
+        "negative_count": sum(value == "negative" for value in tiers.values()),
+        "open_obligation_count": sum(
+            item.get("status") != "closed" for item in obligations.values()
+        ),
+        "closed_obligation_count": sum(
+            item.get("status") == "closed" for item in obligations.values()
+        ),
+        "shared_bottleneck_count": sum(
+            len(set(item.get("route_ids", []))) >= 2 and item.get("status") != "closed"
+            for item in obligations.values()
+        ),
+        "contradiction_count": len(contradiction_broker.get("records", [])),
+        "bridge_task_count": len(bridge_broker.get("tasks", [])),
+        "messages_published": published,
+        "messages_delivered": sum(
+            bool(item.get("prompt_consumed")) for item in deliveries.values()
+        ),
+        "messages_rejected": rejected,
+        "duplicate_message_rate": duplicates / max(1, len(decisions)),
+        "cross_route_token_estimate": (cross_route_chars + 3) // 4,
+        "message_utilization_rate": acknowledged / max(1, len(deliveries)),
+        "graph_mode": proof_graph.get("mode", "off"),
+        "inspiration_mode": inspiration_engine.get("mode", "off"),
+        "inspiration_trigger_count": len(inspiration_engine.get("triggers", {})),
+        "inspiration_proposal_count": len(inspiration_engine.get("proposals", {})),
+        "inspiration_verified_count": len(
+            inspiration_engine.get("verified_proposals", {})
+        ),
+        "surprise_budget": inspiration_engine.get("surprise_budget", {}),
+    }
+    store.write_json("reports", "hierarchical_metrics", metrics)
 
 
 def _proof_steps_markdown(steps) -> str:
@@ -101,6 +229,39 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
     for claim in verified_claims:
         lines.append(f"- `{claim.claim_id}`：{claim.statement}")
     lines.append("")
+
+    latest_checkpoint = store.latest_stage_checkpoint()
+    topology_state = latest_checkpoint[1] if latest_checkpoint is not None else {}
+    registry_state = topology_state.get("route_registry") or {}
+    typed_memory_state = topology_state.get("typed_memory") or {}
+    proof_graph_state = topology_state.get("proof_graph") or {}
+    broker_state = topology_state.get("message_broker") or {}
+    bridge_state = topology_state.get("bridge_broker") or {}
+    conflict_state = topology_state.get("contradiction_broker") or {}
+    inspiration_state = topology_state.get("inspiration_engine") or {}
+    if registry_state or proof_graph_state or inspiration_state:
+        routes = list(registry_state.get("routes", []))
+        tiers = dict(typed_memory_state.get("tiers", {}))
+        obligations = list(dict(proof_graph_state.get("obligations", {})).values())
+        decisions = list(broker_state.get("decisions", []))
+        deliveries = list(dict(broker_state.get("deliveries", {})).values())
+        published = sum(1 for item in decisions if item.get("accepted"))
+        rejected = sum(1 for item in decisions if not item.get("accepted"))
+        duplicates = sum(1 for item in decisions if item.get("duplicate_of"))
+        lines.extend(
+            [
+                "## v0.7 分层稀疏拓扑指标",
+                "",
+                f"- 路线：{len(routes)}（active {sum(item.get('status') == 'active' for item in routes)}；merged {sum(item.get('status') == 'merged' for item in routes)}）",
+                f"- Typed Memory：Fact {sum(value == 'fact' for value in tiers.values())}；Insight {sum(value == 'insight' for value in tiers.values())}；Negative {sum(value == 'negative' for value in tiers.values())}",
+                f"- Proof Obligation：open {sum(item.get('status') != 'closed' for item in obligations)}；closed {sum(item.get('status') == 'closed' for item in obligations)}",
+                f"- Bridge tasks：{len(bridge_state.get('tasks', []))}；Contradictions：{len(conflict_state.get('records', []))}",
+                f"- Typed messages：published {published}；delivered {len(deliveries)}；rejected {rejected}；duplicate rate {(duplicates / max(1, len(decisions))):.3f}",
+                f"- Inspiration：triggers {len(inspiration_state.get('triggers', {}))}；proposals {len(inspiration_state.get('proposals', {}))}；materialized {len(inspiration_state.get('materializations', {}))}",
+                "- 跨路线只传递门控后的结构化数学对象；上述计数不包含原始思考链。",
+                "",
+            ]
+        )
 
     lines.extend(["## 检查点与恢复", ""])
     if not result.proof_checkpoints:

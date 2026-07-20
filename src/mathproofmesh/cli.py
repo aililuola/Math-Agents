@@ -28,6 +28,41 @@ activity_console = Console(stderr=True)
 _VALID_ACTIVITY_MODES: set[str] = {"off", "compact", "detailed"}
 
 
+def _apply_topology_overrides(
+    config: SystemConfig,
+    *,
+    topology_mode: str | None,
+    proof_graph_mode: str | None,
+    disable_route_teams: bool,
+    disable_cross_route: bool,
+) -> SystemConfig:
+    data = config.model_dump(mode="python")
+    topology = data["topology"]
+    if topology_mode is not None:
+        if topology_mode not in {"legacy_sparse", "hierarchical_sparse"}:
+            raise typer.BadParameter(
+                "--topology-mode must be legacy_sparse or hierarchical_sparse"
+            )
+        topology["mode"] = topology_mode
+        if topology_mode == "hierarchical_sparse":
+            if not topology["proof_graph"]["enabled"]:
+                topology["proof_graph"]["mode"] = "off"
+            if not topology["inspiration"]["enabled"]:
+                topology["inspiration"]["mode"] = "off"
+    if proof_graph_mode is not None:
+        if proof_graph_mode not in {"off", "shadow", "active"}:
+            raise typer.BadParameter(
+                "--proof-graph-mode must be off, shadow, or active"
+            )
+        topology["proof_graph"]["mode"] = proof_graph_mode
+        topology["proof_graph"]["enabled"] = proof_graph_mode != "off"
+    if disable_route_teams:
+        topology["route_teams"]["enabled"] = False
+    if disable_cross_route:
+        topology["cross_route"]["enabled"] = False
+    return SystemConfig.model_validate(data)
+
+
 def _configure_logging(level: str) -> None:
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
@@ -121,9 +156,20 @@ def solve(
         "--activity",
         help="Live progress timeline: off, compact, or detailed. Defaults to runtime.activity_mode.",
     ),
+    topology_mode: Optional[str] = typer.Option(None, "--topology-mode"),
+    proof_graph_mode: Optional[str] = typer.Option(None, "--proof-graph-mode"),
+    disable_route_teams: bool = typer.Option(False, "--disable-route-teams"),
+    disable_cross_route: bool = typer.Option(False, "--disable-cross-route"),
 ) -> None:
     """Solve a problem from a UTF-8 text file using the configured API-key agents."""
     cfg = load_config(config)
+    cfg = _apply_topology_overrides(
+        cfg,
+        topology_mode=topology_mode,
+        proof_graph_mode=proof_graph_mode,
+        disable_route_teams=disable_route_teams,
+        disable_cross_route=disable_cross_route,
+    )
     _configure_logging(cfg.runtime.log_level)
     mode = _resolve_activity_mode(cfg, activity, json_output=json_output)
     text = problem.read_text(encoding="utf-8")
@@ -170,9 +216,20 @@ def resume(
         "--activity",
         help="Live progress timeline: off, compact, or detailed.",
     ),
+    topology_mode: Optional[str] = typer.Option(None, "--topology-mode"),
+    proof_graph_mode: Optional[str] = typer.Option(None, "--proof-graph-mode"),
+    disable_route_teams: bool = typer.Option(False, "--disable-route-teams"),
+    disable_cross_route: bool = typer.Option(False, "--disable-cross-route"),
 ) -> None:
     """Resume from the latest stage snapshot and verified proof checkpoint."""
     cfg = load_config(config)
+    cfg = _apply_topology_overrides(
+        cfg,
+        topology_mode=topology_mode,
+        proof_graph_mode=proof_graph_mode,
+        disable_route_teams=disable_route_teams,
+        disable_cross_route=disable_cross_route,
+    )
     _configure_logging(cfg.runtime.log_level)
     mode = _resolve_activity_mode(cfg, activity, json_output=json_output)
     result = _run_resume_with_activity(cfg, run_id=run_id, mode=mode)

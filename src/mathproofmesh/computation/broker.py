@@ -16,9 +16,11 @@ import sympy as sp
 from ..activity import ActivityImportance, ActivityStatus, ActivityStream
 from ..config import SystemConfig
 from ..schemas import (
+    ComputationCertificate,
     ComputationDecision,
     ComputationDecisionStatus,
     ComputationMethod,
+    ComputationPlan,
     EvidenceRef,
     EvidenceStrength,
     ExperimentOutcome,
@@ -48,7 +50,7 @@ from .policy import ComputationContext, ComputationGate
 from .sandbox import run_sandboxed_python
 
 
-TOOL_VERSION = "mathproofmesh-computation/0.6.0"
+TOOL_VERSION = "mathproofmesh-computation/0.7.0"
 
 
 class ComputationBroker:
@@ -113,6 +115,12 @@ class ComputationBroker:
         decision = self.gate.decide(spec, context)
         if not completed_request:
             self.cache.save_decision(decision)
+        if decision.decision == ComputationDecisionStatus.ALLOW:
+            plan = ComputationPlan.from_spec(spec)
+            self.store.write_experiment_artifact(
+                spec.request_hash, "computation_plan.json", plan
+            )
+            self.store.append_event("computation_plan_created", plan)
         self.store.append_event("computation_decision", decision)
         if self.activity is not None:
             status = (
@@ -172,6 +180,12 @@ class ComputationBroker:
                 )
                 reused = ExperimentResult.model_validate(payload)
                 self.ledger.record_cache_use(spec.path_id or "unassigned", reused)
+                certificate = ComputationCertificate.from_result(reused)
+                self.store.write_experiment_artifact(
+                    spec.request_hash,
+                    "computation_certificate.json",
+                    certificate,
+                )
                 self.store.append_event("experiment_cache_hit", reused)
                 return reused
         if program is not None:
@@ -313,6 +327,13 @@ class ComputationBroker:
             # Rewrite once so the durable result includes both artifact references.
             self.cache.save_result(result)
             self.cache.save_evidence(result)
+            certificate = ComputationCertificate.from_result(result)
+            self.store.write_experiment_artifact(
+                spec.request_hash,
+                "computation_certificate.json",
+                certificate,
+            )
+            self.store.append_event("computation_certificate_created", certificate)
             path_id = spec.path_id or "unassigned"
             self.ledger.record_result(path_id, result)
             self.store.append_event("experiment_completed", result)

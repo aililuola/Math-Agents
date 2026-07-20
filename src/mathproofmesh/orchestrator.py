@@ -23,10 +23,13 @@ from .agents import (
     StructuredOutputError,
 )
 from .budget import AdaptiveBudgetManager, SoftBudgetAllocator
+from .communication.broker import MessageBroker
+from .communication.route_registry import RouteRegistry
 from .config import SystemConfig
 from .computation.policy import ComputationContext
 from .continuation import (
     attempt_from_checkpoint,
+    checkpoint_to_route_message,
     local_delta_verification,
     make_genesis_checkpoint,
     merge_verified_delta,
@@ -34,13 +37,21 @@ from .continuation import (
 )
 from .llm.mock import MockResponder
 from .llm.pool import AgentPool, AgentRuntime
-from .memory import LemmaMemory
+from .inspiration.engine import InspirationEngine
+from .inspiration.trigger_policy import InspirationSnapshot
+from .memory import LemmaMemory, TypedMemory
 from .prompts import PromptBundle, PromptFactory
-from .report import write_run_report
+from .report import write_hierarchical_reports, write_run_report
+from .proof_graph.bridges import BridgeBroker
+from .proof_graph.contradictions import ContradictionBroker
+from .proof_graph.matching import DuplicateRouteDetector
+from .proof_graph.store import ProofGraphStore
 from .schemas import (
     ActionKind,
     AgentMetric,
     AttemptStatus,
+    BlindReviewPacket,
+    BlindVerificationReport,
     CandidateAssessment,
     ClaimBatch,
     ClaimCard,
@@ -51,6 +62,7 @@ from .schemas import (
     ContinuationAction,
     ContinuationTurn,
     Difficulty,
+    EvidenceType,
     EvidenceRef,
     EvidenceStrength,
     ExperimentOutcome,
@@ -61,7 +73,14 @@ from .schemas import (
     FinalProof,
     InitialExplorationAction,
     InitialExplorationTurn,
+    InspirationMechanism,
+    InspirationProposal,
+    InspirationReview,
     MetaReview,
+    MemoryTier,
+    MessageEnvelope,
+    MessageType,
+    NoveltySignature,
     ProblemContract,
     ProblemKind,
     ProofAttempt,
@@ -69,6 +88,7 @@ from .schemas import (
     ProofDelta,
     RunResult,
     RunStatus,
+    RouteRole,
     Severity,
     StrategyCard,
     StrategySet,
@@ -82,8 +102,15 @@ from .schemas import (
     stable_hash,
 )
 from .store import ArtifactStore
+from .teams.role_runner import RoleRunner
 from .tools import ToolBroker
-from .topology import SparseTopologyRouter, jaccard_similarity, strategy_text
+from .topology import (
+    SparseTopologyRouter,
+    jaccard_similarity,
+    select_sparse_route_neighbors,
+    strategy_text,
+)
+from .verification import AgentCapabilityProfile, ValidationEscalator
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
@@ -109,6 +136,20 @@ class SolveState:
     final_proof: FinalProof | None = None
     final_verification: VerificationReport | None = None
     budget_exhausted: bool = False
+    route_registry: RouteRegistry | None = None
+    message_broker: MessageBroker | None = None
+    proof_graph: ProofGraphStore | None = None
+    typed_memory: TypedMemory | None = None
+    inspiration_engine: InspirationEngine | None = None
+    bridge_broker: BridgeBroker | None = None
+    contradiction_broker: ContradictionBroker | None = None
+    duplicate_route_detector: DuplicateRouteDetector | None = None
+    current_round: int = 0
+    graph_frozen: bool = False
+    proof_debt_history: dict[str, list[float]] | None = None
+    capability_profile: AgentCapabilityProfile | None = None
+    validation_escalator: ValidationEscalator | None = None
+    final_repair_failed: bool = False
 
 
 class ProofMeshOrchestrator:
@@ -218,6 +259,14 @@ class ProofMeshOrchestrator:
             aggregate_reports={},
             meta_reviews=[],
             checkpoints=[],
+            proof_debt_history={},
+        )
+        self._initialize_hierarchical_runtime(
+            state,
+            problem=problem,
+            store=store,
+            activity=activity,
+            memory=memory,
         )
 
         try:
@@ -277,6 +326,13 @@ class ProofMeshOrchestrator:
                 store,
             )
             assignments = router.assign_explorers(state.strategies)
+            self._register_hierarchical_routes(
+                state,
+                assignments,
+                round_index=0,
+                activity=activity,
+                store=store,
+            )
             strategy_names = "；".join(
                 strategy.title for strategy in state.strategies[:4]
             )
@@ -427,6 +483,13 @@ class ProofMeshOrchestrator:
                 store,
             )
             self._record_verification_bundles(state, verification_bundles)
+            self._sync_hierarchical_artifacts(
+                state,
+                problem=problem,
+                memory=memory,
+                current_round=0,
+                store=store,
+            )
             verdict_counts = {verdict.value: 0 for verdict in VerificationVerdict}
             for bundle in verification_bundles:
                 verdict_counts[bundle.aggregate.verdict.value] += 1
@@ -496,6 +559,7 @@ class ProofMeshOrchestrator:
             # Adaptive breadth/depth loop. Actions are selected from verified progress,
             # novelty, uncertainty, gaps, stagnation, and protected future call reserves.
             for round_index in range(1, self.config.budget.max_rounds):
+                state.current_round = round_index
                 round_task = activity.start_task(
                     "adaptive_round",
                     title=activity.text(
@@ -532,11 +596,29 @@ class ProofMeshOrchestrator:
                         )
                         break
 
+                self._sync_hierarchical_artifacts(
+                    state,
+                    problem=problem,
+                    memory=memory,
+                    current_round=round_index,
+                    store=store,
+                )
+                graph_signals = self._hierarchical_graph_signals(state)
+                await self._run_inspiration_round(
+                    state,
+                    problem=problem,
+                    remaining_calls=runner.ledger.remaining_calls,
+                    store=store,
+                    runner=runner,
+                    prompts=prompts,
+                )
+                graph_signals = self._hierarchical_graph_signals(state)
                 stats = budget_manager.build_path_stats(
                     state.strategies,
                     state.attempts,
                     state.reports,
                     state.aggregate_reports,
+                    graph_signals=graph_signals,
                 )
                 decision = budget_manager.decide(
                     stats,
@@ -750,6 +832,37 @@ class ProofMeshOrchestrator:
                             )
                             self._record_verification_bundles(state, [bundle])
                             performed = True
+                    elif action.action in {
+                        ActionKind.BRIDGE,
+                        ActionKind.RESOLVE_CONFLICT,
+                        ActionKind.SEARCH_COUNTEREXAMPLE,
+                        ActionKind.MERGE_ROUTE,
+                        ActionKind.COOLDOWN_ROUTE,
+                        ActionKind.SWITCH_REPRESENTATION,
+                        ActionKind.TRIGGER_INSPIRATION,
+                        ActionKind.SEARCH_ANALOGY,
+                        ActionKind.INVENT_CONSTRUCTION,
+                        ActionKind.GENERATE_INVARIANT,
+                        ActionKind.REVERSE_GOAL,
+                        ActionKind.META_REPLAN,
+                        ActionKind.SURPRISE_WIDEN,
+                    }:
+                        performed = (
+                            await self._execute_hierarchical_action(
+                                state,
+                                action.action,
+                                strategy_id=action.strategy_id,
+                                current_round=round_index,
+                                store=store,
+                                problem=problem,
+                                runner=runner,
+                                prompts=prompts,
+                                router=router,
+                                memory=memory,
+                                tools=tools,
+                            )
+                            or performed
+                        )
 
                 # Verify the best newly generated candidate when its marginal value is high.
                 unverified = [
@@ -797,6 +910,14 @@ class ProofMeshOrchestrator:
                     )
                     state.meta_reviews.append(review)
 
+                self._sync_hierarchical_artifacts(
+                    state,
+                    problem=problem,
+                    memory=memory,
+                    current_round=round_index,
+                    store=store,
+                )
+
                 self._checkpoint(
                     store, f"adaptive_round_{round_index}", state, memory, runner
                 )
@@ -821,6 +942,14 @@ class ProofMeshOrchestrator:
                 )
                 if not performed:
                     break
+
+            if (
+                state.proof_graph is not None
+                and self.config.topology.final_stage.freeze_graph_before_synthesis
+                and not state.proof_graph.frozen
+            ):
+                state.proof_graph.freeze()
+                state.graph_frozen = True
 
             # Form a final proof even when all paths are partial; caveats preserve honesty.
             if state.attempts:
@@ -981,6 +1110,7 @@ class ProofMeshOrchestrator:
                             revisions + 1,
                         )
                         if revised is None:
+                            state.final_repair_failed = True
                             activity.fail_task(
                                 revision_task,
                                 title=activity.text(
@@ -1066,6 +1196,18 @@ class ProofMeshOrchestrator:
                             metrics={
                                 "verdict": state.final_verification.verdict.value,
                                 "revision_count": revisions,
+                            },
+                        )
+                    if (
+                        revisions > 0
+                        and state.final_verification.verdict != VerificationVerdict.PASS
+                    ):
+                        state.final_repair_failed = True
+                        store.append_event(
+                            "final_repair_inspiration_trigger_ready",
+                            {
+                                "revision_count": revisions,
+                                "verdict": state.final_verification.verdict.value,
                             },
                         )
                 else:
@@ -1289,6 +1431,14 @@ class ProofMeshOrchestrator:
         tools = ToolBroker(self.config, store, activity)
 
         state = self._restore_state_from_checkpoint(payload, store)
+        self._initialize_hierarchical_runtime(
+            state,
+            problem=problem,
+            store=store,
+            activity=activity,
+            memory=memory,
+            checkpoint_payload=payload,
+        )
         state.resumed = True
         latest_proof_checkpoint = max(
             state.checkpoints,
@@ -1418,6 +1568,7 @@ class ProofMeshOrchestrator:
 
             max_resume_rounds = max(1, self.config.budget.max_rounds)
             for resume_round in range(max_resume_rounds):
+                state.current_round = resume_round
                 updated_attempts: list[ProofAttempt] = []
                 for strategy in state.strategies:
                     path_attempts = [
@@ -1507,6 +1658,21 @@ class ProofMeshOrchestrator:
                     store,
                 )
                 self._record_verification_bundles(state, verification_bundles)
+                self._sync_hierarchical_artifacts(
+                    state,
+                    problem=problem,
+                    memory=memory,
+                    current_round=resume_round,
+                    store=store,
+                )
+                await self._run_inspiration_round(
+                    state,
+                    problem=problem,
+                    remaining_calls=runner.ledger.remaining_calls,
+                    store=store,
+                    runner=runner,
+                    prompts=prompts,
+                )
                 if state.attempts and runner.ledger.remaining_calls > 0:
                     review = await self._meta_review(
                         problem,
@@ -1529,6 +1695,13 @@ class ProofMeshOrchestrator:
                 if not updated_attempts:
                     break
 
+            if (
+                state.proof_graph is not None
+                and self.config.topology.final_stage.freeze_graph_before_synthesis
+                and not state.proof_graph.frozen
+            ):
+                state.proof_graph.freeze()
+                state.graph_frozen = True
             if state.attempts:
                 state.final_proof, synthesizer = await self._synthesize(
                     problem,
@@ -1669,6 +1842,1576 @@ class ProofMeshOrchestrator:
         finally:
             await pool.aclose()
 
+    def _initialize_hierarchical_runtime(
+        self,
+        state: SolveState,
+        *,
+        problem: ProblemContract,
+        store: ArtifactStore,
+        activity: ActivityStream,
+        memory: LemmaMemory,
+        checkpoint_payload: dict[str, Any] | None = None,
+    ) -> None:
+        if self.config.topology.mode != "hierarchical_sparse":
+            return
+        payload = checkpoint_payload or {}
+        registry_state = payload.get("route_registry")
+        state.route_registry = (
+            RouteRegistry.from_state(registry_state, self.config)
+            if isinstance(registry_state, dict)
+            else RouteRegistry(self.config, problem_hash=problem.integrity_hash)
+        )
+        memory_state = payload.get("typed_memory")
+        state.typed_memory = (
+            TypedMemory.from_state(
+                memory_state,
+                store=store,
+                config=self.config,
+                lemma_memory=memory,
+            )
+            if isinstance(memory_state, dict)
+            else TypedMemory(store, self.config, lemma_memory=memory)
+        )
+        graph_state = payload.get("proof_graph")
+        state.proof_graph = (
+            ProofGraphStore.from_state(graph_state, config=self.config, store=store)
+            if isinstance(graph_state, dict)
+            else ProofGraphStore(
+                self.config, store, problem_hash=problem.integrity_hash
+            )
+        )
+        broker_state = payload.get("message_broker")
+        state.message_broker = (
+            MessageBroker.from_state(
+                broker_state,
+                config=self.config,
+                store=store,
+                activity=activity,
+                route_registry=state.route_registry,
+                proof_graph=state.proof_graph,
+                typed_memory=state.typed_memory,
+            )
+            if isinstance(broker_state, dict)
+            else MessageBroker(
+                self.config,
+                store,
+                activity,
+                state.route_registry,
+                state.proof_graph,
+                state.typed_memory,
+            )
+        )
+        bridge_state = payload.get("bridge_broker")
+        state.bridge_broker = (
+            BridgeBroker.from_state(
+                bridge_state,
+                config=self.config,
+                proof_graph=state.proof_graph,
+            )
+            if isinstance(bridge_state, dict)
+            else BridgeBroker(self.config, state.proof_graph)
+        )
+        contradiction_state = payload.get("contradiction_broker")
+        state.contradiction_broker = (
+            ContradictionBroker.from_state(
+                contradiction_state,
+                config=self.config,
+                proof_graph=state.proof_graph,
+            )
+            if isinstance(contradiction_state, dict)
+            else ContradictionBroker(self.config, state.proof_graph)
+        )
+        state.duplicate_route_detector = DuplicateRouteDetector(self.config)
+        capability_state = payload.get("agent_capability")
+        state.capability_profile = (
+            AgentCapabilityProfile.from_state(
+                capability_state,
+                config=self.config.topology.agent_capability,
+            )
+            if isinstance(capability_state, dict)
+            else AgentCapabilityProfile(self.config.topology.agent_capability)
+        )
+        state.validation_escalator = ValidationEscalator(
+            self.config.topology.validation_escalation
+        )
+        state.proof_debt_history = {
+            str(key): [float(item) for item in value]
+            for key, value in dict(payload.get("proof_debt_history", {})).items()
+        }
+        state.current_round = int(payload.get("current_round", state.current_round))
+        state.graph_frozen = state.proof_graph.frozen
+        state.final_repair_failed = bool(payload.get("final_repair_failed", False))
+
+        for strategy in state.strategies:
+            route = next(
+                (
+                    item
+                    for item in state.route_registry.routes
+                    if item.strategy_id == strategy.strategy_id
+                ),
+                None,
+            )
+            if route is None:
+                route = state.route_registry.register_route(strategy)
+            if strategy.assigned_agent_id and not state.route_registry.owns_agent(
+                route.route_id, strategy.assigned_agent_id, RouteRole.PROVER
+            ):
+                try:
+                    state.route_registry.assign_member(
+                        route.route_id,
+                        strategy.assigned_agent_id,
+                        RouteRole.PROVER,
+                        state.current_round,
+                    )
+                except ValueError:
+                    pass
+
+        state.inspiration_engine = InspirationEngine(
+            self.config,
+            problem=problem,
+            proof_graph=state.proof_graph,
+            typed_memory=state.typed_memory,
+            route_registry=state.route_registry,
+            broker=state.message_broker,
+            store=store,
+            activity=activity,
+            project_root=".",
+        )
+        inspiration_state = payload.get("inspiration_engine")
+        if isinstance(inspiration_state, dict):
+            state.inspiration_engine.restore_state(inspiration_state)
+
+        if checkpoint_payload is not None and not all(
+            isinstance(payload.get(key), dict)
+            for key in (
+                "route_registry",
+                "typed_memory",
+                "proof_graph",
+                "message_broker",
+                "inspiration_engine",
+            )
+        ):
+            store.append_event(
+                "checkpoint_migrated_to_v0_7",
+                {
+                    "initialized_empty_components": [
+                        key
+                        for key in (
+                            "route_registry",
+                            "typed_memory",
+                            "proof_graph",
+                            "message_broker",
+                            "inspiration_engine",
+                        )
+                        if not isinstance(payload.get(key), dict)
+                    ]
+                },
+            )
+            activity.info(
+                "checkpoint_migrated_to_v0_7",
+                title="Checkpoint migrated to v0.7",
+                detail="Missing hierarchical topology state was initialized conservatively.",
+                stage="run_resume",
+            )
+
+    def _register_hierarchical_routes(
+        self,
+        state: SolveState,
+        assignments: list[tuple[StrategyCard, AgentRuntime]],
+        *,
+        round_index: int,
+        activity: ActivityStream,
+        store: ArtifactStore,
+    ) -> None:
+        registry = state.route_registry
+        if registry is None:
+            return
+        for strategy, agent in assignments:
+            route = registry.register_route(strategy)
+            registry.assign_member(
+                route.route_id, agent.id, RouteRole.PROVER, round_index
+            )
+            store.append_event("route_registered", route)
+            store.append_event(
+                "route_member_assigned",
+                {
+                    "route_id": route.route_id,
+                    "agent_id": agent.id,
+                    "role": RouteRole.PROVER.value,
+                    "round_index": round_index,
+                },
+            )
+            activity.info(
+                "route_registered",
+                title="Hierarchical route registered",
+                detail=strategy.title,
+                stage="route_team",
+                agent_id=agent.id,
+                metrics={
+                    "route_id": route.route_id,
+                    "strategy_id": strategy.strategy_id,
+                },
+            )
+        routes = registry.routes
+        limit = self.config.topology.cross_route.max_neighbors_per_route
+        strategies = {item.strategy_id: item for item in state.strategies}
+        neighborhoods = select_sparse_route_neighbors(
+            [
+                (route.route_id, strategies[route.strategy_id])
+                for route in routes
+                if route.strategy_id in strategies
+            ],
+            max_neighbors=limit,
+        )
+        for route_id, neighbors in neighborhoods.items():
+            registry.set_neighbors(route_id, neighbors)
+
+    def _route_for_strategy(self, state: SolveState, strategy_id: str) -> str | None:
+        if state.route_registry is None:
+            return None
+        route = next(
+            (
+                item
+                for item in state.route_registry.routes
+                if item.strategy_id == strategy_id
+            ),
+            None,
+        )
+        return route.route_id if route else None
+
+    def _sync_hierarchical_artifacts(
+        self,
+        state: SolveState,
+        *,
+        problem: ProblemContract,
+        memory: LemmaMemory,
+        current_round: int,
+        store: ArtifactStore,
+    ) -> None:
+        broker = state.message_broker
+        graph = state.proof_graph
+        registry = state.route_registry
+        if broker is None or graph is None or registry is None or graph.frozen:
+            return
+        attempts_by_id = {item.attempt_id: item for item in state.attempts}
+        for claim in memory.claims:
+            attempt = attempts_by_id.get(claim.source_attempt_id or "")
+            if attempt is None:
+                continue
+            route_id = self._route_for_strategy(state, attempt.strategy_id)
+            if route_id is None:
+                continue
+            if not registry.owns_agent(route_id, attempt.agent_id, RouteRole.PROVER):
+                try:
+                    registry.assign_member(
+                        route_id, attempt.agent_id, RouteRole.PROVER, current_round
+                    )
+                except ValueError:
+                    continue
+            report = state.aggregate_reports.get(attempt.attempt_id)
+            referee_id = (
+                report.agent_id
+                if report is not None
+                and report.agent_id not in {"system-aggregate", attempt.agent_id}
+                else next(
+                    (
+                        item.agent_id
+                        for item in state.reports
+                        if item.target_id == attempt.attempt_id
+                        and item.agent_id != attempt.agent_id
+                    ),
+                    None,
+                )
+            )
+            if referee_id is not None and not registry.owns_agent(
+                route_id, referee_id, RouteRole.REFEREE
+            ):
+                try:
+                    registry.assign_member(
+                        route_id, referee_id, RouteRole.REFEREE, current_round
+                    )
+                except ValueError:
+                    referee_id = None
+            skeptic_id = next(
+                (
+                    item.agent_id
+                    for item in state.reports
+                    if item.target_id == attempt.attempt_id
+                    and item.stage == VerificationStage.DETAILED
+                    and item.agent_id not in {attempt.agent_id, referee_id}
+                ),
+                None,
+            )
+            if skeptic_id is not None and not registry.owns_agent(
+                route_id, skeptic_id, RouteRole.SKEPTIC
+            ):
+                try:
+                    registry.assign_member(
+                        route_id, skeptic_id, RouteRole.SKEPTIC, current_round
+                    )
+                except ValueError:
+                    skeptic_id = None
+            tier = MemoryTier.INSIGHT
+            evidence = EvidenceType.UNVERIFIED_IDEA
+            message_type = MessageType.CLAIM_PROPOSAL
+            verification_status = claim.status
+            confidence = claim.verification_confidence or 0.0
+            if claim.status == ClaimStatus.VERIFIED and referee_id is not None:
+                tier = MemoryTier.FACT
+                evidence = EvidenceType.NATURAL_PROOF_AUDITED
+                message_type = MessageType.VERIFIED_LEMMA
+                target_reports = [
+                    item
+                    for item in state.reports
+                    if item.target_id == attempt.attempt_id
+                    and item.agent_id != "system-aggregate"
+                ]
+                if state.validation_escalator is not None:
+                    escalation = state.validation_escalator.plan(
+                        risk_score=min(
+                            1.0,
+                            (1.0 - confidence)
+                            + 0.08 * len(report.issues if report else []),
+                        ),
+                        reviewer_verdicts=[
+                            item.verdict.value for item in target_reports
+                        ],
+                        cross_provider_available=(
+                            len(
+                                {
+                                    item.provider
+                                    for item in self.config.agents
+                                    if item.enabled
+                                }
+                            )
+                            > 1
+                        ),
+                        tool_or_formal_available=(
+                            self.config.verification.enable_sympy_tools
+                            or self.config.verification.enable_lean
+                        ),
+                        before_fact_promotion=True,
+                    )
+                    store.append_event(
+                        "validation_escalation_planned",
+                        {
+                            "target_id": attempt.attempt_id,
+                            **escalation.model_dump(mode="json"),
+                        },
+                    )
+                    independent_reviewers = {
+                        item.agent_id
+                        for item in target_reports
+                        if item.agent_id != attempt.agent_id
+                    }
+                    if (
+                        escalation.blocks_fact_promotion
+                        and len(independent_reviewers) < 2
+                    ):
+                        tier = MemoryTier.INSIGHT
+                        evidence = EvidenceType.UNVERIFIED_IDEA
+                        message_type = MessageType.CLAIM_PROPOSAL
+                        verification_status = ClaimStatus.UNCERTAIN
+            elif claim.status == ClaimStatus.REJECTED:
+                tier = MemoryTier.NEGATIVE
+                message_type = MessageType.FAILURE_RECORD
+            normalized = self._normalize_statement(claim.statement or claim.conclusion)
+            has_implicit_quantifier = any(
+                marker in normalized.casefold()
+                for marker in ("for all", "for every", "there exists", "∀", "∃")
+            )
+            if has_implicit_quantifier and not claim.scope_limitations:
+                tier = MemoryTier.INSIGHT
+                evidence = EvidenceType.UNVERIFIED_IDEA
+                message_type = MessageType.CLAIM_PROPOSAL
+                verification_status = ClaimStatus.UNCERTAIN
+            message = MessageEnvelope(
+                message_id=f"msg_claim_{claim.content_hash[:12]}",
+                problem_hash=problem.integrity_hash,
+                source_agent_id=attempt.agent_id,
+                source_route_id=route_id,
+                source_role=RouteRole.PROVER,
+                message_type=message_type,
+                statement=claim.statement,
+                normalized_statement=normalized,
+                assumptions=claim.assumptions,
+                conclusion=claim.conclusion,
+                dependencies=claim.dependencies,
+                scope_limitations=claim.scope_limitations,
+                evidence_type=evidence,
+                memory_tier=tier,
+                verification_status=verification_status,
+                verification_confidence=confidence,
+                normalization_confidence=(0.7 if has_implicit_quantifier else 1.0),
+                artifact_refs=[ref.artifact_ref for ref in claim.evidence_refs],
+                round_created=current_round,
+                ttl_rounds=self.config.topology.cross_route.message_ttl_rounds,
+            )
+            first_team_publication = all(
+                item.message_id != message.message_id for item in broker.decisions
+            )
+            if first_team_publication and self.config.topology.route_teams.enabled:
+                store.append_event(
+                    "route_team_started",
+                    {
+                        "route_id": route_id,
+                        "attempt_id": attempt.attempt_id,
+                        "prover_agent_id": attempt.agent_id,
+                        "skeptic_agent_id": skeptic_id,
+                    },
+                )
+            publication = broker.publish(
+                message,
+                referee_agent_id=referee_id,
+                current_round=current_round,
+            )
+            if (
+                publication.accepted
+                and tier == MemoryTier.FACT
+                and state.inspiration_engine is not None
+            ):
+                proposal = next(
+                    (
+                        item
+                        for item in state.inspiration_engine.proposals.values()
+                        if f"strategy_{item.proposal_id}" == attempt.strategy_id
+                    ),
+                    None,
+                )
+                if proposal is not None:
+                    state.inspiration_engine.mark_verified(
+                        proposal.proposal_id, message.message_id
+                    )
+            if first_team_publication and self.config.topology.route_teams.enabled:
+                store.append_event(
+                    "route_local_review_completed",
+                    {
+                        "route_id": route_id,
+                        "attempt_id": attempt.attempt_id,
+                        "referee_agent_id": referee_id,
+                        "verdict": report.verdict.value if report else "unavailable",
+                        "global_share_allowed": tier == MemoryTier.FACT,
+                    },
+                )
+
+        for attempt in state.attempts:
+            route_id = self._route_for_strategy(state, attempt.strategy_id)
+            if route_id is None or not registry.owns_agent(
+                route_id, attempt.agent_id, RouteRole.PROVER
+            ):
+                continue
+            for gap in attempt.unresolved_gaps:
+                gap_hash = stable_hash(
+                    (problem.integrity_hash, route_id, self._normalize_statement(gap))
+                )
+                message = MessageEnvelope(
+                    message_id=f"msg_gap_{gap_hash[:12]}",
+                    problem_hash=problem.integrity_hash,
+                    source_agent_id=attempt.agent_id,
+                    source_route_id=route_id,
+                    source_role=RouteRole.PROVER,
+                    message_type=MessageType.PROOF_OBLIGATION,
+                    statement=gap,
+                    normalized_statement=self._normalize_statement(gap),
+                    conclusion=gap,
+                    evidence_type=EvidenceType.UNVERIFIED_IDEA,
+                    memory_tier=MemoryTier.INSIGHT,
+                    verification_status=ClaimStatus.PROPOSED,
+                    normalization_confidence=1.0,
+                    round_created=current_round,
+                    ttl_rounds=self.config.topology.cross_route.message_ttl_rounds,
+                )
+                broker.publish(
+                    message,
+                    referee_agent_id=None,
+                    current_round=current_round,
+                )
+
+        for checkpoint in state.checkpoints:
+            route_id = self._route_for_strategy(state, checkpoint.strategy_id)
+            source_agent_id = checkpoint.source_agent_id
+            if route_id is None or not source_agent_id:
+                continue
+            if not registry.owns_agent(route_id, source_agent_id, RouteRole.PROVER):
+                try:
+                    registry.assign_member(
+                        route_id, source_agent_id, RouteRole.PROVER, current_round
+                    )
+                except ValueError:
+                    continue
+            broker.publish(
+                checkpoint_to_route_message(
+                    checkpoint,
+                    route_id=route_id,
+                    source_agent_id=source_agent_id,
+                    round_index=current_round,
+                    ttl_rounds=self.config.topology.cross_route.message_ttl_rounds,
+                ),
+                referee_agent_id=None,
+                current_round=current_round,
+            )
+
+        self._update_route_progress_state(state, current_round=current_round)
+
+        if state.bridge_broker is not None:
+            state.bridge_broker.detect(
+                current_round=current_round,
+                allowed_fact_ids=[item.message_id for item in state.typed_memory.facts]
+                if state.typed_memory
+                else [],
+                forbidden_negative_ids=[
+                    item.message_id
+                    for item in (
+                        state.typed_memory.negatives if state.typed_memory else []
+                    )
+                    if isinstance(item, MessageEnvelope)
+                ],
+                budget_available=True,
+            )
+        if state.contradiction_broker is not None:
+            state.contradiction_broker.detect(current_round=current_round)
+
+    def _update_route_progress_state(
+        self, state: SolveState, *, current_round: int
+    ) -> None:
+        registry = state.route_registry
+        typed_memory = state.typed_memory
+        if registry is None:
+            return
+        for route in registry.routes:
+            attempts = sorted(
+                (
+                    item
+                    for item in state.attempts
+                    if item.strategy_id == route.strategy_id
+                ),
+                key=lambda item: (item.round_index, item.attempt_id),
+            )
+            if not attempts:
+                continue
+            latest = attempts[-1]
+            route.latest_attempt_id = latest.attempt_id
+            route.latest_checkpoint_id = latest.latest_checkpoint_id
+            route.failure_count = sum(
+                state.aggregate_reports.get(item.attempt_id) is not None
+                and state.aggregate_reports[item.attempt_id].verdict
+                == VerificationVerdict.FAIL
+                for item in attempts
+            )
+            progress_rounds = {
+                item.round_index
+                for item in attempts
+                if state.aggregate_reports.get(item.attempt_id) is not None
+                and state.aggregate_reports[item.attempt_id].verdict
+                == VerificationVerdict.PASS
+            }
+            if typed_memory is not None:
+                progress_rounds.update(
+                    item.round_created
+                    for item in typed_memory.facts_for_route(route.route_id)
+                )
+            if progress_rounds:
+                route.stagnation_rounds = max(0, current_round - max(progress_rounds))
+            else:
+                route.stagnation_rounds = max(
+                    0, current_round - attempts[0].round_index + 1
+                )
+
+    def _hierarchical_graph_signals(
+        self, state: SolveState
+    ) -> dict[str, dict[str, object]]:
+        if (
+            state.route_registry is None
+            or state.proof_graph is None
+            or state.typed_memory is None
+        ):
+            return {}
+        graph = state.proof_graph
+        registry = state.route_registry
+        shared = graph.find_shared_bottlenecks()
+        result: dict[str, dict[str, object]] = {}
+        for route in registry.routes:
+            debt = graph.proof_debt(route.route_id)
+            history = (state.proof_debt_history or {}).setdefault(route.route_id, [])
+            reduction = max(0.0, history[-1] - debt) if history else 0.0
+            if not history or history[-1] != debt:
+                history.append(debt)
+            route_obligations = [
+                item for item in graph.obligations if route.route_id in item.route_ids
+            ]
+            shared_count = sum(
+                1
+                for group in shared
+                if any(route.route_id in item.route_ids for item in group)
+            )
+            contradictions = (
+                [
+                    item
+                    for item in state.contradiction_broker.unresolved()
+                    if route.route_id in item.route_ids
+                ]
+                if state.contradiction_broker is not None
+                else []
+            )
+            counterexamples = [
+                item
+                for item in state.typed_memory.negatives_for_route(route.route_id)
+                if isinstance(item, MessageEnvelope)
+                and item.evidence_type == EvidenceType.COUNTEREXAMPLE
+            ]
+            redundancy = 0.0
+            if state.duplicate_route_detector is not None:
+                for other in registry.routes:
+                    if other.route_id == route.route_id:
+                        continue
+                    redundancy = max(
+                        redundancy,
+                        state.duplicate_route_detector.similarity(route, other),
+                    )
+            accepted_receipts = (
+                [
+                    item
+                    for item in state.message_broker.receipts
+                    if item.target_route_id == route.route_id
+                    and item.status.value == "accepted"
+                ]
+                if state.message_broker is not None
+                else []
+            )
+            result[route.strategy_id] = {
+                "proof_debt": debt,
+                "proof_debt_reduction": reduction,
+                "verified_fact_gain": len(
+                    state.typed_memory.facts_for_route(route.route_id)
+                ),
+                "shared_obligation_count": shared_count,
+                "high_centrality_obligation_count": sum(
+                    item.centrality >= 0.6 and item.status != "closed"
+                    for item in route_obligations
+                ),
+                "contradiction_count": len(contradictions),
+                "counterexample_count": len(counterexamples),
+                "message_utility": min(1.0, len(accepted_receipts) / 3),
+                "route_redundancy": redundancy,
+                "bridge_opportunity": min(1.0, shared_count / 2),
+                "negative_memory_hits": len(
+                    state.typed_memory.negatives_for_route(route.route_id)
+                ),
+                "inspiration_trigger_count": len(
+                    state.inspiration_engine.triggers
+                    if state.inspiration_engine is not None
+                    else {}
+                ),
+                "novelty_score": max(0.0, 1.0 - redundancy),
+                "representation_diversity": max(0.0, 1.0 - redundancy),
+                "analogy_opportunity": (
+                    1.0
+                    if state.inspiration_engine is not None
+                    and state.inspiration_engine.analogy_library.records
+                    else 0.0
+                ),
+                "construction_opportunity": 1.0
+                if any(item.status != "closed" for item in route_obligations)
+                else 0.0,
+                "surprise_budget_remaining": (
+                    state.inspiration_engine.surprise_explorer.state.remaining_calls
+                    if state.inspiration_engine is not None
+                    else 0
+                ),
+            }
+        return result
+
+    def _inspiration_snapshot(
+        self,
+        state: SolveState,
+        *,
+        remaining_calls: int,
+    ) -> InspirationSnapshot | None:
+        if (
+            state.inspiration_engine is None
+            or state.route_registry is None
+            or state.proof_graph is None
+        ):
+            return None
+        routes = state.route_registry.active_routes(state.current_round)
+        attempt_by_strategy = {
+            item.strategy_id: item
+            for item in sorted(state.attempts, key=lambda item: item.round_index)
+        }
+        failed_routes: list[str] = []
+        stagnation: dict[str, int] = {}
+        first_errors: list[str] = []
+        for route in routes:
+            attempt = attempt_by_strategy.get(route.strategy_id)
+            if attempt is None:
+                continue
+            report = state.aggregate_reports.get(attempt.attempt_id)
+            if report is not None and report.verdict == VerificationVerdict.FAIL:
+                failed_routes.append(route.route_id)
+            stagnation[route.route_id] = route.stagnation_rounds
+            if report is not None and report.first_error_step:
+                first_errors.append(report.first_error_step)
+        shared = state.proof_graph.find_shared_bottlenecks()
+        signatures = [
+            NoveltySignature(
+                mechanism_tags=route.mechanism_signature,
+                core_objects=route.mechanism_signature,
+                targeted_obligation_ids=[
+                    item.obligation_id
+                    for item in state.proof_graph.obligations
+                    if route.route_id in item.route_ids and item.status != "closed"
+                ],
+            )
+            for route in routes
+        ]
+        redundancy = 0.0
+        if state.duplicate_route_detector is not None:
+            for index, left in enumerate(routes):
+                for right in routes[index + 1 :]:
+                    redundancy = max(
+                        redundancy,
+                        state.duplicate_route_detector.similarity(left, right),
+                    )
+        total_tokens = sum(item.usage.total_tokens for item in state.attempts)
+        route_budget_share: dict[str, float] = {}
+        for route in routes:
+            spent = sum(
+                item.usage.total_tokens
+                for item in state.attempts
+                if item.strategy_id == route.strategy_id
+            )
+            route_budget_share[route.route_id] = spent / max(1, total_tokens)
+        histories = state.proof_debt_history or {}
+        debt_reduction = sum(
+            max(0.0, values[-2] - values[-1])
+            for values in histories.values()
+            if len(values) >= 2
+        )
+        return InspirationSnapshot(
+            round_index=state.current_round,
+            domain=(state.triage.problem_kind.value if state.triage else "unknown"),
+            active_route_ids=[item.route_id for item in routes],
+            failed_route_ids=failed_routes,
+            stagnation_rounds_by_route=stagnation,
+            verified_fact_gain_recent=(
+                sum(
+                    item.round_created == state.current_round
+                    for item in state.typed_memory.facts
+                )
+                if state.typed_memory
+                else 0
+            ),
+            proof_debt_by_route={
+                route.route_id: state.proof_graph.proof_debt(route.route_id)
+                for route in routes
+            },
+            proof_debt_reduction_recent=debt_reduction,
+            proof_debt_history=[
+                value for values in histories.values() for value in values
+            ],
+            first_error_fingerprints=first_errors,
+            route_redundancy=redundancy,
+            shared_bottleneck_ids=[
+                item.obligation_id for group in shared for item in group
+            ],
+            route_budget_share=route_budget_share,
+            message_utility_by_route={},
+            unresolved_conflict_ids=(
+                [
+                    item.contradiction_id
+                    for item in state.contradiction_broker.unresolved()
+                ]
+                if state.contradiction_broker is not None
+                else []
+            ),
+            final_repair_failed=state.final_repair_failed,
+            remaining_calls=remaining_calls,
+            finalization_reserve_calls=(
+                state.inspiration_engine.surprise_explorer.state.finalization_reserve_calls
+            ),
+            current_path_count=len(state.strategies),
+            max_paths=self.config.budget.max_paths,
+            route_signatures=signatures,
+            open_obligation_ids=[
+                item.obligation_id
+                for item in state.proof_graph.obligations
+                if item.status != "closed"
+            ],
+        )
+
+    async def _run_inspiration_round(
+        self,
+        state: SolveState,
+        *,
+        problem: ProblemContract,
+        remaining_calls: int,
+        store: ArtifactStore,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+    ) -> None:
+        snapshot = self._inspiration_snapshot(state, remaining_calls=remaining_calls)
+        engine = state.inspiration_engine
+        if snapshot is None or engine is None:
+            return
+        triggers = engine.detect_triggers(snapshot)
+        tasks = engine.select_tasks(triggers, snapshot)
+        proposals = await self._generate_inspiration_proposals(
+            engine,
+            tasks,
+            snapshot=snapshot,
+            problem=problem,
+            runner=runner,
+            prompts=prompts,
+        )
+        (
+            precomputed,
+            counterexamples,
+            hidden_assumptions,
+        ) = await self._review_inspiration_proposals(
+            engine,
+            proposals,
+            snapshot=snapshot,
+            problem=problem,
+            runner=runner,
+            prompts=prompts,
+        )
+        reviews = await engine.review(
+            proposals,
+            precomputed_reviews=precomputed,
+            immediate_counterexamples=counterexamples,
+            hidden_assumptions=hidden_assumptions,
+        )
+        engine.materialize(reviews, snapshot)
+        for strategy in engine.materialized_strategies.values():
+            if all(
+                item.strategy_id != strategy.strategy_id for item in state.strategies
+            ):
+                state.strategies.append(strategy)
+        store.write_json(
+            "inspiration",
+            f"round_{state.current_round}",
+            {
+                "triggers": triggers,
+                "tasks": tasks,
+                "proposals": proposals,
+                "reviews": reviews,
+                "materializations": [
+                    engine.materializations[item.proposal_id]
+                    for item in reviews
+                    if item.proposal_id in engine.materializations
+                ],
+            },
+        )
+
+    async def _generate_inspiration_proposals(
+        self,
+        engine: InspirationEngine,
+        tasks: Sequence[Any],
+        *,
+        snapshot: InspirationSnapshot,
+        problem: ProblemContract,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+    ) -> list[InspirationProposal]:
+        if engine.inspiration_config.mode != "active":
+            return await engine.generate(tasks)
+        proposals: list[InspirationProposal] = []
+        final_reserve = snapshot.finalization_reserve_calls
+        for task in tasks:
+            if (
+                task.mechanism == InspirationMechanism.STRUCTURAL_ANALOGY
+                and not engine.analogy_library.records
+            ):
+                proposals.extend(await engine.generate([task]))
+                continue
+            if runner.ledger.remaining_calls <= final_reserve:
+                proposals.extend(await engine.generate([task]))
+                continue
+            role, bundle = self._inspiration_agent_prompt(
+                engine,
+                task,
+                snapshot=snapshot,
+                problem=problem,
+                prompts=prompts,
+            )
+            candidates = [
+                agent
+                for agent in runner.pool.agents
+                if agent.supports_role(role) and not agent.in_cooldown
+            ]
+            if not candidates:
+                proposals.extend(await engine.generate([task]))
+                continue
+            agent = max(candidates, key=lambda item: (item.trust_score, item.id))
+            result = await self._safe_call(
+                runner,
+                role,
+                bundle,
+                fixed_agent=agent,
+                budget_bucket="breadth",
+            )
+            if result is None:
+                proposals.extend(await engine.generate([task]))
+                continue
+            try:
+                proposals.append(
+                    engine.register_agent_artifact(
+                        task,
+                        result.value,
+                        source_agent_id=agent.id,
+                        state=snapshot,
+                    )
+                )
+            except (TypeError, ValueError) as exc:
+                store = engine.store
+                if store is not None:
+                    store.append_event(
+                        "inspiration_agent_artifact_rejected",
+                        {
+                            "task_id": task.task_id,
+                            "agent_id": agent.id,
+                            "reason": str(exc),
+                        },
+                    )
+                proposals.extend(await engine.generate([task]))
+        return proposals
+
+    def _inspiration_agent_prompt(
+        self,
+        engine: InspirationEngine,
+        task: Any,
+        *,
+        snapshot: InspirationSnapshot,
+        problem: ProblemContract,
+        prompts: PromptFactory,
+    ) -> tuple[str, PromptBundle]:
+        graph_context = engine.proof_graph.minimal_subgraph(task.target_obligation_ids)
+        context = {
+            "proof_graph": graph_context,
+            "verified_facts": [
+                item.model_dump(mode="json") for item in engine.typed_memory.facts
+            ],
+            "negative_memory": [
+                item.model_dump(mode="json") for item in engine.typed_memory.negatives
+            ],
+            "route_novelty_signatures": [
+                item.model_dump(mode="json") for item in snapshot.route_signatures
+            ],
+            "failure_diagnostics": snapshot.model_dump(mode="json"),
+            "target_obligation_ids": task.target_obligation_ids,
+        }
+        mechanism = task.mechanism
+        if mechanism == InspirationMechanism.REPRESENTATION_SWITCH:
+            return (
+                "representation_switchboard",
+                prompts.representation_switchboard(problem, **context),
+            )
+        if mechanism == InspirationMechanism.STRUCTURAL_ANALOGY:
+            records = engine.analogy_library.search(
+                query_text=problem.normalized_statement,
+                object_tags=problem.definitions,
+                mechanism_tags=[
+                    tag
+                    for item in snapshot.route_signatures
+                    for tag in item.mechanism_tags
+                ],
+                top_k=engine.inspiration_config.analogy_top_k,
+            )
+            return (
+                "analogy_agent",
+                prompts.structural_analogy_search(
+                    problem=problem,
+                    verified_local_records=records,
+                    **context,
+                ),
+            )
+        if mechanism == InspirationMechanism.AUXILIARY_CONSTRUCTION:
+            return (
+                "construction_inventor",
+                prompts.invent_auxiliary_construction(problem=problem, **context),
+            )
+        if mechanism == InspirationMechanism.INVARIANT_HYPOTHESIS:
+            return (
+                "invariant_hypothesis_agent",
+                prompts.hypothesize_invariant(problem=problem, **context),
+            )
+        if mechanism in {
+            InspirationMechanism.REVERSE_GOAL_ANALYSIS,
+            InspirationMechanism.BRIDGE_LEMMA,
+        }:
+            return (
+                "reverse_goal_analyzer",
+                prompts.reverse_goal_analysis(problem=problem, **context),
+            )
+        if mechanism == InspirationMechanism.META_REPLAN:
+            return (
+                "meta_strategist",
+                prompts.persistent_meta_strategy(problem=problem, **context),
+            )
+        return (
+            "representation_switchboard",
+            prompts.surprise_exploration(problem=problem, **context),
+        )
+
+    async def _review_inspiration_proposals(
+        self,
+        engine: InspirationEngine,
+        proposals: Sequence[InspirationProposal],
+        *,
+        snapshot: InspirationSnapshot,
+        problem: ProblemContract,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+    ) -> tuple[
+        dict[str, InspirationReview],
+        dict[str, list[str]],
+        dict[str, list[str]],
+    ]:
+        precomputed: dict[str, InspirationReview] = {}
+        counterexamples: dict[str, list[str]] = {}
+        hidden: dict[str, list[str]] = {}
+        for proposal in proposals:
+            eligible = [
+                agent
+                for agent in runner.pool.agents
+                if agent.id != proposal.source_agent_id
+                and agent.supports_role("inspiration_referee")
+                and not agent.in_cooldown
+            ]
+            if (
+                engine.inspiration_config.mode != "active"
+                or not eligible
+                or runner.ledger.remaining_calls <= snapshot.finalization_reserve_calls
+            ):
+                local = engine.referee.review(
+                    proposal,
+                    reviewer_agent_id="local_deterministic_referee",
+                    open_obligation_ids=snapshot.open_obligation_ids,
+                    existing_signatures=snapshot.route_signatures,
+                )
+                precomputed[proposal.proposal_id] = local.model_copy(
+                    update={"recommendation": "store_insight"}
+                )
+                continue
+            reviewer = max(eligible, key=lambda item: (item.trust_score, item.id))
+            result = await self._safe_call(
+                runner,
+                "inspiration_referee",
+                prompts.inspiration_referee(
+                    problem=problem,
+                    proposal=proposal.model_dump(mode="json"),
+                    open_obligation_ids=snapshot.open_obligation_ids,
+                    existing_novelty_signatures=[
+                        item.model_dump(mode="json")
+                        for item in snapshot.route_signatures
+                    ],
+                ),
+                fixed_agent=reviewer,
+                budget_bucket="verification",
+            )
+            if result is None:
+                local = engine.referee.review(
+                    proposal,
+                    reviewer_agent_id="local_deterministic_referee",
+                    open_obligation_ids=snapshot.open_obligation_ids,
+                    existing_signatures=snapshot.route_signatures,
+                )
+                precomputed[proposal.proposal_id] = local.model_copy(
+                    update={"recommendation": "store_insight"}
+                )
+                continue
+            review = result.value
+            review.proposal_id = proposal.proposal_id
+            review.reviewer_agent_id = reviewer.id
+            precomputed[proposal.proposal_id] = review
+
+            skeptic_candidates = [
+                agent
+                for agent in runner.pool.agents
+                if agent.id not in {proposal.source_agent_id, reviewer.id}
+                and agent.supports_role("route_skeptic")
+                and not agent.in_cooldown
+            ]
+            if (
+                review.recommendation == "reject"
+                or not skeptic_candidates
+                or runner.ledger.remaining_calls <= snapshot.finalization_reserve_calls
+            ):
+                continue
+            skeptic = max(
+                skeptic_candidates, key=lambda item: (item.trust_score, item.id)
+            )
+            skeptic_result = await self._safe_call(
+                runner,
+                "route_skeptic",
+                prompts.route_skeptic(
+                    problem=problem,
+                    inspiration_proposal=proposal.model_dump(mode="json"),
+                    repair_request=False,
+                    task="quick falsification only",
+                ),
+                fixed_agent=skeptic,
+                budget_bucket="verification",
+            )
+            if skeptic_result is None:
+                continue
+            report = skeptic_result.value
+            if report.verdict == VerificationVerdict.FAIL:
+                descriptions = [item.description for item in report.issues]
+                immediate = [
+                    item for item in descriptions if "counterexample" in item.casefold()
+                ]
+                counterexamples[proposal.proposal_id] = immediate
+                hidden[proposal.proposal_id] = [
+                    item for item in descriptions if item not in immediate
+                ]
+                if not immediate:
+                    precomputed[proposal.proposal_id] = review.model_copy(
+                        update={"recommendation": "store_insight"}
+                    )
+        return precomputed, counterexamples, hidden
+
+    async def _execute_hierarchical_action(
+        self,
+        state: SolveState,
+        action: ActionKind,
+        *,
+        strategy_id: str | None,
+        current_round: int,
+        store: ArtifactStore,
+        problem: ProblemContract,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        tools: ToolBroker,
+    ) -> bool:
+        if state.route_registry is None:
+            return False
+        if action == ActionKind.MERGE_ROUTE and state.duplicate_route_detector:
+            matches = state.duplicate_route_detector.detect(state.route_registry.routes)
+            match = next(
+                (
+                    item
+                    for item in matches
+                    if strategy_id is None
+                    or state.route_registry.get(item.source_route_id).strategy_id
+                    == strategy_id
+                ),
+                None,
+            )
+            if match is not None:
+                state.route_registry.merge_routes(
+                    match.source_route_id, match.target_route_id
+                )
+                match_payload = {
+                    "source_route_id": match.source_route_id,
+                    "target_route_id": match.target_route_id,
+                    "similarity": match.similarity,
+                    "survivor_route_id": match.survivor_route_id,
+                    "reason": match.reason,
+                }
+                store.append_event("route_duplicate_detected", match_payload)
+                store.append_event("route_merged", match_payload)
+                return True
+        if action == ActionKind.COOLDOWN_ROUTE and strategy_id:
+            route_id = self._route_for_strategy(state, strategy_id)
+            if route_id:
+                state.route_registry.mark_cooling(
+                    route_id,
+                    current_round + self.config.scheduler.failed_path_cooldown_rounds,
+                    "scheduler cooldown",
+                )
+                store.append_event(
+                    "route_cooled",
+                    {"route_id": route_id, "round_index": current_round},
+                )
+                return True
+        if action in {
+            ActionKind.BRIDGE,
+            ActionKind.RESOLVE_CONFLICT,
+            ActionKind.SEARCH_COUNTEREXAMPLE,
+        }:
+            return await self._execute_cross_route_verification_task(
+                state,
+                action,
+                strategy_id=strategy_id,
+                current_round=current_round,
+                store=store,
+                problem=problem,
+                runner=runner,
+                prompts=prompts,
+            )
+        if (
+            action
+            in {
+                ActionKind.SWITCH_REPRESENTATION,
+                ActionKind.TRIGGER_INSPIRATION,
+                ActionKind.SEARCH_ANALOGY,
+                ActionKind.INVENT_CONSTRUCTION,
+                ActionKind.GENERATE_INVARIANT,
+                ActionKind.REVERSE_GOAL,
+                ActionKind.META_REPLAN,
+                ActionKind.SURPRISE_WIDEN,
+            }
+            and state.inspiration_engine is not None
+        ):
+            materialized_this_round = any(
+                state.inspiration_engine.triggers.get(proposal.trigger_id) is not None
+                and state.inspiration_engine.triggers[proposal.trigger_id].round_index
+                == current_round
+                and materialization.action
+                in {"attached", "route_created", "bridge_requested"}
+                for proposal_id, materialization in state.inspiration_engine.materializations.items()
+                for proposal in [state.inspiration_engine.proposals[proposal_id]]
+            )
+            pending = [
+                strategy
+                for strategy in state.inspiration_engine.materialized_strategies.values()
+                if all(
+                    attempt.strategy_id != strategy.strategy_id
+                    for attempt in state.attempts
+                )
+            ]
+            if not pending:
+                return materialized_this_round
+            assignments = router.assign_explorers(pending)
+            for strategy, agent in assignments:
+                route_id = self._route_for_strategy(state, strategy.strategy_id)
+                if route_id is not None and not state.route_registry.owns_agent(
+                    route_id, agent.id, RouteRole.PROVER
+                ):
+                    try:
+                        state.route_registry.assign_member(
+                            route_id, agent.id, RouteRole.PROVER, current_round
+                        )
+                    except ValueError:
+                        continue
+            attempts = await self._parallel_round_exploration(
+                problem,
+                assignments,
+                current_round,
+                runner,
+                prompts,
+                router,
+                memory,
+                store,
+                tools,
+            )
+            if attempts:
+                state.attempts.extend(attempts)
+                await self._extract_claims_many(
+                    problem,
+                    attempts,
+                    runner,
+                    prompts,
+                    memory,
+                    store,
+                    budget_bucket="breadth",
+                )
+                return True
+            return materialized_this_round
+        return False
+
+    async def _execute_cross_route_verification_task(
+        self,
+        state: SolveState,
+        action: ActionKind,
+        *,
+        strategy_id: str | None,
+        current_round: int,
+        store: ArtifactStore,
+        problem: ProblemContract,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+    ) -> bool:
+        registry = state.route_registry
+        broker = state.message_broker
+        graph = state.proof_graph
+        if registry is None or broker is None or graph is None or graph.frozen:
+            return False
+
+        role_runner = RoleRunner(runner.pool, registry)
+        target: Any
+        source_route_id: str
+        source_role: RouteRole
+        role_name: str
+        bundle: PromptBundle
+        excluded_authors: set[str]
+
+        if action == ActionKind.BRIDGE:
+            bridge = state.bridge_broker
+            if bridge is None:
+                return False
+            target = next(
+                (
+                    item
+                    for item in bridge.tasks
+                    if item.task_id not in bridge.completed_task_ids
+                    and (
+                        strategy_id is None
+                        or any(
+                            registry.get(route_id).strategy_id == strategy_id
+                            for route_id in item.route_ids
+                        )
+                    )
+                ),
+                None,
+            )
+            if target is None:
+                return False
+            source_route_id = target.route_ids[0]
+            source_role = RouteRole.BRIDGE_PROVER
+            role_name = "bridge_prover"
+            excluded_authors = self._route_authors(registry, target.route_ids)
+            bundle = prompts.bridge_lemma(
+                problem=problem,
+                shared_obligation=target.model_dump(mode="json"),
+                verified_facts=[
+                    item.model_dump(mode="json")
+                    for item in (state.typed_memory.facts if state.typed_memory else [])
+                    if item.message_id in target.allowed_fact_ids
+                ],
+                failure_records=list(target.forbidden_negative_ids),
+            )
+        elif action == ActionKind.RESOLVE_CONFLICT:
+            conflicts = state.contradiction_broker
+            if conflicts is None:
+                return False
+            target = next(
+                (
+                    item
+                    for item in conflicts.unresolved()
+                    if strategy_id is None
+                    or any(
+                        registry.get(route_id).strategy_id == strategy_id
+                        for route_id in item.route_ids
+                    )
+                ),
+                None,
+            )
+            if target is None:
+                return False
+            source_route_id = target.route_ids[0]
+            source_role = RouteRole.CONFLICT_RESOLVER
+            role_name = "conflict_resolver"
+            excluded_authors = self._route_authors(registry, target.route_ids)
+            related = [
+                item.model_dump(mode="json")
+                for item in graph.claim_nodes
+                if item.message_id in target.message_ids
+            ]
+            bundle = prompts.resolve_contradiction(
+                problem=problem,
+                contradiction=target.model_dump(mode="json"),
+                scoped_messages=related,
+            )
+        else:
+            target_route_id = (
+                self._route_for_strategy(state, strategy_id) if strategy_id else None
+            )
+            candidates = [
+                item
+                for item in graph.claim_nodes
+                if target_route_id is None
+                or item.source_route_id == target_route_id
+                or target_route_id in item.target_route_ids
+            ]
+            target = next(
+                (
+                    item
+                    for item in candidates
+                    if item.evidence_type != EvidenceType.COUNTEREXAMPLE
+                ),
+                None,
+            )
+            if target is None:
+                return False
+            source_route_id = target.source_route_id
+            source_role = RouteRole.COUNTEREXAMPLE_HUNTER
+            role_name = "counterexample_hunter"
+            excluded_authors = {target.source_agent_id}
+            bundle = prompts.counterexample_search(
+                problem=problem,
+                exact_scoped_claim=target.model_dump(mode="json"),
+                deterministic_replay_required=True,
+            )
+
+        assignment = role_runner.select(
+            source_route_id,
+            source_role,
+            round_index=current_round,
+            exclude=excluded_authors,
+        )
+        if assignment.agent_id is None:
+            store.append_event(
+                "route_role_unavailable",
+                {
+                    "route_id": source_route_id,
+                    "role": source_role.value,
+                    "reason": assignment.reason,
+                },
+            )
+            return False
+        agent = role_runner.runtime(assignment)
+        store.append_event(
+            "route_member_assigned",
+            {
+                "route_id": source_route_id,
+                "agent_id": agent.id,
+                "role": source_role.value,
+                "round_index": current_round,
+            },
+        )
+        result = await self._safe_call(
+            runner,
+            role_name,
+            bundle,
+            fixed_agent=agent,
+            budget_bucket=("verification" if action != ActionKind.BRIDGE else "depth"),
+        )
+        if result is None:
+            return False
+
+        candidate = result.value
+        if not isinstance(candidate, MessageEnvelope):
+            return False
+        if action == ActionKind.BRIDGE:
+            expected_statement = target.normalized_goal
+        elif action == ActionKind.RESOLVE_CONFLICT:
+            expected_statement = target.normalized_statement
+        else:
+            expected_statement = target.normalized_statement
+        if action != ActionKind.RESOLVE_CONFLICT and (
+            self._normalize_statement(candidate.normalized_statement)
+            != self._normalize_statement(expected_statement)
+        ):
+            store.append_event(
+                "cross_route_task_rejected",
+                {
+                    "action": action.value,
+                    "reason": "agent changed the exact scoped target",
+                },
+            )
+            return False
+
+        referee = role_runner.select(
+            source_route_id,
+            RouteRole.REFEREE,
+            round_index=current_round,
+            exclude={agent.id},
+        )
+        if referee.agent_id is None:
+            return False
+        referee_agent = role_runner.runtime(referee)
+        review_result = await self._safe_call(
+            runner,
+            "route_referee",
+            prompts.route_referee(
+                problem=problem,
+                proposed_message=candidate.model_dump(mode="json"),
+                author_agent_id=agent.id,
+                permitted_target=expected_statement,
+            ),
+            fixed_agent=referee_agent,
+            budget_bucket="verification",
+        )
+        if review_result is None or not review_result.value.accepted:
+            return False
+
+        payload = candidate.model_dump(mode="json")
+        message_type = MessageType.VERIFIED_LEMMA
+        evidence_type = EvidenceType.NATURAL_PROOF_AUDITED
+        memory_tier = MemoryTier.FACT
+        verification_status = ClaimStatus.VERIFIED
+        dependencies: list[str] = []
+        target_routes: list[str] = []
+        if action == ActionKind.BRIDGE:
+            dependencies = list(target.allowed_fact_ids)
+            target_routes = [
+                route_id for route_id in target.route_ids if route_id != source_route_id
+            ]
+        elif action == ActionKind.RESOLVE_CONFLICT:
+            allowed = {
+                "a refutes b",
+                "b refutes a",
+                "same statement with different scopes",
+                "both unsupported",
+                "both compatible after variable/quantifier normalization",
+                "requires external tool/formal check",
+            }
+            resolution = self._normalize_statement(candidate.conclusion)
+            if resolution not in allowed:
+                return False
+            message_type = MessageType.CONTRADICTION_NOTICE
+            memory_tier = MemoryTier.INSIGHT
+            dependencies = list(target.message_ids)
+            target_routes = [
+                route_id for route_id in target.route_ids if route_id != source_route_id
+            ]
+        else:
+            message_type = MessageType.COUNTEREXAMPLE
+            evidence_type = EvidenceType.COUNTEREXAMPLE
+            memory_tier = MemoryTier.NEGATIVE
+            verification_status = ClaimStatus.REJECTED
+            dependencies = [target.message_id]
+            target_routes = sorted(
+                set([target.source_route_id, *target.target_route_ids])
+                - {source_route_id}
+            )
+        payload.update(
+            {
+                "problem_hash": problem.integrity_hash,
+                "source_agent_id": agent.id,
+                "source_route_id": source_route_id,
+                "source_role": source_role.value,
+                "target_route_ids": target_routes,
+                "message_type": message_type.value,
+                "normalized_statement": self._normalize_statement(expected_statement),
+                "dependencies": dependencies,
+                "evidence_type": evidence_type.value,
+                "memory_tier": memory_tier.value,
+                "verification_status": verification_status.value,
+                "verification_confidence": max(
+                    self.config.topology.typed_memory.fact_pass_threshold,
+                    candidate.verification_confidence,
+                ),
+                "normalization_confidence": 1.0,
+                "raw_source_ref": result.raw_ref,
+                "round_created": current_round,
+                "ttl_rounds": self.config.topology.cross_route.message_ttl_rounds,
+                "content_hash": "",
+            }
+        )
+        verified_message = MessageEnvelope.model_validate(payload)
+        decision = broker.publish(
+            verified_message,
+            referee_agent_id=referee_agent.id,
+            current_round=current_round,
+        )
+        if not decision.accepted:
+            return False
+        if action == ActionKind.BRIDGE and state.bridge_broker is not None:
+            state.bridge_broker.accept_verified_result(target.task_id, verified_message)
+        elif (
+            action == ActionKind.RESOLVE_CONFLICT
+            and state.contradiction_broker is not None
+        ):
+            state.contradiction_broker.resolve(
+                target.contradiction_id,
+                resolution_message_id=verified_message.message_id,
+            )
+        return True
+
+    @staticmethod
+    def _route_authors(registry: RouteRegistry, route_ids: Iterable[str]) -> set[str]:
+        return {
+            member.agent_id
+            for route_id in route_ids
+            for member in registry.get(route_id).members
+            if member.role == RouteRole.PROVER
+        }
+
     def _restore_state_from_checkpoint(
         self,
         payload: dict[str, Any],
@@ -1712,6 +3455,12 @@ class ProofMeshOrchestrator:
                 else None
             ),
             budget_exhausted=bool(payload.get("budget_exhausted", False)),
+            current_round=int(payload.get("current_round", 0)),
+            graph_frozen=bool(payload.get("graph_frozen", False)),
+            proof_debt_history={
+                str(key): [float(item) for item in value]
+                for key, value in dict(payload.get("proof_debt_history", {})).items()
+            },
         )
 
     async def _triage(
@@ -3192,6 +4941,7 @@ class ProofMeshOrchestrator:
         *,
         stage: str,
         experiment_audit: Sequence[dict[str, Any]] | None = None,
+        prompt_target: dict[str, Any] | None = None,
     ) -> list[VerificationReport]:
         target_id = (
             target.attempt_id if isinstance(target, ProofAttempt) else "final_proof"
@@ -3220,6 +4970,10 @@ class ProofMeshOrchestrator:
                 for result in tools.results
             ]
         )
+        sanitized_target = prompt_target or target.model_dump(mode="json")
+        sanitized_query = json.dumps(
+            sanitized_target, ensure_ascii=False, sort_keys=True
+        )
         guard_experiments = (
             tools.results_for_path(target.path_id)
             if isinstance(target, ProofAttempt) and target.path_id
@@ -3229,11 +4983,11 @@ class ProofMeshOrchestrator:
         async def one(reviewer: AgentRuntime) -> VerificationReport:
             bundle = prompts.detailed_verify(
                 problem,
-                target.model_dump(mode="json"),
+                sanitized_target,
                 structural_report,
                 self._select_claim_context(
                     memory.verified(),
-                    target.model_dump_json(),
+                    sanitized_query,
                     max_chars=max(2000, self.config.topology.max_context_chars // 4),
                 ),
                 reviewer.id,
@@ -3285,11 +5039,11 @@ class ProofMeshOrchestrator:
                 if runner.ledger.remaining_calls > 0:
                     follow_up = prompts.detailed_verify(
                         problem,
-                        target.model_dump(mode="json"),
+                        sanitized_target,
                         structural_report,
                         self._select_claim_context(
                             memory.verified(),
-                            target.model_dump_json(),
+                            sanitized_query,
                             max_chars=max(
                                 2000, self.config.topology.max_context_chars // 4
                             ),
@@ -3353,6 +5107,146 @@ class ProofMeshOrchestrator:
                         if stage == "final"
                         else VerificationStage.DETAILED,
                         f"Detailed verifier {reviewer.id} raised: {result}",
+                        uncertain=True,
+                    )
+                )
+            else:
+                reports.append(result)
+        return reports
+
+    @staticmethod
+    def _expand_blind_verification(
+        report: BlindVerificationReport,
+        *,
+        verifier_id: str,
+        stage: VerificationStage,
+        raw_ref: str | None,
+        usage: UsageRecord,
+    ) -> VerificationReport:
+        """Attach system provenance only after an identity-free model call."""
+
+        return VerificationReport(
+            target_id="final_proof",
+            target_type="final_proof",
+            agent_id=verifier_id,
+            stage=stage,
+            problem_integrity_ok=report.problem_integrity_ok,
+            verdict=report.verdict,
+            first_error_step=report.first_error_step,
+            issues=report.issues,
+            checked_dependencies=report.checked_dependencies,
+            tool_requests=report.tool_requests,
+            tool_results=report.tool_results,
+            failure_level=report.failure_level,
+            confidence=report.confidence,
+            concise_feedback=report.concise_feedback,
+            raw_artifact_ref=raw_ref,
+            usage=usage,
+        )
+
+    async def _call_blind_final_reviewers(
+        self,
+        problem: ProblemContract,
+        proof: FinalProof,
+        packet: BlindReviewPacket,
+        reviewers: Sequence[AgentRuntime],
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        tools: ToolBroker,
+        store: ArtifactStore,
+        *,
+        experiment_audit: Sequence[dict[str, Any]] | None = None,
+    ) -> list[VerificationReport]:
+        audit_by_hash = {
+            str(record.get("request_hash")): record
+            for record in (experiment_audit or [])
+        }
+        auditable_experiments = [
+            {
+                **experiment.model_dump(mode="json"),
+                **(
+                    {"independent_replay_audit": audit_by_hash[experiment.request_hash]}
+                    if experiment.request_hash in audit_by_hash
+                    else {}
+                ),
+            }
+            for experiment in tools.results
+        ]
+
+        async def one(reviewer: AgentRuntime) -> VerificationReport:
+            first = await self._safe_call(
+                runner,
+                "final_verifier",
+                prompts.blind_detailed_review(
+                    packet,
+                    experiment_results=auditable_experiments,
+                ),
+                fixed_agent=reviewer,
+                budget_bucket="verification",
+            )
+            if first is None:
+                return self._synthetic_verification_failure(
+                    "final_proof",
+                    "final_proof",
+                    VerificationStage.FINAL,
+                    f"Final verifier {reviewer.id} failed to return a valid report.",
+                    uncertain=True,
+                )
+
+            blind: BlindVerificationReport = first.value
+            raw_ref = first.raw_ref
+            usage = first.usage
+            if blind.tool_requests:
+                tool_results = tools.execute_many(blind.tool_requests)
+                blind.tool_results = tool_results
+                if runner.ledger.remaining_calls > 0:
+                    follow_up = await self._safe_call(
+                        runner,
+                        "final_verifier",
+                        prompts.blind_detailed_review(
+                            packet,
+                            tool_results=[
+                                item.model_dump(mode="json") for item in tool_results
+                            ],
+                            experiment_results=auditable_experiments,
+                        ),
+                        fixed_agent=reviewer,
+                        budget_bucket="verification",
+                    )
+                    if follow_up is not None:
+                        interpreted: BlindVerificationReport = follow_up.value
+                        interpreted.tool_requests = blind.tool_requests
+                        interpreted.tool_results = tool_results
+                        blind = interpreted
+                        raw_ref = follow_up.raw_ref
+                        usage = self._sum_usage([first.usage, follow_up.usage])
+
+            report = self._expand_blind_verification(
+                blind,
+                verifier_id=reviewer.id,
+                stage=VerificationStage.FINAL,
+                raw_ref=raw_ref,
+                usage=usage,
+            )
+            self._apply_local_target_integrity_guard(problem, proof, report)
+            self._apply_deterministic_tool_guard(report)
+            self._apply_experiment_counterexample_guard(proof, report, tools.results)
+            self._apply_experiment_audit_guard(report, experiment_audit or [])
+            store.write_json("structured", f"report_{report.report_id}", report)
+            return report
+
+        results = await asyncio.gather(
+            *(one(reviewer) for reviewer in reviewers), return_exceptions=True
+        )
+        reports: list[VerificationReport] = []
+        for reviewer, result in zip(reviewers, results):
+            if isinstance(result, Exception):
+                reports.append(
+                    self._synthetic_verification_failure(
+                        "final_proof",
+                        "final_proof",
+                        VerificationStage.FINAL,
+                        f"Final verifier {reviewer.id} raised: {result}",
                         uncertain=True,
                     )
                 )
@@ -3531,6 +5425,13 @@ class ProofMeshOrchestrator:
         selected = router.select_diverse_strategies(genuinely_new, count)
         state.strategies.extend(selected)
         assignments = router.assign_explorers(selected)
+        if state.route_registry is not None:
+            for strategy, agent in assignments:
+                route = state.route_registry.register_route(strategy)
+                state.route_registry.assign_member(
+                    route.route_id, agent.id, RouteRole.PROVER, round_index
+                )
+                store.append_event("route_registered", route)
         return await self._parallel_round_exploration(
             problem,
             assignments,
@@ -3635,6 +5536,41 @@ class ProofMeshOrchestrator:
             claim_query,
             max_chars=max(2000, int(self.config.topology.max_context_chars * 0.25)),
         )
+        if state.typed_memory is not None:
+            claim_context.extend(
+                {
+                    "statement": fact.statement,
+                    "assumptions": fact.assumptions,
+                    "conclusion": fact.conclusion,
+                    "dependencies": fact.dependencies,
+                    "scope_limitations": fact.scope_limitations,
+                    "evidence_type": fact.evidence_type.value,
+                    "content_hash": fact.content_hash,
+                }
+                for fact in state.typed_memory.facts
+            )
+        open_obligations = (
+            [
+                {
+                    "obligation_id": item.obligation_id,
+                    "statement": item.statement,
+                    "status": item.status,
+                }
+                for item in state.proof_graph.obligations
+                if item.status != "closed"
+            ]
+            if state.proof_graph is not None
+            else []
+        )
+        forbidden_claims = (
+            [
+                item.statement
+                for item in state.typed_memory.negatives
+                if isinstance(item, MessageEnvelope)
+            ]
+            if state.typed_memory is not None
+            else []
+        )
 
         def bundle_factory(current_agent: AgentRuntime) -> PromptBundle:
             return prompts.synthesize(
@@ -3643,6 +5579,8 @@ class ProofMeshOrchestrator:
                 claim_context,
                 review,
                 current_agent.id,
+                open_obligations=open_obligations,
+                forbidden_claims=forbidden_claims,
             )
 
         try:
@@ -3694,6 +5632,47 @@ class ProofMeshOrchestrator:
         store.write_json("structured", "final_proof_draft", proof)
         return proof, synthesizer
 
+    def _build_blind_review_packet(
+        self,
+        problem: ProblemContract,
+        proof: FinalProof,
+        memory: LemmaMemory,
+    ) -> BlindReviewPacket:
+        proof_text = json.dumps(
+            {
+                "answer": proof.answer,
+                "proof_steps": [
+                    step.model_dump(
+                        mode="json",
+                        exclude={"confidence"},
+                    )
+                    for step in proof.proof_steps
+                ],
+                "dependencies": proof.dependencies,
+                "caveats": proof.caveats,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        fact_packets = [
+            {
+                "claim_id": claim.claim_id,
+                "statement": claim.statement,
+                "assumptions": claim.assumptions,
+                "conclusion": claim.conclusion,
+                "dependencies": claim.dependencies,
+                "scope_limitations": claim.scope_limitations,
+                "content_hash": claim.content_hash,
+            }
+            for claim in memory.verified()
+        ]
+        return BlindReviewPacket(
+            problem=problem,
+            final_proof_text=proof_text,
+            cited_fact_packets=fact_packets,
+            forbidden_claims=[claim.statement for claim in memory.rejected()],
+        )
+
     async def _verify_final(
         self,
         problem: ProblemContract,
@@ -3707,6 +5686,33 @@ class ProofMeshOrchestrator:
         store: ArtifactStore,
     ) -> VerificationBundle:
         reports: list[VerificationReport] = []
+        blind_packet = self._build_blind_review_packet(problem, proof, memory)
+        hierarchical = self.config.topology.mode == "hierarchical_sparse"
+        blind_structural = (
+            hierarchical and self.config.topology.final_stage.blind_structural_review
+        )
+        blind_detailed = (
+            hierarchical and self.config.topology.final_stage.blind_detailed_review
+        )
+        if blind_structural or blind_detailed:
+            store.write_json("structured", "blind_final_review_packet", blind_packet)
+        escalation = ValidationEscalator(
+            self.config.topology.validation_escalation
+        ).plan(
+            risk_score=max(0.0, 1.0 - proof.confidence),
+            cross_provider_available=(
+                len({item.provider for item in self.config.agents if item.enabled}) > 1
+            ),
+            tool_or_formal_available=(
+                self.config.verification.enable_sympy_tools
+                or self.config.verification.enable_lean
+            ),
+            final_proof=True,
+        )
+        store.append_event(
+            "validation_escalation_planned",
+            {"target_id": "final_proof", **escalation.model_dump(mode="json")},
+        )
         experiment_audit = tools.audit_key_results()
         failed_experiment_audits = [
             record for record in experiment_audit if not record.get("valid", False)
@@ -3724,14 +5730,19 @@ class ProofMeshOrchestrator:
             payload_type="FinalProof",
             reason="independent final theorem-integrity and dependency gate",
         )
-        result = await self._safe_call(
-            runner,
-            "structural_verifier",
-            prompts.structural_verify(
+        structural_prompt = (
+            prompts.blind_structural_review(blind_packet)
+            if blind_structural
+            else prompts.structural_verify(
                 problem,
                 proof.model_dump(mode="json"),
                 structural.id,
-            ),
+            )
+        )
+        result = await self._safe_call(
+            runner,
+            "structural_verifier",
+            structural_prompt,
             fixed_agent=structural,
             budget_bucket="verification",
         )
@@ -3744,16 +5755,25 @@ class ProofMeshOrchestrator:
                 uncertain=True,
             )
         else:
-            structural_report = result.value
-            self._normalize_report(
-                structural_report,
-                target_id="final_proof",
-                target_type="final_proof",
-                agent_id=structural.id,
-                stage=VerificationStage.STRUCTURAL,
-                raw_ref=result.raw_ref,
-                usage=result.usage,
-            )
+            if blind_structural:
+                structural_report = self._expand_blind_verification(
+                    result.value,
+                    verifier_id=structural.id,
+                    stage=VerificationStage.STRUCTURAL,
+                    raw_ref=result.raw_ref,
+                    usage=result.usage,
+                )
+            else:
+                structural_report = result.value
+                self._normalize_report(
+                    structural_report,
+                    target_id="final_proof",
+                    target_type="final_proof",
+                    agent_id=structural.id,
+                    stage=VerificationStage.STRUCTURAL,
+                    raw_ref=result.raw_ref,
+                    usage=result.usage,
+                )
             self._apply_local_target_integrity_guard(problem, proof, structural_report)
         if failed_experiment_audits:
             structural_report.issues.append(
@@ -3814,19 +5834,32 @@ class ProofMeshOrchestrator:
                 payload_type="FinalProof",
                 reason="independent first-error, step-level final audit",
             )
-        detailed = await self._call_detailed_reviewers(
-            problem,
-            proof,
-            structural_report,
-            final_reviewers,
-            runner,
-            prompts,
-            memory,
-            tools,
-            store,
-            stage="final",
-            experiment_audit=experiment_audit,
-        )
+        if blind_detailed:
+            detailed = await self._call_blind_final_reviewers(
+                problem,
+                proof,
+                blind_packet,
+                final_reviewers,
+                runner,
+                prompts,
+                tools,
+                store,
+                experiment_audit=experiment_audit,
+            )
+        else:
+            detailed = await self._call_detailed_reviewers(
+                problem,
+                proof,
+                structural_report,
+                final_reviewers,
+                runner,
+                prompts,
+                memory,
+                tools,
+                store,
+                stage="final",
+                experiment_audit=experiment_audit,
+            )
         reports.extend(detailed)
 
         if (
@@ -3845,19 +5878,32 @@ class ProofMeshOrchestrator:
                 1,
                 exclude=exclude | {structural.id} | {r.agent_id for r in detailed},
             )
-            extra_reports = await self._call_detailed_reviewers(
-                problem,
-                proof,
-                structural_report,
-                extra,
-                runner,
-                prompts,
-                memory,
-                tools,
-                store,
-                stage="final",
-                experiment_audit=experiment_audit,
-            )
+            if blind_detailed:
+                extra_reports = await self._call_blind_final_reviewers(
+                    problem,
+                    proof,
+                    blind_packet,
+                    extra,
+                    runner,
+                    prompts,
+                    tools,
+                    store,
+                    experiment_audit=experiment_audit,
+                )
+            else:
+                extra_reports = await self._call_detailed_reviewers(
+                    problem,
+                    proof,
+                    structural_report,
+                    extra,
+                    runner,
+                    prompts,
+                    memory,
+                    tools,
+                    store,
+                    stage="final",
+                    experiment_audit=experiment_audit,
+                )
             detailed.extend(extra_reports)
             reports.extend(extra_reports)
 
@@ -4353,6 +6399,36 @@ class ProofMeshOrchestrator:
         for bundle in bundles:
             state.reports.extend(bundle.reports)
             state.aggregate_reports[bundle.aggregate.target_id] = bundle.aggregate
+            if state.capability_profile is None or state.triage is None:
+                continue
+            domain = state.triage.problem_kind.value
+            if domain not in {
+                "number_theory",
+                "combinatorics",
+                "algebra",
+                "inequalities",
+                "geometry",
+                "logic",
+                "computation",
+            }:
+                domain = "logic"
+            role_by_stage = {
+                VerificationStage.STRUCTURAL: "structural_verifier",
+                VerificationStage.DETAILED: "detailed_verifier",
+                VerificationStage.FINAL: "detailed_verifier",
+                VerificationStage.LEMMA: "route_referee",
+            }
+            for report in bundle.reports:
+                if report.agent_id == "system-aggregate":
+                    continue
+                role = role_by_stage.get(report.stage, "detailed_verifier")
+                state.capability_profile.update(
+                    report.agent_id,
+                    domain,
+                    role,
+                    kind="recent_task",
+                    success=(report.verdict == bundle.aggregate.verdict),
+                )
 
     def _select_for_synthesis(self, state: SolveState) -> list[ProofAttempt]:
         ranked = self._rank_attempts(state.attempts)
@@ -5051,6 +7127,7 @@ class ProofMeshOrchestrator:
         store.checkpoint(
             stage,
             {
+                "schema_version": "0.7",
                 "triage": state.triage,
                 "strategies": state.strategies,
                 "attempts": state.attempts,
@@ -5064,6 +7141,50 @@ class ProofMeshOrchestrator:
                 "final_proof": state.final_proof,
                 "final_verification": state.final_verification,
                 "budget_exhausted": state.budget_exhausted,
+                "current_round": state.current_round,
+                "graph_frozen": state.graph_frozen,
+                "final_repair_failed": state.final_repair_failed,
+                "proof_debt_history": state.proof_debt_history or {},
+                "route_registry": (
+                    state.route_registry.export_state()
+                    if state.route_registry is not None
+                    else None
+                ),
+                "typed_memory": (
+                    state.typed_memory.export_state()
+                    if state.typed_memory is not None
+                    else None
+                ),
+                "proof_graph": (
+                    state.proof_graph.export_state()
+                    if state.proof_graph is not None
+                    else None
+                ),
+                "message_broker": (
+                    state.message_broker.export_state()
+                    if state.message_broker is not None
+                    else None
+                ),
+                "bridge_broker": (
+                    state.bridge_broker.export_state()
+                    if state.bridge_broker is not None
+                    else None
+                ),
+                "contradiction_broker": (
+                    state.contradiction_broker.export_state()
+                    if state.contradiction_broker is not None
+                    else None
+                ),
+                "inspiration_engine": (
+                    state.inspiration_engine.export_state()
+                    if state.inspiration_engine is not None
+                    else None
+                ),
+                "agent_capability": (
+                    state.capability_profile.export_state()
+                    if state.capability_profile is not None
+                    else None
+                ),
                 "claims": memory.claims,
                 "calls_started": runner.ledger.calls_started,
                 "stage_calls": runner.ledger.stage_calls,
@@ -5071,6 +7192,57 @@ class ProofMeshOrchestrator:
                 "agent_metrics": runner.pool.metrics(),
             },
         )
+        if state.route_registry is not None:
+            route_registry_state = state.route_registry.export_state()
+            broker_state = (
+                state.message_broker.export_state()
+                if state.message_broker is not None
+                else {}
+            )
+            graph_state = (
+                state.proof_graph.export_state()
+                if state.proof_graph is not None
+                else {}
+            )
+            typed_memory_state = (
+                state.typed_memory.export_state()
+                if state.typed_memory is not None
+                else {}
+            )
+            bridge_state = (
+                state.bridge_broker.export_state()
+                if state.bridge_broker is not None
+                else {}
+            )
+            contradiction_state = (
+                state.contradiction_broker.export_state()
+                if state.contradiction_broker is not None
+                else {}
+            )
+            inspiration_state = (
+                state.inspiration_engine.export_state()
+                if state.inspiration_engine is not None
+                else {}
+            )
+            store.write_json("structured", "route_registry", route_registry_state)
+            store.write_json("structured", "message_broker", broker_state)
+            store.write_json("structured", "proof_graph", graph_state)
+            store.write_json("structured", "typed_memory", typed_memory_state)
+            store.write_json(
+                "structured",
+                "message_receipts",
+                broker_state.get("receipts", {}),
+            )
+            write_hierarchical_reports(
+                store,
+                route_registry=route_registry_state,
+                message_broker=broker_state,
+                proof_graph=graph_state,
+                typed_memory=typed_memory_state,
+                bridge_broker=bridge_state,
+                contradiction_broker=contradiction_state,
+                inspiration_engine=inspiration_state,
+            )
         runner.persist_runtime_state()
 
     def _allowed_tools(self) -> list[str]:

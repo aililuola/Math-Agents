@@ -51,6 +51,7 @@ class AdaptiveBudgetManager:
         attempts: list[ProofAttempt],
         reports: list[VerificationReport],
         aggregate_reports: Mapping[str, VerificationReport] | None = None,
+        graph_signals: Mapping[str, Mapping[str, object]] | None = None,
     ) -> list[PathStats]:
         attempts_by_strategy: dict[str, list[ProofAttempt]] = defaultdict(list)
         for attempt in attempts:
@@ -154,6 +155,31 @@ class AdaptiveBudgetManager:
                     structurally_valid=latest_evidence.structurally_valid,
                 )
             )
+        graph_signals = graph_signals or {}
+        graph_fields = {
+            "proof_debt",
+            "proof_debt_reduction",
+            "verified_fact_gain",
+            "shared_obligation_count",
+            "high_centrality_obligation_count",
+            "contradiction_count",
+            "counterexample_count",
+            "message_utility",
+            "route_redundancy",
+            "bridge_opportunity",
+            "negative_memory_hits",
+            "inspiration_trigger_count",
+            "novelty_score",
+            "representation_diversity",
+            "analogy_opportunity",
+            "construction_opportunity",
+            "surprise_budget_remaining",
+        }
+        for stat in stats:
+            payload = graph_signals.get(stat.strategy_id, {})
+            for field_name in graph_fields:
+                if field_name in payload:
+                    setattr(stat, field_name, payload[field_name])
         return stats
 
     @staticmethod
@@ -460,6 +486,19 @@ class AdaptiveBudgetManager:
         )
 
         candidates: list[BudgetAction] = []
+        hierarchical = self.config.topology.mode == "hierarchical_sparse"
+        graph_mode = self.config.topology.proof_graph.mode
+        graph_active = (
+            hierarchical
+            and self.config.topology.proof_graph.enabled
+            and graph_mode == "active"
+        )
+        inspiration_mode = self.config.topology.inspiration.mode
+        inspiration_active = (
+            hierarchical
+            and self.config.topology.inspiration.enabled
+            and inspiration_mode == "active"
+        )
         for stat in stats:
             if stat.attempt_id is None:
                 continue
@@ -511,6 +550,18 @@ class AdaptiveBudgetManager:
             if stat.structurally_valid is False:
                 depth_score -= self.config.scheduler.structural_failure_penalty
             depth_score -= self._failure_penalty(stat)
+            if graph_active:
+                scheduler = self.config.scheduler
+                depth_score += (
+                    scheduler.proof_debt_reduction_weight
+                    * max(0.0, stat.proof_debt_reduction)
+                    + scheduler.verified_fact_gain_weight
+                    * min(1.0, stat.verified_fact_gain / 2)
+                    + scheduler.message_utility_weight * stat.message_utility
+                    - scheduler.route_redundancy_penalty * stat.route_redundancy
+                    - scheduler.contradiction_priority_weight
+                    * min(1.0, stat.contradiction_count)
+                )
             candidates.append(
                 BudgetAction(
                     action=ActionKind.DEEPEN,
@@ -522,6 +573,191 @@ class AdaptiveBudgetManager:
                     blocked_reason=depth_blocked,
                 )
             )
+
+            if hierarchical and graph_mode in {"shadow", "active"}:
+                shadow = not graph_active
+                if stat.counterexample_count:
+                    candidates.append(
+                        BudgetAction(
+                            action=ActionKind.SEARCH_COUNTEREXAMPLE,
+                            strategy_id=stat.strategy_id,
+                            target_id=stat.attempt_id,
+                            score=(
+                                self.config.scheduler.counterexample_priority_weight
+                                * min(1.0, stat.counterexample_count)
+                                + stat.high_centrality_obligation_count * 0.08
+                            ),
+                            reason="an exact or candidate counterexample has priority over positive votes",
+                            eligible=not shadow,
+                            blocked_reason=(
+                                "proof graph shadow mode records this recommendation only"
+                                if shadow
+                                else None
+                            ),
+                        )
+                    )
+                if stat.contradiction_count:
+                    candidates.append(
+                        BudgetAction(
+                            action=ActionKind.RESOLVE_CONFLICT,
+                            strategy_id=stat.strategy_id,
+                            target_id=stat.attempt_id,
+                            score=(
+                                self.config.scheduler.contradiction_priority_weight
+                                * min(1.0, stat.contradiction_count)
+                                + stat.high_centrality_obligation_count * 0.08
+                            ),
+                            reason="an unresolved scoped contradiction blocks synthesis",
+                            eligible=not shadow,
+                            blocked_reason=(
+                                "proof graph shadow mode records this recommendation only"
+                                if shadow
+                                else None
+                            ),
+                        )
+                    )
+                if stat.shared_obligation_count or stat.bridge_opportunity:
+                    candidates.append(
+                        BudgetAction(
+                            action=ActionKind.BRIDGE,
+                            strategy_id=stat.strategy_id,
+                            target_id=stat.attempt_id,
+                            score=(
+                                self.config.scheduler.bridge_priority_weight
+                                * stat.bridge_opportunity
+                                + self.config.scheduler.shared_bottleneck_weight
+                                * min(1.0, stat.shared_obligation_count / 2)
+                            ),
+                            reason="several routes can share one independently verified bridge lemma",
+                            eligible=not shadow,
+                            blocked_reason=(
+                                "proof graph shadow mode records this recommendation only"
+                                if shadow
+                                else None
+                            ),
+                        )
+                    )
+                if (
+                    stat.route_redundancy
+                    >= self.config.topology.broker.duplicate_strategy_threshold
+                ):
+                    candidates.append(
+                        BudgetAction(
+                            action=ActionKind.MERGE_ROUTE,
+                            strategy_id=stat.strategy_id,
+                            target_id=stat.attempt_id,
+                            score=self.config.scheduler.route_redundancy_penalty
+                            * stat.route_redundancy,
+                            reason="route mechanism, obligations, and facts are redundant",
+                            eligible=not shadow,
+                            blocked_reason=(
+                                "proof graph shadow mode records this recommendation only"
+                                if shadow
+                                else None
+                            ),
+                        )
+                    )
+
+            if hierarchical and inspiration_mode in {"shadow", "active"}:
+                shadow = not inspiration_active
+                obligation_relevance = min(
+                    1.0,
+                    (
+                        stat.high_centrality_obligation_count
+                        + stat.shared_obligation_count
+                    )
+                    / 3.0,
+                )
+                expected_debt_gain = min(1.0, stat.proof_debt / (1.0 + stat.proof_debt))
+                historical_success = min(1.0, stat.verified_fact_gain / 2.0)
+                fast_falsification = 1.0 / 4.0
+                inspiration_base = max(
+                    0.0,
+                    0.30 * stat.novelty_score
+                    + 0.20 * obligation_relevance
+                    + 0.20 * expected_debt_gain
+                    + 0.10 * fast_falsification
+                    + 0.10 * historical_success
+                    - 0.10 * stat.route_redundancy,
+                )
+                inspiration_candidates = [
+                    (
+                        ActionKind.TRIGGER_INSPIRATION,
+                        inspiration_base
+                        + stat.novelty_score
+                        * self.config.scheduler.inspiration_novelty_weight,
+                        stat.inspiration_trigger_count > 0,
+                    ),
+                    (
+                        ActionKind.SWITCH_REPRESENTATION,
+                        stat.representation_diversity
+                        * self.config.scheduler.representation_switch_weight,
+                        stat.representation_diversity > 0,
+                    ),
+                    (
+                        ActionKind.SEARCH_ANALOGY,
+                        stat.analogy_opportunity
+                        * self.config.scheduler.analogy_relevance_weight,
+                        stat.analogy_opportunity > 0,
+                    ),
+                    (
+                        ActionKind.INVENT_CONSTRUCTION,
+                        stat.construction_opportunity
+                        * self.config.scheduler.construction_relevance_weight,
+                        stat.construction_opportunity > 0,
+                    ),
+                    (
+                        ActionKind.GENERATE_INVARIANT,
+                        inspiration_base
+                        + self.config.scheduler.construction_relevance_weight
+                        * expected_debt_gain,
+                        stat.proof_debt > 0
+                        and (
+                            stat.stagnation_rounds > 0
+                            or stat.inspiration_trigger_count > 0
+                        ),
+                    ),
+                    (
+                        ActionKind.REVERSE_GOAL,
+                        inspiration_base
+                        + self.config.scheduler.bridge_priority_weight
+                        * obligation_relevance,
+                        stat.shared_obligation_count > 0
+                        or stat.high_centrality_obligation_count > 0,
+                    ),
+                    (
+                        ActionKind.META_REPLAN,
+                        self.config.scheduler.meta_replan_weight
+                        * min(1.0, stat.stagnation_rounds / 2),
+                        stat.stagnation_rounds > 0,
+                    ),
+                    (
+                        ActionKind.SURPRISE_WIDEN,
+                        inspiration_base
+                        + self.config.scheduler.surprise_exploration_weight
+                        * stat.novelty_score,
+                        stat.surprise_budget_remaining > 0
+                        and current_path_count < self.config.budget.max_paths,
+                    ),
+                ]
+                for action, score, relevant in inspiration_candidates:
+                    if not relevant:
+                        continue
+                    candidates.append(
+                        BudgetAction(
+                            action=action,
+                            strategy_id=stat.strategy_id,
+                            target_id=stat.attempt_id,
+                            score=score,
+                            reason="Inspiration Engine recommends a mechanism-changing action from observable graph signals",
+                            eligible=not shadow,
+                            blocked_reason=(
+                                "inspiration shadow mode records this recommendation only"
+                                if shadow
+                                else None
+                            ),
+                        )
+                    )
 
         best_verified = max((stat.verification_score for stat in stats), default=0.0)
         any_complete = any(stat.complete for stat in stats)
@@ -890,6 +1126,8 @@ class SoftBudgetAllocator:
             )
             if candidate.action == ActionKind.WIDEN:
                 projected_paths += candidate.planned_paths
+            elif candidate.action == ActionKind.SURPRISE_WIDEN:
+                projected_paths += 1
 
         if admitted:
             decision.actions = admitted
@@ -992,6 +1230,25 @@ class SoftBudgetAllocator:
             return 1 + verification_calls
         if action == ActionKind.REVISE:
             return 1 + verification_calls
+        if action == ActionKind.BRIDGE:
+            return 1 + verification_calls
+        if action == ActionKind.RESOLVE_CONFLICT:
+            return 2 + verification_calls
+        if action == ActionKind.SEARCH_COUNTEREXAMPLE:
+            return 2 + verification_calls
+        if action in {ActionKind.MERGE_ROUTE, ActionKind.COOLDOWN_ROUTE}:
+            return 0
+        if action in {
+            ActionKind.SWITCH_REPRESENTATION,
+            ActionKind.SEARCH_ANALOGY,
+            ActionKind.INVENT_CONSTRUCTION,
+            ActionKind.GENERATE_INVARIANT,
+            ActionKind.REVERSE_GOAL,
+            ActionKind.META_REPLAN,
+            ActionKind.TRIGGER_INSPIRATION,
+            ActionKind.SURPRISE_WIDEN,
+        }:
+            return 3
         return 0
 
     def _calls_per_explored_path(self) -> int:
@@ -1026,7 +1283,20 @@ class SoftBudgetAllocator:
             ActionKind.SYNTHESIZE: "synthesis",
             ActionKind.REVISE: "synthesis",
             ActionKind.STOP: "other",
-        }[action]
+            ActionKind.BRIDGE: "depth",
+            ActionKind.RESOLVE_CONFLICT: "verification",
+            ActionKind.SEARCH_COUNTEREXAMPLE: "verification",
+            ActionKind.MERGE_ROUTE: "other",
+            ActionKind.COOLDOWN_ROUTE: "other",
+            ActionKind.SWITCH_REPRESENTATION: "breadth",
+            ActionKind.TRIGGER_INSPIRATION: "breadth",
+            ActionKind.SEARCH_ANALOGY: "breadth",
+            ActionKind.INVENT_CONSTRUCTION: "breadth",
+            ActionKind.GENERATE_INVARIANT: "breadth",
+            ActionKind.REVERSE_GOAL: "depth",
+            ActionKind.META_REPLAN: "breadth",
+            ActionKind.SURPRISE_WIDEN: "breadth",
+        }.get(action, "other")
 
     def estimate_revision_cycle_calls(self) -> int:
         return self.estimate_action_calls(ActionKind.REVISE)

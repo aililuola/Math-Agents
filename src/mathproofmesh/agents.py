@@ -14,7 +14,7 @@ from pydantic import BaseModel, ValidationError
 from .activity import ActivityImportance, ActivityStatus, ActivityStream, stage_label
 from .config import SystemConfig
 from .llm.pool import AgentCallFailure, AgentPool, AgentRuntime
-from .prompts import PromptBundle
+from .prompts import PromptBundle, assert_blind_prompt_safe
 from .schemas import UsageRecord
 from .store import ArtifactStore
 
@@ -135,6 +135,7 @@ class StructuredAgentRunner:
         prefer_provider_not: str | None = None,
         budget_bucket: str = "other",
     ) -> StructuredCallResult[Any]:
+        assert_blind_prompt_safe(bundle)
         agent = fixed_agent or self.pool.select(
             role,
             exclude=exclude,

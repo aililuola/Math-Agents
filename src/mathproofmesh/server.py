@@ -10,6 +10,7 @@ from typing import Any, AsyncIterator
 from pydantic import BaseModel, Field
 
 from .activity import ActivityEvent
+from . import __version__
 from .config import SystemConfig, load_config
 from .orchestrator import ProofMeshOrchestrator
 
@@ -46,7 +47,7 @@ def create_app(config_path: str | None = None):
     run_semaphore = asyncio.Semaphore(max_runs)
     server_token = os.getenv("MATHPROOFMESH_SERVER_TOKEN")
 
-    app = FastAPI(title="MathProofMesh", version="0.6.0")
+    app = FastAPI(title="MathProofMesh", version=__version__)
 
     def authorize(authorization: str | None) -> None:
         if not server_token:
@@ -59,12 +60,16 @@ def create_app(config_path: str | None = None):
     async def health() -> dict[str, object]:
         return {
             "ok": True,
+            "version": __version__,
             "system": config.system_name,
             "enabled_agents": len([a for a in config.agents if a.enabled]),
             "activity_stream": "/solve/stream",
             "resume_endpoint": "/resume",
             "resume_stream": "/resume/stream",
             "checkpoint_resume_enabled": config.continuation.process_resume_enabled,
+            "topology_mode": config.topology.mode,
+            "proof_graph_mode": config.topology.proof_graph.mode,
+            "inspiration_mode": config.topology.inspiration.mode,
         }
 
     @app.post("/solve")

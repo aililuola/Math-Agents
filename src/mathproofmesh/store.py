@@ -50,6 +50,11 @@ class ArtifactStore:
             "prompts",
             "deltas",
             "experiments",
+            "communication",
+            "proof_graph",
+            "inspiration",
+            "verification",
+            "events",
         ]:
             (self.root / subdir).mkdir(parents=True, exist_ok=True)
         self.events_path = self.root / "events.jsonl"
@@ -118,6 +123,18 @@ class ArtifactStore:
             "payload": _to_jsonable(payload),
         }
         with self.events_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+
+    def append_message_event(self, event_type: str, payload: Any) -> None:
+        """Persist the message protocol stream without removing the legacy log."""
+        event = {
+            "timestamp": utc_now_iso(),
+            "run_id": self.run_id,
+            "event_type": event_type,
+            "payload": _to_jsonable(payload),
+        }
+        path = self.root / "events" / "messages.jsonl"
+        with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
 
     def checkpoint(self, stage: str, state: Any) -> str:

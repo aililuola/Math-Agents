@@ -83,6 +83,10 @@ _STAGE_LABELS_ZH = {
     "checkpoint_verification": "验证并提交证明检查点",
     "agent_failover": "切换备用 Agent 继续当前任务",
     "run_resume": "恢复中断的多 Agent 运行",
+    "message_broker": "路由强类型数学消息",
+    "route_team": "执行路线局部协作与独立审查",
+    "proof_graph": "更新证明义务图",
+    "inspiration": "执行表示、类比、构造与策略灵感机制",
 }
 
 _STAGE_LABELS_EN = {
@@ -103,6 +107,10 @@ _STAGE_LABELS_EN = {
     "checkpoint_verification": "Verify and commit a proof checkpoint",
     "agent_failover": "Fail over to a backup agent",
     "run_resume": "Resume an interrupted multi-agent run",
+    "message_broker": "Route typed mathematical messages",
+    "route_team": "Run route-local collaboration and independent review",
+    "proof_graph": "Update the proof-obligation graph",
+    "inspiration": "Run representation, analogy, construction, and meta inspiration",
 }
 
 

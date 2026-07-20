@@ -11,7 +11,7 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [planner, meta_reviewer, final_verifier, experimenter]
+    roles: [planner, meta_reviewer, final_verifier, experimenter, meta_strategist, inspiration_referee, conflict_resolver]
     specialties: [problem_decomposition, strategy_generation, failure_classification, meta_review]
     max_concurrency: 1
     temperature: 0.0
@@ -29,7 +29,7 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [explorer, summarizer, detailed_verifier, final_verifier]
+    roles: [explorer, summarizer, detailed_verifier, final_verifier, route_prover, route_skeptic, analogy_agent, invariant_hypothesis_agent]
     specialties: [number_theory, algebra, combinatorics, invariants, extremal_arguments]
     max_concurrency: 1
     temperature: 0.0
@@ -47,7 +47,7 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [explorer, summarizer, detailed_verifier, final_verifier]
+    roles: [explorer, summarizer, detailed_verifier, final_verifier, route_prover, construction_inventor, representation_switchboard, reverse_goal_analyzer]
     specialties: [analysis, inequalities, geometry, probability, analytic_methods]
     max_concurrency: 1
     temperature: 0.0
@@ -65,7 +65,7 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [explorer, summarizer, structural_verifier, detailed_verifier, final_verifier]
+    roles: [explorer, summarizer, structural_verifier, detailed_verifier, final_verifier, route_prover, route_skeptic, route_referee, tool_specialist, bridge_prover, counterexample_hunter]
     specialties: [logic, graph_theory, constructive_proofs, counterexample_search, dependency_audit]
     max_concurrency: 1
     temperature: 0.0
@@ -83,7 +83,7 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [synthesizer, structural_verifier, detailed_verifier, final_verifier]
+    roles: [synthesizer, structural_verifier, detailed_verifier, final_verifier, route_referee, inspiration_referee, conflict_resolver]
     specialties: [proof_synthesis, rigorous_exposition, proof_audit, symbolic_checks]
     max_concurrency: 1
     temperature: 0.0
@@ -144,6 +144,7 @@ scheduler:
   diagnostic_candidate_limit: 12
 
 topology:
+  mode: hierarchical_sparse
   neighbor_k: 2
   # All five agents use the same provider/model, so independence is enforced by key,
   # user_id, isolated first-pass prompts, and author exclusion rather than provider diversity.
@@ -155,6 +156,37 @@ topology:
   max_context_chars: 180000
   max_verified_claims_per_context: 30
   preserve_raw_evidence: true
+  typed_communication:
+    enabled: true
+  route_teams:
+    enabled: true
+  cross_route:
+    enabled: true
+    initial_isolation_rounds: 1
+    max_neighbors_per_route: 2
+    max_messages_per_route_per_round: 6
+    max_global_messages_per_round: 24
+  proof_graph:
+    enabled: true
+    mode: shadow
+  typed_memory:
+    enabled: true
+    strict_fact_gate: true
+  inspiration:
+    enabled: true
+    mode: shadow
+    representation_switchboard: true
+    analogy_agent: true
+    auxiliary_construction_inventor: true
+    invariant_hypothesis_agent: true
+    reverse_goal_analysis: true
+    bridge_lemma_generator: true
+    persistent_meta_strategist: true
+    surprise_exploration: true
+  validation_escalation:
+    enabled: true
+  agent_capability:
+    enabled: true
 
 verification:
   structural_first: true

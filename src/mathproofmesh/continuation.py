@@ -7,11 +7,16 @@ from .schemas import (
     CheckpointStatus,
     ClaimCard,
     ClaimStatus,
+    EvidenceType,
     FailureLevel,
+    MemoryTier,
+    MessageEnvelope,
+    MessageType,
     ProblemContract,
     ProofAttempt,
     ProofCheckpoint,
     ProofDelta,
+    RouteRole,
     Severity,
     StrategyCard,
     UsageRecord,
@@ -207,6 +212,45 @@ def merge_verified_delta(
         status=CheckpointStatus.COMMITTED,
         verification_report_ids=[report.report_id for report in reports],
         failover_chain=list(failover_chain or []),
+    )
+
+
+def checkpoint_to_route_message(
+    checkpoint: ProofCheckpoint,
+    *,
+    route_id: str,
+    source_agent_id: str,
+    round_index: int,
+    ttl_rounds: int,
+) -> MessageEnvelope:
+    """Expose a committed checkpoint as a route-local typed audit artifact."""
+
+    summary = (
+        checkpoint.final_answer
+        or checkpoint.current_goal
+        or f"Committed proof checkpoint at segment {checkpoint.segment_index}"
+    )
+    return MessageEnvelope(
+        message_id=f"msg_checkpoint_{checkpoint.content_hash[:12]}",
+        problem_hash=checkpoint.problem_hash,
+        source_agent_id=source_agent_id,
+        source_route_id=route_id,
+        source_role=RouteRole.PROVER,
+        message_type=MessageType.ROUTE_CHECKPOINT,
+        statement=summary,
+        normalized_statement=" ".join(summary.casefold().split()),
+        conclusion=summary,
+        dependencies=list(checkpoint.verified_claim_ids),
+        scope_limitations=[
+            "route-local checkpoint; individual lemmas require separate FactMemory promotion"
+        ],
+        evidence_type=EvidenceType.NATURAL_PROOF_AUDITED,
+        memory_tier=MemoryTier.INSIGHT,
+        verification_status=ClaimStatus.VERIFIED,
+        verification_confidence=1.0,
+        normalization_confidence=1.0,
+        round_created=round_index,
+        ttl_rounds=ttl_rounds,
     )
 
 
