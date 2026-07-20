@@ -1,5 +1,13 @@
 # 提示词演化与 Agent 间消息协议
 
+## 0.7 Typed Prompt 边界
+
+分层模式新增 `route_prove`、`route_skeptic`、`route_referee`、`bridge_lemma`、`resolve_contradiction`、`acknowledge_message` 和 `counterexample_search`。路线 Agent 只接收自己的 Strategy、已验证检查点、Typed inbox、相关 Fact/Insight/Negative 和开放义务；Insight 在 prompt 中明确标注为不能作为前提。Referee 只审查清洗后的 artifact，不能生成新证明。
+
+Inspiration Engine 另有八个结构化入口：`representation_switchboard`、`structural_analogy_search`、`invent_auxiliary_construction`、`hypothesize_invariant`、`reverse_goal_analysis`、`persistent_meta_strategy`、`surprise_exploration` 和 `inspiration_referee`。每个输出都必须声明新颖性来源、作用域、假设、目标义务和失败测试，不输出私有思考链。
+
+最终 structural/detailed Judge 使用单独的 blind prompt 与 `BlindVerificationReport`。运行时守卫拒绝包含作者或路线身份、路线分数、自信度、历史审稿或投票字段的盲审 prompt。详见 [TYPED_MESSAGE_PROTOCOL.md](TYPED_MESSAGE_PROTOCOL.md) 与 [INSPIRATION_ENGINE.md](INSPIRATION_ENGINE.md)。
+
 ## 1. 原则
 
 MathProofMesh 的提示词不是同一个“请再想一遍”模板反复追加历史，而是随证明状态变化而演化。每一阶段只接收完成其职责所需的信息，并输出固定 Schema。

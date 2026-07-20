@@ -1,5 +1,13 @@
 # 证明检查点、断线接力与进程恢复
 
+## 0.7 拓扑恢复语义
+
+分层模式的阶段 checkpoint 除旧 `ProofCheckpoint` 外，还保存 `route_registry`、`message_broker`、`message_receipts`、`typed_memory`、`proof_graph`、`bridge_broker`、`contradiction_broker`、`inspiration_engine` 和 domain-role capability 状态。旧 checkpoint 缺少这些字段时初始化为空，并记录 `checkpoint_migrated_to_v0_7`，不会丢弃原有已验证证明段。
+
+消息恢复使用 `(message_id, target_route_id)` 稳定 delivery key。已经进入 Agent prompt 但尚未回执的投递恢复为 pending receipt，`prompt_consumed=true`，不会再次放入 prompt。Inspiration proposal、review 和 materialization 也有稳定 ID；同一 proposal 恢复后不能重复创建路线或重复花费 Surprise Budget。
+
+Graph freeze、Meta-Strategist cooldown、最后可观测 Inspiration snapshot 和受保护预算都随 checkpoint 恢复。恢复的是可审计外部状态，不是模型私有解码状态。
+
 MathProofMesh v0.5.0 将一次长证明从“单个超长模型调用”改造成若干可验证的数学增量。系统不能恢复供应商服务器在断线瞬间的隐藏神经网络状态，但可以恢复最近一个**已经独立验证并持久化**的证明状态。因此，用户看到的行为是“证明已通过第 7 步，断线后继续第 8 步”，而不是重新证明全部前置内容。
 
 ## 1. 恢复语义

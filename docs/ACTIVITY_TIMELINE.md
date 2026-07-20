@@ -1,5 +1,11 @@
 # 实时 Activity 时间线
 
+## 0.7 拓扑与灵感事件
+
+分层模式增加路线注册/成员分配、typed message 发布/投递/拒绝/过期、Fact/Insight/Negative 变化、义务开关、Bridge/Conflict、路线合并/冷却和 graph freeze 事件。`detailed` 显示 source/target route、消息类型、memory tier、拒绝原因、proof debt 变化和消息成本；`compact` 只显示高层动作。
+
+Inspiration Engine 记录 `inspiration_triggered`、表示切换开始/候选、类比搜索/映射、构造开始/提案、不变量候选、`meta_strategy_replan`、Surprise Budget 预留/路线创建，以及提案拒绝、materialize 和验证事件。Detailed payload 可包含 trigger、mechanism、novelty、目标义务、估计调用、审稿建议、派生路线和 debt 前后值，但永远不包含模型私有思考链。
+
 MathProofMesh 可以在求解过程中持续显示类似“Activity”的时间线，让用户按时间顺序看到系统正在做什么，而不必等待全部 Agent 结束后才得到结果。
 
 ## 1. 默认显示内容

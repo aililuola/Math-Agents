@@ -2,11 +2,27 @@
 
 MathProofMesh 是面向高难度数学证明、逻辑推演和研究型推理任务的多智能体系统。它强调四件事：**隔离探索、抽象推理优先、独立验证、可恢复执行**。
 
-当前源码版本和本地目录版本均为 **0.6.0**；实际包版本以 `pyproject.toml`、`BUILD_INFO.json` 和 `mathproofmesh.__version__` 为准。
+当前源码版本为 **0.7.0**；实际包版本以 `pyproject.toml`、`BUILD_INFO.json` 和 `mathproofmesh.__version__` 为准。
 
-> `verified` 表示结果通过了当前配置的自然语言独立审计链，并不等价于 Lean、Coq 或 Isabelle 内核证明。高风险结论仍应由领域专家或形式化证明助手复核。
+> `verified` 表示结果通过了当前配置的独立审计链，并不等价于 Lean、Coq 或 Isabelle 内核证明。高风险结论仍应由领域专家或形式化证明助手复核。
 
-## 0.6.0 核心变化
+## 0.7.0 核心变化
+
+0.7.0 在推理优先计算协议之上增加了可选的分层稀疏协作拓扑。跨路线信息不再是自由文本，而是经过证据、作用域、独立审稿、去重、限流和回执门控的数学对象；Proof Obligation Graph 显式记录开放目标、依赖、冲突和 proof debt。
+
+本版本完整加入 P0 `Inspiration Engine`，不是普通 `widen` 的别名：
+
+- `Representation Switchboard` 主动切换数学表示，并记录对象映射、保持条件、损失风险和快速失败测试；
+- `Analogy Agent` 只检索本地已验证题库，显式列出不可迁移条件；
+- `Auxiliary Construction Inventor` 与 `Invariant / Monovariant Agent` 生成绑定开放义务、可快速证伪的候选；
+- `Reverse Goal Analyzer` 从目标倒推最小桥梁缺口；
+- `Persistent Meta-Strategist` 根据 proof debt、重复首错、路线冗余和预算持续重规划；
+- `Surprise Budget Explorer` 保留少量高新颖性预算，但绝不侵占最终综合、审计和修订储备；
+- `Novelty Signature` 识别“换措辞但同机制”，`Inspiration Referee` 独立门控所有提案。
+
+通用配置仍默认 `legacy_sparse`。DeepSeek 正式版和冒烟版先以 `proof_graph: shadow`、`inspiration: shadow` 观察诊断；实验配置 `config.deepseek-v4-pro.topology-active.yaml` 才会正式让图和灵感提案改变调度。
+
+## 0.6.0 推理优先计算基础
 
 0.6.0 在 0.5.1 的验证式多 Agent 工作流上增加了“推理优先计算协议”。目标不是让系统优先穷举，而是把必要的数值检查从长篇推理文本中抽离出来，用可审计、受预算约束的工具完成。
 
@@ -29,6 +45,10 @@ MathProofMesh 是面向高难度数学证明、逻辑推演和研究型推理任
 - **断线接力与恢复**：同 key 重试失败后可跨 key 接力；进程重启后可从最近已验证检查点继续。
 - **失败感知调度**：根据执行、计划或策略失败决定修补、拓宽或停止。
 - **推理优先计算**：Explorer 可提交 `ExperimentSpec`，但计算门控、工具执行和证明推进彼此隔离。
+- **分层稀疏拓扑**：每条路线拥有局部团队、收件箱和检查点；跨路线只共享 Broker 门控后的结构化对象。
+- **三层记忆与证明图**：Fact、Insight、Negative 严格分层，反例可失效依赖事实并重新打开义务。
+- **专门灵感机制**：表示切换、结构类比、辅助构造、不变量、逆向目标、持续元策略和 Surprise Budget 按可观测停滞触发。
+- **盲终审与升级验证**：最终 Judge 不接收作者、路线排名、投票、自信度或历史审稿；高风险内容可升级到对抗审稿、工具或形式化微证书。
 - **证据重放终审**：终审会校验请求哈希、工具版本、结果哈希，并重放关键实验。
 - **可追溯产物**：保存提示、结构化结果、检查点、实验、验证报告和 Activity 时间线，不传播模型私有思维链。
 
@@ -39,7 +59,7 @@ MathProofMesh 是面向高难度数学证明、逻辑推演和研究型推理任
 Windows PowerShell：
 
 ```powershell
-cd C:\Users\yanxinyu\Desktop\MathProofMesh-0.3.1-DeepSeek-SSE\MathProofMesh-0.6.0
+cd <MathProofMesh 仓库目录>
 
 # 仅第一次需要创建虚拟环境
 python -m venv .venv
@@ -56,7 +76,7 @@ source .venv/bin/activate
 python -m pip install -e ".[dev,server]"
 ```
 
-Python 要求为 **3.11 或更高版本**。0.6.0 的主依赖已包含 SymPy、NetworkX 和 Z3；普通拉取只有在 `pyproject.toml` 的依赖发生变化时才需要重新安装。
+Python 要求为 **3.11 或更高版本**。主依赖已包含 SymPy、NetworkX 和 Z3；普通拉取只有在 `pyproject.toml` 的依赖发生变化时才需要重新安装。
 
 不使用外部 API 的确定性演示：
 
@@ -323,9 +343,10 @@ python -m ruff check .
 python -m ruff format --check .
 python -m compileall -q src
 python benchmarks\reasoning_first_computation.py
+python -m benchmarks.topology.run_mock_benchmark
 ```
 
-0.6.0 的自动化覆盖包括：
+0.7.0 在全部 0.6.0 回归测试之外，还覆盖：
 
 - 简单证明不触发计算；
 - 首轮模糊模式搜索被拒绝；
@@ -338,6 +359,11 @@ python benchmarks\reasoning_first_computation.py
 - 缓存和恢复不重复执行；
 - 沙箱 AST 规则和 Docker 命令构造不暴露网络、API key 或项目工作区；
 - 离线枚举密集代理基准检查结构化计算显著减少推理文本，并保持已知答案正确率。
+- Typed Message 哈希、作用域、Fact evidence gate、稀疏投递和 exactly-once resume；
+- Route Team 独立审稿、Proof Graph 生命周期、Bridge/Conflict 和机制级重复路线；
+- 完整 Inspiration Engine 触发、八类机制、Novelty Gate、shadow/active、预算保护与幂等恢复；
+- Validation Escalation、Agent x Domain x Role capability 和形式化微证书安全降级；
+- 六个离线拓扑场景和十一组规定消融，不使用真实 API。
 
 离线 token 基准是“显式逐例文本”与“结构化请求/结果”的可重复代理，不声称测量供应商隐藏推理 tokens。当前代理基准 3/3 结果正确，估算可见文本减少 99.97%。真实 DeepSeek 成本和准确率回归需要 API key，因此不会在默认测试中调用。固定摘要镜像的 Docker 实机探针已分别通过冒烟版和正式版配置，结果保持为 `bounded_evidence`。
 
@@ -345,11 +371,20 @@ python benchmarks\reasoning_first_computation.py
 
 - [推理优先计算策略、Schema、门控与证据语义](docs/COMPUTATION_POLICY.md)
 - [系统架构、通信拓扑与预算](docs/ARCHITECTURE.md)
+- [分层通信拓扑](docs/COMMUNICATION_TOPOLOGY.md)
+- [Typed Message 协议](docs/TYPED_MESSAGE_PROTOCOL.md)
+- [Proof Obligation Graph](docs/PROOF_OBLIGATION_GRAPH.md)
+- [Typed Memory](docs/TYPED_MEMORY.md)
+- [Inspiration Engine](docs/INSPIRATION_ENGINE.md)
+- [Validation Escalation](docs/VALIDATION_ESCALATION.md)
+- [Agent Capability Profile](docs/AGENT_CAPABILITY_PROFILE.md)
+- [从 0.6 迁移到 0.7](docs/MIGRATION_0.7.md)
 - [DeepSeek V4 Pro 配置](docs/DEEPSEEK_V4_PRO.md)
 - [证明检查点、断线接力与进程恢复](docs/CHECKPOINT_RESUME.md)
 - [Activity 时间线与 SSE](docs/ACTIVITY_TIMELINE.md)
 - [部署与扩展](docs/DEPLOYMENT.md)
 - [可复现验证记录](docs/VALIDATION.md)
+- [0.7.0 发布说明](RELEASE_NOTES_0.7.0.md)
 - [0.6.0 发布说明](RELEASE_NOTES_0.6.0.md)
 
 ## 安全与正确性边界

@@ -1,5 +1,19 @@
 # MathProofMesh 架构说明
 
+## 0.7 分层稀疏扩展
+
+0.7 保留下文的 v0.6 编排器、`SparseTopologyRouter`、软预算和推理优先计算主干，并在 `topology.mode: hierarchical_sparse` 时增加四个平面：控制平面、路线局部团队、全局 Proof Obligation Graph 黑板和盲终审平面。跨路线只允许 `MessageBroker` 投递通过作用域、证据和独立审稿门控的 `MessageEnvelope`，不共享原始 transcript 或 `reasoning_content`。
+
+新增包边界为：
+
+- `communication/`：消息、回执、路线注册、稀疏 Broker 与政策；
+- `proof_graph/`：义务图、桥梁、冲突与机制级重复路线检测；
+- `teams/`：按需启用的 Prover/Skeptic/Tool/Referee；
+- `inspiration/`：表示切换、类比、构造、不变量、逆向目标、持续元策略、Surprise Budget、Novelty 与独立 Referee；
+- `verification/`：升级验证、能力画像、Proof Mutation 和形式化微证书接口。
+
+Proof Graph 与 Inspiration Engine 都支持 `off | shadow | active`。Shadow 只记录候选信号，不改变旧调度；Active 才能正式分配预算、附着义务或创建路线。完整拓扑见 [COMMUNICATION_TOPOLOGY.md](COMMUNICATION_TOPOLOGY.md)，灵感流水线见 [INSPIRATION_ENGINE.md](INSPIRATION_ENGINE.md)。
+
 ## 1. 设计目标
 
 系统需要同时满足四个目标：

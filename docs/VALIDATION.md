@@ -1,6 +1,6 @@
 # 可复现验证记录
 
-**验证日期：2026 年 7 月 20 日。** 本记录严格区分源码静态质量、确定性 Mock/HTTP Mock 行为、安装产物验证、Docker 沙箱实机验证和真实供应商联调。源码、Mock 和安装产物验证已经执行；本机没有 Docker，且构建过程中未使用真实 API key 发起付费请求。
+**验证日期：2026 年 7 月 20 日。** 本记录严格区分源码静态质量、确定性 Mock/HTTP Mock 行为、Docker 沙箱探针和真实供应商联调。0.7 源码、Mock、拓扑 benchmark 与 Docker 固定镜像隔离探针已执行；整个 0.7 自动化过程没有读取 API key，也没有发起真实供应商请求。
 
 ## 1. 一键复验
 
@@ -29,7 +29,7 @@ compileall(src + tests)
 | `python -m compileall -q src tests` | PASS |
 | `ruff check .` | PASS |
 | `ruff format --check .` | PASS |
-| `PYTHONPATH=src pytest -q` | **78 passed, 1 skipped** |
+| `PYTHONPATH=src pytest -q` | **130 passed** |
 | deterministic demo | `verified`，23 calls，30,540 tokens |
 | continuation deterministic demo | `verified`，25 calls，32,920 tokens |
 | demo 证明检查点 | 3 条路径，共 6 个 checkpoint（3 个 genesis + 3 个已验证完成段） |
@@ -40,6 +40,23 @@ compileall(src + tests)
 | `reasoning_content` 增量脱敏 | PASS |
 | YAML 配置解析 | PASS |
 | 源码秘密扫描 | 源码、配置和文档中真实 key 与通用长 `sk-*` 模式均为 0 匹配 |
+
+## 2A. 0.7 分层拓扑与灵感验收
+
+新增测试覆盖 Typed Message/receipt、问题哈希和量词作用域、Broker 去重/TTL/限流、初始隔离、Route Team 独立性、Fact/Insight/Negative 门控、Proof Graph 生命周期、Bridge/Conflict、机制级重复路线、Blind Final Review、checkpoint/resume exactly-once、调度器 graph/inspiration 信号，以及 Validation Escalation、Capability 和形式化微证书安全降级。
+
+P0 Inspiration Engine 的每个要求均有确定性覆盖：触发策略、Representation Switchboard、只读已验证本地库的 Analogy Agent、Auxiliary Construction Inventor、Invariant/Monovariant Hypothesis、Reverse Goal Analyzer、Persistent Meta-Strategist、Surprise Budget、Novelty Signature、独立 Inspiration Referee、shadow 不改变状态、active 创建新路线和 resume 幂等 materialization。
+
+离线拓扑 benchmark：
+
+```text
+6 contract cases
+11 required variants/ablations
+10/10 local component contracts passed
+0 provider calls
+```
+
+结果保存在 `benchmarks/topology/mock_benchmark_results.json`。其中调用数、token 和费用明确是 Mock 估算，不是供应商遥测；该 benchmark 用于回归拓扑语义，不能单独证明真实 IMO 正确率提升。
 
 演示定理为前 `n` 个正奇数之和等于 `n^2`。选择简单定理是为了使状态机、故障恢复和审计链测试可重复，不能据此声称系统已经解决研究级开放问题。
 
@@ -132,7 +149,7 @@ primary key 正常调用级重试耗尽
 - 最终预算储备根据 `reserve_revision_cycles` 与 `max_revisions` 计算；
 - 调度产物记录每个候选动作的排名、分数、预计成本、未选原因和预算阻断原因。
 
-对应自动化结果：`78 passed, 1 skipped`。分段确定性完整演示结果为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
+当前包含上述历史回归在内的完整自动化结果为 `130 passed`。分段确定性完整演示结果仍为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
 
 ## 6. 终审边界与修订回归验证
 
@@ -147,9 +164,9 @@ primary key 正常调用级重试耗尽
 
 集成回归模拟了“最终证明遗漏一个实际为真的定理假设”的情形。首次结构审计阻断详细审计；修订器补出显式推导；随后新的结构审计和详细审计均通过，最终状态才成为 `verified`。
 
-## 7. 安装产物验证
+## 7. 历史 0.6 安装产物验证
 
-v0.6.0 已在本地重新构建 Wheel 和 sdist。`dist/` 仍由 `.gitignore` 排除，因此 GitHub 源码提交不携带二进制构建产物。产物哈希不写回源码元数据，以免 sdist 因包含自身哈希记录而形成循环变化。
+下列记录属于 v0.6.0 基线产物。0.7.0 本次提交只发布源码，不提交 Wheel/sdist；`dist/` 继续由 `.gitignore` 排除。
 
 构建命令：
 
@@ -206,6 +223,6 @@ Python 3.11
 - 真实 SSE 长连接在本地网络、代理和防火墙下的稳定性；
 - 真实 429/5xx 的 `Retry-After` 行为和供应商计费；
 - 多 key 大规模并行下的实际成本、延迟和错误相关性。
-- 固定 digest Docker 镜像中的沙箱实机隔离；当前只完成 AST 拒绝规则和 Docker 启动参数自动化测试，本机未安装 Docker。
+- Docker Desktop/WSL2 已安装，固定 digest 的 `python:3.11-slim` 已在无网络、只读、非 root、cap-drop、进程/内存/CPU 限制下完成 `sandbox-ok` 实机探针。真实模型生成程序的数学正确性仍必须经过现有证据门和独立重放。
 
 真实联调应先执行 `mathproofmesh probe`，再使用 `config.deepseek-v4-pro.smoke.yaml`，最后切换正式配置。详见 [DEEPSEEK_V4_PRO.md](DEEPSEEK_V4_PRO.md)、[CHECKPOINT_RESUME.md](CHECKPOINT_RESUME.md) 与 [DEPLOYMENT.md](DEPLOYMENT.md)。

@@ -1,99 +1,80 @@
 {
   "project": "MathProofMesh",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "validated_on": "2026-07-20",
   "python_requirement": ">=3.11",
-  "release_branch": "feature/mathproofmesh-v0.6.0-reasoning-first-computation",
+  "base_branch": "feature/mathproofmesh-v0.6.0-reasoning-first-computation",
+  "base_commit": "5a77fffb0758240e021c86545fe6165fac52585a",
+  "release_branch": "feature/mathproofmesh-v0.7.0-hierarchical-sparse-topology",
   "deepseek_profile": {
     "provider": "deepseek",
     "model": "deepseek-v4-pro",
     "thinking_enabled": true,
     "reasoning_effort": "max",
     "agent_count": 5,
-    "sse_streaming_enabled_in_deepseek_profiles": true,
+    "sse_streaming_enabled": true,
     "keys_persisted": false,
     "smoke_max_output_tokens": 50000,
     "formal_max_output_tokens": 100000,
     "smoke_max_new_steps_per_segment": 8,
     "formal_max_new_steps_per_segment": 12
   },
-  "continuation": {
-    "proof_delta_segmentation": true,
-    "verified_checkpoint_commit": true,
-    "same_key_request_retries": true,
-    "cross_key_failover": true,
-    "synthesis_cross_key_failover": true,
-    "author_excluded_from_checkpoint_review": true,
-    "actual_synthesizer_excluded_from_final_review": true,
-    "process_resume": true,
-    "raw_reasoning_persisted": false
+  "hierarchical_topology": {
+    "legacy_default_preserved": true,
+    "typed_message_protocol": true,
+    "message_broker_and_receipts": true,
+    "exactly_once_resume": true,
+    "route_local_teams": true,
+    "typed_memory": true,
+    "proof_obligation_graph": true,
+    "bridge_and_contradiction_brokers": true,
+    "mechanism_duplicate_detection": true,
+    "blind_final_review": true,
+    "deepseek_default_graph_mode": "shadow",
+    "active_experiment_config": "config.deepseek-v4-pro.topology-active.yaml"
   },
-  "computation": {
-    "policy": "reasoning_first",
-    "planner_hints_executable": false,
-    "targeted_falsification_fast_path": true,
-    "broad_search_requires_stall_and_meta_review": true,
-    "typed_tools_enabled_in_deepseek_profiles": true,
-    "sandboxed_python_default": false,
-    "not_refuted_can_verify": false,
-    "counterexamples_require_independent_replay": true,
-    "checkpoint_replay_audit": true,
-    "final_replay_audit": true,
-    "cache_and_resume": true,
-    "max_compute_cycles_per_segment": 1,
-    "default_max_cases_per_experiment": 1000000,
-    "default_max_total_cpu_seconds": 120,
-    "default_max_output_chars": 20000
+  "inspiration_engine": {
+    "p0_complete": true,
+    "representation_switchboard": true,
+    "verified_local_analogy_agent": true,
+    "auxiliary_construction_inventor": true,
+    "invariant_monovariant_hypothesis_agent": true,
+    "reverse_goal_analyzer": true,
+    "persistent_meta_strategist": true,
+    "surprise_budget_explorer": true,
+    "novelty_signature_and_referee": true,
+    "checkpoint_and_activity": true,
+    "deepseek_default_mode": "shadow"
   },
   "validation": {
     "compileall": "PASS",
     "ruff_check": "PASS",
     "ruff_format_check": "PASS",
-    "pytest": "78 passed, 1 skipped",
-    "source_demo": {
-      "status": "verified",
-      "calls": 23,
-      "tokens": 30540
+    "pytest": "130 passed",
+    "offline_topology_benchmark": {
+      "status": "PASS",
+      "provider_calls": 0,
+      "cases": 6,
+      "variants": 11,
+      "component_contracts_passed": 10
     },
-    "source_continuation_demo": {
-      "status": "verified",
-      "calls": 25,
-      "tokens": 32920,
-      "proof_checkpoints": 6
-    },
-    "reasoning_first_computation_tests": "18 passed",
-    "offline_computation_benchmark": {
-      "correctness_rate": 1.0,
-      "legacy_reasoning_token_estimate": 8004816,
-      "structured_token_estimate": 2197,
-      "estimated_token_reduction": 0.9997255402247847,
-      "provider_hidden_tokens_measured": false
-    },
-    "config_parse": "PASS (generic disabled; DeepSeek smoke/formal typed computation enabled; Python sandbox disabled)",
-    "source_secret_scan": "PASS",
-    "wheel_build": "PASS",
-    "sdist_build": "PASS",
-    "wheel_install_target": "PASS",
-    "installed_wheel_demo": "verified (25 calls)",
-    "archive_secret_scan": "PASS",
-    "docker_sandbox_policy_tests": "PASS (AST and command construction)",
-    "docker_sandbox_runtime": "NOT RUN (Docker executable unavailable)",
-    "real_provider_calls": "NOT RUN (credentials intentionally not used during build)"
+    "reasoning_first_computation_regression": "PASS",
+    "configuration_parse": "PASS",
+    "real_provider_calls": "NOT RUN; credentials intentionally unused"
   },
   "counts": {
-    "source_python_files": 38,
-    "test_python_files": 16,
-    "documentation_files": 14,
-    "source_lines": 14612,
-    "test_lines": 2967,
-    "documentation_lines": 1906
+    "source_python_files": 71,
+    "test_python_files": 42,
+    "documentation_files": 25,
+    "source_lines": 23975,
+    "test_lines": 4496,
+    "docs_directory_lines": 2088
   },
   "artifacts": {
-    "status": "BUILT AND LOCALLY VALIDATED; dist/ REMAINS GIT-IGNORED",
-    "version": "0.6.0",
-    "wheel": "dist/mathproofmesh-0.6.0-py3-none-any.whl",
-    "sdist": "dist/mathproofmesh-0.6.0.tar.gz",
-    "isolated_target_install": "PASS",
-    "artifact_hashes": "RECORDED OUTSIDE SOURCE METADATA TO AVOID SELF-REFERENTIAL SDIST HASHES"
+    "status": "SOURCE RELEASE; DISTRIBUTION ARTIFACTS NOT COMMITTED",
+    "wheel": "dist/mathproofmesh-0.7.0-py3-none-any.whl",
+    "sdist": "dist/mathproofmesh-0.7.0.tar.gz",
+    "runs_committed": false,
+    "provider_outputs_committed": false
   }
 }
