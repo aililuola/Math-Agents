@@ -1,8 +1,9 @@
 {
   "project": "MathProofMesh",
-  "version": "0.5.1",
-  "validated_on": "2026-07-19",
+  "version": "0.6.0",
+  "validated_on": "2026-07-20",
   "python_requirement": ">=3.11",
+  "release_branch": "feature/mathproofmesh-v0.6.0-reasoning-first-computation",
   "deepseek_profile": {
     "provider": "deepseek",
     "model": "deepseek-v4-pro",
@@ -10,9 +11,11 @@
     "reasoning_effort": "max",
     "agent_count": 5,
     "sse_streaming_enabled_in_deepseek_profiles": true,
-    "streaming_default_for_other_configs": false,
-    "stream_options_include_usage": true,
-    "keys_persisted": false
+    "keys_persisted": false,
+    "smoke_max_output_tokens": 50000,
+    "formal_max_output_tokens": 100000,
+    "smoke_max_new_steps_per_segment": 8,
+    "formal_max_new_steps_per_segment": 12
   },
   "continuation": {
     "proof_delta_segmentation": true,
@@ -22,115 +25,75 @@
     "synthesis_cross_key_failover": true,
     "author_excluded_from_checkpoint_review": true,
     "actual_synthesizer_excluded_from_final_review": true,
-    "failed_agent_cooldown": true,
     "process_resume": true,
-    "resume_before_first_stage_checkpoint": true,
-    "cumulative_budget_and_usage_restore": true,
     "raw_reasoning_persisted": false
+  },
+  "computation": {
+    "policy": "reasoning_first",
+    "planner_hints_executable": false,
+    "targeted_falsification_fast_path": true,
+    "broad_search_requires_stall_and_meta_review": true,
+    "typed_tools_enabled_in_deepseek_profiles": true,
+    "sandboxed_python_default": false,
+    "not_refuted_can_verify": false,
+    "counterexamples_require_independent_replay": true,
+    "checkpoint_replay_audit": true,
+    "final_replay_audit": true,
+    "cache_and_resume": true,
+    "max_compute_cycles_per_segment": 1,
+    "default_max_cases_per_experiment": 1000000,
+    "default_max_total_cpu_seconds": 120,
+    "default_max_output_chars": 20000
   },
   "validation": {
     "compileall": "PASS",
     "ruff_check": "PASS",
     "ruff_format_check": "PASS",
-    "pytest": "60 passed, 1 skipped",
+    "pytest": "78 passed, 1 skipped",
+    "source_demo": {
+      "status": "verified",
+      "calls": 23,
+      "tokens": 30540
+    },
     "source_continuation_demo": {
       "status": "verified",
       "calls": 25,
-      "tokens": 29818,
+      "tokens": 32920,
       "proof_checkpoints": 6
     },
-    "completed_run_resume": {
-      "status": "PASS",
-      "calls_before": 22,
-      "calls_after": 22,
-      "tokens_before": 25969,
-      "tokens_after": 25969
+    "reasoning_first_computation_tests": "18 passed",
+    "offline_computation_benchmark": {
+      "correctness_rate": 1.0,
+      "legacy_reasoning_token_estimate": 8004816,
+      "structured_token_estimate": 2197,
+      "estimated_token_reduction": 0.9997255402247847,
+      "provider_hidden_tokens_measured": false
     },
-    "interrupted_run_resume": {
-      "status": "PASS",
-      "interrupted_status": "budget_exhausted",
-      "calls_before": 4,
-      "resume_status": "verified",
-      "calls_after": 13,
-      "resumed_from_partial_segment": 1,
-      "completed_segment": 2,
-      "stage_checkpoint_present_before_resume": false
-    },
-    "cross_agent_network_failover": "PASS",
-    "auth_key_failover_without_same_key_retry": "PASS",
-    "failed_agent_cooldown": "PASS",
-    "independent_checkpoint_reviewer_guard": "PASS",
-    "checkpoint_lineage_and_hash_guards": "PASS",
-    "self_dependent_claim_guard": "PASS",
-    "immutable_content_addressed_prompts": "PASS",
-    "deepseek_non_streaming_http_mock": "PASS",
-    "deepseek_sse_http_mock": "PASS",
-    "sse_incomplete_stream_guard": "PASS",
-    "sse_missing_usage_guard": "PASS",
-    "reasoning_content_redaction": "PASS",
-    "config_parse": "PASS (both DeepSeek profiles parse; 5/5 agents use streaming=true and reasoning_effort=max; adaptive headroom regression passes)",
-    "source_secret_scan": "PASS (62 tracked candidate files; no supplied key or generic long sk-* credential pattern)",
+    "config_parse": "PASS (generic disabled; DeepSeek smoke/formal typed computation enabled; Python sandbox disabled)",
+    "source_secret_scan": "PASS",
     "wheel_build": "PASS",
     "sdist_build": "PASS",
     "wheel_install_target": "PASS",
-    "wheel_demo": {
-      "status": "verified",
-      "calls": 25
-    },
+    "installed_wheel_demo": "verified (25 calls)",
     "archive_secret_scan": "PASS",
-    "real_provider_calls": "NOT RUN (credentials intentionally not used during build)",
-    "scheduler_regression_tests": "PASS",
-    "deterministic_scheduler_demo": {
-      "status": "verified",
-      "calls": 25,
-      "tokens": 29818
-    },
-    "scheduler_replay_all_failed_paths": "PASS (widen selected when capacity and budget permit)",
-    "latest_smoke_completion_replay": "PASS (completion-only execution failure selected for synthesized final audit without provider calls)",
-    "synthesis_network_failover": "PASS (backup synthesizer completes the same task and remains excluded from final review)",
-    "repairable_final_gap": "PASS (missing theorem applicability condition is revised and then fully re-audited)",
-    "standard_theorem_bibliography_policy": "PASS (bibliographic location is optional; exact form and every hypothesis remain mandatory)",
-    "deepseek_profile_limits": "PASS (smoke 50k/8 steps; formal 100k/12 steps)"
+    "docker_sandbox_policy_tests": "PASS (AST and command construction)",
+    "docker_sandbox_runtime": "NOT RUN (Docker executable unavailable)",
+    "real_provider_calls": "NOT RUN (credentials intentionally not used during build)"
   },
   "counts": {
-    "source_python_files": 25,
-    "test_python_files": 14,
-    "documentation_files": 8,
-    "source_lines": 11907,
-    "test_lines": 2496,
-    "documentation_lines": 2161
+    "source_python_files": 38,
+    "test_python_files": 16,
+    "documentation_files": 14,
+    "source_lines": 14612,
+    "test_lines": 2967,
+    "documentation_lines": 1906
   },
   "artifacts": {
     "status": "BUILT AND LOCALLY VALIDATED; dist/ REMAINS GIT-IGNORED",
-    "current_source_build": {
-      "version": "0.5.1",
-      "wheel": "PASS",
-      "sdist": "PASS",
-      "isolated_target_install": "PASS",
-      "installed_wheel_demo": "verified (25 calls)",
-      "artifact_hashes": "RECORDED OUTSIDE SOURCE METADATA TO AVOID SELF-REFERENTIAL SDIST HASHES"
-    },
-    "previous_release": {
-      "version": "0.5.0",
-      "wheel_sha256": "d60129a5f8f9b41367ae3f5cdbe19882ede791ef4546d17892f407d6e6d22aac",
-      "sdist_sha256": "7a711ca43ba82a2d6403b9c2dd44be98c1db752ecef9e553f7de8958fec50111"
-    }
-  },
-  "scheduler": {
-    "coverage_uses_max_paths": true,
-    "structural_and_aggregate_reports_connected": true,
-    "verification_discounted_progress": true,
-    "failure_level_repair_limits": true,
-    "failed_path_cooldown": true,
-    "force_widen_when_all_failed": true,
-    "dynamic_action_costs": true,
-    "configurable_revision_reserve": true,
-    "candidate_diagnostics": true,
-    "completion_only_execution_repair_requires_final_audit": true,
-    "smoke_and_formal_profiles_preserve_adaptive_headroom": true,
-    "repairable_final_gaps_receive_fresh_full_reaudit": true,
-    "standard_theorem_bibliography_not_required": true,
-    "theorem_form_and_hypotheses_still_required": true,
-    "all_limits_configurable": true
+    "version": "0.6.0",
+    "wheel": "dist/mathproofmesh-0.6.0-py3-none-any.whl",
+    "sdist": "dist/mathproofmesh-0.6.0.tar.gz",
+    "isolated_target_install": "PASS",
+    "artifact_hashes": "RECORDED OUTSIDE SOURCE METADATA TO AVOID SELF-REFERENTIAL SDIST HASHES"
   }
 }

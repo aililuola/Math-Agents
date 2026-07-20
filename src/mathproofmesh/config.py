@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -32,6 +33,7 @@ RoleName = Literal[
     "meta_reviewer",
     "synthesizer",
     "final_verifier",
+    "experimenter",
     "general",
 ]
 
@@ -225,6 +227,49 @@ class ContinuationConfig(ConfigModel):
     retain_rejected_deltas: bool = True
 
 
+class ComputationConfig(ConfigModel):
+    """Reasoning-first experiment policy, budgets, and sandbox controls."""
+
+    enabled: bool = False
+    policy: Literal["reasoning_first"] = "reasoning_first"
+    typed_tools_enabled: bool = True
+    sandboxed_python_enabled: bool = False
+    execute_planner_hints_immediately: bool = False
+    targeted_falsification_fast_path: bool = True
+    soft_experiments_per_path: int = Field(default=2, ge=0, le=100)
+    hard_experiments_per_path: int = Field(default=6, ge=1, le=100)
+    max_compute_cycles_per_segment: int = Field(default=1, ge=0, le=8)
+    max_total_cpu_seconds: float = Field(default=120.0, ge=0.1, le=86_400.0)
+    max_cases_per_experiment: int = Field(default=1_000_000, ge=1, le=100_000_000)
+    max_output_chars: int = Field(default=20_000, ge=256, le=2_000_000)
+    broad_search_after_stalled_rounds: int = Field(default=1, ge=0, le=64)
+    broad_search_requires_meta_review: bool = True
+    cache_results: bool = True
+    sandbox_image: str | None = None
+    sandbox_timeout_seconds: float = Field(default=20.0, ge=0.1, le=600.0)
+    sandbox_memory_mb: int = Field(default=256, ge=32, le=8192)
+    sandbox_cpus: float = Field(default=1.0, ge=0.1, le=16.0)
+    sandbox_pids_limit: int = Field(default=32, ge=4, le=1024)
+
+    @model_validator(mode="after")
+    def validate_computation_policy(self) -> "ComputationConfig":
+        if self.soft_experiments_per_path > self.hard_experiments_per_path:
+            raise ValueError(
+                "soft_experiments_per_path cannot exceed hard_experiments_per_path"
+            )
+        if self.execute_planner_hints_immediately:
+            raise ValueError(
+                "planner computation hints are non-executable under reasoning_first policy"
+            )
+        if self.sandboxed_python_enabled:
+            image = self.sandbox_image or ""
+            if re.fullmatch(r"[^\s@]+@sha256:[0-9a-fA-F]{64}", image) is None:
+                raise ValueError(
+                    "sandboxed Python requires sandbox_image pinned with @sha256:<64 hex>"
+                )
+        return self
+
+
 class RuntimeConfig(ConfigModel):
     run_root: str = "runs"
     output_language: str = "zh-CN"
@@ -251,6 +296,7 @@ class SystemConfig(ConfigModel):
     topology: TopologyConfig = Field(default_factory=TopologyConfig)
     verification: VerificationConfig = Field(default_factory=VerificationConfig)
     continuation: ContinuationConfig = Field(default_factory=ContinuationConfig)
+    computation: ComputationConfig = Field(default_factory=ComputationConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
 
     @field_validator("agents")

@@ -49,6 +49,7 @@ class ArtifactStore:
             "tools",
             "prompts",
             "deltas",
+            "experiments",
         ]:
             (self.root / subdir).mkdir(parents=True, exist_ok=True)
         self.events_path = self.root / "events.jsonl"
@@ -230,6 +231,68 @@ class ArtifactStore:
     ) -> str:
         suffix = "rejected" if rejected else "candidate"
         return self.write_json("deltas", f"{suffix}_{delta_id}", value)
+
+    def write_experiment_artifact(
+        self,
+        request_hash: str,
+        name: str,
+        value: Any,
+        *,
+        text: bool = False,
+    ) -> str:
+        """Write one canonical file under experiments/<request_hash>/ atomically."""
+        experiment_dir = self.root / "experiments" / _safe_name(request_hash)
+        experiment_dir.mkdir(parents=True, exist_ok=True)
+        filename = _safe_name(name)
+        if text:
+            path = experiment_dir / filename
+            content = str(value)
+        else:
+            path = experiment_dir / (
+                filename if filename.endswith(".json") else f"{filename}.json"
+            )
+            content = json.dumps(
+                _to_jsonable(value), ensure_ascii=False, indent=2, sort_keys=True
+            )
+        self._atomic_write(path, content)
+        return self.ref(path)
+
+    def read_experiment_artifact(self, request_hash: str, name: str) -> Any:
+        experiment_dir = self.root / "experiments" / _safe_name(request_hash)
+        filename = _safe_name(name)
+        path = experiment_dir / (
+            filename if filename.endswith(".json") else f"{filename}.json"
+        )
+        with path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+
+    def read_experiment_text_artifact(self, request_hash: str, name: str) -> str:
+        experiment_dir = self.root / "experiments" / _safe_name(request_hash)
+        path = experiment_dir / _safe_name(name)
+        return path.read_text(encoding="utf-8")
+
+    def has_experiment_artifact(self, request_hash: str, name: str) -> bool:
+        experiment_dir = self.root / "experiments" / _safe_name(request_hash)
+        filename = _safe_name(name)
+        path = experiment_dir / (
+            filename if filename.endswith(".json") else f"{filename}.json"
+        )
+        return path.exists()
+
+    def list_experiment_results(self) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        root = self.root / "experiments"
+        if not root.exists():
+            return results
+        for path in sorted(root.glob("*/result.json")):
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+                if isinstance(payload, dict):
+                    results.append(payload)
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+        return results
 
     def latest_stage_checkpoint(self) -> tuple[str, dict[str, Any]] | None:
         candidates = [

@@ -1,6 +1,6 @@
 # 可复现验证记录
 
-**验证日期：2026 年 7 月 19 日。** 本记录严格区分源码静态质量、确定性 Mock/HTTP Mock 行为、安装产物验证和真实供应商联调。前三类已经执行；构建过程中未使用用户的真实 API key 发起付费请求。
+**验证日期：2026 年 7 月 20 日。** 本记录严格区分源码静态质量、确定性 Mock/HTTP Mock 行为、安装产物验证、Docker 沙箱实机验证和真实供应商联调。源码、Mock 和安装产物验证已经执行；本机没有 Docker，且构建过程中未使用真实 API key 发起付费请求。
 
 ## 1. 一键复验
 
@@ -29,8 +29,9 @@ compileall(src + tests)
 | `python -m compileall -q src tests` | PASS |
 | `ruff check .` | PASS |
 | `ruff format --check .` | PASS |
-| `PYTHONPATH=src pytest -q` | **60 passed, 1 skipped** |
-| continuation deterministic demo | `verified`，25 calls，29,818 tokens |
+| `PYTHONPATH=src pytest -q` | **78 passed, 1 skipped** |
+| deterministic demo | `verified`，23 calls，30,540 tokens |
+| continuation deterministic demo | `verified`，25 calls，32,920 tokens |
 | demo 证明检查点 | 3 条路径，共 6 个 checkpoint（3 个 genesis + 3 个已验证完成段） |
 | DeepSeek 非流式 HTTP Mock | PASS |
 | DeepSeek SSE HTTP Mock | PASS |
@@ -131,7 +132,7 @@ primary key 正常调用级重试耗尽
 - 最终预算储备根据 `reserve_revision_cycles` 与 `max_revisions` 计算；
 - 调度产物记录每个候选动作的排名、分数、预计成本、未选原因和预算阻断原因。
 
-对应自动化结果：`60 passed, 1 skipped`。确定性完整演示结果为 `verified`，25 calls，29,818 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
+对应自动化结果：`78 passed, 1 skipped`。分段确定性完整演示结果为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
 
 ## 6. 终审边界与修订回归验证
 
@@ -148,7 +149,7 @@ primary key 正常调用级重试耗尽
 
 ## 7. 安装产物验证
 
-v0.5.1 已在本地重新构建 Wheel 和 sdist。`dist/` 仍由 `.gitignore` 排除，因此 GitHub 源码提交不携带二进制构建产物。产物哈希不写回源码元数据，以免 sdist 因包含自身哈希记录而形成循环变化。
+v0.6.0 已在本地重新构建 Wheel 和 sdist。`dist/` 仍由 `.gitignore` 排除，因此 GitHub 源码提交不携带二进制构建产物。产物哈希不写回源码元数据，以免 sdist 因包含自身哈希记录而形成循环变化。
 
 构建命令：
 
@@ -160,8 +161,8 @@ python -m hatchling build
 
 | 产物 | 结果 |
 |---|---:|
-| `dist/mathproofmesh-0.5.1.tar.gz` | PASS |
-| `dist/mathproofmesh-0.5.1-py3-none-any.whl` | PASS |
+| `dist/mathproofmesh-0.6.0.tar.gz` | PASS |
+| `dist/mathproofmesh-0.6.0-py3-none-any.whl` | PASS |
 | wheel 安装到隔离 target | PASS |
 | 从已安装 wheel 执行 continuation demo | `verified`，25 calls |
 | wheel/sdist 通用长 `sk-*` 凭据模式扫描 | 0 匹配 |
@@ -178,7 +179,25 @@ Python 3.11
 
 该工作流只运行确定性 Mock 测试，不读取 DeepSeek secrets，也不会产生真实模型费用。远程 CI 状态应以相应 GitHub commit/PR 页面为准。
 
-## 9. 尚未实机验证的部分
+## 9. 0.6.0 推理优先计算验证
+
+新增自动化测试覆盖：
+
+- 模糊搜索拒绝、定向反驳快速通道、停滞/Meta 审批和软硬配额；
+- `not_refuted`、有限证据、反例、穷尽证书和形式证书的非对称语义；
+- 反例由 Handler 和 Broker 双重重放，并覆盖仍使用被反驳命题的模型 PASS；
+- 请求/结果往返不增加证明分段或提交中间检查点；
+- 模、Z3、图证书、递推、精确几何和数值反例 Handler；
+- 工具异常降级为无结论；
+- 缓存键、实验 Ledger、进程恢复和最终关键证据重放；
+- Python AST 禁止项与 Docker 无网络、只读、非 root、资源上限和只读临时挂载参数；
+- 离线枚举密集代理基准的正确率和可见文本 token 降幅。
+
+离线代理基准覆盖 1,000,602 个声明案例，3/3 预期结果一致；结构化请求/结果约 2,197 tokens，相对逐例文本代理约 8,004,816 tokens，估算减少 99.97%。这不是供应商隐藏思维 token 的实测值。
+
+发布时的最终测试数量、构建产物和哈希由 `BUILD_INFO.json` 记录。真实 DeepSeek V4 Pro 调用仍标记为 `NOT RUN`，除非用户主动提供凭据并执行 probe/smoke。
+
+## 10. 尚未实机验证的部分
 
 本次构建没有使用聊天中提供的真实 DeepSeek key。尚需在用户本机验证：
 
@@ -187,5 +206,6 @@ Python 3.11
 - 真实 SSE 长连接在本地网络、代理和防火墙下的稳定性；
 - 真实 429/5xx 的 `Retry-After` 行为和供应商计费；
 - 多 key 大规模并行下的实际成本、延迟和错误相关性。
+- 固定 digest Docker 镜像中的沙箱实机隔离；当前只完成 AST 拒绝规则和 Docker 启动参数自动化测试，本机未安装 Docker。
 
 真实联调应先执行 `mathproofmesh probe`，再使用 `config.deepseek-v4-pro.smoke.yaml`，最后切换正式配置。详见 [DEEPSEEK_V4_PRO.md](DEEPSEEK_V4_PRO.md)、[CHECKPOINT_RESUME.md](CHECKPOINT_RESUME.md) 与 [DEPLOYMENT.md](DEPLOYMENT.md)。

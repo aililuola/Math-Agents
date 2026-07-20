@@ -341,7 +341,7 @@ E_{\rm mesh}
 拓宽覆盖率定义为：
 
 \[
-c=\min\!\left(1,rac{	ext{current paths}}{	ext{max paths}}ight),
+c=\min\!\left(1,\frac{\text{current paths}}{\text{max paths}}\right),
 \]
 
 而不是 `current paths / initial paths`。其评分综合剩余容量、整体不确定性、平均停滞、最佳证据进展和失败率。若所有已探索路线的最新版本都经过审查且均为 FAIL、尚未达到 `max_paths`，并且最终储备之后仍有足够预算，`force_widen_when_all_failed=true` 会保证本轮入选动作中至少有一个 `widen`。
@@ -400,9 +400,22 @@ R_{finish}=C_{synthesis+audit}
 - 最终 PASS 还需达到 `verification_pass_threshold`；
 - `first_error_step` 优先取最早、最明确的问题。
 
-## 8. 安全与故障模型
+## 8. 0.6.0 推理优先计算层
 
-### 8.1 API key
+0.6.0 在 Explorer 与 ProofDelta 验证之间增加 `ComputationGate -> ToolBroker -> ExperimentResult` 子流程。它不是新的证明路线，也没有写入 Claim 库的权限。
+
+- Planner 只产生不可执行的 `ComputationHint`。
+- Explorer 必须提交完整 `ExperimentSpec`，Gate 才能决定 allow、defer 或 reject。
+- 计算往返保持原 `parent_checkpoint_id` 和 `segment_index`。
+- 强类型 Handler 与默认关闭的 Docker Python 沙箱位于 `src/mathproofmesh/computation/`。
+- 实验 Ledger 独立于模型调用 Ledger，并按唯一请求统计路径配额和 CPU 时间。
+- 终审重放关键实验；哈希、版本或结果不一致会阻断最终通过。
+
+完整协议见 [COMPUTATION_POLICY.md](COMPUTATION_POLICY.md)。
+
+## 9. 安全与故障模型
+
+### 9.1 API key
 
 - 推荐只配置 `api_key_env`；
 - 脱敏配置不写入 key；
@@ -410,19 +423,19 @@ R_{finish}=C_{synthesis+audit}
 - 每 key 独立限流和并发；
 - `.env` 被 `.gitignore` 排除。
 
-### 8.2 工具
+### 9.2 工具
 
-- 任意 Python 禁止；
+- 宿主机直接执行任意 Python 禁止；模型生成程序仅可进入显式开启、固定镜像的 Docker 沙箱；
 - SymPy 表达式 AST 白名单；
 - Lean 默认关闭；
 - 外部工具设置超时；
 - 生产环境应在无网络、低权限容器执行形式化工具。
 
-### 8.3 Prompt injection
+### 9.3 Prompt injection
 
 数学题本身仍可能包含伪指令。系统的 `COMMON_SYSTEM` 把题面视为不可变数学数据，并要求只输出 Schema；但模型层注入不能仅靠提示词完全消除。公开服务应限制输入来源、工具能力和文件访问。
 
-### 8.4 故障恢复
+### 9.4 故障恢复
 
 系统实现三层恢复：
 

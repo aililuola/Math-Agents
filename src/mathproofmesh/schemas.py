@@ -110,6 +110,64 @@ class Severity(StrEnum):
     CRITICAL = "critical"
 
 
+class ComputationPurpose(StrEnum):
+    FALSIFY_CLAIM = "falsify_claim"
+    CHECK_DERIVED_IDENTITY = "check_derived_identity"
+    TEST_BOUNDARY_CASES = "test_boundary_cases"
+    VERIFY_FINITE_REDUCTION = "verify_finite_reduction"
+    VALIDATE_CONSTRUCTED_EXAMPLE = "validate_constructed_example"
+    DISCOVER_PATTERN = "discover_pattern"
+
+
+class ComputationMethod(StrEnum):
+    SYMPY_SIMPLIFY = "sympy_simplify"
+    SYMPY_EQUIVALENT = "sympy_equivalent"
+    POLYNOMIAL_FACTOR = "polynomial_factor"
+    MODULAR_EXHAUSTIVE = "modular_exhaustive"
+    BOUNDED_INTEGER_SEARCH = "bounded_integer_search"
+    GRAPH_CERTIFICATE = "graph_certificate"
+    RECURRENCE_CHECK = "recurrence_check"
+    EXACT_GEOMETRY = "exact_geometry"
+    NUMERIC_COUNTEREXAMPLE = "numeric_counterexample"
+    SANDBOXED_PYTHON = "sandboxed_python"
+    LEAN_CHECK = "lean_check"
+
+
+class ComputationDecisionStatus(StrEnum):
+    ALLOW = "allow"
+    DEFER = "defer"
+    REJECT = "reject"
+
+
+class EvidenceStrength(StrEnum):
+    HEURISTIC = "heuristic"
+    BOUNDED_EVIDENCE = "bounded_evidence"
+    COUNTEREXAMPLE = "counterexample"
+    EXHAUSTIVE_CERTIFICATE = "exhaustive_certificate"
+    FORMAL_CERTIFICATE = "formal_certificate"
+
+
+class ExperimentOutcome(StrEnum):
+    NOT_REFUTED = "not_refuted"
+    COUNTEREXAMPLE_FOUND = "counterexample_found"
+    CERTIFIED = "certified"
+    INCONCLUSIVE = "inconclusive"
+    ERROR = "error"
+
+
+class InitialExplorationAction(StrEnum):
+    SUBMIT_ATTEMPT = "submit_attempt"
+    REQUEST_COMPUTATION = "request_computation"
+    ABANDON = "abandon"
+
+
+class ContinuationAction(StrEnum):
+    SUBMIT_DELTA = "submit_delta"
+    REQUEST_COMPUTATION = "request_computation"
+    COMPLETE = "complete"
+    ABANDON = "abandon"
+
+
 class UsageRecord(StrictModel):
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
@@ -143,6 +201,206 @@ class CitationRecord(StrictModel):
     verified: bool = False
 
 
+class ComputationHint(StrictModel):
+    """A planner-authored possibility. It is deliberately not executable."""
+
+    purpose: ComputationPurpose
+    target_claim: str
+    suggested_method: ComputationMethod
+    decision_use: str
+    broad_search: bool = False
+
+
+class ExperimentSpec(StrictModel):
+    """An auditable, decision-linked request for a bounded computation."""
+
+    experiment_id: str = Field(default_factory=lambda: new_id("experiment"))
+    purpose: ComputationPurpose = ComputationPurpose.FALSIFY_CLAIM
+    target_claim: str = Field(min_length=1)
+    assumptions: list[str] = Field(default_factory=list)
+    reasoning_basis: str = Field(min_length=1)
+    why_computation_is_needed: str = Field(min_length=1)
+    decision_if_confirmed: str = Field(min_length=1)
+    decision_if_refuted: str = Field(min_length=1)
+    noncomputational_alternative: str = Field(min_length=1)
+    method: ComputationMethod
+    domains: dict[str, Any] = Field(default_factory=dict)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    exact_arithmetic: bool = True
+    broad_search: bool = False
+    typed_tool_gap: str | None = None
+    max_cases: int = Field(default=100_000, ge=1, le=100_000_000)
+    seed: int = 20260719
+    requested_by: str | None = None
+    path_id: str | None = None
+    parent_checkpoint_id: str | None = None
+    runtime_fingerprint: dict[str, Any] = Field(default_factory=dict)
+    request_hash: str = ""
+
+    def normalized_payload(self) -> dict[str, Any]:
+        return {
+            "purpose": self.purpose.value,
+            "target_claim": self.target_claim,
+            "assumptions": self.assumptions,
+            "reasoning_basis": self.reasoning_basis,
+            "why_computation_is_needed": self.why_computation_is_needed,
+            "decision_if_confirmed": self.decision_if_confirmed,
+            "decision_if_refuted": self.decision_if_refuted,
+            "noncomputational_alternative": self.noncomputational_alternative,
+            "method": self.method.value,
+            "domains": self.domains,
+            "arguments": self.arguments,
+            "exact_arithmetic": self.exact_arithmetic,
+            "broad_search": self.broad_search,
+            "typed_tool_gap": self.typed_tool_gap,
+            "max_cases": self.max_cases,
+            "seed": self.seed,
+            "runtime_fingerprint": self.runtime_fingerprint,
+        }
+
+    def bind_runtime_fingerprint(self, fingerprint: dict[str, Any]) -> None:
+        """Bind cache-relevant runtime identity before gate/cache lookup."""
+        object.__setattr__(self, "runtime_fingerprint", fingerprint)
+        object.__setattr__(self, "request_hash", stable_hash(self.normalized_payload()))
+
+    @model_validator(mode="after")
+    def validate_and_hash(self) -> "ExperimentSpec":
+        if (
+            self.purpose == ComputationPurpose.DISCOVER_PATTERN
+            and not self.broad_search
+        ):
+            raise ValueError("discover_pattern requests must set broad_search=true")
+        if self.broad_search and self.purpose == ComputationPurpose.FALSIFY_CLAIM:
+            raise ValueError(
+                "falsify_claim is a targeted request; broad searches must use discover_pattern"
+            )
+        expected = stable_hash(self.normalized_payload())
+        if self.request_hash and self.request_hash != expected:
+            raise ValueError(
+                "request_hash does not match the normalized experiment request"
+            )
+        object.__setattr__(self, "request_hash", expected)
+        return self
+
+
+class ExperimentProgram(StrictModel):
+    experiment_id: str
+    source: str
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+    output_schema: dict[str, Any] = Field(default_factory=dict)
+    dependencies: list[str] = Field(default_factory=list)
+    code_hash: str = ""
+    created_at: str = Field(default_factory=utc_now_iso)
+
+    @model_validator(mode="after")
+    def set_code_hash(self) -> "ExperimentProgram":
+        expected = stable_hash(self.source)
+        if self.code_hash and self.code_hash != expected:
+            raise ValueError("code_hash does not match source")
+        object.__setattr__(self, "code_hash", expected)
+        return self
+
+
+class ExperimentResult(StrictModel):
+    experiment_id: str
+    request_hash: str
+    path_id: str | None = None
+    parent_checkpoint_id: str | None = None
+    target_claim: str
+    method: ComputationMethod
+    outcome: ExperimentOutcome
+    evidence_strength: EvidenceStrength
+    scope: dict[str, Any] = Field(default_factory=dict)
+    counterexample: dict[str, Any] | None = None
+    certificate: dict[str, Any] | None = None
+    exact_arithmetic: bool = False
+    cases_checked: int = Field(default=0, ge=0)
+    runtime_seconds: float = Field(default=0.0, ge=0.0)
+    tool_name: str
+    tool_version: str
+    program_hash: str | None = None
+    cached: bool = False
+    independently_verified: bool = False
+    verification_notes: list[str] = Field(default_factory=list)
+    error: str | None = None
+    artifact_refs: list[EvidenceRef] = Field(default_factory=list)
+    result_hash: str = ""
+    created_at: str = Field(default_factory=utc_now_iso)
+
+    @model_validator(mode="after")
+    def enforce_evidence_semantics(self) -> "ExperimentResult":
+        if self.outcome == ExperimentOutcome.COUNTEREXAMPLE_FOUND:
+            if self.counterexample is None:
+                raise ValueError(
+                    "counterexample_found requires a counterexample payload"
+                )
+            if self.evidence_strength != EvidenceStrength.COUNTEREXAMPLE:
+                raise ValueError(
+                    "a counterexample must use counterexample evidence strength"
+                )
+            if not self.independently_verified:
+                raise ValueError(
+                    "counterexample_found requires independent deterministic verification"
+                )
+        if self.outcome == ExperimentOutcome.CERTIFIED:
+            if self.certificate is None:
+                raise ValueError("certified requires a certificate payload")
+            if self.evidence_strength not in {
+                EvidenceStrength.EXHAUSTIVE_CERTIFICATE,
+                EvidenceStrength.FORMAL_CERTIFICATE,
+            }:
+                raise ValueError(
+                    "certified requires exhaustive_certificate or formal_certificate evidence"
+                )
+        if (
+            self.outcome == ExperimentOutcome.NOT_REFUTED
+            and self.evidence_strength
+            not in {
+                EvidenceStrength.HEURISTIC,
+                EvidenceStrength.BOUNDED_EVIDENCE,
+            }
+        ):
+            raise ValueError("not_refuted can only be heuristic or bounded evidence")
+        if self.outcome in {ExperimentOutcome.ERROR, ExperimentOutcome.INCONCLUSIVE}:
+            if self.evidence_strength != EvidenceStrength.HEURISTIC:
+                raise ValueError("failed or inconclusive computation is only heuristic")
+        payload = {
+            "request_hash": self.request_hash,
+            "target_claim": self.target_claim,
+            "method": self.method.value,
+            "outcome": self.outcome.value,
+            "evidence_strength": self.evidence_strength.value,
+            "scope": self.scope,
+            "counterexample": self.counterexample,
+            "certificate": self.certificate,
+            "exact_arithmetic": self.exact_arithmetic,
+            "cases_checked": self.cases_checked,
+            "tool_name": self.tool_name,
+            "tool_version": self.tool_version,
+            "program_hash": self.program_hash,
+            "independently_verified": self.independently_verified,
+            "verification_notes": self.verification_notes,
+            "error": self.error,
+        }
+        expected = stable_hash(payload)
+        if self.result_hash and self.result_hash != expected:
+            raise ValueError("result_hash does not match experiment result")
+        object.__setattr__(self, "result_hash", expected)
+        return self
+
+
+class ComputationDecision(StrictModel):
+    experiment_id: str
+    request_hash: str
+    decision: ComputationDecisionStatus
+    reason: str
+    rule_id: str
+    cache_hit: bool = False
+    remaining_experiments: int = Field(default=0, ge=0)
+    requires_meta_review: bool = False
+    created_at: str = Field(default_factory=utc_now_iso)
+
+
 class ToolRequest(StrictModel):
     request_id: str = Field(default_factory=lambda: new_id("toolreq"))
     kind: Literal[
@@ -150,6 +408,11 @@ class ToolRequest(StrictModel):
         "sympy_equivalent",
         "numeric_counterexample",
         "polynomial_factor",
+        "modular_exhaustive",
+        "bounded_integer_search",
+        "graph_certificate",
+        "recurrence_check",
+        "exact_geometry",
         "lean_check",
     ]
     arguments: dict[str, Any] = Field(default_factory=dict)
@@ -212,6 +475,7 @@ class StrategyCard(StrictModel):
     estimated_success: float = Field(ge=0.0, le=1.0)
     estimated_cost: float = Field(default=0.5, ge=0.0, le=1.0)
     tags: list[str] = Field(default_factory=list)
+    computation_hints: list[ComputationHint] = Field(default_factory=list)
     assigned_agent_id: str | None = None
 
 
@@ -339,6 +603,70 @@ class ProofDelta(StrictModel):
         return self
 
 
+class InitialExplorationTurn(StrictModel):
+    action: InitialExplorationAction
+    attempt: ProofAttempt | None = None
+    experiment_spec: ExperimentSpec | None = None
+    experiment_impact: FailureLevel | None = None
+    reason: str = ""
+
+    @model_validator(mode="after")
+    def require_action_payload(self) -> "InitialExplorationTurn":
+        if self.experiment_impact == FailureLevel.NONE:
+            raise ValueError(
+                "experiment_impact must classify execution, plan, or strategy"
+            )
+        if self.action == InitialExplorationAction.SUBMIT_ATTEMPT:
+            if self.attempt is None or self.experiment_spec is not None:
+                raise ValueError("submit_attempt requires only an attempt")
+        elif self.action == InitialExplorationAction.REQUEST_COMPUTATION:
+            if self.experiment_spec is None or self.attempt is not None:
+                raise ValueError("request_computation requires only an experiment_spec")
+            if self.experiment_impact is not None:
+                raise ValueError(
+                    "request_computation cannot classify an experiment before it runs"
+                )
+        elif self.attempt is not None or self.experiment_spec is not None:
+            raise ValueError("abandon cannot carry an attempt or experiment request")
+        return self
+
+
+class ContinuationTurn(StrictModel):
+    action: ContinuationAction
+    delta: ProofDelta | None = None
+    experiment_spec: ExperimentSpec | None = None
+    experiment_impact: FailureLevel | None = None
+    reason: str = ""
+
+    @model_validator(mode="after")
+    def require_action_payload(self) -> "ContinuationTurn":
+        if self.experiment_impact == FailureLevel.NONE:
+            raise ValueError(
+                "experiment_impact must classify execution, plan, or strategy"
+            )
+        if self.action in {
+            ContinuationAction.SUBMIT_DELTA,
+            ContinuationAction.COMPLETE,
+        }:
+            if self.delta is None or self.experiment_spec is not None:
+                raise ValueError("submit_delta/complete requires only a proof delta")
+            if (
+                self.action == ContinuationAction.COMPLETE
+                and not self.delta.proof_complete
+            ):
+                raise ValueError("complete requires delta.proof_complete=true")
+        elif self.action == ContinuationAction.REQUEST_COMPUTATION:
+            if self.experiment_spec is None or self.delta is not None:
+                raise ValueError("request_computation requires only an experiment_spec")
+            if self.experiment_impact is not None:
+                raise ValueError(
+                    "request_computation cannot classify an experiment before it runs"
+                )
+        elif self.delta is not None or self.experiment_spec is not None:
+            raise ValueError("abandon cannot carry a proof delta or experiment request")
+        return self
+
+
 class ProofCheckpoint(StrictModel):
     checkpoint_id: str = Field(default_factory=lambda: new_id("checkpoint"))
     parent_checkpoint_id: str | None = None
@@ -455,6 +783,7 @@ class MetaReview(StrictModel):
     shared_agreements: list[str] = Field(default_factory=list)
     unresolved_conflicts: list[str] = Field(default_factory=list)
     required_actions: list[str] = Field(default_factory=list)
+    broad_computation_approved_strategy_ids: list[str] = Field(default_factory=list)
     failure_level: FailureLevel = FailureLevel.NONE
     can_synthesize: bool = False
     confidence: float = Field(ge=0.0, le=1.0)
@@ -559,6 +888,7 @@ class RunResult(StrictModel):
     verification_reports: list[VerificationReport] = Field(default_factory=list)
     meta_reviews: list[MetaReview] = Field(default_factory=list)
     proof_checkpoints: list[ProofCheckpoint] = Field(default_factory=list)
+    experiments: list[ExperimentResult] = Field(default_factory=list)
     resumed: bool = False
     resumed_from_checkpoint_id: str | None = None
     agent_metrics: list[AgentMetric] = Field(default_factory=list)
