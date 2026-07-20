@@ -477,7 +477,7 @@ class ContinuationConfig(ConfigModel):
     )
     max_new_steps_per_call: int = Field(default=3, ge=1, le=32)
     max_new_claims_per_call: int = Field(default=3, ge=0, le=32)
-    max_output_tokens_per_segment: int = Field(default=12000, ge=512, le=128000)
+    max_output_tokens_per_segment: int = Field(default=12000, ge=512, le=384000)
     segments_per_explore_call: int = Field(default=1, ge=1, le=8)
     max_segments_per_path: int = Field(default=12, ge=1, le=128)
     verify_each_delta: bool = True

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -17,6 +18,19 @@ def _user_text(messages: list[Message]) -> str:
     return "\n".join(
         message["content"] for message in messages if message["role"] == "user"
     )
+
+
+def _sanitized_context(text: str) -> dict[str, Any]:
+    marker = "SANITIZED CONTEXT:\n"
+    end_marker = "\n\nOUTPUT LANGUAGE:"
+    if marker not in text:
+        return {}
+    payload = text.split(marker, 1)[1].split(end_marker, 1)[0]
+    try:
+        value = json.loads(payload)
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def demo_responder(
@@ -88,6 +102,11 @@ def demo_responder(
             "omitted_directions": [],
         }
     if schema_name in {"ContinuationTurn", "ProofDelta"}:
+        context = _sanitized_context(text)
+        authoritative = context.get("authoritative_ids", {})
+        checkpoint_context = context.get("checkpoint", {})
+        strategy_context = context.get("strategy", {})
+        problem_context = context.get("problem", {})
         parent_match = re.search(r'"checkpoint_id"\s*:\s*"([^"]+)"', text)
         problem_match = re.search(r'"integrity_hash"\s*:\s*"([^"]+)"', text)
         path_match = re.search(r'"path_id"\s*:\s*"([^"]+)"', text)
@@ -95,22 +114,36 @@ def demo_responder(
         segment_match = re.search(r"segment_index=(\d+)", text)
         round_match = re.search(r"round_index=(\d+)", text)
         agent_match = re.search(r"agent_id=\'([^\']+)\'", text)
+        segment_index = int(
+            authoritative.get(
+                "segment_index", segment_match.group(1) if segment_match else 1
+            )
+        )
         delta = {
-            "problem_hash": problem_match.group(1) if problem_match else "0" * 64,
-            "path_id": path_match.group(1) if path_match else "path_mock",
-            "strategy_id": strategy_match.group(1)
-            if strategy_match
-            else "strategy_mock",
-            "parent_checkpoint_id": parent_match.group(1)
-            if parent_match
-            else "checkpoint_mock",
-            "agent_id": agent_match.group(1) if agent_match else "mock-explorer",
-            "round_index": int(round_match.group(1)) if round_match else 0,
-            "segment_index": int(segment_match.group(1)) if segment_match else 1,
+            "problem_hash": authoritative.get("problem_hash")
+            or problem_context.get("integrity_hash")
+            or (problem_match.group(1) if problem_match else "0" * 64),
+            "path_id": authoritative.get("path_id")
+            or checkpoint_context.get("path_id")
+            or (path_match.group(1) if path_match else "path_mock"),
+            "strategy_id": authoritative.get("strategy_id")
+            or strategy_context.get("strategy_id")
+            or (strategy_match.group(1) if strategy_match else "strategy_mock"),
+            "parent_checkpoint_id": authoritative.get("parent_checkpoint_id")
+            or checkpoint_context.get("checkpoint_id")
+            or (parent_match.group(1) if parent_match else "checkpoint_mock"),
+            "agent_id": authoritative.get("agent_id")
+            or (agent_match.group(1) if agent_match else "mock-explorer"),
+            "round_index": int(
+                authoritative.get(
+                    "round_index", round_match.group(1) if round_match else 0
+                )
+            ),
+            "segment_index": segment_index,
             "completed_subgoal": "Establish the consecutive-square difference and telescope it.",
             "new_steps": [
                 {
-                    "step_id": f"seg{segment_match.group(1) if segment_match else '1'}_s1",
+                    "step_id": f"seg{segment_index}_s1",
                     "statement": "For every k>=1, k^2-(k-1)^2=2k-1.",
                     "justification": "Expand the square and simplify.",
                     "dependencies": [],
@@ -120,12 +153,10 @@ def demo_responder(
                     "confidence": 0.99,
                 },
                 {
-                    "step_id": f"seg{segment_match.group(1) if segment_match else '1'}_s2",
+                    "step_id": f"seg{segment_index}_s2",
                     "statement": "Summing from k=1 to n telescopes to n^2.",
                     "justification": "All intermediate square terms cancel.",
-                    "dependencies": [
-                        f"seg{segment_match.group(1) if segment_match else '1'}_s1"
-                    ],
+                    "dependencies": [f"seg{segment_index}_s1"],
                     "calculations": ["sum_{k=1}^n(k^2-(k-1)^2)=n^2"],
                     "citations": [],
                     "is_key_step": True,
@@ -146,7 +177,33 @@ def demo_responder(
             "usage": {},
         }
         if schema_name == "ContinuationTurn":
-            return {"action": "complete", "delta": delta, "reason": ""}
+            requirements = {
+                str(item.get("message_id")): item
+                for item in context.get("message_receipt_requirements", [])
+            }
+            receipts = []
+            for message in context.get("broker_messages", []):
+                message_id = str(message.get("message_id", ""))
+                requirement = requirements.get(message_id, {})
+                receipts.append(
+                    {
+                        "message_id": message_id,
+                        "target_route_id": requirement.get("target_route_id")
+                        or context.get("route_id", "route-mock"),
+                        "status": "accepted",
+                        "parsed_assumptions": message.get("assumptions", []),
+                        "parsed_conclusion": message.get("conclusion", ""),
+                        "semantic_hash": "",
+                        "reason": "",
+                        "delivered_round": int(requirement.get("delivered_round", 0)),
+                    }
+                )
+            return {
+                "action": "complete",
+                "delta": delta,
+                "message_receipts": receipts,
+                "reason": "",
+            }
         return delta
     if schema_name in {"InitialExplorationTurn", "ProofAttempt"}:
         attempt = {
@@ -403,6 +460,69 @@ def demo_responder(
             "immediate_counterexamples": [],
             "recommendation": "store_insight",
             "confidence": 0.9,
+        }
+    if schema_name == "BrokerDecision":
+        context = _sanitized_context(text)
+        proposed = context.get("proposed_message", {})
+        return {
+            "message_id": context.get("candidate_message_id")
+            or proposed.get("message_id")
+            or "message_mock",
+            "accepted": True,
+            "selected_targets": [],
+            "rejected_targets": {},
+            "score_breakdown": {"mock_referee": 1.0},
+        }
+    if schema_name == "MessageReceipt":
+        context = _sanitized_context(text)
+        message = context.get("message", {})
+        return {
+            "message_id": message.get("message_id", "message_mock"),
+            "target_route_id": context.get("target_route_id", "route_mock"),
+            "status": "accepted",
+            "parsed_assumptions": message.get("assumptions", []),
+            "parsed_conclusion": message.get("conclusion", ""),
+            "semantic_hash": "",
+            "reason": "",
+            "delivered_round": int(context.get("delivered_round", 0)),
+        }
+    if schema_name == "MessageEnvelope":
+        context = _sanitized_context(text)
+        problem = context.get("problem", {})
+        bridge = context.get("shared_obligation", {})
+        contradiction = context.get("contradiction", {})
+        scoped_claim = context.get("exact_scoped_claim", {})
+        target = bridge or contradiction or scoped_claim
+        normalized_statement = (
+            bridge.get("normalized_goal")
+            or target.get("normalized_statement")
+            or "mock scoped claim"
+        )
+        conclusion = normalized_statement
+        if contradiction:
+            conclusion = "both unsupported"
+        return {
+            "problem_hash": problem.get("integrity_hash", "0" * 64),
+            "source_agent_id": "mock-specialist",
+            "source_route_id": ((target.get("route_ids") or ["route-mock"])[0]),
+            "source_role": "bridge_prover",
+            "target_route_ids": [],
+            "message_type": "claim_proposal",
+            "statement": normalized_statement,
+            "normalized_statement": normalized_statement,
+            "assumptions": [],
+            "conclusion": conclusion,
+            "quantifiers": [],
+            "variable_bindings": [],
+            "dependencies": [],
+            "scope_limitations": [],
+            "evidence_type": "unverified_idea",
+            "memory_tier": "insight",
+            "verification_status": "proposed",
+            "verification_confidence": 0.8,
+            "normalization_confidence": 1.0,
+            "round_created": 0,
+            "ttl_rounds": 2,
         }
     if schema_name == "BlindVerificationReport":
         return {

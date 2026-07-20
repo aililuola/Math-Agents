@@ -404,7 +404,11 @@ def test_budget_diagnostics_record_rank_selection_and_blocking(demo_config) -> N
 
 @pytest.mark.parametrize(
     "filename",
-    ["config.deepseek-v4-pro.smoke.yaml", "config.deepseek-v4-pro.yaml"],
+    [
+        "config.deepseek-v4-pro.smoke.yaml",
+        "config.deepseek-v4-pro.yaml",
+        "config.deepseek-v4-pro.topology-active.yaml",
+    ],
 )
 def test_deepseek_profiles_reserve_one_widen_and_finalization_cycle(
     filename: str,
@@ -459,11 +463,22 @@ def test_smoke_and_formal_output_limits() -> None:
     root = Path(__file__).resolve().parents[1]
     smoke = load_config(root / "config.deepseek-v4-pro.smoke.yaml")
     formal = load_config(root / "config.deepseek-v4-pro.yaml")
+    active = load_config(root / "config.deepseek-v4-pro.topology-active.yaml")
 
     assert all(agent.max_output_tokens == 50000 for agent in smoke.agents)
     assert smoke.continuation.max_output_tokens_per_segment == 50000
     assert all(agent.max_output_tokens == 100000 for agent in formal.agents)
     assert formal.continuation.max_output_tokens_per_segment == 100000
+    assert all(agent.max_output_tokens == 384000 for agent in active.agents)
+    assert active.continuation.max_output_tokens_per_segment == 384000
+    assert active.budget.max_total_tokens == 10000000
+    assert active.budget.max_total_calls == 150
+    assert active.budget.max_rounds == 8
+    assert active.budget.initial_paths == 6
+    assert active.budget.max_paths == 12
+    assert active.continuation.max_new_steps_per_call == 20
+    assert active.continuation.max_segments_per_path == 20
+    assert active.computation.sandboxed_python_enabled is True
     assert smoke.continuation.segments_per_explore_call == 1
     assert formal.continuation.segments_per_explore_call == 1
     assert smoke.budget.max_revisions >= 1

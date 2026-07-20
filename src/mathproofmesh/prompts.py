@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, is_dataclass
+from enum import Enum
+from pathlib import Path
 from typing import Any, Type
 
 from pydantic import BaseModel
@@ -68,10 +71,34 @@ def assert_blind_prompt_safe(bundle: PromptBundle) -> None:
         raise ValueError(f"blind review prompt contains forbidden metadata: {leaked}")
 
 
-def _json(value: Any) -> str:
+def _to_jsonable(value: Any) -> Any:
+    """Recursively normalize typed prompt context without losing its structure."""
+
     if isinstance(value, BaseModel):
-        value = value.model_dump(mode="json")
-    return json.dumps(value, ensure_ascii=False, indent=2)
+        return _to_jsonable(value.model_dump(mode="json"))
+    if isinstance(value, Enum):
+        return _to_jsonable(value.value)
+    if isinstance(value, Path):
+        return str(value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return _to_jsonable(asdict(value))
+    if isinstance(value, Mapping):
+        return {str(key): _to_jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_jsonable(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        converted = [_to_jsonable(item) for item in value]
+        return sorted(
+            converted,
+            key=lambda item: json.dumps(
+                item, ensure_ascii=False, sort_keys=True, default=str
+            ),
+        )
+    return value
+
+
+def _json(value: Any) -> str:
+    return json.dumps(_to_jsonable(value), ensure_ascii=False, indent=2)
 
 
 def _schema(model: Type[BaseModel]) -> str:
@@ -760,7 +787,21 @@ JSON SCHEMA:
     ) -> PromptBundle:
         return self._typed_stage(
             "route_prove",
-            "Continue only the assigned mechanism. Use Fact inbox items as premises, label Insight items as non-premises, honor NegativeMemory, and expose every new obligation.",
+            (
+                "Continue only the assigned mechanism from the authoritative verified "
+                "checkpoint. Use fact_inbox and accepted broker_messages as premises, "
+                "label insight_hints as non-premises, honor negative_memory, and work on "
+                "the listed open_obligations. Respect every continuation limit and "
+                "authoritative ID in the context. Return a ContinuationTurn: submit a "
+                "bounded ProofDelta, request one precisely scoped computation when the "
+                "reasoning-first gate permits it, complete the proof, or abandon with a "
+                "specific obstruction. Never use not_refuted or bounded evidence as "
+                "proof. For every broker_messages item, return exactly one "
+                "message_receipt that restates only its assumptions and conclusion. Mark "
+                "the receipt accepted only when that parse is exact; semantic_hash may be "
+                "empty because the broker recomputes and validates it. Expose every new "
+                "obligation and do not repeat a consumed message as a new discovery."
+            ),
             ContinuationTurn,
             {"problem": problem, **context},
             temperature=0.25,

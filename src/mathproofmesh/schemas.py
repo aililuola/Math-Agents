@@ -1313,6 +1313,7 @@ class ContinuationTurn(StrictModel):
     delta: ProofDelta | None = None
     experiment_spec: ExperimentSpec | None = None
     experiment_impact: FailureLevel | None = None
+    message_receipts: list[MessageReceipt] = Field(default_factory=list)
     reason: str = ""
 
     @model_validator(mode="after")

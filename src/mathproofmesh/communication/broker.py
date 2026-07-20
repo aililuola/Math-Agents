@@ -66,6 +66,12 @@ class MessageBroker:
     def receipts(self) -> list[MessageReceipt]:
         return list(self._receipts.values())
 
+    def delivery_record(
+        self, message_id: str, target_route_id: str
+    ) -> dict[str, Any] | None:
+        delivery = self._deliveries.get(delivery_key(message_id, target_route_id))
+        return dict(delivery) if delivery is not None else None
+
     def _dedup_key(self, message: MessageEnvelope) -> str:
         return stable_hash(
             (
@@ -271,6 +277,10 @@ class MessageBroker:
 
         self._messages[message.message_id] = message
         self._dedup[duplicate_key] = message.message_id
+        # Only broker-admitted deliveries may make an artifact visible in a
+        # target route's persistent typed-memory context. Requested but rejected
+        # targets must not bypass the broker through MessageEnvelope metadata.
+        message.target_route_ids = []
 
         # 13-14: memory and graph write happen even for a route-local insight.
         self.typed_memory.add_message(message, referee_agent_id=referee_agent_id)
@@ -318,6 +328,8 @@ class MessageBroker:
             "acknowledged": False,
             "status": "pending",
         }
+        if target_route_id not in message.target_route_ids:
+            message.target_route_ids.append(target_route_id)
         self._route_queues[target_route_id].append(key)
         count_key = f"{current_round}:{target_route_id}"
         self._round_route_counts[count_key] += 1

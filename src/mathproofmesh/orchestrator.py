@@ -52,6 +52,7 @@ from .schemas import (
     AttemptStatus,
     BlindReviewPacket,
     BlindVerificationReport,
+    BrokerDecision,
     CandidateAssessment,
     ClaimBatch,
     ClaimCard,
@@ -79,6 +80,7 @@ from .schemas import (
     MetaReview,
     MemoryTier,
     MessageEnvelope,
+    MessageReceipt,
     MessageType,
     NoveltySignature,
     ProblemContract,
@@ -86,6 +88,7 @@ from .schemas import (
     ProofAttempt,
     ProofCheckpoint,
     ProofDelta,
+    ReceiptStatus,
     RunResult,
     RunStatus,
     RouteRole,
@@ -103,6 +106,7 @@ from .schemas import (
 )
 from .store import ArtifactStore
 from .teams.role_runner import RoleRunner
+from .teams.route_team import RouteTeam
 from .tools import ToolBroker
 from .topology import (
     SparseTopologyRouter,
@@ -150,6 +154,7 @@ class SolveState:
     capability_profile: AgentCapabilityProfile | None = None
     validation_escalator: ValidationEscalator | None = None
     final_repair_failed: bool = False
+    route_team_reviews: dict[str, list[dict[str, Any]]] | None = None
 
 
 class ProofMeshOrchestrator:
@@ -260,6 +265,7 @@ class ProofMeshOrchestrator:
             meta_reviews=[],
             checkpoints=[],
             proof_debt_history={},
+            route_team_reviews={},
         )
         self._initialize_hierarchical_runtime(
             state,
@@ -382,6 +388,7 @@ class ProofMeshOrchestrator:
             )
             initial_attempts = await self._parallel_initial_exploration(
                 problem,
+                state,
                 assignments,
                 runner,
                 prompts,
@@ -1607,6 +1614,7 @@ class ProofMeshOrchestrator:
                         problem,
                         strategy,
                         agent,
+                        state=state,
                         round_index=(
                             previous.round_index + 1 if previous else resume_round
                         ),
@@ -2109,20 +2117,35 @@ class ProofMeshOrchestrator:
                 except ValueError:
                     continue
             report = state.aggregate_reports.get(attempt.attempt_id)
-            referee_id = (
-                report.agent_id
-                if report is not None
-                and report.agent_id not in {"system-aggregate", attempt.agent_id}
-                else next(
-                    (
-                        item.agent_id
-                        for item in state.reports
-                        if item.target_id == attempt.attempt_id
-                        and item.agent_id != attempt.agent_id
-                    ),
-                    None,
-                )
+            team_reviews = (state.route_team_reviews or {}).get(attempt.attempt_id, [])
+            team_review = team_reviews[-1] if team_reviews else None
+            teams_enabled = self.config.topology.route_teams.enabled
+            team_global_allowed = (
+                all(bool(item.get("global_share_allowed")) for item in team_reviews)
+                if team_reviews
+                else not teams_enabled
             )
+            if teams_enabled:
+                referee_id = (
+                    str(team_review.get("referee_agent_id"))
+                    if team_review and team_review.get("referee_agent_id")
+                    else None
+                )
+            else:
+                referee_id = (
+                    report.agent_id
+                    if report is not None
+                    and report.agent_id not in {"system-aggregate", attempt.agent_id}
+                    else next(
+                        (
+                            item.agent_id
+                            for item in state.reports
+                            if item.target_id == attempt.attempt_id
+                            and item.agent_id != attempt.agent_id
+                        ),
+                        None,
+                    )
+                )
             if referee_id is not None and not registry.owns_agent(
                 route_id, referee_id, RouteRole.REFEREE
             ):
@@ -2132,16 +2155,23 @@ class ProofMeshOrchestrator:
                     )
                 except ValueError:
                     referee_id = None
-            skeptic_id = next(
-                (
-                    item.agent_id
-                    for item in state.reports
-                    if item.target_id == attempt.attempt_id
-                    and item.stage == VerificationStage.DETAILED
-                    and item.agent_id not in {attempt.agent_id, referee_id}
-                ),
-                None,
-            )
+            if teams_enabled:
+                skeptic_id = (
+                    str(team_review.get("skeptic_agent_id"))
+                    if team_review and team_review.get("skeptic_agent_id")
+                    else None
+                )
+            else:
+                skeptic_id = next(
+                    (
+                        item.agent_id
+                        for item in state.reports
+                        if item.target_id == attempt.attempt_id
+                        and item.stage == VerificationStage.DETAILED
+                        and item.agent_id not in {attempt.agent_id, referee_id}
+                    ),
+                    None,
+                )
             if skeptic_id is not None and not registry.owns_agent(
                 route_id, skeptic_id, RouteRole.SKEPTIC
             ):
@@ -2156,7 +2186,11 @@ class ProofMeshOrchestrator:
             message_type = MessageType.CLAIM_PROPOSAL
             verification_status = claim.status
             confidence = claim.verification_confidence or 0.0
-            if claim.status == ClaimStatus.VERIFIED and referee_id is not None:
+            if (
+                claim.status == ClaimStatus.VERIFIED
+                and referee_id is not None
+                and team_global_allowed
+            ):
                 tier = MemoryTier.FACT
                 evidence = EvidenceType.NATURAL_PROOF_AUDITED
                 message_type = MessageType.VERIFIED_LEMMA
@@ -2247,19 +2281,6 @@ class ProofMeshOrchestrator:
                 round_created=current_round,
                 ttl_rounds=self.config.topology.cross_route.message_ttl_rounds,
             )
-            first_team_publication = all(
-                item.message_id != message.message_id for item in broker.decisions
-            )
-            if first_team_publication and self.config.topology.route_teams.enabled:
-                store.append_event(
-                    "route_team_started",
-                    {
-                        "route_id": route_id,
-                        "attempt_id": attempt.attempt_id,
-                        "prover_agent_id": attempt.agent_id,
-                        "skeptic_agent_id": skeptic_id,
-                    },
-                )
             publication = broker.publish(
                 message,
                 referee_agent_id=referee_id,
@@ -2282,18 +2303,6 @@ class ProofMeshOrchestrator:
                     state.inspiration_engine.mark_verified(
                         proposal.proposal_id, message.message_id
                     )
-            if first_team_publication and self.config.topology.route_teams.enabled:
-                store.append_event(
-                    "route_local_review_completed",
-                    {
-                        "route_id": route_id,
-                        "attempt_id": attempt.attempt_id,
-                        "referee_agent_id": referee_id,
-                        "verdict": report.verdict.value if report else "unavailable",
-                        "global_share_allowed": tier == MemoryTier.FACT,
-                    },
-                )
-
         for attempt in state.attempts:
             route_id = self._route_for_strategy(state, attempt.strategy_id)
             if route_id is None or not registry.owns_agent(
@@ -2587,6 +2596,20 @@ class ProofMeshOrchestrator:
             for values in histories.values()
             if len(values) >= 2
         )
+        message_utility_by_route: dict[str, float] = {}
+        if state.message_broker is not None:
+            for route in routes:
+                receipts = [
+                    item
+                    for item in state.message_broker.receipts
+                    if item.target_route_id == route.route_id
+                ]
+                accepted = sum(
+                    item.status == ReceiptStatus.ACCEPTED for item in receipts
+                )
+                message_utility_by_route[route.route_id] = (
+                    accepted / len(receipts) if receipts else 0.0
+                )
         return InspirationSnapshot(
             round_index=state.current_round,
             domain=(state.triage.problem_kind.value if state.triage else "unknown"),
@@ -2615,7 +2638,7 @@ class ProofMeshOrchestrator:
                 item.obligation_id for group in shared for item in group
             ],
             route_budget_share=route_budget_share,
-            message_utility_by_route={},
+            message_utility_by_route=message_utility_by_route,
             unresolved_conflict_ids=(
                 [
                     item.contradiction_id
@@ -3089,6 +3112,7 @@ class ProofMeshOrchestrator:
                         continue
             attempts = await self._parallel_round_exploration(
                 problem,
+                state,
                 assignments,
                 current_round,
                 runner,
@@ -3461,6 +3485,10 @@ class ProofMeshOrchestrator:
                 str(key): [float(item) for item in value]
                 for key, value in dict(payload.get("proof_debt_history", {})).items()
             },
+            route_team_reviews={
+                str(key): [dict(item) for item in value]
+                for key, value in dict(payload.get("route_team_reviews", {})).items()
+            },
         )
 
     async def _triage(
@@ -3532,6 +3560,7 @@ class ProofMeshOrchestrator:
     async def _parallel_initial_exploration(
         self,
         problem: ProblemContract,
+        state: SolveState,
         assignments: list[tuple[StrategyCard, AgentRuntime]],
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
@@ -3545,6 +3574,7 @@ class ProofMeshOrchestrator:
                 problem,
                 strategy,
                 agent,
+                state=state,
                 round_index=0,
                 runner=runner,
                 prompts=prompts,
@@ -3660,12 +3690,311 @@ class ProofMeshOrchestrator:
             context.append(payload)
         return context
 
+    def _hierarchical_route_prompt_context(
+        self,
+        state: SolveState | None,
+        *,
+        strategy_id: str,
+        current_round: int,
+    ) -> tuple[str | None, list[MessageEnvelope], dict[str, Any]]:
+        if (
+            state is None
+            or state.route_registry is None
+            or state.message_broker is None
+            or state.typed_memory is None
+            or self.config.topology.mode != "hierarchical_sparse"
+            or not self.config.topology.typed_communication.enabled
+        ):
+            return None, [], {}
+        route_id = self._route_for_strategy(state, strategy_id)
+        if route_id is None:
+            return None, [], {}
+
+        delivered = state.message_broker.inbox(
+            route_id,
+            current_round=current_round,
+        )
+        open_obligations = []
+        if state.proof_graph is not None:
+            open_obligations = [
+                obligation
+                for obligation in state.proof_graph.obligations
+                if obligation.status not in {"closed", "refuted"}
+                and (not obligation.route_ids or route_id in obligation.route_ids)
+            ]
+        receipt_requirements: list[dict[str, Any]] = []
+        for message in delivered:
+            delivery = (
+                state.message_broker.delivery_record(message.message_id, route_id) or {}
+            )
+            receipt_requirements.append(
+                {
+                    "message_id": message.message_id,
+                    "target_route_id": route_id,
+                    "delivered_round": int(
+                        delivery.get("delivered_round", current_round)
+                    ),
+                }
+            )
+        return (
+            route_id,
+            delivered,
+            {
+                "route_id": route_id,
+                "broker_messages": delivered,
+                "message_receipt_requirements": receipt_requirements,
+                "fact_inbox": state.typed_memory.facts_for_route(route_id),
+                "insight_hints": state.typed_memory.insights_for_route(route_id),
+                "negative_memory": state.typed_memory.negatives_for_route(route_id),
+                "open_obligations": open_obligations,
+            },
+        )
+
+    @staticmethod
+    def _acknowledge_route_messages(
+        broker: MessageBroker,
+        delivered: Sequence[MessageEnvelope],
+        receipts: Sequence[MessageReceipt],
+        *,
+        route_id: str,
+        current_round: int,
+    ) -> list[MessageReceipt]:
+        candidates = {receipt.message_id: receipt for receipt in receipts}
+        acknowledged: list[MessageReceipt] = []
+        for message in delivered:
+            candidate = candidates.get(message.message_id)
+            delivery = broker.delivery_record(message.message_id, route_id) or {}
+            delivered_round = int(delivery.get("delivered_round", current_round))
+            if candidate is None:
+                receipt = MessageReceipt(
+                    message_id=message.message_id,
+                    target_route_id=route_id,
+                    status=ReceiptStatus.REJECTED,
+                    reason="target route omitted the required semantic receipt",
+                    delivered_round=delivered_round,
+                )
+            else:
+                parsed_hash = stable_hash(
+                    {
+                        "assumptions": candidate.parsed_assumptions,
+                        "conclusion": candidate.parsed_conclusion,
+                        "quantifiers": [
+                            item.model_dump(mode="json") for item in message.quantifiers
+                        ],
+                    }
+                )
+                receipt = MessageReceipt(
+                    receipt_id=candidate.receipt_id,
+                    message_id=message.message_id,
+                    target_route_id=route_id,
+                    status=candidate.status,
+                    parsed_assumptions=candidate.parsed_assumptions,
+                    parsed_conclusion=candidate.parsed_conclusion,
+                    semantic_hash=parsed_hash,
+                    reason=candidate.reason,
+                    delivered_round=delivered_round,
+                    acknowledged_at=candidate.acknowledged_at,
+                )
+            broker.acknowledge(receipt)
+            acknowledged.append(receipt)
+        return acknowledged
+
+    async def _run_active_route_team(
+        self,
+        state: SolveState | None,
+        *,
+        problem: ProblemContract,
+        strategy: StrategyCard,
+        checkpoint: ProofCheckpoint,
+        delta: ProofDelta,
+        attempt_id: str,
+        author: AgentRuntime,
+        round_index: int,
+        experiment_results: Sequence[dict[str, Any]],
+        route_context: dict[str, Any],
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        store: ArtifactStore,
+    ) -> Any | None:
+        if (
+            state is None
+            or state.route_registry is None
+            or not self.config.topology.route_teams.enabled
+            or self.config.topology.mode != "hierarchical_sparse"
+        ):
+            return None
+        route_id = self._route_for_strategy(state, strategy.strategy_id)
+        if route_id is None:
+            return None
+
+        team = RouteTeam(
+            self.config,
+            RoleRunner(runner.pool, state.route_registry),
+        )
+        risk_artifact = delta.model_dump(mode="json")
+        if experiment_results:
+            risk_artifact["evidence_type"] = EvidenceType.BOUNDED_EXPERIMENT.value
+            risk_artifact["tool_requests"] = [
+                item.get("request_hash") or item.get("experiment_id")
+                for item in experiment_results
+            ]
+        plan = team.plan(
+            route_id,
+            author.id,
+            risk_artifact,
+            round_index=round_index,
+            entering_global_fact_gate=bool(delta.new_claims or delta.proof_complete),
+        )
+        store.append_event(
+            "route_team_started",
+            {
+                "route_id": route_id,
+                "attempt_id": attempt_id,
+                "delta_id": delta.delta_id,
+                "prover_agent_id": author.id,
+                "skeptic_agent_id": (
+                    plan.skeptic.agent_id if plan.skeptic is not None else None
+                ),
+                "tool_agent_id": (
+                    plan.tool_specialist.agent_id
+                    if plan.tool_specialist is not None
+                    else None
+                ),
+                "referee_agent_id": plan.referee.agent_id,
+                "risk_score": plan.risk.score,
+                "risk_reasons": list(plan.risk.reasons),
+            },
+        )
+
+        async def skeptic_handler(assignment: Any, artifact: Any) -> Any:
+            skeptic = team.role_runner.runtime(assignment)
+            call = await self._safe_call(
+                runner,
+                "route_skeptic",
+                prompts.route_skeptic(
+                    problem=problem,
+                    route_id=route_id,
+                    strategy=strategy,
+                    parent_checkpoint=checkpoint,
+                    candidate_delta=artifact,
+                    fact_inbox=route_context.get("fact_inbox", []),
+                    negative_memory=route_context.get("negative_memory", []),
+                    open_obligations=route_context.get("open_obligations", []),
+                    repair_request=False,
+                ),
+                fixed_agent=skeptic,
+                budget_bucket="verification",
+            )
+            if call is None:
+                return None
+            report: VerificationReport = call.value
+            report.target_id = delta.delta_id
+            report.target_type = "proof_delta"
+            report.agent_id = skeptic.id
+            report.stage = VerificationStage.DETAILED
+            report.raw_artifact_ref = call.raw_ref
+            report.usage = call.usage
+            store.write_json(
+                "structured",
+                f"route_skeptic_{delta.delta_id}_{skeptic.id}",
+                report,
+            )
+            store.append_event("route_skeptic_completed", report)
+            return report
+
+        async def tool_handler(assignment: Any, _artifact: Any) -> Any:
+            audit = {
+                "agent_id": assignment.agent_id,
+                "route_id": route_id,
+                "experiment_results": list(experiment_results),
+                "all_results_replayed_independently": all(
+                    bool(item.get("independently_verified"))
+                    for item in experiment_results
+                    if item.get("outcome")
+                    == ExperimentOutcome.COUNTEREXAMPLE_FOUND.value
+                ),
+            }
+            store.append_event("route_tool_audit_completed", audit)
+            return audit
+
+        async def referee_handler(assignment: Any, sanitized: Any) -> Any:
+            referee = team.role_runner.runtime(assignment)
+            message_id = f"route_artifact_{delta.delta_id}"
+            call = await self._safe_call(
+                runner,
+                "route_referee",
+                prompts.route_referee(
+                    problem=problem,
+                    candidate_message_id=message_id,
+                    route_id=route_id,
+                    author_agent_id=author.id,
+                    sanitized_artifact=sanitized,
+                    required_fact_threshold=(
+                        self.config.topology.typed_memory.fact_pass_threshold
+                    ),
+                ),
+                fixed_agent=referee,
+                budget_bucket="verification",
+            )
+            if call is None:
+                return None
+            decision: BrokerDecision = call.value
+            decision.message_id = message_id
+            store.write_json(
+                "structured",
+                f"route_referee_{delta.delta_id}_{referee.id}",
+                decision,
+            )
+            store.append_event("route_referee_completed", decision)
+            return decision
+
+        result = await team.run(
+            plan,
+            delta,
+            skeptic_handler=skeptic_handler,
+            tool_handler=tool_handler,
+            referee_handler=referee_handler,
+        )
+        summary = {
+            "route_id": route_id,
+            "attempt_id": attempt_id,
+            "delta_id": delta.delta_id,
+            "prover_agent_id": author.id,
+            "skeptic_agent_id": (
+                plan.skeptic.agent_id if plan.skeptic is not None else None
+            ),
+            "tool_agent_id": (
+                plan.tool_specialist.agent_id
+                if plan.tool_specialist is not None
+                else None
+            ),
+            "referee_agent_id": plan.referee.agent_id,
+            "skeptic_verdict": (
+                result.skeptic_result.verdict.value
+                if isinstance(result.skeptic_result, VerificationReport)
+                else None
+            ),
+            "referee_accepted": (
+                result.referee_result.accepted
+                if isinstance(result.referee_result, BrokerDecision)
+                else False
+            ),
+            "global_share_allowed": result.global_share_allowed,
+            "diagnostics": list(result.diagnostics),
+        }
+        if state.route_team_reviews is None:
+            state.route_team_reviews = {}
+        state.route_team_reviews.setdefault(attempt_id, []).append(summary)
+        store.append_event("route_local_review_completed", summary)
+        return result
+
     async def _explore_path(
         self,
         problem: ProblemContract,
         strategy: StrategyCard,
         agent: AgentRuntime,
         *,
+        state: SolveState | None = None,
         round_index: int,
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
@@ -3683,6 +4012,7 @@ class ProofMeshOrchestrator:
                 problem,
                 strategy,
                 agent,
+                state=state,
                 round_index=round_index,
                 runner=runner,
                 prompts=prompts,
@@ -3718,6 +4048,7 @@ class ProofMeshOrchestrator:
         strategy: StrategyCard,
         agent: AgentRuntime,
         *,
+        state: SolveState | None,
         round_index: int,
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
@@ -3811,6 +4142,13 @@ class ProofMeshOrchestrator:
             relevant = router.relevant_claims(
                 memory.claims, strategy, targeted_feedback
             )
+            route_id, delivered_messages, route_context = (
+                self._hierarchical_route_prompt_context(
+                    state,
+                    strategy_id=strategy.strategy_id,
+                    current_round=round_index,
+                )
+            )
             next_segment = checkpoint.segment_index + 1
             experiment_results: list[dict[str, Any]] = []
             computation_feedback: list[dict[str, Any]] = []
@@ -3819,26 +4157,56 @@ class ProofMeshOrchestrator:
             delta: ProofDelta | None = None
             result: StructuredCallResult[Any] | None = None
             tried_agents: list[str] = []
+            receipts_processed = False
 
             while True:
 
                 def bundle_factory(current_agent: AgentRuntime) -> PromptBundle:
-                    bundle = prompts.continue_proof(
-                        problem,
-                        strategy.model_dump(mode="json"),
-                        checkpoint,
-                        current_agent.id,
-                        round_index,
-                        next_segment,
-                        [claim.model_dump(mode="json") for claim in relevant],
-                        targeted_feedback,
-                        max_new_steps=cfg.max_new_steps_per_call,
-                        max_new_claims=cfg.max_new_claims_per_call,
-                        checkpoint_policy=cfg.checkpoint_policy,
-                        remaining_call_budget=runner.ledger.remaining_calls,
-                        experiment_results=experiment_results,
-                        computation_feedback=computation_feedback,
-                    )
+                    if route_id is not None:
+                        bundle = prompts.route_prove(
+                            problem,
+                            strategy=strategy,
+                            checkpoint=checkpoint,
+                            agent_id=current_agent.id,
+                            verified_legacy_claims=relevant,
+                            targeted_feedback=targeted_feedback,
+                            experiment_results=experiment_results,
+                            computation_feedback=computation_feedback,
+                            continuation_limits={
+                                "checkpoint_policy": cfg.checkpoint_policy,
+                                "max_new_steps": cfg.max_new_steps_per_call,
+                                "max_new_claims": cfg.max_new_claims_per_call,
+                                "max_compute_cycles": self.config.computation.max_compute_cycles_per_segment,
+                            },
+                            authoritative_ids={
+                                "problem_hash": problem.integrity_hash,
+                                "path_id": checkpoint.path_id,
+                                "strategy_id": strategy.strategy_id,
+                                "parent_checkpoint_id": checkpoint.checkpoint_id,
+                                "agent_id": current_agent.id,
+                                "round_index": round_index,
+                                "segment_index": next_segment,
+                            },
+                            remaining_call_budget=runner.ledger.remaining_calls,
+                            **route_context,
+                        )
+                    else:
+                        bundle = prompts.continue_proof(
+                            problem,
+                            strategy.model_dump(mode="json"),
+                            checkpoint,
+                            current_agent.id,
+                            round_index,
+                            next_segment,
+                            [claim.model_dump(mode="json") for claim in relevant],
+                            targeted_feedback,
+                            max_new_steps=cfg.max_new_steps_per_call,
+                            max_new_claims=cfg.max_new_claims_per_call,
+                            checkpoint_policy=cfg.checkpoint_policy,
+                            remaining_call_budget=runner.ledger.remaining_calls,
+                            experiment_results=experiment_results,
+                            computation_feedback=computation_feedback,
+                        )
                     return PromptBundle(
                         bundle.stage,
                         bundle.system,
@@ -3901,6 +4269,30 @@ class ProofMeshOrchestrator:
                         delta=result.value,
                     )
                 )
+                if (
+                    delivered_messages
+                    and route_id is not None
+                    and state is not None
+                    and state.message_broker is not None
+                    and not receipts_processed
+                ):
+                    acknowledged = self._acknowledge_route_messages(
+                        state.message_broker,
+                        delivered_messages,
+                        turn.message_receipts,
+                        route_id=route_id,
+                        current_round=round_index,
+                    )
+                    receipts_processed = True
+                    if self.config.topology.typed_communication.require_receipt and any(
+                        receipt.status != ReceiptStatus.ACCEPTED
+                        for receipt in acknowledged
+                    ):
+                        targeted_feedback = [
+                            *targeted_feedback,
+                            "A cross-route message was not acknowledged with an exact semantic receipt; no checkpoint was advanced.",
+                        ]
+                        break
                 if (
                     confirmed_counterexample_pending
                     and turn.action != ContinuationAction.REQUEST_COMPUTATION
@@ -4041,6 +4433,26 @@ class ProofMeshOrchestrator:
             )
 
             reports = [local_report]
+            if local_report.verdict == VerificationVerdict.PASS:
+                team_result = await self._run_active_route_team(
+                    state,
+                    problem=problem,
+                    strategy=strategy,
+                    checkpoint=checkpoint,
+                    delta=delta,
+                    attempt_id=attempt_id,
+                    author=result.agent,
+                    round_index=round_index,
+                    experiment_results=experiment_results,
+                    route_context=route_context,
+                    runner=runner,
+                    prompts=prompts,
+                    store=store,
+                )
+                if team_result is not None and isinstance(
+                    team_result.skeptic_result, VerificationReport
+                ):
+                    reports.append(team_result.skeptic_result)
             if (
                 local_report.verdict == VerificationVerdict.PASS
                 and cfg.verify_each_delta
@@ -5351,6 +5763,7 @@ class ProofMeshOrchestrator:
             problem,
             strategy,
             agent,
+            state=state,
             round_index=round_index,
             runner=runner,
             prompts=prompts,
@@ -5434,6 +5847,7 @@ class ProofMeshOrchestrator:
                 store.append_event("route_registered", route)
         return await self._parallel_round_exploration(
             problem,
+            state,
             assignments,
             round_index,
             runner,
@@ -5447,6 +5861,7 @@ class ProofMeshOrchestrator:
     async def _parallel_round_exploration(
         self,
         problem: ProblemContract,
+        state: SolveState,
         assignments: list[tuple[StrategyCard, AgentRuntime]],
         round_index: int,
         runner: StructuredAgentRunner,
@@ -5462,6 +5877,7 @@ class ProofMeshOrchestrator:
                     problem,
                     strategy,
                     agent,
+                    state=state,
                     round_index=round_index,
                     runner=runner,
                     prompts=prompts,
@@ -7145,6 +7561,7 @@ class ProofMeshOrchestrator:
                 "graph_frozen": state.graph_frozen,
                 "final_repair_failed": state.final_repair_failed,
                 "proof_debt_history": state.proof_debt_history or {},
+                "route_team_reviews": state.route_team_reviews or {},
                 "route_registry": (
                     state.route_registry.export_state()
                     if state.route_registry is not None
@@ -7228,6 +7645,16 @@ class ProofMeshOrchestrator:
             store.write_json("structured", "message_broker", broker_state)
             store.write_json("structured", "proof_graph", graph_state)
             store.write_json("structured", "typed_memory", typed_memory_state)
+            store.write_json(
+                "structured",
+                "route_team_reviews",
+                state.route_team_reviews or {},
+            )
+            store.write_json(
+                "structured",
+                "inspiration_engine",
+                inspiration_state,
+            )
             store.write_json(
                 "structured",
                 "message_receipts",

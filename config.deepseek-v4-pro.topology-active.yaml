@@ -15,7 +15,8 @@ agents:
     specialties: [problem_decomposition, strategy_generation, failure_classification, meta_review]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 100000
+    # DeepSeek V4 Pro's API maximum is 384K output tokens per request.
+    max_output_tokens: 384000
     timeout_seconds: 900
     trust_prior: 0.55
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
@@ -33,7 +34,7 @@ agents:
     specialties: [number_theory, algebra, combinatorics, invariants, extremal_arguments]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 100000
+    max_output_tokens: 384000
     timeout_seconds: 900
     trust_prior: 0.52
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
@@ -51,7 +52,7 @@ agents:
     specialties: [analysis, inequalities, geometry, probability, analytic_methods]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 100000
+    max_output_tokens: 384000
     timeout_seconds: 900
     trust_prior: 0.52
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
@@ -69,7 +70,7 @@ agents:
     specialties: [logic, graph_theory, constructive_proofs, counterexample_search, dependency_audit]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 100000
+    max_output_tokens: 384000
     timeout_seconds: 900
     trust_prior: 0.54
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
@@ -87,17 +88,18 @@ agents:
     specialties: [proof_synthesis, rigorous_exposition, proof_audit, symbolic_checks]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 100000
+    max_output_tokens: 384000
     timeout_seconds: 900
     trust_prior: 0.56
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
 
 budget:
-  max_total_calls: 42
-  max_rounds: 4
-  initial_paths: 3
-  max_paths: 6
-  strategies_to_generate: 6
+  max_total_calls: 150
+  max_rounds: 8
+  initial_paths: 6
+  # Leave room for active inspiration and surprise routes after initialization.
+  max_paths: 12
+  strategies_to_generate: 12
   candidates_to_verify: 3
   max_revisions: 3
   base_verifier_replicas: 1
@@ -105,8 +107,8 @@ budget:
   high_risk_threshold: 0.45
   verification_pass_threshold: 0.80
   synthesis_threshold: 0.74
-  max_total_tokens: 2000000
-  max_cost_usd: 5.0
+  max_total_tokens: 10000000
+  max_cost_usd: 10.0
   breadth_share: 0.30
   depth_share: 0.35
   verification_share: 0.25
@@ -160,6 +162,7 @@ topology:
     enabled: true
   route_teams:
     enabled: true
+    max_members_per_route: 4
   cross_route:
     enabled: true
     initial_isolation_rounds: 1
@@ -204,12 +207,12 @@ continuation:
   # Segment long proofs into independently verified, persistent mathematical checkpoints.
   enabled: true
   checkpoint_policy: verified_subgoal
-  max_new_steps_per_call: 12
+  max_new_steps_per_call: 20
   max_new_claims_per_call: 3
-  max_output_tokens_per_segment: 100000
+  max_output_tokens_per_segment: 384000
   # Keep each scheduler action small enough to preserve breadth and final-audit calls.
   segments_per_explore_call: 1
-  max_segments_per_path: 12
+  max_segments_per_path: 20
   verify_each_delta: true
   delta_verifier_replicas: 1
   checkpoint_pass_threshold: 0.80

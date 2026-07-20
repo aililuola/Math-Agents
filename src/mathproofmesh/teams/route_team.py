@@ -5,11 +5,14 @@ from typing import Any, Awaitable, Callable
 
 from ..config import SystemConfig
 from ..schemas import (
+    BrokerDecision,
     ClaimStatus,
     MessageEnvelope,
     ProofAttempt,
     ProofDelta,
     RouteRole,
+    VerificationReport,
+    VerificationVerdict,
 )
 from .role_runner import RoleAssignment, RoleRunner
 
@@ -72,7 +75,12 @@ class RouteTeam:
             else dict(artifact)
         )
         serialized = str(payload).casefold()
-        if any(step.get("is_key_step") for step in payload.get("proof_steps", [])):
+        proof_steps = [
+            *payload.get("proof_steps", []),
+            *payload.get("new_steps", []),
+        ]
+        contains_key_step = any(step.get("is_key_step") for step in proof_steps)
+        if contains_key_step:
             score += 0.18
             reasons.append("contains a key proof step")
         if "external:" in serialized or "theorem" in serialized:
@@ -113,11 +121,15 @@ class RouteTeam:
         needs_tool = evidence in {"bounded_experiment", "numerical_heuristic"} or bool(
             payload.get("tool_requests")
         )
-        needs_skeptic = (
-            score >= threshold
-            if self.config.topology.route_teams.skeptic_on_high_risk_only
-            else True
+        mandatory_skeptic = bool(
+            contains_key_step
+            or needs_tool
+            or structural_verdict in {"uncertain", "fail"}
+            or repeated_first_error
+            or entering_global_fact_gate
         )
+        needs_skeptic = not self.config.topology.route_teams.skeptic_on_high_risk_only
+        needs_skeptic = needs_skeptic or mandatory_skeptic or score >= threshold
         return RiskAssessment(
             score=score,
             reasons=tuple(reasons),
@@ -183,8 +195,10 @@ class RouteTeam:
             diagnostics.append("no independent referee; artifact remains route-local")
         if skeptic is not None and skeptic.agent_id is None:
             diagnostics.append("requested skeptic is unavailable")
+            global_share = False
         if tool is not None and tool.agent_id is None:
             diagnostics.append("requested tool specialist is unavailable")
+            global_share = False
         return RouteTeamPlan(
             route_id=route_id,
             prover=prover,
@@ -211,18 +225,40 @@ class RouteTeam:
             global_share_allowed=plan.global_share_allowed,
             diagnostics=list(plan.diagnostics),
         )
-        if (
-            plan.skeptic is not None
-            and plan.skeptic.agent_id is not None
-            and skeptic_handler is not None
-        ):
-            result.skeptic_result = await skeptic_handler(plan.skeptic, artifact)
-        if (
-            plan.tool_specialist is not None
-            and plan.tool_specialist.agent_id is not None
-            and tool_handler is not None
-        ):
-            result.tool_result = await tool_handler(plan.tool_specialist, artifact)
+        if plan.skeptic is not None:
+            if plan.skeptic.agent_id is None or skeptic_handler is None:
+                result.global_share_allowed = False
+                result.diagnostics.append(
+                    "required skeptic did not run; artifact remains route-local"
+                )
+            else:
+                result.skeptic_result = await skeptic_handler(plan.skeptic, artifact)
+                if not (
+                    isinstance(result.skeptic_result, VerificationReport)
+                    and result.skeptic_result.verdict == VerificationVerdict.PASS
+                ):
+                    result.global_share_allowed = False
+                    result.diagnostics.append(
+                        "skeptic did not pass the artifact; it remains route-local"
+                    )
+        if plan.tool_specialist is not None:
+            if plan.tool_specialist.agent_id is None or tool_handler is None:
+                result.global_share_allowed = False
+                result.diagnostics.append(
+                    "required tool audit did not run; artifact remains route-local"
+                )
+            else:
+                result.tool_result = await tool_handler(plan.tool_specialist, artifact)
+                if result.tool_result is None or (
+                    isinstance(result.tool_result, dict)
+                    and not result.tool_result.get(
+                        "all_results_replayed_independently", False
+                    )
+                ):
+                    result.global_share_allowed = False
+                    result.diagnostics.append(
+                        "tool evidence was not independently replayed; artifact remains route-local"
+                    )
         if plan.referee.agent_id is None or referee_handler is None:
             result.global_share_allowed = False
             return result
@@ -236,4 +272,19 @@ class RouteTeam:
             "tool_result": result.tool_result,
         }
         result.referee_result = await referee_handler(plan.referee, sanitized)
+        if isinstance(result.referee_result, BrokerDecision):
+            result.global_share_allowed = (
+                result.global_share_allowed and result.referee_result.accepted
+            )
+        elif isinstance(result.referee_result, VerificationReport):
+            result.global_share_allowed = (
+                result.global_share_allowed
+                and result.referee_result.problem_integrity_ok
+                and result.referee_result.verdict == VerificationVerdict.PASS
+            )
+        else:
+            result.global_share_allowed = False
+            result.diagnostics.append(
+                "referee returned no recognized admissibility result"
+            )
         return result

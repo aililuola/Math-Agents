@@ -16,8 +16,13 @@
     "keys_persisted": false,
     "smoke_max_output_tokens": 50000,
     "formal_max_output_tokens": 100000,
+    "active_max_output_tokens": 384000,
+    "active_max_total_tokens": 10000000,
+    "active_max_total_calls": 150,
     "smoke_max_new_steps_per_segment": 8,
-    "formal_max_new_steps_per_segment": 12
+    "formal_max_new_steps_per_segment": 12,
+    "active_max_new_steps_per_segment": 20,
+    "active_max_segments_per_path": 20
   },
   "hierarchical_topology": {
     "legacy_default_preserved": true,
@@ -25,6 +30,9 @@
     "message_broker_and_receipts": true,
     "exactly_once_resume": true,
     "route_local_teams": true,
+    "active_route_team_execution": true,
+    "active_broker_prompt_delivery": true,
+    "semantic_receipt_validation": true,
     "typed_memory": true,
     "proof_obligation_graph": true,
     "bridge_and_contradiction_brokers": true,
@@ -50,7 +58,7 @@
     "compileall": "PASS",
     "ruff_check": "PASS",
     "ruff_format_check": "PASS",
-    "pytest": "130 passed",
+    "pytest": "138 passed",
     "offline_topology_benchmark": {
       "status": "PASS",
       "provider_calls": 0,
@@ -64,11 +72,11 @@
   },
   "counts": {
     "source_python_files": 71,
-    "test_python_files": 42,
+    "test_python_files": 48,
     "documentation_files": 25,
-    "source_lines": 23975,
-    "test_lines": 4496,
-    "docs_directory_lines": 2088
+    "source_lines": 24615,
+    "test_lines": 5010,
+    "docs_directory_lines": 2106
   },
   "artifacts": {
     "status": "SOURCE RELEASE; DISTRIBUTION ARTIFACTS NOT COMMITTED",

@@ -18,6 +18,24 @@
 - Added stable topology/inspiration checkpoint state, Activity events, reports,
   six offline benchmark cases and eleven required ablations.
 
+## Active Runtime Closure
+
+The active profile now exercises the hierarchical components in the live proof
+path rather than only recording post-hoc topology metadata:
+
+- Typed prompt context is recursively JSON-normalized, including nested
+  Pydantic models, enums, dataclasses, paths and collections.
+- Each route reads its bounded Broker inbox and typed memory before the next
+  continuation call, then returns a semantic receipt for every delivered
+  message. The Broker recomputes receipt hashes and persists exactly-once
+  delivery state across resume.
+- Ordinary active routes run through Prover, risk-directed Skeptic/Tool and an
+  independent Referee before an artifact may be promoted to global FactMemory.
+  Missing or failed required roles fail closed and leave the artifact local.
+- Active Inspiration, Bridge and Contradiction typed calls are covered by
+  end-to-end deterministic tests. Inspiration and route-team state are emitted
+  as stable structured artifacts for audit.
+
 ## Compatibility
 
 `legacy_sparse` remains the default for generic configuration and preserves the
