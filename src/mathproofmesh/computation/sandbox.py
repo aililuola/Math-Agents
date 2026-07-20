@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -63,6 +64,43 @@ class UnsafeProgramError(ValueError):
     pass
 
 
+def _find_docker_executable() -> str | None:
+    discovered = shutil.which("docker")
+    if discovered:
+        return discovered
+    if os.name != "nt":
+        return None
+
+    candidates: list[Path] = []
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        candidates.append(
+            Path(local_app_data)
+            / "Programs"
+            / "DockerDesktop"
+            / "resources"
+            / "bin"
+            / "docker.exe"
+        )
+    program_files = os.environ.get("ProgramFiles")
+    if program_files:
+        candidates.append(
+            Path(program_files)
+            / "Docker"
+            / "Docker"
+            / "resources"
+            / "bin"
+            / "docker.exe"
+        )
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return str(candidate)
+        except OSError:
+            continue
+    return None
+
+
 def validate_program_source(source: str) -> set[str]:
     tree = ast.parse(source, mode="exec")
     run_definitions = 0
@@ -120,6 +158,7 @@ def build_docker_command(config: ComputationConfig, workdir: Path) -> list[str]:
         "docker",
         "run",
         "--rm",
+        "--interactive",
         "--network",
         "none",
         "--read-only",
@@ -284,15 +323,14 @@ def run_sandboxed_python(
             "program dependencies must exactly match its imported modules"
         )
     _validate_program_schemas(program)
-    if shutil.which("docker") is None:
+    docker_path = _find_docker_executable()
+    if docker_path is None:
         raise RuntimeError("Docker executable was not found")
     input_payload = spec.arguments.get("input", {})
     if not isinstance(input_payload, dict):
         raise ValueError("sandbox input must be a JSON object")
     input_payload = {**input_payload, "seed": spec.seed}
     _validate_json_object(input_payload, program.input_schema, label="input")
-    docker_path = shutil.which("docker")
-    assert docker_path is not None
     with tempfile.TemporaryDirectory(prefix="mathproofmesh_experiment_") as tmpdir:
         workdir = Path(tmpdir).resolve()
         workdir.chmod(0o755)

@@ -15,8 +15,9 @@
 - 工具版本、精度、种子和镜像 digest 感知的内容缓存。
 - `runs/<run_id>/experiments/<request_hash>/` 完整实验审计目录。
 - 关键实验的终审重放和哈希验证。
-- 默认关闭的 Docker Python 沙箱及静态源码安全检查。
-- DeepSeek 冒烟/正式配置启用强类型工具；模型生成 Python 继续关闭。
+- 通用配置默认关闭的 Docker Python 沙箱及静态源码安全检查。
+- DeepSeek 冒烟/正式配置启用强类型工具，并显式固定和启用隔离 Python 镜像。
+- 用户模式 Docker Desktop 路径发现、容器标准输入和可重复实机探针。
 - 离线枚举密集 token 代理基准。
 
 ## 正确性约束

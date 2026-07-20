@@ -143,7 +143,7 @@ Activity 只显示阶段、任务和结构化结果摘要，不显示原始 `rea
 | 整个 run token 预算 | 300,000 | 2,000,000 |
 | 配置费用上限 | USD 0.75 | USD 5.00 |
 | 强类型计算工具 | 开启 | 开启 |
-| 模型生成 Python 沙箱 | 关闭 | 关闭 |
+| 模型生成 Python 沙箱 | 开启（需 Docker） | 开启（需 Docker） |
 
 “正式版最多 12 步”指 `continuation.max_new_steps_per_call: 12`：一次分段调用最多提交 12 个新的结构化证明步骤。它不表示整道题只能有 12 步。正式版每条路线最多 12 个分段，仍受总调用、总 token、费用和调度预算限制。
 
@@ -240,6 +240,14 @@ computation:
   sandbox_image: registry.example/mathproofmesh-python@sha256:<64位十六进制摘要>
 ```
 
+仓库随附的 DeepSeek 冒烟版和正式版已经显式启用沙箱，并固定到配置文件中的官方
+Python 3.11 镜像摘要。安装 Docker Desktop 后可运行真实隔离探针：
+
+```powershell
+python scripts/verify_sandbox.py --config config.deepseek-v4-pro.smoke.yaml
+python scripts/verify_sandbox.py --config config.deepseek-v4-pro.yaml
+```
+
 运行器按无网络、只读根文件系统、非 root 用户、无工作区挂载、空宿主环境、CPU/内存/进程/超时/输出限制构造 Docker 命令。生成源码禁止 `open`、`exec`、`eval`、`compile`、`subprocess`、`socket`、动态导入和私有属性访问。输入输出必须符合 JSON Schema，输入 Schema 必须声明固定种子，输出 Schema 必须声明标准结果字段。
 
 模型生成 Python 的正面结果最高只能是 `bounded_evidence`。它给出的反例候选若不能由强类型检查器独立复现，会被降级为 `inconclusive`。
@@ -331,7 +339,7 @@ python benchmarks\reasoning_first_computation.py
 - 沙箱 AST 规则和 Docker 命令构造不暴露网络、API key 或项目工作区；
 - 离线枚举密集代理基准检查结构化计算显著减少推理文本，并保持已知答案正确率。
 
-离线 token 基准是“显式逐例文本”与“结构化请求/结果”的可重复代理，不声称测量供应商隐藏推理 tokens。当前代理基准 3/3 结果正确，估算可见文本减少 99.97%。真实 DeepSeek 成本和准确率回归需要 API key，因此不会在默认测试中调用；本机没有 Docker，沙箱容器实机隔离也需在具备固定镜像的环境中另行验证。
+离线 token 基准是“显式逐例文本”与“结构化请求/结果”的可重复代理，不声称测量供应商隐藏推理 tokens。当前代理基准 3/3 结果正确，估算可见文本减少 99.97%。真实 DeepSeek 成本和准确率回归需要 API key，因此不会在默认测试中调用。固定摘要镜像的 Docker 实机探针已分别通过冒烟版和正式版配置，结果保持为 `bounded_evidence`。
 
 ## 文档
 

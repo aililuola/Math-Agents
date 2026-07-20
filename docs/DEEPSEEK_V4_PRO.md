@@ -277,14 +277,22 @@ computation:
   enabled: true
   policy: reasoning_first
   typed_tools_enabled: true
-  sandboxed_python_enabled: false
+  sandboxed_python_enabled: true
+  sandbox_image: python@sha256:<配置文件中的固定摘要>
   targeted_falsification_fast_path: true
   soft_experiments_per_path: 2
   hard_experiments_per_path: 6
   max_compute_cycles_per_segment: 1
 ```
 
-Planner 同时具有 `experimenter` 角色，但只有在用户显式开启带固定 digest 的 Docker 沙箱、Gate 确认强类型工具无法表达请求后，才会调用代码生成阶段。默认 DeepSeek 运行不会执行模型生成 Python。
+Planner 同时具有 `experimenter` 角色，但只有在 Gate 确认强类型工具无法表达请求后，才会调用代码生成阶段。两个 DeepSeek 预设已显式启用带固定 digest 的 Docker 沙箱；没有安装 Docker 的环境应把 `sandboxed_python_enabled` 改回 `false`，强类型工具仍可继续工作。
+
+安装完成后可分别验证两个预设：
+
+```powershell
+python scripts/verify_sandbox.py --config config.deepseek-v4-pro.smoke.yaml
+python scripts/verify_sandbox.py --config config.deepseek-v4-pro.yaml
+```
 
 计算结果通过新的自包含请求返回原 Explorer，不依赖供应商对话中的 tool-call 状态，也不会回放 `reasoning_content`。详细安全和证据规则见 [COMPUTATION_POLICY.md](COMPUTATION_POLICY.md)。
 

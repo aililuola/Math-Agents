@@ -9,6 +9,7 @@ from mathproofmesh.computation.broker import ToolBroker
 from mathproofmesh.computation.policy import ComputationContext
 from mathproofmesh.computation.sandbox import (
     UnsafeProgramError,
+    _find_docker_executable,
     _validate_json_object,
     _validate_program_schemas,
     build_docker_command,
@@ -634,6 +635,7 @@ def test_sandbox_policy_rejects_dangerous_code_and_builds_isolated_docker_comman
     command = build_docker_command(config, tmp_path.resolve())
     joined = " ".join(command)
     assert "--network none" in joined
+    assert "--interactive" in command
     assert "--read-only" in command
     assert "--cap-drop ALL" in joined
     assert "no-new-privileges" in command
@@ -645,6 +647,23 @@ def test_sandbox_policy_rejects_dangerous_code_and_builds_isolated_docker_comman
     assert "@sha256:" in joined
     assert "--env" not in command
     assert str(Path.cwd().resolve()) not in joined
+
+
+def test_docker_discovery_supports_per_user_windows_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    docker = (
+        tmp_path / "Programs" / "DockerDesktop" / "resources" / "bin" / "docker.exe"
+    )
+    docker.parent.mkdir(parents=True)
+    docker.touch()
+    monkeypatch.setattr("mathproofmesh.computation.sandbox.os.name", "nt")
+    monkeypatch.setattr(
+        "mathproofmesh.computation.sandbox.shutil.which", lambda _: None
+    )
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    assert _find_docker_executable() == str(docker)
 
 
 def test_program_source_artifact_is_hash_checked(demo_config, artifact_store) -> None:
