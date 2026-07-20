@@ -1,0 +1,12 @@
+{
+  "case_id": "bounded_computation_scope",
+  "description": "A finite experiment supports a conjecture but does not prove its universal form.",
+  "target_claim": "The recurrence has property P for every positive integer.",
+  "checked_domain": {"n": {"min": 1, "max": 1000}},
+  "evidence_type": "bounded_experiment",
+  "expected": {
+    "maximum_memory_tier": "insight",
+    "can_close_universal_obligation": false,
+    "final_review_accepts_as_proof": false
+  }
+}

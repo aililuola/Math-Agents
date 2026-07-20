@@ -1,0 +1,598 @@
+{
+  "benchmark": "mathproofmesh_v0_7_hierarchical_topology_mock",
+  "provider_calls": 0,
+  "provider_cost_measured": false,
+  "case_count": 6,
+  "variant_count": 11,
+  "component_contracts": {
+    "shared_bridge": true,
+    "exact_counterexample": true,
+    "mechanism_duplicate": true,
+    "bounded_computation_scope": true,
+    "resume_exactly_once": true,
+    "representation_switchboard": true,
+    "analogy_agent": true,
+    "construction_inventor": true,
+    "invariant_hypothesis_agent": true,
+    "inspiration_triggers": true
+  },
+  "variants": [
+    {
+      "variant": "v0.6 legacy sparse",
+      "features": {
+        "typed_broker": false,
+        "route_teams": false,
+        "graph_mode": "off",
+        "inspiration_mode": "off",
+        "analogy": false,
+        "representation_switch": false,
+        "surprise_budget": false,
+        "persistent_meta_strategist": false
+      },
+      "case_successes": {
+        "shared_bridge": false,
+        "exact_counterexample": false,
+        "mechanism_duplicate": false,
+        "bounded_computation_scope": false,
+        "resume_exactly_once": false,
+        "proof_mutation_review": false
+      },
+      "metrics": {
+        "verified_solve_rate": 0.0,
+        "false_accept_rate": 1.0,
+        "first_error_localization_rate": 0.4,
+        "route_diversity": 0.25,
+        "duplicate_route_rate": 0.4,
+        "verified_fact_reuse_rate": 0.0,
+        "proof_debt_reduction": 0.12,
+        "messages_per_solve": 14.0,
+        "cross_route_token_estimate": 8400,
+        "bridge_success_rate": 0.0,
+        "contradiction_resolution_rate": 0.0,
+        "resume_duplicate_delivery_rate": 1.0,
+        "calls": 20,
+        "tokens": 26400,
+        "estimated_cost_usd": 0.0,
+        "inspiration_trigger_rate": 0.0,
+        "verified_breakthrough_conversion_rate": 0.0,
+        "representation_diversity": 0.25,
+        "analogy_usefulness_rate": 0.0,
+        "auxiliary_construction_survival_rate": 0.0,
+        "surprise_budget_utilization": 0.0,
+        "calls_to_first_breakthrough": null,
+        "false_novelty_rate": null,
+        "repeated_mechanism_rate": 0.4,
+        "capability_calibration_by_domain_role": {
+          "number_theory/route_referee": 0.5,
+          "combinatorics/skeptic": 0.5,
+          "algebra/tool_agent": 0.5
+        }
+      }
+    },
+    {
+      "variant": "v0.7 typed broker only",
+      "features": {
+        "typed_broker": true,
+        "route_teams": false,
+        "graph_mode": "off",
+        "inspiration_mode": "off",
+        "analogy": false,
+        "representation_switch": false,
+        "surprise_budget": false,
+        "persistent_meta_strategist": false
+      },
+      "case_successes": {
+        "shared_bridge": false,
+        "exact_counterexample": false,
+        "mechanism_duplicate": false,
+        "bounded_computation_scope": true,
+        "resume_exactly_once": true,
+        "proof_mutation_review": false
+      },
+      "metrics": {
+        "verified_solve_rate": 0.333,
+        "false_accept_rate": 0.667,
+        "first_error_localization_rate": 0.4,
+        "route_diversity": 0.25,
+        "duplicate_route_rate": 0.4,
+        "verified_fact_reuse_rate": 0.18,
+        "proof_debt_reduction": 0.12,
+        "messages_per_solve": 4.0,
+        "cross_route_token_estimate": 1800,
+        "bridge_success_rate": 0.0,
+        "contradiction_resolution_rate": 0.0,
+        "resume_duplicate_delivery_rate": 0.0,
+        "calls": 21,
+        "tokens": 20700,
+        "estimated_cost_usd": 0.0,
+        "inspiration_trigger_rate": 0.0,
+        "verified_breakthrough_conversion_rate": 0.0,
+        "representation_diversity": 0.25,
+        "analogy_usefulness_rate": 0.0,
+        "auxiliary_construction_survival_rate": 0.0,
+        "surprise_budget_utilization": 0.0,
+        "calls_to_first_breakthrough": null,
+        "false_novelty_rate": null,
+        "repeated_mechanism_rate": 0.4,
+        "capability_calibration_by_domain_role": {
+          "number_theory/route_referee": 0.5,
+          "combinatorics/skeptic": 0.5,
+          "algebra/tool_agent": 0.84
+        }
+      }
+    },
+    {
+      "variant": "v0.7 broker + route teams",
+      "features": {
+        "typed_broker": true,
+        "route_teams": true,
+        "graph_mode": "off",
+        "inspiration_mode": "off",
+        "analogy": false,
+        "representation_switch": false,
+        "surprise_budget": false,
+        "persistent_meta_strategist": false
+      },
+      "case_successes": {
+        "shared_bridge": false,
+        "exact_counterexample": false,
+        "mechanism_duplicate": false,
+        "bounded_computation_scope": true,
+        "resume_exactly_once": true,
+        "proof_mutation_review": true
+      },
+      "metrics": {
+        "verified_solve_rate": 0.5,
+        "false_accept_rate": 0.333,
+        "first_error_localization_rate": 1.0,
+        "route_diversity": 0.25,
+        "duplicate_route_rate": 0.4,
+        "verified_fact_reuse_rate": 0.18,
+        "proof_debt_reduction": 0.12,
+        "messages_per_solve": 4.0,
+        "cross_route_token_estimate": 1800,
+        "bridge_success_rate": 0.0,
+        "contradiction_resolution_rate": 0.0,
+        "resume_duplicate_delivery_rate": 0.0,
+        "calls": 23,
+        "tokens": 22500,
+        "estimated_cost_usd": 0.0,
+        "inspiration_trigger_rate": 0.0,
+        "verified_breakthrough_conversion_rate": 0.0,
+        "representation_diversity": 0.25,
+        "analogy_usefulness_rate": 0.0,
+        "auxiliary_construction_survival_rate": 0.0,
+        "surprise_budget_utilization": 0.0,
+        "calls_to_first_breakthrough": null,
+        "false_novelty_rate": null,
+        "repeated_mechanism_rate": 0.4,
+        "capability_calibration_by_domain_role": {
+          "number_theory/route_referee": 0.86,
+          "combinatorics/skeptic": 0.82,
+          "algebra/tool_agent": 0.84
+        }
+      }
+    },
+    {
+      "variant": "v0.7 full shadow graph",
+      "features": {
+        "typed_broker": true,
+        "route_teams": true,
+        "graph_mode": "shadow",
+        "inspiration_mode": "off",
+        "analogy": false,
+        "representation_switch": false,
+        "surprise_budget": false,
+        "persistent_meta_strategist": false
+      },
+      "case_successes": {
+        "shared_bridge": false,
+        "exact_counterexample": false,
+        "mechanism_duplicate": false,
+        "bounded_computation_scope": true,
+        "resume_exactly_once": true,
+        "proof_mutation_review": true
+      },
+      "metrics": {
+        "verified_solve_rate": 0.5,
+        "false_accept_rate": 0.333,
+        "first_error_localization_rate": 1.0,
+        "route_diversity": 0.25,
+        "duplicate_route_rate": 0.4,
+        "verified_fact_reuse_rate": 0.18,
+        "proof_debt_reduction": 0.12,
+        "messages_per_solve": 4.0,
+        "cross_route_token_estimate": 1800,
+        "bridge_success_rate": 0.0,
+        "contradiction_resolution_rate": 0.0,
+        "resume_duplicate_delivery_rate": 0.0,
+        "calls": 23,
+        "tokens": 22500,
+        "estimated_cost_usd": 0.0,
+        "inspiration_trigger_rate": 0.0,
+        "verified_breakthrough_conversion_rate": 0.0,
+        "representation_diversity": 0.25,
+        "analogy_usefulness_rate": 0.0,
+        "auxiliary_construction_survival_rate": 0.0,
+        "surprise_budget_utilization": 0.0,
+        "calls_to_first_breakthrough": null,
+        "false_novelty_rate": null,
+        "repeated_mechanism_rate": 0.4,
+        "capability_calibration_by_domain_role": {
+          "number_theory/route_referee": 0.86,
+          "combinatorics/skeptic": 0.82,
+          "algebra/tool_agent": 0.84
+        }
+      }
+    },
+    {
+      "variant": "v0.7 active graph",
+      "features": {
+        "typed_broker": true,
+        "route_teams": true,
+        "graph_mode": "active",
+        "inspiration_mode": "off",
+        "analogy": false,
+        "representation_switch": false,
+        "surprise_budget": false,
+        "persistent_meta_strategist": false
+      },
+      "case_successes": {
+        "shared_bridge": true,
+        "exact_counterexample": true,
+        "mechanism_duplicate": true,
+        "bounded_computation_scope": true,
+        "resume_exactly_once": true,
+        "proof_mutation_review": true
+      },
+      "metrics": {
+        "verified_solve_rate": 1.0,
+        "false_accept_rate": 0.0,
+        "first_error_localization_rate": 1.0,
+        "route_diversity": 0.25,
+        "duplicate_route_rate": 0.08,
+        "verified_fact_reuse_rate": 0.82,
+        "proof_debt_reduction": 0.52,
+        "messages_per_solve": 4.0,
+        "cross_route_token_estimate": 1800,
+        "bridge_success_rate": 1.0,
+        "contradiction_resolution_rate": 1.0,
+        "resume_duplicate_delivery_rate": 0.0,
+        "calls": 25,
+        "tokens": 24300,
+        "estimated_cost_usd": 0.0,
+        "inspiration_trigger_rate": 0.0,
+        "verified_breakthrough_conversion_rate": 0.0,
+        "representation_diversity": 0.25,
+        "analogy_usefulness_rate": 0.0,
+        "auxiliary_construction_survival_rate": 0.0,
+        "surprise_budget_utilization": 0.0,
+        "calls_to_first_breakthrough": null,
+        "false_novelty_rate": null,
+        "repeated_mechanism_rate": 0.2,
+        "capability_calibration_by_domain_role": {
+          "number_theory/route_referee": 0.86,
+          "combinatorics/skeptic": 0.82,
+          "algebra/tool_agent": 0.84
+        }
+      }
+    },
+    {
+      "variant": "v0.7 active graph + inspiration shadow",
+      "features": {
+        "typed_broker": true,
+        "route_teams": true,
+        "graph_mode": "active",
+        "inspiration_mode": "shadow",
+        "analogy": true,
+        "representation_switch": true,
+        "surprise_budget": true,
+        "persistent_meta_strategist": true
+      },
+      "case_successes": {
+        "shared_bridge": true,
+        "exact_counterexample": true,
+        "mechanism_duplicate": true,
+        "bounded_computation_scope": true,
+        "resume_exactly_once": true,
+        "proof_mutation_review": true
+      },
+      "metrics": {
+        "verified_solve_rate": 1.0,
+        "false_accept_rate": 0.0,
+        "first_error_localization_rate": 1.0,
+        "route_diversity": 0.25,
+        "duplicate_route_rate": 0.08,
+        "verified_fact_reuse_rate": 0.82,
+        "proof_debt_reduction": 0.52,
+        "messages_per_solve": 4.0,
+        "cross_route_token_estimate": 1800,
+        "bridge_success_rate": 1.0,
+        "contradiction_resolution_rate": 1.0,
+        "resume_duplicate_delivery_rate": 0.0,
+        "calls": 27,
+        "tokens": 26100,
+        "estimated_cost_usd": 0.0,
+        "inspiration_trigger_rate": 1.0,
+        "verified_breakthrough_conversion_rate": 0.0,
+        "representation_diversity": 0.25,
+        "analogy_usefulness_rate": 0.0,
+        "auxiliary_construction_survival_rate": 0.0,
+        "surprise_budget_utilization": 0.0,
+        "calls_to_first_breakthrough": null,
+        "false_novelty_rate": 0.0,
+        "repeated_mechanism_rate": 0.2,
+        "capability_calibration_by_domain_role": {
+          "number_theory/route_referee": 0.86,
+          "combinatorics/skeptic": 0.82,
+          "algebra/tool_agent": 0.84
+        }
+      }
+    },
+    {
+      "variant": "v0.7 active graph + inspiration active",
+      "features": {
+        "typed_broker": true,
+        "route_teams": true,
+        "graph_mode": "active",
+        "inspiration_mode": "active",
+        "analogy": true,
+        "representation_switch": true,
+        "surprise_budget": true,
+        "persistent_meta_strategist": true
+      },
+      "case_successes": {
+        "shared_bridge": true,
+        "exact_counterexample": true,
+        "mechanism_duplicate": true,
+        "bounded_computation_scope": true,
+        "resume_exactly_once": true,
+        "proof_mutation_review": true
+      },
+      "metrics": {
+        "verified_solve_rate": 1.0,
+        "false_accept_rate": 0.0,
+        "first_error_localization_rate": 1.0,
+        "route_diversity": 0.9,
+        "duplicate_route_rate": 0.08,
+        "verified_fact_reuse_rate": 0.82,
+        "proof_debt_reduction": 0.72,
+        "messages_per_solve": 4.0,
+        "cross_route_token_estimate": 1800,
+        "bridge_success_rate": 1.0,
+        "contradiction_resolution_rate": 1.0,
+        "resume_duplicate_delivery_rate": 0.0,
+        "calls": 29,
+        "tokens": 27900,
+        "estimated_cost_usd": 0.0,
+        "inspiration_trigger_rate": 1.0,
+        "verified_breakthrough_conversion_rate": 0.75,
+        "representation_diversity": 0.9,
+        "analogy_usefulness_rate": 0.67,
+        "auxiliary_construction_survival_rate": 0.67,
+        "surprise_budget_utilization": 0.75,
+        "calls_to_first_breakthrough": 6,
+        "false_novelty_rate": 0.0,
+        "repeated_mechanism_rate": 0.05,
+        "capability_calibration_by_domain_role": {
+          "number_theory/route_referee": 0.86,
+          "combinatorics/skeptic": 0.82,
+          "algebra/tool_agent": 0.84
+        }
+      }
+    },
+    {
+      "variant": "v0.7 without analogy",
+      "features": {
+        "typed_broker": true,
+        "route_teams": true,
+        "graph_mode": "active",
+        "inspiration_mode": "active",
+        "analogy": false,
+        "representation_switch": true,
+        "surprise_budget": true,
+        "persistent_meta_strategist": true
+      },
+      "case_successes": {
+        "shared_bridge": true,
+        "exact_counterexample": true,
+        "mechanism_duplicate": true,
+        "bounded_computation_scope": true,
+        "resume_exactly_once": true,
+        "proof_mutation_review": true
+      },
+      "metrics": {
+        "verified_solve_rate": 1.0,
+        "false_accept_rate": 0.0,
+        "first_error_localization_rate": 1.0,
+        "route_diversity": 0.8,
+        "duplicate_route_rate": 0.08,
+        "verified_fact_reuse_rate": 0.82,
+        "proof_debt_reduction": 0.67,
+        "messages_per_solve": 4.0,
+        "cross_route_token_estimate": 1800,
+        "bridge_success_rate": 1.0,
+        "contradiction_resolution_rate": 1.0,
+        "resume_duplicate_delivery_rate": 0.0,
+        "calls": 28,
+        "tokens": 27000,
+        "estimated_cost_usd": 0.0,
+        "inspiration_trigger_rate": 1.0,
+        "verified_breakthrough_conversion_rate": 0.6,
+        "representation_diversity": 0.8,
+        "analogy_usefulness_rate": 0.0,
+        "auxiliary_construction_survival_rate": 0.67,
+        "surprise_budget_utilization": 0.75,
+        "calls_to_first_breakthrough": 7,
+        "false_novelty_rate": 0.0,
+        "repeated_mechanism_rate": 0.05,
+        "capability_calibration_by_domain_role": {
+          "number_theory/route_referee": 0.86,
+          "combinatorics/skeptic": 0.82,
+          "algebra/tool_agent": 0.84
+        }
+      }
+    },
+    {
+      "variant": "v0.7 without representation switch",
+      "features": {
+        "typed_broker": true,
+        "route_teams": true,
+        "graph_mode": "active",
+        "inspiration_mode": "active",
+        "analogy": true,
+        "representation_switch": false,
+        "surprise_budget": true,
+        "persistent_meta_strategist": true
+      },
+      "case_successes": {
+        "shared_bridge": true,
+        "exact_counterexample": true,
+        "mechanism_duplicate": true,
+        "bounded_computation_scope": true,
+        "resume_exactly_once": true,
+        "proof_mutation_review": true
+      },
+      "metrics": {
+        "verified_solve_rate": 1.0,
+        "false_accept_rate": 0.0,
+        "first_error_localization_rate": 1.0,
+        "route_diversity": 0.45,
+        "duplicate_route_rate": 0.08,
+        "verified_fact_reuse_rate": 0.82,
+        "proof_debt_reduction": 0.67,
+        "messages_per_solve": 4.0,
+        "cross_route_token_estimate": 1800,
+        "bridge_success_rate": 1.0,
+        "contradiction_resolution_rate": 1.0,
+        "resume_duplicate_delivery_rate": 0.0,
+        "calls": 28,
+        "tokens": 27000,
+        "estimated_cost_usd": 0.0,
+        "inspiration_trigger_rate": 1.0,
+        "verified_breakthrough_conversion_rate": 0.6,
+        "representation_diversity": 0.45,
+        "analogy_usefulness_rate": 0.67,
+        "auxiliary_construction_survival_rate": 0.67,
+        "surprise_budget_utilization": 0.75,
+        "calls_to_first_breakthrough": 7,
+        "false_novelty_rate": 0.0,
+        "repeated_mechanism_rate": 0.13,
+        "capability_calibration_by_domain_role": {
+          "number_theory/route_referee": 0.86,
+          "combinatorics/skeptic": 0.82,
+          "algebra/tool_agent": 0.84
+        }
+      }
+    },
+    {
+      "variant": "v0.7 without surprise budget",
+      "features": {
+        "typed_broker": true,
+        "route_teams": true,
+        "graph_mode": "active",
+        "inspiration_mode": "active",
+        "analogy": true,
+        "representation_switch": true,
+        "surprise_budget": false,
+        "persistent_meta_strategist": true
+      },
+      "case_successes": {
+        "shared_bridge": true,
+        "exact_counterexample": true,
+        "mechanism_duplicate": true,
+        "bounded_computation_scope": true,
+        "resume_exactly_once": true,
+        "proof_mutation_review": true
+      },
+      "metrics": {
+        "verified_solve_rate": 1.0,
+        "false_accept_rate": 0.0,
+        "first_error_localization_rate": 1.0,
+        "route_diversity": 0.8,
+        "duplicate_route_rate": 0.08,
+        "verified_fact_reuse_rate": 0.82,
+        "proof_debt_reduction": 0.67,
+        "messages_per_solve": 4.0,
+        "cross_route_token_estimate": 1800,
+        "bridge_success_rate": 1.0,
+        "contradiction_resolution_rate": 1.0,
+        "resume_duplicate_delivery_rate": 0.0,
+        "calls": 28,
+        "tokens": 27000,
+        "estimated_cost_usd": 0.0,
+        "inspiration_trigger_rate": 1.0,
+        "verified_breakthrough_conversion_rate": 0.6,
+        "representation_diversity": 0.8,
+        "analogy_usefulness_rate": 0.67,
+        "auxiliary_construction_survival_rate": 0.67,
+        "surprise_budget_utilization": 0.0,
+        "calls_to_first_breakthrough": 7,
+        "false_novelty_rate": 0.0,
+        "repeated_mechanism_rate": 0.05,
+        "capability_calibration_by_domain_role": {
+          "number_theory/route_referee": 0.86,
+          "combinatorics/skeptic": 0.82,
+          "algebra/tool_agent": 0.84
+        }
+      }
+    },
+    {
+      "variant": "v0.7 without persistent meta-strategist",
+      "features": {
+        "typed_broker": true,
+        "route_teams": true,
+        "graph_mode": "active",
+        "inspiration_mode": "active",
+        "analogy": true,
+        "representation_switch": true,
+        "surprise_budget": true,
+        "persistent_meta_strategist": false
+      },
+      "case_successes": {
+        "shared_bridge": true,
+        "exact_counterexample": true,
+        "mechanism_duplicate": true,
+        "bounded_computation_scope": true,
+        "resume_exactly_once": true,
+        "proof_mutation_review": true
+      },
+      "metrics": {
+        "verified_solve_rate": 1.0,
+        "false_accept_rate": 0.0,
+        "first_error_localization_rate": 1.0,
+        "route_diversity": 0.9,
+        "duplicate_route_rate": 0.08,
+        "verified_fact_reuse_rate": 0.82,
+        "proof_debt_reduction": 0.67,
+        "messages_per_solve": 4.0,
+        "cross_route_token_estimate": 1800,
+        "bridge_success_rate": 1.0,
+        "contradiction_resolution_rate": 1.0,
+        "resume_duplicate_delivery_rate": 0.0,
+        "calls": 28,
+        "tokens": 27000,
+        "estimated_cost_usd": 0.0,
+        "inspiration_trigger_rate": 1.0,
+        "verified_breakthrough_conversion_rate": 0.6,
+        "representation_diversity": 0.9,
+        "analogy_usefulness_rate": 0.67,
+        "auxiliary_construction_survival_rate": 0.67,
+        "surprise_budget_utilization": 0.75,
+        "calls_to_first_breakthrough": 7,
+        "false_novelty_rate": 0.0,
+        "repeated_mechanism_rate": 0.12,
+        "capability_calibration_by_domain_role": {
+          "number_theory/route_referee": 0.86,
+          "combinatorics/skeptic": 0.82,
+          "algebra/tool_agent": 0.84
+        }
+      }
+    }
+  ],
+  "notes": [
+    "All mathematical and routing checks are deterministic and offline.",
+    "Calls, tokens, and cost are explicit mock estimates, not provider telemetry.",
+    "Shadow variants record recommendations but do not materialize graph or inspiration actions."
+  ]
+}

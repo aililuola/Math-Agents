@@ -1,0 +1,21 @@
+{
+  "case_id": "mechanism_duplicate",
+  "description": "Two differently worded routes use the same representation and mechanism.",
+  "route_a": {
+    "representation_tags": ["modular"],
+    "mechanism_tags": ["residue_class_split"],
+    "key_transformations": ["reduce_mod_m"],
+    "targeted_obligations": ["goal"]
+  },
+  "route_b": {
+    "representation_tags": ["modular"],
+    "mechanism_tags": ["residue_class_split"],
+    "key_transformations": ["reduce_mod_m"],
+    "targeted_obligations": ["goal"]
+  },
+  "expected": {
+    "duplicate": true,
+    "release_one_route": true,
+    "lose_verified_facts": false
+  }
+}
