@@ -145,6 +145,39 @@ class BudgetConfig(ConfigModel):
         return self
 
 
+class SchedulerConfig(ConfigModel):
+    """Adaptive breadth/depth policy and its budget-aware admission controls."""
+
+    max_actions_per_round: int = Field(default=2, ge=1, le=16)
+    widen_paths_per_action: int = Field(default=2, ge=1, le=32)
+    force_widen_when_all_failed: bool = True
+    max_execution_repairs_per_path: int = Field(default=1, ge=0, le=32)
+    max_plan_repairs_per_path: int = Field(default=1, ge=0, le=32)
+    max_unknown_failure_repairs_per_path: int = Field(default=1, ge=0, le=32)
+    allow_strategy_failure_repair: bool = False
+    failed_path_cooldown_rounds: int = Field(default=1, ge=0, le=32)
+    meaningful_progress_threshold: float = Field(default=0.04, ge=0.0, le=1.0)
+    unverified_progress_discount: float = Field(default=0.55, ge=0.0, le=1.0)
+    uncertain_progress_discount: float = Field(default=0.40, ge=0.0, le=1.0)
+    failed_progress_discount: float = Field(default=0.10, ge=0.0, le=1.0)
+    structural_failure_progress_cap: float = Field(default=0.10, ge=0.0, le=1.0)
+    execution_failure_progress_cap: float = Field(default=0.45, ge=0.0, le=1.0)
+    plan_failure_progress_cap: float = Field(default=0.18, ge=0.0, le=1.0)
+    strategy_failure_progress_cap: float = Field(default=0.05, ge=0.0, le=1.0)
+    structural_failure_penalty: float = Field(default=0.30, ge=0.0, le=2.0)
+    execution_failure_penalty: float = Field(default=0.12, ge=0.0, le=2.0)
+    plan_failure_penalty: float = Field(default=0.30, ge=0.0, le=2.0)
+    strategy_failure_penalty: float = Field(default=0.50, ge=0.0, le=2.0)
+    repeated_failure_penalty: float = Field(default=0.15, ge=0.0, le=2.0)
+    reserve_revision_cycles: int = Field(default=1, ge=0, le=32)
+    include_post_action_verification_in_cost: bool = True
+    include_meta_review_in_cost: bool = True
+    verification_call_safety_margin: int = Field(default=0, ge=0, le=16)
+    finish_transition_buffer_calls: int = Field(default=1, ge=0, le=64)
+    diagnostics_enabled: bool = True
+    diagnostic_candidate_limit: int = Field(default=12, ge=1, le=128)
+
+
 class TopologyConfig(ConfigModel):
     neighbor_k: int = Field(default=2, ge=1, le=16)
     prefer_cross_provider_review: bool = True
@@ -214,6 +247,7 @@ class SystemConfig(ConfigModel):
     system_name: str = "MathProofMesh"
     agents: list[AgentConfig]
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     topology: TopologyConfig = Field(default_factory=TopologyConfig)
     verification: VerificationConfig = Field(default_factory=VerificationConfig)
     continuation: ContinuationConfig = Field(default_factory=ContinuationConfig)

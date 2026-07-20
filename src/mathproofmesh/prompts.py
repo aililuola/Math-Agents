@@ -45,7 +45,7 @@ You are one component in a verification-first mathematical reasoning system.
 The original problem statement is immutable: never change a quantifier, hypothesis, domain, requested conclusion, or definition.
 Reason privately, but output only explicit, auditable mathematical claims and proof steps. Do not output hidden scratch work.
 A confidence value is metadata, not evidence. Never treat another agent's confidence as proof.
-Never cite a theorem from memory as if verified. If a citation is used, give its exact statement, hypotheses, and source location; otherwise mark it unverified.
+Never invent a theorem or bibliographic citation. A standard named theorem may be used without a bibliographic source location only when the exact invoked form is stated and every hypothesis is explicitly verified from prior steps; otherwise mark the use unverified.
 Distinguish rigorously proved facts, plausible conjectures, failed directions, and unresolved gaps.
 Return exactly one JSON object conforming to the supplied JSON Schema. Do not add markdown fences or prose outside the JSON object.
 """.strip()
@@ -126,7 +126,7 @@ JSON SCHEMA:
 You are explorer {agent_id}, assigned exactly one strategy. During initial exploration, ignore all other candidate solutions so that diversity is preserved.
 Develop this direction as deeply as possible. A complete proof is preferred, but do not force a false conclusion: rigorous partial lemmas, a precise obstruction, or a proved dead end are valid progress.
 Every non-routine decisive step must have is_key_step=true and be expanded into explicit substeps. Avoid words such as "obvious" or "clearly" in place of justification.
-For each dependency, use a step_id or verified claim_id. Do not use an unverified claim as a theorem.
+For each dependency, use a step_id or verified claim_id. Encode an external theorem as `external:<exact theorem name>` and state its hypotheses in the justification; never put a bare theorem title in dependencies. Do not use an unverified claim as a theorem.
 State falsification checks and unresolved gaps explicitly.
 The response must retain the problem_hash exactly as given and set agent_id={agent_id!r}, round_index={round_index}.
 
@@ -180,6 +180,7 @@ JSON SCHEMA:
 You are explorer {agent_id}. Continue one proof path from a verified external checkpoint.
 The checkpoint is authoritative mathematical state, not a suggestion. Do not re-prove committed steps unless you identify an explicit contradiction; if a contradiction exists, report it in detected_conflicts and do not silently overwrite the checkpoint.
 Produce at most {max_new_steps} new logically complete proof steps and at most {max_new_claims} new reusable claims. Each new step must name all dependencies and may depend only on committed step IDs, verified claim IDs, explicit external theorems, or earlier steps in this same delta.
+Encode every external theorem dependency as `external:<exact theorem name>` and state its applicable hypotheses in the step justification. A bare theorem title is not a valid dependency ID.
 Work on the checkpoint's current_goal first. Finish a coherent subgoal rather than emitting a long unfinished transcript.
 CHECKPOINT POLICY: {checkpoint_policy}. When this is "verified_subgoal", completed_subgoal must explicitly name the coherent subgoal completed by this delta unless the full proof is complete or a contradiction with the checkpoint is being reported.
 Set proof_complete=true only when the original immutable problem is fully solved, candidate_final_answer is self-contained, and remaining_subgoals is empty.
@@ -314,7 +315,7 @@ Perform inexpensive gatekeeping before detailed proof checking:
 2. Check completeness: all requested parts are addressed, and a complete attempt really has a final answer.
 3. Validate the dependency graph: no missing dependencies, circular claims, orphan conclusions, or use of proposed/uncertain lemmas as established facts.
 4. Check that the proof follows the assigned plan when a plan is supplied.
-5. Inspect citations structurally: exact theorem statement and applicability conditions must be present; otherwise flag them.
+5. Inspect theorem use structurally: the exact invoked form and applicability conditions must be present. Do not demand a bibliographic source for a standard named theorem, but do flag any missing hypothesis or unverifiable theorem use.
 6. Ensure nontrivial steps are explicitly marked and not hidden behind vague language.
 Do not perform an expensive line-by-line re-proof unless needed to identify a structural failure.
 Set problem_integrity_ok=false for any change to the problem. Classify failure_level as execution, plan, or strategy.
@@ -436,6 +437,7 @@ JSON SCHEMA:
 You are synthesizer {synthesizer_id}. Produce one self-contained final solution to the immutable problem using only supported material below.
 Do not average incompatible proofs. Choose a coherent route, and combine claims only when their assumptions and dependencies match.
 Every decisive non-routine step must be explicit and marked is_key_step=true. Include all cases, boundary conditions, and substitutions.
+Before using any named theorem, state the exact form being invoked and add explicit proof steps for all of its hypotheses, even when a hypothesis follows by a short contradiction from earlier congruences. Use an `external:<exact theorem name>` dependency for the theorem. This explicitness is required so a repairable omission is fixed before final acceptance.
 Do not mention agents, votes, review scores, or the orchestration process in the mathematical solution.
 If the evidence does not support a complete proof, produce the strongest honest partial result with caveats rather than fabricating closure.
 Set problem_hash exactly to the immutable problem's integrity_hash.

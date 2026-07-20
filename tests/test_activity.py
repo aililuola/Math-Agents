@@ -65,13 +65,11 @@ def test_activity_stream_redacts_and_persists(tmp_path: Path) -> None:
     combined = raw_jsonl + timeline_json + timeline_md
     assert leaked not in combined
     assert "[REDACTED]" in combined
-    assert (
-        str(tmp_path) in combined
-    )  # arbitrary metric values are converted to JSON-safe text
     assert "不包含任何模型的原始私有思考链" in timeline_md
 
     payload = json.loads(timeline_json)
     assert [event["status"] for event in payload] == ["running", "running", "completed"]
+    assert payload[1]["metrics"]["path"] == str(tmp_path)
 
 
 def test_compact_console_view_prints_progress_without_ansi(tmp_path: Path) -> None:

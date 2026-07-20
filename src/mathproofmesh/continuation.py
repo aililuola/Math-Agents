@@ -116,10 +116,12 @@ def local_delta_verification(
     for claim in delta.new_claims:
         if claim.claim_id in committed_claim_ids or claim.claim_id in new_claim_ids:
             issue(f"Duplicate claim ID {claim.claim_id!r}.")
-        # A claim may depend only on previously committed claims or claims that
-        # appeared earlier in the same topologically ordered delta. Adding the
-        # current ID after validation rejects self-dependencies and forward cycles.
-        allowed_claim_dependencies = committed_claim_ids | new_claim_ids
+        # Claims may summarize proof steps from the committed checkpoint or this
+        # delta, and may depend on earlier claims in topological order. Adding the
+        # current ID after validation still rejects self-dependencies and cycles.
+        allowed_claim_dependencies = (
+            committed_step_ids | new_step_ids | committed_claim_ids | new_claim_ids
+        )
         for dependency in claim.dependencies:
             if dependency in allowed_claim_dependencies or dependency.startswith(
                 "external:"
@@ -242,6 +244,7 @@ def attempt_from_checkpoint(
     agent_id: str,
     round_index: int,
     previous_attempt: ProofAttempt | None = None,
+    attempt_id: str | None = None,
     proposed_lemmas: list[ClaimCard] | None = None,
     raw_artifact_ref: str | None = None,
     usage: UsageRecord | None = None,
@@ -261,9 +264,7 @@ def attempt_from_checkpoint(
         ]
     )
     return ProofAttempt(
-        attempt_id=previous_attempt.attempt_id
-        if previous_attempt
-        else new_id("attempt"),
+        attempt_id=attempt_id or new_id("attempt"),
         problem_hash=checkpoint.problem_hash,
         strategy_id=strategy.strategy_id,
         agent_id=agent_id,

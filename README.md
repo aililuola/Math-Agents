@@ -1,156 +1,60 @@
 # MathProofMesh
 
-MathProofMesh 是一个面向高难度数学证明、逻辑推演和研究型推理任务的**稀疏通信、验证优先、多 API-key 多智能体系统**。每个配置项代表一个隔离的子智能体，并读取独立的 API key；系统不会把多个 key 混成一个共享“人格”，而是显式维护角色、提供商、并发限制、调用预算、可信度记录和可追溯证据。
+MathProofMesh 是一个面向高难度数学证明、逻辑推演和研究型推理任务的多智能体系统。它强调三件事：**隔离探索、验证优先、过程可恢复**。
 
-它不是一个“让若干模型轮流聊天”的简单工作流。核心设计是：
+当前源码版本为 **0.5.1**。本地目录仍名为 `MathProofMesh-0.5.0`，这只是旧目录名，不影响安装、运行或提交；实际版本以 `pyproject.toml`、`BUILD_INFO.json` 和 `mathproofmesh.__version__` 为准。
 
-1. 将原题冻结为带 SHA-256 完整性哈希的 `ProblemContract`；
-2. 先生成数学机制真正不同的策略，再进行相互隔离的并行探索；
-3. 将长推理压缩为带来源、依赖和适用范围的 `ClaimCard`，但只允许验证通过的引理进入后续事实库；
-4. 采用“结构检查 → 逐步数学检查”的两级验证门；
-5. 只在失败、低置信度或审稿分歧时触发额外审稿人；
-6. 由 Meta-Reviewer 汇总、去重并定位首个错误，而不是让审稿人相互争论；
-7. 将长证明拆成小型 `ProofDelta`，只有通过独立验证的增量才提交为持久化 `ProofCheckpoint`；
-8. 发生断连时先用原 key 重试，仍失败则把同一检查点和子目标交给备用 key，进程重启后也可由 `resume` 继续；
-9. 根据进展、创新性、不确定性、停滞和剩余预算，动态决定拓宽、深挖、复核或综合；
-10. 最终答案必须再经过与生成者隔离的结构审计和逐步审计。
+> `verified` 表示配置的独立审计链已经通过，不等同于 Lean、Coq 或 Isabelle 的内核证明。MathProofMesh 会尽力阻止未经验证的推理进入最终答案，但自然语言模型仍可能共同犯错；高风险结论应继续由领域专家或形式化证明助手复核。
 
-> “verified” 仅表示配置的独立审计链通过，不等同于 Lean/Coq/Isabelle 内核证明。对于可形式化的关键结论，可以启用隔离环境中的 Lean 检查，或扩展新的形式化后端。
+## 核心能力
 
-## 一、系统拓扑
+- **一 key 一 Agent**：每个规划、探索、审查和综合角色读取独立环境变量，拥有独立并发、重试、限流和使用量记录。
+- **稀疏通信**：初始 Explorer 相互隔离；跨路线信息只通过结构化 Claim、验证报告和 Meta-Reviewer 传递。
+- **两级验证**：先检查题意、依赖、定理适用条件和证明结构，再进行逐步数学审计与反例搜索。
+- **已验证检查点**：长证明被拆成 `ProofDelta`；只有通过本地守卫和独立 Reviewer 的增量才会提交为 `ProofCheckpoint`。
+- **断线与跨 key 接力**：同一 key 重试耗尽后，可把最近的已验证检查点交给备用 Agent；进程重启后可用 `resume` 继续。
+- **失败感知调度**：系统根据验证结果、失败层级、停滞程度和剩余预算决定拓宽路线、定向修补、复核或进入综合。
+- **独立终审与自动修订**：最终草稿必须通过结构审计和详细审计；可修复缺口会进入定向修订，修订稿必须重新接受完整独立审计。
+- **可追溯运行产物**：保存结构化结果、调用记录、检查点、工具证据、通信图和 Activity 时间线，不传播模型私有思考链。
 
-```mermaid
-flowchart LR
-    U[Immutable ProblemContract] --> T[Triage / Planner]
-    T --> S[Distinct Strategy Set]
-    S --> E1[Isolated Explorer 1]
-    S --> E2[Isolated Explorer 2]
-    S --> EN[Isolated Explorer N]
+## 快速开始
 
-    E1 --> C1[Claim extraction]
-    E2 --> C2[Claim extraction]
-    EN --> CN[Claim extraction]
-
-    E1 --> SV[Structural verifier]
-    E2 --> SV
-    EN --> SV
-    SV -->|pass only| DV[Detailed verifier]
-    DV -->|failure/disagreement only| XV[Conditional extra verifier]
-
-    C1 --> LM[Verified lemma memory]
-    C2 --> LM
-    CN --> LM
-    DV --> LM
-
-    DV --> MR[Meta-review chair]
-    XV --> MR
-    MR -->|execution gap| DEEP[Targeted deepening]
-    MR -->|strategy gap| WIDE[New strategy]
-    DEEP --> SV
-    WIDE --> SV
-
-    MR --> SYN[Synthesizer]
-    LM --> SYN
-    SYN --> FS[Final structural audit]
-    FS -->|pass| FD[Final detailed audit]
-    FD -->|repairable failure| REV[Targeted revision]
-    REV --> FS
-    FD --> OUT[Audited result]
-```
-
-通信是分层稀疏的：初始 Explorer 不读取其他候选答案；Reviewer 不直接互聊；跨路径知识只通过已验证引理库和 Meta-Reviewer 的聚合反馈传递。`neighbor_k` 限制单个路径最多接收多少个其他来源的引理，`max_context_chars` 对结构化上下文实行软上限，原始回答则作为不可变证据单独保存。
-
-## 二、主要能力
-
-- **一 key 一 Agent**：DeepSeek V4、OpenAI-compatible、Anthropic、Gemini 和 Mock 适配器；每个 Agent 有独立 semaphore、RPM 限制、重试、价格和使用量统计。
-- **提示词逐阶段演化**：从不可变题目契约、策略卡、隔离探索、引理包、结构审计、详细审计、Meta-review，到最终综合和修订；每阶段输出均由 Pydantic JSON Schema 约束。
-- **信息传输不丢关键语义**：假设、结论、依赖、证明步骤、适用范围、反例风险、证据引用和验证状态均为独立字段；不会用一段自由文本摘要替代全部数学结构。
-- **广度—深度自适应**：软预算默认 30% 广度、35% 深度、25% 验证、10% 综合，并保留最终综合与审计所需的调用储备；这些比例是可调的工程初值，不是普适最优定理。
-- **双层验证**：廉价结构门先查题意漂移、缺项、依赖图、循环、引用和关键步骤标记；通过后才进行逐步重证与反例搜索。
-- **确定性工具覆盖模型判断**：安全的 SymPy 化简/等价/因式分解和有界数值反例搜索；若工具找到反例，即使模型输出 PASS，系统也强制改为 FAIL。
-- **防篡改与追溯**：题目、Claim 和原始响应均有内容哈希；每次调用保存 prompt、原始响应、结构化结果、通信边、工具证据、检查点和最终报告。
-- **故障降级**：单个 Agent 超时、返回非法 JSON 或失败时，不直接丢失整个运行；系统保留失败记录并在预算允许时解析修复、换审稿人或使用保守的本地回退。连续失败的 key 会进入短暂冷却，后续调度优先选择健康 Agent。
-- **证明步骤级断点续推**：长证明按子目标分段；每个 `ProofDelta` 先经过本地完整性守卫和独立 Reviewer，只有 PASS 的段落才推进 `latest.json`。半截 SSE、截断 JSON 和未验证推理不会成为恢复点。
-- **跨 API-key 接力**：同一 key 的网络重试耗尽后，系统把原题、策略、最近已提交检查点和当前子目标原样交给备用 Agent；401/403 不在原 key 上重复消耗请求，但允许切换其他 key；不会把原始私有思考链传给备用 key。
-- **进程重启恢复**：`mathproofmesh resume <run_id>` 恢复阶段状态、证明检查点、调用预算、Agent token/费用统计和完整 Activity 时间线。
-- **实时 Activity 时间线**：CLI 按时间线显示题目分析、路线分配、并行探索、验证、综合和终审进展；长调用有低频心跳。这里只显示编排状态与结构化结果摘要，不显示 DeepSeek 原始 `reasoning_content`。
-
-## 三、快速开始
-
-### 1. 安装
-
-```bash
-cd mathproofmesh
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -e ".[dev,server]"
-```
-
-Python 要求为 3.11 及以上。
-
-### 2. 配置独立 API key
-
-复制示例文件：
-
-```bash
-cp config.example.yaml config.yaml
-cp .env.example .env
-```
-
-系统不会自动把 `.env` 写入日志。可用 shell、容器 secret 或部署平台的 secret manager 注入环境变量：
-
-```bash
-export AGENT_PLANNER_KEY="..."
-export AGENT_EXPLORER_1_KEY="..."
-export AGENT_EXPLORER_2_KEY="..."
-export AGENT_VERIFIER_1_KEY="..."
-export AGENT_VERIFIER_2_KEY="..."
-export AGENT_SYNTHESIZER_KEY="..."
-```
-
-`config.example.yaml` 中每个 `agents` 条目就是一个独立子智能体。例如：
-
-```yaml
-agents:
-  - id: explorer-1
-    provider: openai_compatible
-    model: your-reasoning-model
-    base_url: https://api.openai.com/v1
-    api_key_env: AGENT_EXPLORER_1_KEY
-    roles: [explorer, summarizer]
-    specialties: [algebra, number_theory, combinatorics]
-    max_concurrency: 1
-    requests_per_minute: 20
-    temperature: 0.45
-    max_output_tokens: 24000
-```
-
-对于兼容 OpenAI Chat Completions 的第三方服务，只需替换 `base_url`、`model` 和对应 key。不同提供商的 JSON 模式存在差异，因此完整 JSON Schema 始终同时写入提示词，供应商侧 JSON mode 只作为额外约束。
-
-#### DeepSeek V4 Pro：五个 key 对应五个 Agent
-
-仓库已提供 `config.deepseek-v4-pro.yaml`。该配置固定使用：
-
-```yaml
-provider: deepseek
-model: deepseek-v4-pro
-base_url: https://api.deepseek.com
-thinking_enabled: true
-reasoning_effort: max
-streaming: true
-```
-
-五个 key 只通过以下环境变量传入，不得写入 YAML、源码或提交记录：
-
-```bash
-export DEEPSEEK_AGENT_1_KEY="..."
-export DEEPSEEK_AGENT_2_KEY="..."
-export DEEPSEEK_AGENT_3_KEY="..."
-export DEEPSEEK_AGENT_4_KEY="..."
-export DEEPSEEK_AGENT_5_KEY="..."
-```
+### 1. 安装或复用环境
 
 Windows PowerShell：
+
+```powershell
+cd C:\Users\yanxinyu\Desktop\MathProofMesh-0.3.1-DeepSeek-SSE\MathProofMesh-0.5.0
+
+# 第一次运行时创建；已经存在 .venv 就不要重复创建
+python -m venv .venv
+Set-ExecutionPolicy -Scope Process Bypass
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev,server]"
+```
+
+Linux 或 macOS：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev,server]"
+```
+
+Python 要求为 **3.11 及以上**。
+
+不使用外部 API 的确定性演示：
+
+```powershell
+mathproofmesh demo --run-root demo-runs
+mathproofmesh demo --continuation --run-root demo-runs
+```
+
+`demo` 使用 Mock Agent，不需要 API key，也不会产生模型费用。
+
+### 2. 配置 DeepSeek API key
+
+DeepSeek 两个预置配置都会读取以下五个环境变量。系统不会把真实 key 写入 YAML、日志或 Git 提交。
 
 ```powershell
 $env:DEEPSEEK_AGENT_1_KEY="..."
@@ -160,187 +64,215 @@ $env:DEEPSEEK_AGENT_4_KEY="..."
 $env:DEEPSEEK_AGENT_5_KEY="..."
 ```
 
-先验证五个凭据能否看到目标模型；该命令不打印 key：
+上面的 `$env:` 只对当前 PowerShell 窗口有效。需要跨终端保存时，可以写入当前 Windows 用户的环境变量；共享电脑更适合使用专用 secret manager。
 
-```bash
+```powershell
+[Environment]::SetEnvironmentVariable("DEEPSEEK_AGENT_1_KEY", "...", "User")
+```
+
+为其余四个变量执行同样操作，然后重新打开 PowerShell。仓库中的 `.env.example` 只用于说明变量名，当前 CLI **不会自动加载 `.env`**；`.env` 已被 `.gitignore` 排除。
+
+先检查凭据和模型可见性。普通 probe 不发送付费补全，也不会打印 key：
+
+```powershell
 mathproofmesh probe --config config.deepseek-v4-pro.yaml
 ```
 
-增加 `--completion` 会让每个 Agent 再发送一个很小的真实补全请求，因此会产生少量费用：
+需要同时验证真实补全时：
 
-```bash
+```powershell
 mathproofmesh probe --config config.deepseek-v4-pro.yaml --completion
 ```
 
-正式求解：
+`--completion` 会让每个 Agent 发出一次小型请求，因此会产生少量费用。
 
-```bash
-mathproofmesh solve examples/problem.txt \
-  --config config.deepseek-v4-pro.yaml \
-  --run-id hard-problem-001
+### 3. 运行冒烟版或正式版
+
+把题目保存为 UTF-8 文本，例如 `examples/problem.txt`。
+
+冒烟版：
+
+```powershell
+mathproofmesh solve examples/problem.txt `
+  --config config.deepseek-v4-pro.smoke.yaml `
+  --run-id smoke-prime-001
 ```
 
-若 Python 进程、机器或网络中断，重新注入环境变量后从最近的阶段快照和已验证证明检查点恢复：
+正式版：
 
-```bash
-mathproofmesh resume hard-problem-001 \
-  --config config.deepseek-v4-pro.yaml
+```powershell
+mathproofmesh solve examples/problem.txt `
+  --config config.deepseek-v4-pro.yaml `
+  --run-id imo-hard-001
 ```
 
-恢复的是外部化、经过验证的数学状态，而不是 DeepSeek 服务器端的隐藏神经网络状态。当前未完成的 SSE 调用会被丢弃；新请求从最近的 `committed` 检查点继续当前子目标。预算统计是跨进程累计的；若上次状态为 `budget_exhausted`，应在恢复配置中提高 `max_total_calls`，它表示整个 run 的总上限，而不是本次额外调用数。
+恢复中断运行：
 
-首次联调可以使用调用数和输出上限更低的 `config.deepseek-v4-pro.smoke.yaml`。
-
-DeepSeek 适配器在思考模式下不发送 `temperature`，并给每个 Agent 分配不同的 `user_id`。供应商返回的 `reasoning_content` 不会进入其他 Agent 的上下文，也不会保存到运行目录；系统只保留最终结构化内容、思考内容是否存在、字符数和哈希等非敏感元数据。
-
-`streaming: true` 开启的是 **DeepSeek → MathProofMesh 后端** 的 SSE 增量读取。模型生成期间，适配器持续接收 `data:` 事件，并在本地拼接最终 JSON；最后一个 usage-only 事件用于记录完整 token 用量。该开关不会把尚未完成的证明片段传给其他 Agent，也不会输出原始思考链。配置字段默认仍为 `false`，因此其他已有配置的非流式行为不受影响。
-
-这里与 HTTP 服务的 `/solve/stream` 不同：前者是模型供应商响应的流式传输，后者是 **MathProofMesh 后端 → 浏览器/终端前端** 的 Activity 时间线推送。两者可以同时启用。
-
-### 3. 运行无外部 API 的确定性演示
-
-```bash
-mathproofmesh demo --run-root demo-runs
-```
-
-演示题为前 `n` 个奇数之和，模拟六个 Agent 完成策略生成、并行求解、引理提取、验证、Meta-review、综合和最终审计。
-
-### 4. 求解自己的问题
-
-把题目放入 UTF-8 文本文件：
-
-```bash
-mathproofmesh solve examples/problem.txt --config config.yaml
+```powershell
+mathproofmesh resume imo-hard-001 --config config.deepseek-v4-pro.yaml
 ```
 
 输出完整 JSON：
 
-```bash
-mathproofmesh solve examples/problem.txt --config config.yaml --json
+```powershell
+mathproofmesh solve examples/problem.txt --config config.deepseek-v4-pro.yaml --json
 ```
 
-默认会在终端显示类似 Activity 面板的简要时间线：
+控制终端 Activity 时间线：
 
-```text
-Activity · 06:18
-✓ 00:21  题目分析完成
-✓ 00:48  证明路线已生成并分配
-◐ 01:03  并行探索不同证明方向
-✓ 04:11  引理归纳完成
-✓ 04:35  已提交证明检查点 C3
-! 05:10  原 API 重试耗尽，切换备用 Agent
-◐ 05:11  从检查点 C3 继续当前子目标
-◐ 05:40  验证候选证明
-✓ 06:18  综合复核完成
+```powershell
+mathproofmesh solve examples/problem.txt --config config.deepseek-v4-pro.yaml --activity compact
+mathproofmesh solve examples/problem.txt --config config.deepseek-v4-pro.yaml --activity detailed
+mathproofmesh solve examples/problem.txt --config config.deepseek-v4-pro.yaml --activity off
 ```
 
-可控制显示粒度：
+Activity 只展示阶段、Agent 任务和结构化结果摘要，不显示原始 `reasoning_content`。
 
-```bash
-mathproofmesh solve examples/problem.txt --config config.yaml --activity compact
-mathproofmesh solve examples/problem.txt --config config.yaml --activity detailed
-mathproofmesh solve examples/problem.txt --config config.yaml --activity off
+### 4. 拉取或切换分支后继续使用
+
+最省事的方式是只保留一个 Git 仓库，在同一目录切换分支。这样 `.venv` 和用户级 API 环境变量都能复用：
+
+```powershell
+git fetch origin
+git switch <branch-name>
+git pull --ff-only
+.\.venv\Scripts\Activate.ps1
 ```
 
-`compact` 适合日常运行；`detailed` 还会显示结构化输出修复和长调用心跳。时间线只呈现阶段状态、Agent 当前任务和经 Schema 校验后的结果摘要，不输出模型原始私有思考链。`--json` 默认关闭终端 Activity，以保持 stdout 为纯 JSON；显式加 `--activity compact` 时，时间线写入 stderr。
+源码采用 editable install，普通源码更新不需要重新安装。只有 `pyproject.toml` 中的依赖、入口点或构建配置发生变化时，再执行：
 
-### 5. HTTP 服务
-
-```bash
-export MATHPROOFMESH_SERVER_TOKEN="replace-with-a-long-random-token"
-mathproofmesh serve --config config.yaml --host 127.0.0.1 --port 8000
+```powershell
+python -m pip install -e ".[dev,server]"
 ```
 
-请求：
+## DeepSeek 配置档位
 
-```bash
-curl -X POST http://127.0.0.1:8000/solve \
-  -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $MATHPROOFMESH_SERVER_TOKEN" \
-  -d '{"problem":"Prove ...", "run_id":"problem-001"}'
+| 配置 | 冒烟版 | 正式版 |
+| --- | ---: | ---: |
+| 文件 | `config.deepseek-v4-pro.smoke.yaml` | `config.deepseek-v4-pro.yaml` |
+| Agent 数 | 5 | 5 |
+| 单个 Agent 请求输出上限 | 50,000 tokens | 100,000 tokens |
+| 单个证明分段输出上限 | 50,000 tokens | 100,000 tokens |
+| 每段最多新增结构化步骤 | 8 | 12 |
+| 每条路线最多分段数 | 4 | 12 |
+| 初始路线 / 最大路线 | 2 / 3 | 3 / 6 |
+| 最大调度轮数 | 2 | 4 |
+| 整个 run 最大调用数 | 28 | 42 |
+| 最终修订上限 | 1 | 3 |
+| 整个 run token 预算 | 300,000 | 2,000,000 |
+| 配置费用上限 | USD 0.75 | USD 5.00 |
+
+这些值是 MathProofMesh 向提供商发出的请求和本地预算上限；模型或 API 服务自身如果有更低硬限制，仍以提供商返回为准。
+
+### “最多 12 步”是什么意思
+
+正式版的 `continuation.max_new_steps_per_call: 12` 表示：**一次分段续推最多提交 12 个新的、结构化的证明步骤**。它不是整道题只能有 12 步，也不是系统最多调用模型 12 次。
+
+每个分段形成一个 `ProofDelta`。其中的步骤可以依赖：
+
+- 已提交检查点中的步骤；
+- 已验证 Claim；
+- 明确写出准确形式和适用条件的外部定理；
+- 当前同一 Delta 中排在它前面的步骤。
+
+Delta 通过独立验证后才推进检查点。正式版每条路线最多 12 个分段，因此长证明可以分批继续；调度器仍受总调用数、总 token、费用和路线预算约束。冒烟版对应每段最多 8 步、每条路线最多 4 个分段。
+
+## 系统流程
+
+```mermaid
+flowchart LR
+    P[Immutable ProblemContract] --> T[Triage and planning]
+    T --> E1[Isolated explorer A]
+    T --> E2[Isolated explorer B]
+    T --> EN[Isolated explorer N]
+    E1 --> D[ProofDelta]
+    E2 --> D
+    EN --> D
+    D --> G[Local guards]
+    G --> V1[Structural verifier]
+    V1 -->|pass| V2[Detailed verifier]
+    V2 -->|pass| C[Verified checkpoint]
+    C --> M[Verified lemma memory]
+    V2 --> R[Meta-review and scheduler]
+    R -->|widen or deepen| E1
+    R --> S[Synthesizer with failover]
+    M --> S
+    S --> F1[Final structural audit]
+    F1 -->|pass| F2[Final detailed audit]
+    F2 -->|repairable gap| X[Targeted revision]
+    X --> F1
+    F2 --> O[Audited result]
 ```
 
-实时接收 Activity 事件和最终结果：
+初始探索彼此隔离。Reviewer 不直接互相对话；Meta-Reviewer 负责聚合分歧和定位首个错误。原始模型回答作为证据保存，但不会默认广播给其他 Agent。
 
-```bash
-curl -N -X POST http://127.0.0.1:8000/solve/stream \
-  -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $MATHPROOFMESH_SERVER_TOKEN" \
-  -d '{"problem":"Prove ...", "run_id":"problem-001"}'
-```
+## 0.5.1 新增与修复
 
-该接口使用 Server-Sent Events，依次发送 `connected`、多个 `activity` 和最终 `result` 事件，适合接入浏览器中的可折叠时间线。
+### 调度器正确性
 
-恢复既支持普通 JSON，也支持 Activity SSE：
+- 路线覆盖率改为 `current_paths / max_paths`，不会在尚有扩展容量时误判“已经覆盖全部路线”。
+- 结构审查和聚合审查都进入路线状态，结构失败不再丢失为 `None`。
+- 单纯增加证明步数不再被视为可靠进展；结构失败、高置信度 FAIL、计划失败和策略失败会折扣或限制进展分数。
+- 执行级、计划级、策略级和未知失败使用不同修补上限，重复失败路线进入冷却。
+- 当所有已探索路线都失败、仍有路线容量且预算允许时，调度器强制保留一次 `widen`，避免反复深挖同一错误机制。
+- 动作成本按实际新增路线、分段续推、Delta 审查、Claim 提取、候选复核和 Meta-review 动态估算。
+- 最终预算会预留“综合 + 终审”和配置数量的“修订 + 完整复审”周期。
+- `budget_decision_round_*.json` 记录候选动作的得分、排序、预计成本、未选原因和预算阻断原因。
 
-```bash
-curl -X POST http://127.0.0.1:8000/resume \
-  -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $MATHPROOFMESH_SERVER_TOKEN" \
-  -d '{"run_id":"problem-001"}'
+### 断点续推与故障切换
 
-curl -N -X POST http://127.0.0.1:8000/resume/stream \
-  -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $MATHPROOFMESH_SERVER_TOKEN" \
-  -d '{"run_id":"problem-001"}'
-```
+- 同一 Delta 内允许后续步骤依赖前面刚产生的步骤，同时继续拒绝前向依赖、缺失依赖和自依赖。
+- 只有通过本地完整性守卫和独立 Reviewer 的 Delta 才提交为不可变检查点。
+- 网络错误先在原 key 上按策略重试；401/403 跳过无意义的同 key 重试，再尝试备用 key。
+- 备用 Agent 接收原题、策略、最近已验证检查点和当前子目标，不接收半截 SSE 或私有思考链。
+- 不只探索和审查阶段支持接力；主 Synthesizer 连接失败时也会尝试合格的备用 Agent。
+- 最终结构审计会排除实际完成综合的 Agent，确保故障切换后仍保持作者与审稿人隔离。
 
-不设置 `MATHPROOFMESH_SERVER_TOKEN` 时鉴权关闭，适合仅绑定本机的开发环境；公开部署应设置 token，并在反向代理层增加 TLS、请求大小限制和访问控制。
+### 终审策略调整
 
-## 四、运行产物
+0.5.1 调整的是**形式要求**，不是数学正确性门槛：
 
-每次运行产生一个隔离目录：
+| 情况 | 系统处理 | 能否直接得到 `verified` |
+| --- | --- | --- |
+| 标准公认定理没有书目链接，但准确形式和全部假设已明确验证 | 不再仅因缺少书目定位判 FAIL，可作为说明或警告 | 可以继续审计 |
+| 定理名称存在，但调用的准确形式没有写出 | 阻断通过并要求修订 | 不可以 |
+| 定理的某个适用条件没有显式推出 | 视为可修复执行缺口，进入定向修订 | 修订并重新审计前不可以 |
+| 依赖缺失、循环依赖、题意被改变 | 结构门直接阻断 | 不可以 |
+| SymPy 或数值工具找到反例 | 即使模型自报 PASS，也强制改为 FAIL | 不可以 |
+| 只是措辞、书目格式或非数学性的展示问题 | 可记录为 warning | warning 本身不能替代数学证据 |
 
-```text
-runs/<run_id>/
-├── events.jsonl                 # 完整内部审计事件流
-├── activity.jsonl               # 可面向用户实时展示的简要时间线
-├── prompts/                     # 每个阶段实际发送的提示词
-├── raw/                         # 内容寻址的原始供应商响应
-├── structured/                  # Pydantic 验证后的策略、证明、Claim、报告
-├── tools/                       # 确定性工具请求与结果
-├── checkpoints/
-│   ├── *_latest.json            # 阶段级快照
-│   ├── runtime_ledger.json      # 调用、token、费用和 Agent 统计
-│   └── proof/<path_id>/
-│       ├── 0000_*.json          # genesis 检查点
-│       ├── 0001_*.json          # 逐段验证后的不可变检查点
-│       └── latest.json          # 该路径的原子恢复指针
-├── deltas/                      # 候选和被拒绝的 ProofDelta
-└── reports/
-    ├── run_report.md
-    ├── activity_timeline.json
-    ├── activity_timeline.md
-    ├── communication_graph.json
-    └── communication_graph.mmd
-```
+最终审计未通过时，系统只对执行级或计划级缺口进行有限次定向修订。每次修订后都会重新运行独立结构审计和详细审计；不会沿用上一轮 PASS，也不会因为“已经修过一次”自动放行。策略级矛盾不会靠润色同一证明掩盖，而是保持 `unverified`。
 
-原始响应不会作为默认跨 Agent 上下文广播。其他 Agent 接收的是结构化、经过筛选的消息包，并可通过 `artifact://...` 引用回溯原始证据。
+一句话概括：**可以不重证费马小定理，也可以不提供书目页码，但必须准确说明使用了什么形式，并逐项验证它的适用条件。**
 
-## 五、关键配置
+## 运行状态
 
-### 调用预算
+- `verified`：最终结构审计和详细审计通过，聚合置信度达到配置阈值。
+- `unverified`：得到答案或部分证明，但独立审计尚未达到通过条件。
+- `budget_exhausted`：本次运行预算耗尽；中间结果、检查点和报告仍会保留。
+- `failed`：发生未恢复的基础设施异常。
+
+界面中的 `AgentCallFailure` 表示某个模型调用失败，不表示数学命题已经被反驳。系统会按配置尝试重试或备用 Agent；若仍无法完成独立审计，结果保持 `unverified` 或 `failed`，不会伪装成 `verified`。
+
+## 关键配置
+
+### 失败感知调度
 
 ```yaml
-budget:
-  max_total_calls: 48
-  max_rounds: 4
-  initial_paths: 4
-  max_paths: 8
-  candidates_to_verify: 3
-  base_verifier_replicas: 1
-  high_risk_verifier_replicas: 2
-  breadth_share: 0.30
-  depth_share: 0.35
-  verification_share: 0.25
-  synthesis_share: 0.10
+scheduler:
+  max_actions_per_round: 2
+  widen_paths_per_action: 2
+  force_widen_when_all_failed: true
+  max_execution_repairs_per_path: 1
+  max_plan_repairs_per_path: 1
+  max_unknown_failure_repairs_per_path: 1
+  allow_strategy_failure_repair: false
+  failed_path_cooldown_rounds: 1
+  reserve_revision_cycles: 1
+  include_post_action_verification_in_cost: true
+  include_meta_review_in_cost: true
+  diagnostics_enabled: true
 ```
-
-- `initial_paths` 决定初始并行广度；
-- `max_paths` 限制策略膨胀；
-- `candidates_to_verify` 避免对所有低质量草稿做昂贵详细审计；
-- 额外 Reviewer 仅由高风险、失败、低置信度或分歧触发；
-- 最少保留约三次调用用于综合、结构终审和详细终审。
 
 ### 稀疏通信
 
@@ -349,33 +281,12 @@ topology:
   neighbor_k: 2
   isolate_initial_exploration: true
   conditional_cross_review: true
-  disagreement_threshold: 0.35
-  max_context_chars: 90000
-  max_verified_claims_per_context: 24
+  disagreement_threshold: 0.30
+  max_context_chars: 180000
+  max_verified_claims_per_context: 30
 ```
 
-`neighbor_k=2` 表示一个探索路径从共享引理库取信息时，最多选取两个最相关来源路径。它不是传统图上的固定近邻，而是按当前策略和反馈动态检索的语义近邻。
-
-### 断点续推与 API-key 接力
-
-```yaml
-continuation:
-  enabled: true
-  checkpoint_policy: verified_subgoal
-  max_new_steps_per_call: 3
-  max_output_tokens_per_segment: 12000
-  segments_per_explore_call: 1
-  max_segments_per_path: 12
-  verify_each_delta: true
-  delta_verifier_replicas: 1
-  checkpoint_pass_threshold: 0.80
-  resume_on_disconnect: true
-  allow_cross_agent_failover: true
-  max_failover_agents: 2
-  process_resume_enabled: true
-```
-
-一次逻辑任务会先执行 1 次初始请求，并在同一 API key 上最多再执行 `runtime.request_retries` 次传输重试；全部失败后才选择合格的备用 Agent。备用 Agent 收到的是同一个最新已验证检查点，而不是半截输出。证明作者被显式排除在该 Delta 的独立检查点审查与审查故障转移之外。`checkpoint_policy=verified_subgoal` 要求每次持久化推进至少完成一个明确子目标；需要更细粒度时可改为 `verified_delta`。
+`neighbor_k` 限制一条路线最多读取多少个其他来源的已验证 Claim。它是按当前策略和反馈动态检索的语义近邻，不是固定的聊天群组。
 
 ### 验证
 
@@ -383,68 +294,107 @@ continuation:
 verification:
   structural_first: true
   detailed_only_after_structural_pass: true
+  verify_problem_integrity: true
   require_first_error_step: true
+  require_key_step_tagging: true
   enable_sympy_tools: true
   enable_numeric_counterexamples: true
   enable_lean: false
 ```
 
-Lean 可能执行元程序，只有在可信、隔离的容器中才应启用。默认系统没有任意 Python 执行工具。
+Lean 可能执行元程序，只应在可信、隔离的容器中启用。默认工具不允许任意 Python 执行。
 
-## 六、验证语义
+## 运行产物
 
-最终状态包括：
-
-- `verified`：最终结构审计和详细审计均通过，且聚合置信度达到阈值；
-- `unverified`：得到答案或部分证明，但独立审计没有达到通过条件；
-- `budget_exhausted`：预算耗尽，所有中间产物仍被保留；
-- `failed`：运行基础设施发生未恢复异常。
-
-模型自报的 `confidence` 只用于调度，不能把 Claim 升级为已验证事实。Claim 只有在相应验证报告通过、依赖已验证且不存在依赖环或缺失依赖时，才能被后续 Agent 复用为已验证引理。
-
-## 七、测试
-
-```bash
-PYTHONPATH=src pytest -q
+```text
+runs/<run_id>/
+├── events.jsonl
+├── activity.jsonl
+├── prompts/
+├── raw/
+├── structured/
+├── tools/
+├── deltas/
+├── checkpoints/
+│   ├── *_latest.json
+│   ├── runtime_ledger.json
+│   └── proof/<path_id>/
+│       ├── 0000_*.json
+│       ├── 0001_*.json
+│       └── latest.json
+└── reports/
+    ├── run_report.md
+    ├── activity_timeline.json
+    ├── activity_timeline.md
+    ├── communication_graph.json
+    └── communication_graph.mmd
 ```
 
-当前版本本地测试为 **41 passed**，并通过 Ruff、`ruff format --check` 与 `compileall`。测试覆盖：
+`raw/` 中保存的是经过适配器脱敏处理的供应商响应证据；DeepSeek 私有 `reasoning_content` 不会持久化。`latest.json` 只指向已经提交的验证检查点，截断输出和被拒绝 Delta 不会成为恢复起点。
 
-- 题目和 Claim 哈希完整性；
-- 结构化 JSON 的平衡括号提取；
-- 非法 Python 表达式拒绝；
-- SymPy 等价检查与数值反例；
-- 缺失依赖不被静默忽略；
-- 已验证依赖闭包；
-- 策略多样性和稀疏 Claim 路由；
-- 题意哈希守卫；
-- 确定性反例覆盖模型 PASS；
-- Agent 选择可复现性；
-- DeepSeek V4 Pro 的思考开关、`reasoning_effort=max`、JSON mode、`user_id` 和模型列表请求；
-- DeepSeek SSE 的 `stream=true`、`stream_options.include_usage`、keep-alive、分块聚合、截断检测与非流式兼容；
-- DeepSeek 私有 `reasoning_content` 的增量哈希与持久化剥离；
-- Activity 事件脱敏、跨进程连续编号、追加式持久化和最终时间线导出；
-- 证明检查点哈希、单调父子链和原子 `latest.json`；
-- `ProofDelta` 依赖守卫、独立检查点验证和恢复后的累计 Usage；
-- 同 key 重试耗尽后的跨 key/Agent 接力、401/403 的换 key 行为和失败 key 冷却；
-- Reviewer 故障转移时对证明作者的强制排除；
-- 自依赖 Claim、旧父检查点和不连续段号的拒绝；
-- 内容寻址的不可变 prompt 归档；
-- `solve` 后的无重复调用恢复、预算中断后的逐段恢复，以及尚无阶段快照时从 `ProblemContract` 恢复；
-- 比阶段快照更新的持久化 LemmaMemory 恢复；
-- 完整 Mock 端到端运行及审计产物。
+## HTTP 服务
 
-## 八、文档
+```powershell
+$env:MATHPROOFMESH_SERVER_TOKEN="replace-with-a-long-random-token"
+mathproofmesh serve --config config.deepseek-v4-pro.yaml --host 127.0.0.1 --port 8000
+```
 
-- [研究与代码实践综述](docs/RESEARCH_NOTES.md)
+普通求解：
+
+```bash
+curl -X POST http://127.0.0.1:8000/solve \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MATHPROOFMESH_SERVER_TOKEN" \
+  -d '{"problem":"Prove ...", "run_id":"problem-001"}'
+```
+
+Activity SSE：
+
+```bash
+curl -N -X POST http://127.0.0.1:8000/solve/stream \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MATHPROOFMESH_SERVER_TOKEN" \
+  -d '{"problem":"Prove ...", "run_id":"problem-001"}'
+```
+
+还提供 `/resume` 和 `/resume/stream`。公开部署必须配置 token，并在反向代理层增加 TLS、请求大小限制、速率限制和访问控制。
+
+## 验证与测试
+
+```powershell
+python -m pytest -q
+python -m ruff check .
+python -m ruff format --check .
+python -m compileall -q src
+```
+
+当前源码基线：**60 passed, 1 skipped**；Ruff、格式检查和 `compileall` 均通过。新增回归测试包括：
+
+- 全部旧路线失败时强制拓宽；
+- 动态动作成本和最终修订预算储备；
+- 冒烟版 50k 与正式版 100k 输出配置；
+- 同 Delta 内的有序依赖与越界步骤拒绝；
+- Synthesizer 网络失败后的跨 key 接力；
+- 缺失定理适用条件触发修订，并在修订后重新执行完整独立终审；
+- 标准定理不因缺少书目定位被误判，同时继续要求准确形式和全部假设。
+
+真实 DeepSeek 调用不属于自动化测试，运行前请先执行 `mathproofmesh probe`。
+
+## 文档
+
 - [系统架构、通信拓扑与预算公式](docs/ARCHITECTURE.md)
+- [DeepSeek V4 Pro 五 Agent 配置](docs/DEEPSEEK_V4_PRO.md)
+- [证明检查点、断线接力与进程恢复](docs/CHECKPOINT_RESUME.md)
+- [实时 Activity 时间线与 SSE 接入](docs/ACTIVITY_TIMELINE.md)
 - [逐阶段提示词演化与消息协议](docs/PROMPT_PROTOCOL.md)
 - [部署、扩展与真实 API 联调](docs/DEPLOYMENT.md)
-- [DeepSeek V4 Pro 五 Agent 配置](docs/DEEPSEEK_V4_PRO.md)
-- [实时 Activity 时间线与 SSE 接入](docs/ACTIVITY_TIMELINE.md)
-- [证明检查点、断线接力与进程恢复](docs/CHECKPOINT_RESUME.md)
 - [可复现验证记录](docs/VALIDATION.md)
+- [研究与代码实践综述](docs/RESEARCH_NOTES.md)
 
-## 九、边界与诚实说明
+## 安全边界
 
-本仓库已经通过 Mock 供应商完成端到端自动化测试，并通过 HTTP Mock 精确检查 DeepSeek V4 请求体和响应脱敏逻辑。当前构建环境没有使用用户的真实 DeepSeek 凭据进行付费请求；应在可联网的本机先运行 `mathproofmesh probe`。证明检查点恢复不等于恢复供应商服务器上的隐藏解码状态：它是从最近已验证的外部数学状态启动一个新请求。数学自然语言审稿器也可能共同犯错；高风险结果仍应由领域专家或形式化证明助手复核。随机数值测试找不到反例不构成证明，而找到反例可以否定相应的全称命题或暴露形式化映射错误。
+- 不要把真实 API key 写入 YAML、源码、Issue、截图或 Git 历史。
+- `.env`、`.venv`、`runs/`、构建产物和缓存均已忽略，不会进入正常提交。
+- 随机测试找不到反例不构成证明；找到反例可以否定对应全称命题或暴露形式化映射错误。
+- 检查点恢复的是外部化、已验证的数学状态，不是提供商服务器上的隐藏解码状态。
+- 模型置信度只是调度元数据，不能把未经审计的 Claim 升级为已验证事实。

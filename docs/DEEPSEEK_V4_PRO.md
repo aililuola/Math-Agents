@@ -106,7 +106,7 @@ $env:DEEPSEEK_AGENT_4_KEY="..."
 $env:DEEPSEEK_AGENT_5_KEY="..."
 ```
 
-生产部署应使用容器 Secret、系统密钥环或云平台 Secret Manager，而不是明文 `.env`。若必须使用 `.env`，应确认它被 `.gitignore` 排除并限制文件权限。
+生产部署应使用容器 Secret、系统密钥环或云平台 Secret Manager，而不是明文 `.env`。当前 CLI 不自动加载 `.env`；若由外部启动脚本加载该文件，应确认它被 `.gitignore` 排除并限制文件权限。
 
 ## 4. Agent 隔离
 
@@ -125,7 +125,7 @@ $env:DEEPSEEK_AGENT_5_KEY="..."
 
 ## 5. 实时运行时间线
 
-DeepSeek 处于长推理模式时，单次请求可能持续较长时间。v0.5.0 在 CLI 中默认开启 `compact` Activity 面板，按时间顺序显示题目分析、路线生成、并行探索、Claim 提取、两级验证、Meta-review、综合和终审；每个长调用还会按 `activity_heartbeat_seconds` 发出低频“仍在处理”状态。
+DeepSeek 处于长推理模式时，单次请求可能持续较长时间。v0.5.1 在 CLI 中默认开启 `compact` Activity 面板，按时间顺序显示题目分析、路线生成、并行探索、Claim 提取、两级验证、Meta-review、综合和终审；每个长调用还会按 `activity_heartbeat_seconds` 发出低频“仍在处理”状态。
 
 ```bash
 mathproofmesh solve problem.txt \
@@ -169,7 +169,7 @@ continuation:
   process_resume_enabled: true
 ```
 
-Explorer 每次只生成少量新步骤。只有本地完整性守卫和独立 Delta Reviewer 都通过后，系统才推进该路径的 `latest.json`。如果 SSE 中断、没有 `[DONE]`、缺少请求的 usage 摘要或网络超时，当前半截结果被丢弃，同一 key 先按 `request_retries` 重试；仍失败才切换备用 key。401/403 不在原 key 上重复请求，但可以由其他 key 接力；连续失败的 Agent 会进入短暂冷却。当前 Delta 的作者始终从独立 checkpoint Reviewer 及其备用候选中排除。
+Explorer 每次只生成有限数量的新步骤。只有本地完整性守卫和独立 Delta Reviewer 都通过后，系统才推进该路径的 `latest.json`。如果 SSE 中断、没有 `[DONE]`、缺少请求的 usage 摘要或网络超时，当前半截结果被丢弃，同一 key 先按 `request_retries` 重试；仍失败才切换备用 key。401/403 不在原 key 上重复请求，但可以由其他 key 接力；连续失败的 Agent 会进入短暂冷却。当前 Delta 的作者始终从独立 checkpoint Reviewer 及其备用候选中排除。Synthesizer 的可重试连接错误也使用同一接力机制；最终审计排除实际完成综合的 Agent。
 
 恢复命令：
 
@@ -204,7 +204,19 @@ mathproofmesh solve examples/problem.txt \
   --run-id deepseek-smoke
 ```
 
-冒烟配置仍使用 V4 Pro 和 `max`，但限制为两条探索路径、单轮自适应调度、较小输出上限以及较低总费用上限。它用于检查：
+冒烟配置仍使用 V4 Pro 和 `max`，但限制为两条初始探索路径、至多一条拓宽路径、单轮自适应调度以及较低总费用上限。两个配置的关键差异为：
+
+| 配置 | 冒烟版 | 正式版 |
+|---|---:|---:|
+| 单个 Agent 与单个证明分段请求输出上限 | 50,000 tokens | 100,000 tokens |
+| 每段最多新增结构化步骤 | 8 | 12 |
+| 每条路线最多分段数 | 4 | 12 |
+| 最大调用数 | 28 | 42 |
+| 最终修订上限 | 1 | 3 |
+
+“8 步/12 步”是一次 `ProofDelta` 最多新增的结构化证明步骤，不是整道题的总步数或模型调用数。提供商若实施更低的模型输出硬限制，仍以 API 返回为准。
+
+冒烟版用于检查：
 
 - 五个 key 是否均可读取；
 - JSON Schema 是否稳定遵循；
@@ -236,6 +248,9 @@ mathproofmesh resume olympiad-problem-001 \
 4 adaptive rounds
 3 initial paths
 6 maximum paths
+100,000 max output tokens per Agent and proof segment request
+12 new structured proof steps per segment
+12 maximum segments per path
 2,000,000 total tokens
 USD 5 conservative estimated cost cap
 ```

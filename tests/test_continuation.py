@@ -24,7 +24,7 @@ from mathproofmesh.continuation import (
 from mathproofmesh.llm.pool import AgentPool
 from mathproofmesh.mock_demo import build_demo_config, demo_responder, demo_responders
 from mathproofmesh.orchestrator import ProofMeshOrchestrator
-from mathproofmesh.prompts import PromptBundle
+from mathproofmesh.prompts import PromptBundle, PromptFactory
 from mathproofmesh.schemas import (
     CheckpointStatus,
     ClaimCard,
@@ -55,6 +55,41 @@ def _problem_and_strategy() -> tuple[ProblemContract, StrategyCard]:
         estimated_success=0.8,
     )
     return problem, strategy
+
+
+def test_continuation_prompt_requires_external_dependency_prefix() -> None:
+    problem, strategy = _problem_and_strategy()
+    checkpoint = make_genesis_checkpoint(problem, strategy)
+
+    bundle = PromptFactory().continue_proof(
+        problem,
+        strategy.model_dump(mode="json"),
+        checkpoint,
+        agent_id="explorer-a",
+        round_index=0,
+        segment_index=1,
+        verified_claims=[],
+    )
+
+    assert "external:<exact theorem name>" in bundle.user
+    assert "bare theorem title is not a valid dependency ID" in bundle.user
+
+
+def test_verifier_does_not_require_bibliography_for_standard_theorems() -> None:
+    problem, _strategy = _problem_and_strategy()
+
+    bundle = PromptFactory().structural_verify(
+        problem,
+        {"problem_hash": problem.integrity_hash, "status": "complete"},
+        verifier_id="verifier-a",
+    )
+
+    assert (
+        "Do not demand a bibliographic source for a standard named theorem"
+        in bundle.user
+    )
+    assert "flag any missing hypothesis" in bundle.user
+    assert "every hypothesis is explicitly verified" in bundle.system
 
 
 def test_checkpoint_commit_round_trip_and_hash(tmp_path: Path) -> None:
@@ -286,6 +321,50 @@ async def test_continuation_end_to_end_and_process_resume(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_oversized_delta_is_rejected_without_validation_crash(
+    tmp_path: Path,
+) -> None:
+    config = build_demo_config(str(tmp_path / "runs"))
+    config.continuation.enabled = True
+    config.continuation.max_new_steps_per_call = 1
+    config.continuation.segments_per_explore_call = 1
+    config.continuation.verify_each_delta = False
+    config.budget.initial_paths = 1
+    config.budget.max_paths = 1
+    config.budget.strategies_to_generate = 1
+    config.budget.candidates_to_verify = 1
+    config.budget.max_rounds = 1
+    config.budget.max_total_calls = 24
+
+    result = await ProofMeshOrchestrator(
+        config,
+        mock_responders=demo_responders(config),
+    ).solve(
+        "Prove that for every positive integer n, 1+3+...+(2n-1)=n^2.",
+        run_id="oversized-delta-rejection",
+    )
+
+    assert "ValidationError" not in result.summary
+    root = Path(result.run_directory)
+    local_reports = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (root / "structured").glob("checkpoint_local_verification_*.json")
+    ]
+    assert local_reports
+    assert any(
+        report["verdict"] == "fail"
+        and any(
+            "exceeding the configured limit" in issue["description"]
+            for issue in report["issues"]
+        )
+        for report in local_reports
+    )
+    assert "proof_checkpoint_rejected" in (root / "events.jsonl").read_text(
+        encoding="utf-8"
+    )
+
+
+@pytest.mark.asyncio
 async def test_resume_after_budget_interruption_uses_committed_checkpoint(
     tmp_path: Path,
 ) -> None:
@@ -415,6 +494,135 @@ async def test_orchestrator_failover_commits_backup_agent_checkpoint(
 
 
 @pytest.mark.asyncio
+async def test_synthesis_switches_to_backup_after_connect_failure(
+    tmp_path: Path,
+) -> None:
+    config = build_demo_config(str(tmp_path / "runs"))
+    config.continuation.allow_cross_agent_failover = True
+    config.continuation.max_failover_agents = 1
+    config.budget.initial_paths = 2
+    config.budget.max_paths = 2
+    config.budget.strategies_to_generate = 2
+    config.budget.max_rounds = 1
+
+    def disconnected_synthesizer(schema_name, messages, schema):
+        if schema_name == "FinalProof":
+            raise httpx.NetworkError("simulated synthesis disconnect")
+        return demo_responder(schema_name, messages, schema)
+
+    responders = demo_responders(config)
+    responders["synthesizer"] = disconnected_synthesizer
+    result = await ProofMeshOrchestrator(config, mock_responders=responders).solve(
+        "Prove that for every positive integer n, 1+3+...+(2n-1)=n^2.",
+        run_id="synthesis-failover",
+    )
+
+    assert result.status.value == "verified"
+    events = [
+        json.loads(line)
+        for line in Path(result.run_directory, "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    assert any(
+        event["event_type"] == "agent_failover_started"
+        and event["payload"]["role"] == "synthesizer"
+        for event in events
+    )
+    assert any(
+        event["event_type"] == "agent_failover_succeeded"
+        and event["payload"]["role"] == "synthesizer"
+        for event in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_repairable_final_gap_is_revised_and_fully_reaudited(
+    tmp_path: Path,
+) -> None:
+    config = build_demo_config(str(tmp_path / "runs"))
+    config.budget.initial_paths = 2
+    config.budget.max_paths = 2
+    config.budget.strategies_to_generate = 2
+    config.budget.candidates_to_verify = 2
+    config.budget.max_rounds = 1
+    config.budget.max_revisions = 1
+    config.budget.max_total_calls = 40
+    config.scheduler.reserve_revision_cycles = 1
+    repair_marker = "explicit_applicability_check"
+
+    def repairable_responder(schema_name, messages, schema):
+        text = "\n".join(message["content"] for message in messages)
+        payload = demo_responder(schema_name, messages, schema)
+        if schema_name == "FinalProof" and "[STAGE:final_revision]" in text:
+            payload["proof_steps"].insert(
+                0,
+                {
+                    "step_id": "f0",
+                    "statement": repair_marker,
+                    "justification": (
+                        "The omitted theorem hypothesis is derived explicitly from "
+                        "the preceding identities before the theorem is invoked."
+                    ),
+                    "dependencies": [],
+                    "calculations": [],
+                    "citations": [],
+                    "is_key_step": True,
+                    "confidence": 0.99,
+                },
+            )
+        is_final_structural = (
+            schema_name == "VerificationReport"
+            and "[STAGE:structural_verification]" in text
+            and '"answer"' in text
+        )
+        if is_final_structural and repair_marker not in text:
+            payload.update(
+                {
+                    "verdict": "fail",
+                    "first_error_step": "f1",
+                    "issues": [
+                        {
+                            "phase": "theorem_applicability",
+                            "severity": "error",
+                            "step_id": "f1",
+                            "description": (
+                                "A required theorem hypothesis is true but not yet "
+                                "derived explicitly in the submitted proof."
+                            ),
+                            "repair_hint": (
+                                "Add the short derivation, then run a fresh independent audit."
+                            ),
+                        }
+                    ],
+                    "failure_level": "execution",
+                    "confidence": 0.99,
+                    "concise_feedback": "Repair the explicit applicability check.",
+                }
+            )
+        return payload
+
+    responders = {
+        agent.id: repairable_responder for agent in config.agents if agent.enabled
+    }
+    result = await ProofMeshOrchestrator(config, mock_responders=responders).solve(
+        "Prove that for every positive integer n, 1+3+...+(2n-1)=n^2.",
+        run_id="repairable-final-gap",
+    )
+
+    assert result.status.value == "verified"
+    assert result.final_verification is not None
+    assert result.final_verification.verdict == VerificationVerdict.PASS
+    assert result.final_proof is not None
+    assert any(
+        step.statement == repair_marker for step in result.final_proof.proof_steps
+    )
+    activity = Path(result.run_directory, "activity.jsonl").read_text(encoding="utf-8")
+    assert "final_revision_completed" in activity
+
+
+@pytest.mark.asyncio
 async def test_resume_can_restart_before_first_stage_checkpoint(tmp_path: Path) -> None:
     config = build_demo_config(str(tmp_path / "runs"))
     config.continuation = ContinuationConfig(
@@ -539,6 +747,41 @@ def test_delta_rejects_self_dependent_claim() -> None:
 
     assert report.verdict == VerificationVerdict.FAIL
     assert any("claim_self" in issue.description for issue in report.issues)
+
+
+def test_delta_allows_claim_supported_by_new_steps() -> None:
+    problem, strategy = _problem_and_strategy()
+    checkpoint = make_genesis_checkpoint(problem, strategy)
+    supporting_step = ProofStep(
+        step_id="s1",
+        statement="The base case holds.",
+        justification="Direct substitution.",
+    )
+    supported_claim = ClaimCard(
+        claim_id="claim_base_case",
+        statement="The base case is established.",
+        conclusion="P(1) holds.",
+        dependencies=[supporting_step.step_id],
+    )
+    delta = ProofDelta(
+        problem_hash=problem.integrity_hash,
+        path_id=checkpoint.path_id,
+        strategy_id=strategy.strategy_id,
+        parent_checkpoint_id=checkpoint.checkpoint_id,
+        agent_id="explorer-a",
+        round_index=0,
+        segment_index=1,
+        completed_subgoal="Base case",
+        new_steps=[supporting_step],
+        new_claims=[supported_claim],
+        remaining_subgoals=["Inductive step"],
+        current_goal="Inductive step",
+    )
+
+    report = local_delta_verification(problem, checkpoint, delta)
+
+    assert report.verdict == VerificationVerdict.PASS
+    assert report.issues == []
 
 
 @pytest.mark.asyncio

@@ -29,8 +29,8 @@ compileall(src + tests)
 | `python -m compileall -q src tests` | PASS |
 | `ruff check .` | PASS |
 | `ruff format --check .` | PASS |
-| `PYTHONPATH=src pytest -q` | **41 passed** |
-| continuation deterministic demo | `verified`，22 calls，25,969 tokens |
+| `PYTHONPATH=src pytest -q` | **60 passed, 1 skipped** |
+| continuation deterministic demo | `verified`，25 calls，29,818 tokens |
 | demo 证明检查点 | 3 条路径，共 6 个 checkpoint（3 个 genesis + 3 个已验证完成段） |
 | DeepSeek 非流式 HTTP Mock | PASS |
 | DeepSeek SSE HTTP Mock | PASS |
@@ -38,7 +38,7 @@ compileall(src + tests)
 | 请求 usage 但尾部 usage 摘要缺失守卫 | PASS |
 | `reasoning_content` 增量脱敏 | PASS |
 | YAML 配置解析 | PASS |
-| 源码秘密扫描 | 60 个候选文件，真实 key 与通用长 `sk-*` 模式均为 0 匹配 |
+| 源码秘密扫描 | 源码、配置和文档中真实 key 与通用长 `sk-*` 模式均为 0 匹配 |
 
 演示定理为前 `n` 个正奇数之和等于 `n^2`。选择简单定理是为了使状态机、故障恢复和审计链测试可重复，不能据此声称系统已经解决研究级开放问题。
 
@@ -97,6 +97,7 @@ primary key 正常调用级重试耗尽
 - 401/403 在原 key 上不重复请求，但可以切换另一个 key；
 - 连续失败的 key 进入短暂冷却，后续调度优先健康 Agent；
 - checkpoint Reviewer 的首选和故障转移候选均排除当前 Delta 作者；
+- Synthesizer 连接失败时可切换备用 Agent，最终审计继续排除实际完成综合的 Agent；
 - 所有备用 Agent 均失败时，原 committed checkpoint 不被覆盖。
 
 ## 4. 检查点与信息完整性测试
@@ -115,32 +116,57 @@ primary key 正常调用级重试耗尽
 - 比阶段快照更新的 `lemma_memory.json` 会在恢复时被重新加载；
 - 被截断的 SSE、半截 JSON 和私有 `reasoning_content` 不会成为恢复点。
 
-## 5. 安装产物验证
+## 5. 调度器回归验证
+
+新增回归测试覆盖以下通用情形：
+
+- 路线覆盖率按 `current_paths / max_paths` 计算，而不是按初始路线数计算；
+- 所有已审查路线均失败、仍有容量且预算允许时，本轮至少保留一个 `widen`；
+- 达到 `max_paths` 或最终修订储备不足时，不越界拓宽；
+- Structural FAIL 会进入路径统计并降低有效进展；
+- 高置信度策略级失败不会因证明步骤较多而持续获得 `deepen`；
+- 执行级、计划级与未知失败只获得配置允许的修补次数；
+- 重复失败后进入可配置冷却；
+- 动作成本根据新增路线数、continuation 段数、Reviewer、Claim 提取、验证和 Meta-review 动态计算；
+- 最终预算储备根据 `reserve_revision_cycles` 与 `max_revisions` 计算；
+- 调度产物记录每个候选动作的排名、分数、预计成本、未选原因和预算阻断原因。
+
+对应自动化结果：`60 passed, 1 skipped`。确定性完整演示结果为 `verified`，25 calls，29,818 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
+
+## 6. 终审边界与修订回归验证
+
+新增测试明确区分形式要求与数学条件：
+
+- 标准命名定理不需要提供书目链接或页码，但必须写出准确调用形式，并从已有步骤显式验证全部假设；
+- 缺失定理适用条件时，最终结构门返回执行级 FAIL，不能直接形成 `verified`；
+- 预算允许时，缺口进入一次定向修订；修订稿必须重新执行结构审计和详细审计；
+- 修订前的 PASS 不会复用，修订动作本身也不会自动升级最终状态；
+- 策略级错误不通过继续润色同一证明修复；
+- 确定性工具找到反例时仍覆盖模型 PASS。
+
+集成回归模拟了“最终证明遗漏一个实际为真的定理假设”的情形。首次结构审计阻断详细审计；修订器补出显式推导；随后新的结构审计和详细审计均通过，最终状态才成为 `verified`。
+
+## 7. 安装产物验证
+
+v0.5.1 已在本地重新构建 Wheel 和 sdist。`dist/` 仍由 `.gitignore` 排除，因此 GitHub 源码提交不携带二进制构建产物。产物哈希不写回源码元数据，以免 sdist 因包含自身哈希记录而形成循环变化。
 
 构建命令：
 
 ```bash
-uv build
+python -m hatchling build
 ```
 
 结果：
 
 | 产物 | 结果 |
 |---|---:|
-| `dist/mathproofmesh-0.5.0.tar.gz` | PASS |
-| `dist/mathproofmesh-0.5.0-py3-none-any.whl` | PASS |
+| `dist/mathproofmesh-0.5.1.tar.gz` | PASS |
+| `dist/mathproofmesh-0.5.1-py3-none-any.whl` | PASS |
 | wheel 安装到隔离 target | PASS |
-| 从已安装 wheel 执行 continuation demo | `verified`，22 calls |
-| wheel/sdist 秘密扫描 | 真实 key 与通用长 `sk-*` 模式均为 0 匹配 |
+| 从已安装 wheel 执行 continuation demo | `verified`，25 calls |
+| wheel/sdist 通用长 `sk-*` 凭据模式扫描 | 0 匹配 |
 
-SHA-256：
-
-```text
-wheel: d60129a5f8f9b41367ae3f5cdbe19882ede791ef4546d17892f407d6e6d22aac
-sdist: 7a711ca43ba82a2d6403b9c2dd44be98c1db752ecef9e553f7de8958fec50111
-```
-
-## 6. GitHub CI
+## 8. GitHub CI
 
 仓库包含 `.github/workflows/ci.yml`，对功能分支 push 和 Pull Request 执行：
 
@@ -152,7 +178,7 @@ Python 3.11
 
 该工作流只运行确定性 Mock 测试，不读取 DeepSeek secrets，也不会产生真实模型费用。远程 CI 状态应以相应 GitHub commit/PR 页面为准。
 
-## 7. 尚未实机验证的部分
+## 9. 尚未实机验证的部分
 
 本次构建没有使用聊天中提供的真实 DeepSeek key。尚需在用户本机验证：
 

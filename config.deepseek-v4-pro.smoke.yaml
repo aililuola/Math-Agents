@@ -15,7 +15,7 @@ agents:
     specialties: [problem_decomposition, strategy_generation, meta_review]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 8000
+    max_output_tokens: 50000
     timeout_seconds: 600
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
   - id: ds-explorer-a
@@ -31,7 +31,7 @@ agents:
     specialties: [number_theory, algebra, combinatorics]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 12000
+    max_output_tokens: 50000
     timeout_seconds: 600
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
   - id: ds-explorer-b
@@ -47,7 +47,7 @@ agents:
     specialties: [analysis, inequalities, geometry]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 12000
+    max_output_tokens: 50000
     timeout_seconds: 600
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
   - id: ds-verifier
@@ -63,7 +63,7 @@ agents:
     specialties: [proof_audit, counterexample_search]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 10000
+    max_output_tokens: 50000
     timeout_seconds: 600
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
   - id: ds-synthesizer
@@ -79,18 +79,19 @@ agents:
     specialties: [proof_synthesis, rigorous_exposition]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 12000
+    max_output_tokens: 50000
     timeout_seconds: 600
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
 
 budget:
-  max_total_calls: 18
-  max_rounds: 1
+  max_total_calls: 28
+  # Initial exploration plus one adaptive round.
+  max_rounds: 2
   initial_paths: 2
-  max_paths: 2
+  max_paths: 3
   strategies_to_generate: 3
   candidates_to_verify: 2
-  max_revisions: 0
+  max_revisions: 1
   base_verifier_replicas: 1
   high_risk_verifier_replicas: 1
   high_risk_threshold: 0.45
@@ -102,6 +103,36 @@ budget:
   depth_share: 0.35
   verification_share: 0.25
   synthesis_share: 0.10
+
+scheduler:
+  max_actions_per_round: 2
+  widen_paths_per_action: 1
+  force_widen_when_all_failed: true
+  max_execution_repairs_per_path: 1
+  max_plan_repairs_per_path: 1
+  max_unknown_failure_repairs_per_path: 1
+  allow_strategy_failure_repair: false
+  failed_path_cooldown_rounds: 1
+  meaningful_progress_threshold: 0.04
+  unverified_progress_discount: 0.55
+  uncertain_progress_discount: 0.40
+  failed_progress_discount: 0.10
+  structural_failure_progress_cap: 0.10
+  execution_failure_progress_cap: 0.45
+  plan_failure_progress_cap: 0.18
+  strategy_failure_progress_cap: 0.05
+  structural_failure_penalty: 0.30
+  execution_failure_penalty: 0.12
+  plan_failure_penalty: 0.30
+  strategy_failure_penalty: 0.50
+  repeated_failure_penalty: 0.15
+  reserve_revision_cycles: 1
+  include_post_action_verification_in_cost: true
+  include_meta_review_in_cost: true
+  verification_call_safety_margin: 0
+  finish_transition_buffer_calls: 0
+  diagnostics_enabled: true
+  diagnostic_candidate_limit: 8
 
 topology:
   neighbor_k: 1
@@ -129,9 +160,10 @@ verification:
 continuation:
   enabled: true
   checkpoint_policy: verified_subgoal
-  max_new_steps_per_call: 3
+  max_new_steps_per_call: 8
   max_new_claims_per_call: 2
-  max_output_tokens_per_segment: 6000
+  # Leave enough room for max-effort reasoning before the structured JSON answer.
+  max_output_tokens_per_segment: 50000
   segments_per_explore_call: 1
   max_segments_per_path: 4
   verify_each_delta: true

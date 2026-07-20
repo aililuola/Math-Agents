@@ -518,15 +518,23 @@ class ProofMeshOrchestrator:
                 stats = budget_manager.build_path_stats(
                     state.strategies,
                     state.attempts,
-                    list(state.aggregate_reports.values()),
+                    state.reports,
+                    state.aggregate_reports,
                 )
                 decision = budget_manager.decide(
                     stats,
                     current_path_count=len(state.strategies),
                     remaining_calls=runner.ledger.remaining_calls,
+                    current_round=round_index,
                     final_verified=False,
-                    max_actions=2,
+                    max_actions=self.config.scheduler.max_actions_per_round,
                     bucket_pressure=allocator.pressure_snapshot(),
+                )
+                decision = allocator.admit_decision(
+                    decision,
+                    current_path_count=len(state.strategies),
+                    has_candidate=bool(state.attempts),
+                    max_actions=self.config.scheduler.max_actions_per_round,
                 )
                 store.write_json(
                     "structured",
@@ -554,21 +562,79 @@ class ProofMeshOrchestrator:
                         "actions": [action.action.value for action in decision.actions],
                         "global_uncertainty": decision.global_uncertainty,
                         "coverage": decision.coverage,
+                        "failure_rate": decision.failure_rate,
+                        "forced_widen": decision.forced_widen,
+                        "finish_reserve_calls": decision.finish_reserve_calls,
                     },
                 )
+                if self.config.scheduler.diagnostics_enabled:
+                    diagnostics = decision.candidates[
+                        : self.config.scheduler.diagnostic_candidate_limit
+                    ]
+                    diagnostic_text = "; ".join(
+                        (
+                            f"#{candidate.rank} {candidate.action.value}"
+                            f"({candidate.strategy_id or 'global'}), "
+                            f"score={candidate.score:.3f}, "
+                            f"estimated_calls={candidate.estimated_calls}: "
+                            + (
+                                "selected"
+                                if candidate.selected
+                                else candidate.blocked_reason or "not selected"
+                            )
+                        )
+                        for candidate in diagnostics
+                    )
+                    activity.info(
+                        "budget_candidate_diagnostics",
+                        title=activity.text(
+                            "调度候选排名与阻断原因",
+                            "Scheduler candidate ranking and blocking reasons",
+                        ),
+                        detail=diagnostic_text,
+                        stage="adaptive_round",
+                        parent_task_id=round_task,
+                        importance=ActivityImportance.DETAIL,
+                        metrics={
+                            "candidates": [
+                                candidate.model_dump(mode="json")
+                                for candidate in diagnostics
+                            ]
+                        },
+                    )
 
                 performed = False
                 for action in decision.actions:
                     if action.action in {ActionKind.STOP, ActionKind.SYNTHESIZE}:
                         continue
-                    estimated_cost = allocator.estimate_action_calls(action.action)
+                    estimated_cost = (
+                        action.estimated_calls
+                        or allocator.estimate_action_calls(
+                            action.action,
+                            current_path_count=len(state.strategies),
+                            widen_path_count=action.planned_paths or None,
+                        )
+                    )
                     bucket = allocator.bucket_for_action(action.action)
-                    if not allocator.can_spend(
+                    blocked_reason = allocator.spend_block_reason(
                         bucket,
                         estimated_cost,
                         protect_finish=True,
                         has_candidate=bool(state.attempts),
-                    ):
+                    )
+                    if blocked_reason is not None:
+                        action.selected = False
+                        action.blocked_reason = blocked_reason
+                        store.append_event(
+                            "adaptive_action_blocked",
+                            {
+                                "round_index": round_index,
+                                "action": action.action.value,
+                                "strategy_id": action.strategy_id,
+                                "estimated_calls": estimated_cost,
+                                "reason": blocked_reason,
+                            },
+                        )
                         continue
 
                     action_label_zh = {
@@ -629,6 +695,7 @@ class ProofMeshOrchestrator:
                             router,
                             memory,
                             store,
+                            requested_count=action.planned_paths or None,
                         )
                         if new_attempts:
                             state.attempts.extend(new_attempts)
@@ -675,7 +742,10 @@ class ProofMeshOrchestrator:
                     unverified
                     and allocator.can_spend(
                         "verification",
-                        allocator.estimate_action_calls(ActionKind.VERIFY),
+                        allocator.estimate_action_calls(
+                            ActionKind.VERIFY,
+                            current_path_count=len(state.strategies),
+                        ),
                         protect_finish=True,
                         has_candidate=True,
                     )
@@ -1844,6 +1914,7 @@ class ProofMeshOrchestrator:
             store.commit_proof_checkpoint(checkpoint)
             resumed_from = None
 
+        attempt_id = new_id("attempt")
         if (
             checkpoint.proof_complete
             or checkpoint.segment_index >= cfg.max_segments_per_path
@@ -1854,6 +1925,7 @@ class ProofMeshOrchestrator:
                 agent_id=checkpoint.source_agent_id or agent.id,
                 round_index=round_index,
                 previous_attempt=previous_attempt,
+                attempt_id=attempt_id,
                 resumed_from_checkpoint_id=resumed_from,
             )
 
@@ -1861,9 +1933,6 @@ class ProofMeshOrchestrator:
         latest_raw_ref: str | None = None
         verified_delta_claims: list[ClaimCard] = []
         failover_chain: list[str] = []
-        attempt_id = (
-            previous_attempt.attempt_id if previous_attempt else new_id("attempt")
-        )
 
         for _ in range(cfg.segments_per_explore_call):
             if (
@@ -1950,9 +2019,9 @@ class ProofMeshOrchestrator:
             store.save_proof_delta(delta.delta_id, delta)
 
             local_report = local_delta_verification(problem, checkpoint, delta)
+            policy_issues: list[VerificationIssue] = []
             if len(delta.new_steps) > cfg.max_new_steps_per_call:
-                local_report.verdict = VerificationVerdict.FAIL
-                local_report.issues.append(
+                policy_issues.append(
                     VerificationIssue(
                         phase="checkpoint_integrity",
                         severity=Severity.ERROR,
@@ -1963,8 +2032,7 @@ class ProofMeshOrchestrator:
                     )
                 )
             if len(delta.new_claims) > cfg.max_new_claims_per_call:
-                local_report.verdict = VerificationVerdict.FAIL
-                local_report.issues.append(
+                policy_issues.append(
                     VerificationIssue(
                         phase="checkpoint_integrity",
                         severity=Severity.ERROR,
@@ -1980,8 +2048,7 @@ class ProofMeshOrchestrator:
                 and not delta.proof_complete
                 and not delta.detected_conflicts
             ):
-                local_report.verdict = VerificationVerdict.FAIL
-                local_report.issues.append(
+                policy_issues.append(
                     VerificationIssue(
                         phase="checkpoint_policy",
                         severity=Severity.ERROR,
@@ -1995,6 +2062,13 @@ class ProofMeshOrchestrator:
                         ),
                     )
                 )
+            if policy_issues:
+                # VerificationReport validates assignments. Add the concrete issues
+                # before changing the verdict so the model invariant is never broken.
+                local_report.issues.extend(policy_issues)
+                local_report.failure_level = FailureLevel.EXECUTION
+                local_report.concise_feedback = policy_issues[0].description
+                local_report.verdict = VerificationVerdict.FAIL
             store.write_json(
                 "structured",
                 f"checkpoint_local_verification_{delta.delta_id}",
@@ -2130,6 +2204,7 @@ class ProofMeshOrchestrator:
             agent_id=checkpoint.source_agent_id or agent.id,
             round_index=round_index,
             previous_attempt=previous_attempt,
+            attempt_id=attempt_id,
             proposed_lemmas=verified_delta_claims,
             raw_artifact_ref=latest_raw_ref,
             usage=cumulative_usage,
@@ -2224,6 +2299,16 @@ class ProofMeshOrchestrator:
             report.stage = VerificationStage.DETAILED
             if delta.problem_hash != problem.integrity_hash:
                 report.problem_integrity_ok = False
+                report.issues.append(
+                    VerificationIssue(
+                        phase="problem_integrity_guard",
+                        severity=Severity.CRITICAL,
+                        description=(
+                            "Proof delta problem hash does not match the immutable problem."
+                        ),
+                        repair_hint="Regenerate the delta for the exact original problem.",
+                    )
+                )
                 report.verdict = VerificationVerdict.FAIL
             report.raw_artifact_ref = result.raw_ref
             report.usage = result.usage
@@ -2949,6 +3034,8 @@ class ProofMeshOrchestrator:
         router: SparseTopologyRouter,
         memory: LemmaMemory,
         store: ArtifactStore,
+        *,
+        requested_count: int | None = None,
     ) -> list[ProofAttempt]:
         if len(state.strategies) >= self.config.budget.max_paths:
             return []
@@ -2957,7 +3044,10 @@ class ProofMeshOrchestrator:
         if state.meta_reviews:
             feedback.extend(state.meta_reviews[-1].unresolved_conflicts)
             feedback.extend(state.meta_reviews[-1].required_actions)
-        count = min(2, self.config.budget.max_paths - len(state.strategies))
+        count = min(
+            requested_count or self.config.scheduler.widen_paths_per_action,
+            self.config.budget.max_paths - len(state.strategies),
+        )
         result = await self._safe_call(
             runner,
             "planner",
@@ -3094,23 +3184,55 @@ class ProofMeshOrchestrator:
             claim_query,
             max_chars=max(2000, int(self.config.topology.max_context_chars * 0.25)),
         )
-        bundle = prompts.synthesize(
-            problem,
-            selected_contexts,
-            claim_context,
-            review,
-            synthesizer.id,
-        )
-        result = await self._safe_call(
-            runner,
-            "synthesizer",
-            bundle,
-            fixed_agent=synthesizer,
-            budget_bucket="synthesis",
-        )
+
+        def bundle_factory(current_agent: AgentRuntime) -> PromptBundle:
+            return prompts.synthesize(
+                problem,
+                selected_contexts,
+                claim_context,
+                review,
+                current_agent.id,
+            )
+
+        try:
+            result, _tried_agents = await runner.call_with_failover(
+                "synthesizer",
+                bundle_factory,
+                primary_agent=synthesizer,
+                specialty_hints=["proof_synthesis", "rigorous_exposition"],
+                budget_bucket="synthesis",
+                max_failover_agents=self.config.continuation.max_failover_agents,
+                allow_failover=self.config.continuation.allow_cross_agent_failover,
+                failover_only_on_retryable=True,
+                exclude_agent_ids=exclude,
+            )
+        except BudgetExhaustedError:
+            raise
+        except (StructuredOutputError, RuntimeError, ValueError) as exc:
+            logger.warning("Agent call failed at synthesis (synthesizer): %s", exc)
+            store.append_event(
+                "agent_stage_failed",
+                {
+                    "stage": "synthesis",
+                    "role": "synthesizer",
+                    "agent_id": synthesizer.id,
+                    "error": str(exc),
+                },
+            )
+            result = None
         if result is None:
             proof = self._fallback_final_from_attempt(problem, selected[0])
         else:
+            if result.agent.id != synthesizer.id:
+                for attempt in selected:
+                    router.add_edge(
+                        source=attempt.agent_id,
+                        target=result.agent.id,
+                        stage="synthesis_failover",
+                        payload_type="ProofAttempt+VerificationReport",
+                        reason="primary synthesizer failed; backup agent completed synthesis",
+                    )
+            synthesizer = result.agent
             proof: FinalProof = result.value
             proof.problem_hash = problem.integrity_hash
             proof.source_attempt_ids = [
@@ -3397,6 +3519,17 @@ class ProofMeshOrchestrator:
                 if key not in seen_issue_keys:
                     issues.append(issue)
                     seen_issue_keys.add(key)
+        if verdict == VerificationVerdict.FAIL and not issues:
+            issues.append(
+                VerificationIssue(
+                    phase="verification_aggregation",
+                    severity=Severity.ERROR,
+                    description=(
+                        "Verification aggregation produced FAIL without a concrete issue."
+                    ),
+                    repair_hint="Inspect the contributing verification reports.",
+                )
+            )
 
         failure_level = max(
             (r.failure_level for r in reports),
@@ -3638,6 +3771,9 @@ class ProofMeshOrchestrator:
             and state.aggregate_reports[attempt.attempt_id].verdict
             == VerificationVerdict.PASS
         ]
+        repairable_execution = (
+            [] if passed else self._meta_selected_execution_repairs(state, ranked)
+        )
         uncertain_complete = [
             attempt
             for attempt in ranked
@@ -3660,7 +3796,7 @@ class ProofMeshOrchestrator:
             )
         ]
         selected: list[ProofAttempt] = []
-        for group in (passed, uncertain_complete, partial):
+        for group in (passed, repairable_execution, uncertain_complete, partial):
             for attempt in group:
                 if attempt in selected:
                     continue
@@ -3668,6 +3804,58 @@ class ProofMeshOrchestrator:
                 if len(selected) >= 3:
                     return selected
         return selected
+
+    @staticmethod
+    def _meta_selected_execution_repairs(
+        state: SolveState,
+        ranked: Sequence[ProofAttempt],
+    ) -> list[ProofAttempt]:
+        if not state.meta_reviews:
+            return []
+        review = state.meta_reviews[-1]
+        if not review.can_synthesize or review.selected_target_id is None:
+            return []
+        assessment = next(
+            (
+                item
+                for item in review.assessments
+                if item.target_id == review.selected_target_id
+            ),
+            None,
+        )
+        if assessment is None or assessment.recommended_action != ActionKind.SYNTHESIZE:
+            return []
+        attempt = next(
+            (item for item in ranked if item.attempt_id == review.selected_target_id),
+            None,
+        )
+        if (
+            attempt is None
+            or attempt.status == AttemptStatus.FAILED
+            or not attempt.proof_steps
+        ):
+            return []
+        report = state.aggregate_reports.get(attempt.attempt_id)
+        if (
+            report is None
+            or report.verdict != VerificationVerdict.FAIL
+            or report.failure_level != FailureLevel.EXECUTION
+        ):
+            return []
+        if report.first_error_step is not None:
+            return []
+        allowed_issue_phases = {"completeness", "verification_protocol"}
+        if not any(issue.phase == "completeness" for issue in report.issues):
+            return []
+        if any(
+            issue.phase not in allowed_issue_phases
+            or issue.severity == Severity.CRITICAL
+            for issue in report.issues
+        ):
+            return []
+        # The source attempt remains failed. It is admitted only as repair material;
+        # the synthesized proof must still pass the independent final audit.
+        return [attempt]
 
     def _rank_attempts(self, attempts: Sequence[ProofAttempt]) -> list[ProofAttempt]:
         return sorted(
