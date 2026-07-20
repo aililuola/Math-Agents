@@ -657,7 +657,7 @@ def test_docker_discovery_supports_per_user_windows_install(
     )
     docker.parent.mkdir(parents=True)
     docker.touch()
-    monkeypatch.setattr("mathproofmesh.computation.sandbox.os.name", "nt")
+    monkeypatch.setattr("mathproofmesh.computation.sandbox._IS_WINDOWS", True)
     monkeypatch.setattr(
         "mathproofmesh.computation.sandbox.shutil.which", lambda _: None
     )

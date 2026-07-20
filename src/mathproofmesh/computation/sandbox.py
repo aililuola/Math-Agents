@@ -19,6 +19,7 @@ from ..schemas import (
 from .handlers.base import HandlerEvidence
 
 
+_IS_WINDOWS = os.name == "nt"
 _ALLOWED_IMPORTS = {
     "collections",
     "decimal",
@@ -68,7 +69,7 @@ def _find_docker_executable() -> str | None:
     discovered = shutil.which("docker")
     if discovered:
         return discovered
-    if os.name != "nt":
+    if not _IS_WINDOWS:
         return None
 
     candidates: list[Path] = []
