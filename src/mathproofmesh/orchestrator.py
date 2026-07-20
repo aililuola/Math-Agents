@@ -24,6 +24,7 @@ from .agents import (
 )
 from .budget import AdaptiveBudgetManager, SoftBudgetAllocator
 from .config import SystemConfig
+from .computation.policy import ComputationContext
 from .continuation import (
     attempt_from_checkpoint,
     local_delta_verification,
@@ -44,10 +45,22 @@ from .schemas import (
     ClaimBatch,
     ClaimCard,
     ClaimStatus,
+    ComputationDecision,
+    ComputationDecisionStatus,
+    ComputationMethod,
+    ContinuationAction,
+    ContinuationTurn,
     Difficulty,
     EvidenceRef,
+    EvidenceStrength,
+    ExperimentOutcome,
+    ExperimentProgram,
+    ExperimentResult,
+    ExperimentSpec,
     FailureLevel,
     FinalProof,
+    InitialExplorationAction,
+    InitialExplorationTurn,
     MetaReview,
     ProblemContract,
     ProblemKind,
@@ -135,12 +148,15 @@ class ProofMeshOrchestrator:
         )
         pool = AgentPool(self.config, mock_responders=self.mock_responders)
         runner = StructuredAgentRunner(self.config, pool, store, activity=activity)
-        prompts = PromptFactory(self.config.runtime.output_language)
+        prompts = PromptFactory(
+            self.config.runtime.output_language,
+            computation_enabled=self.config.computation.enabled,
+        )
         router = SparseTopologyRouter(self.config, pool, store)
         budget_manager = AdaptiveBudgetManager(self.config)
         allocator = SoftBudgetAllocator(self.config, runner.ledger)
         memory = LemmaMemory(store)
-        tools = ToolBroker(self.config, store)
+        tools = ToolBroker(self.config, store, activity)
 
         problem = ProblemContract(
             exact_statement=problem_text,
@@ -316,6 +332,7 @@ class ProofMeshOrchestrator:
                 router,
                 memory,
                 store,
+                tools,
             )
             state.attempts.extend(initial_attempts)
             complete_count = sum(
@@ -671,6 +688,7 @@ class ProofMeshOrchestrator:
                             router,
                             memory,
                             store,
+                            tools,
                         )
                         if attempt is not None:
                             state.attempts.append(attempt)
@@ -695,6 +713,7 @@ class ProofMeshOrchestrator:
                             router,
                             memory,
                             store,
+                            tools,
                             requested_count=action.planned_paths or None,
                         )
                         if new_attempts:
@@ -1261,10 +1280,13 @@ class ProofMeshOrchestrator:
         )
         pool = AgentPool(self.config, mock_responders=self.mock_responders)
         runner = StructuredAgentRunner(self.config, pool, store, activity=activity)
-        prompts = PromptFactory(self.config.runtime.output_language)
+        prompts = PromptFactory(
+            self.config.runtime.output_language,
+            computation_enabled=self.config.computation.enabled,
+        )
         router = SparseTopologyRouter(self.config, pool, store)
         memory = LemmaMemory(store)
-        tools = ToolBroker(self.config, store)
+        tools = ToolBroker(self.config, store, activity)
 
         state = self._restore_state_from_checkpoint(payload, store)
         state.resumed = True
@@ -1442,9 +1464,15 @@ class ProofMeshOrchestrator:
                         router=router,
                         memory=memory,
                         store=store,
+                        tools=tools,
                         targeted_feedback=feedback,
                         previous_attempt=previous,
                         budget_bucket="depth",
+                        computation_meta_approved=any(
+                            strategy.strategy_id
+                            in review.broad_computation_approved_strategy_ids
+                            for review in state.meta_reviews[-1:]
+                        ),
                     )
                     state.attempts = [
                         item
@@ -1761,6 +1789,7 @@ class ProofMeshOrchestrator:
         router: SparseTopologyRouter,
         memory: LemmaMemory,
         store: ArtifactStore,
+        tools: ToolBroker,
     ) -> list[ProofAttempt]:
         async def one(strategy: StrategyCard, agent: AgentRuntime) -> ProofAttempt:
             return await self._explore_path(
@@ -1773,6 +1802,7 @@ class ProofMeshOrchestrator:
                 router=router,
                 memory=memory,
                 store=store,
+                tools=tools,
                 targeted_feedback=[],
                 previous_attempt=None,
                 budget_bucket="breadth",
@@ -1800,6 +1830,87 @@ class ProofMeshOrchestrator:
                 attempts.append(result)
         return attempts
 
+    async def _run_requested_computation(
+        self,
+        problem: ProblemContract,
+        spec: ExperimentSpec,
+        author: AgentRuntime,
+        *,
+        path_id: str,
+        parent_checkpoint_id: str | None,
+        stalled_rounds: int,
+        meta_review_approved: bool,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        tools: ToolBroker,
+        budget_bucket: str,
+    ) -> tuple[ComputationDecision, ExperimentResult | None]:
+        # Provenance is authoritative and deliberately excluded from the semantic
+        # request hash so the same mathematical request can be reused from cache.
+        spec.requested_by = author.id
+        spec.path_id = path_id
+        spec.parent_checkpoint_id = parent_checkpoint_id
+        context = ComputationContext(
+            path_id=path_id,
+            stalled_rounds=stalled_rounds,
+            meta_review_approved=meta_review_approved,
+            remaining_llm_calls=runner.ledger.remaining_calls,
+        )
+        decision = tools.decide(spec, context)
+        if decision.decision != ComputationDecisionStatus.ALLOW:
+            return decision, None
+
+        program: ExperimentProgram | None = None
+        if spec.method == ComputationMethod.SANDBOXED_PYTHON:
+            try:
+                code_agent = runner.pool.select("experimenter", exclude={author.id})
+            except RuntimeError:
+                try:
+                    code_agent = runner.pool.select("planner", exclude={author.id})
+                except RuntimeError:
+                    code_agent = runner.pool.select("planner")
+            code_result = await self._safe_call(
+                runner,
+                "experimenter"
+                if "experimenter" in code_agent.config.roles
+                else "planner",
+                prompts.experiment_codegen(problem, spec, code_agent.id),
+                fixed_agent=code_agent,
+                budget_bucket=budget_bucket,
+            )
+            if code_result is not None:
+                program = code_result.value
+                program.experiment_id = spec.experiment_id
+
+        result = tools.run_experiment(spec, decision, program=program)
+        return decision, result
+
+    @staticmethod
+    def _experiment_context(
+        tools: ToolBroker,
+        path_id: str,
+        *,
+        parent_checkpoint_id: str | None = None,
+        audit_records: Sequence[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        results = tools.results_for_path(path_id)
+        if parent_checkpoint_id is not None:
+            results = [
+                result
+                for result in results
+                if result.parent_checkpoint_id == parent_checkpoint_id
+            ]
+        audits = {
+            str(record.get("request_hash")): record for record in (audit_records or [])
+        }
+        context: list[dict[str, Any]] = []
+        for result in results:
+            payload = result.model_dump(mode="json")
+            if result.request_hash in audits:
+                payload["independent_replay_audit"] = audits[result.request_hash]
+            context.append(payload)
+        return context
+
     async def _explore_path(
         self,
         problem: ProblemContract,
@@ -1812,9 +1923,11 @@ class ProofMeshOrchestrator:
         router: SparseTopologyRouter,
         memory: LemmaMemory,
         store: ArtifactStore,
+        tools: ToolBroker,
         targeted_feedback: list[str],
         previous_attempt: ProofAttempt | None,
         budget_bucket: str,
+        computation_meta_approved: bool = False,
     ) -> ProofAttempt:
         if self.config.continuation.enabled:
             return await self._explore_path_segmented(
@@ -1827,9 +1940,11 @@ class ProofMeshOrchestrator:
                 router=router,
                 memory=memory,
                 store=store,
+                tools=tools,
                 targeted_feedback=targeted_feedback,
                 previous_attempt=previous_attempt,
                 budget_bucket=budget_bucket,
+                computation_meta_approved=computation_meta_approved,
             )
         return await self._explore_path_legacy(
             problem,
@@ -1841,9 +1956,11 @@ class ProofMeshOrchestrator:
             router=router,
             memory=memory,
             store=store,
+            tools=tools,
             targeted_feedback=targeted_feedback,
             previous_attempt=previous_attempt,
             budget_bucket=budget_bucket,
+            computation_meta_approved=computation_meta_approved,
         )
 
     async def _explore_path_segmented(
@@ -1858,9 +1975,11 @@ class ProofMeshOrchestrator:
         router: SparseTopologyRouter,
         memory: LemmaMemory,
         store: ArtifactStore,
+        tools: ToolBroker,
         targeted_feedback: list[str],
         previous_attempt: ProofAttempt | None,
         budget_bucket: str,
+        computation_meta_approved: bool,
     ) -> ProofAttempt:
         cfg = self.config.continuation
         path_id = (
@@ -1944,66 +2063,166 @@ class ProofMeshOrchestrator:
                 memory.claims, strategy, targeted_feedback
             )
             next_segment = checkpoint.segment_index + 1
+            experiment_results: list[dict[str, Any]] = []
+            computation_feedback: list[dict[str, Any]] = []
+            compute_cycles = 0
+            confirmed_counterexample_pending = False
+            delta: ProofDelta | None = None
+            result: StructuredCallResult[Any] | None = None
+            tried_agents: list[str] = []
 
-            def bundle_factory(current_agent: AgentRuntime) -> PromptBundle:
-                bundle = prompts.continue_proof(
+            while True:
+
+                def bundle_factory(current_agent: AgentRuntime) -> PromptBundle:
+                    bundle = prompts.continue_proof(
+                        problem,
+                        strategy.model_dump(mode="json"),
+                        checkpoint,
+                        current_agent.id,
+                        round_index,
+                        next_segment,
+                        [claim.model_dump(mode="json") for claim in relevant],
+                        targeted_feedback,
+                        max_new_steps=cfg.max_new_steps_per_call,
+                        max_new_claims=cfg.max_new_claims_per_call,
+                        checkpoint_policy=cfg.checkpoint_policy,
+                        remaining_call_budget=runner.ledger.remaining_calls,
+                        experiment_results=experiment_results,
+                        computation_feedback=computation_feedback,
+                    )
+                    return PromptBundle(
+                        bundle.stage,
+                        bundle.system,
+                        bundle.user,
+                        bundle.response_model,
+                        temperature=bundle.temperature,
+                        max_output_tokens=min(
+                            cfg.max_output_tokens_per_segment,
+                            current_agent.config.max_output_tokens,
+                        ),
+                    )
+
+                try:
+                    result, just_tried = await runner.call_with_failover(
+                        "explorer",
+                        bundle_factory,
+                        primary_agent=agent,
+                        specialty_hints=strategy.tags,
+                        budget_bucket=budget_bucket,
+                        max_failover_agents=cfg.max_failover_agents,
+                        allow_failover=cfg.resume_on_disconnect
+                        and cfg.allow_cross_agent_failover,
+                        failover_only_on_retryable=True,
+                    )
+                except BudgetExhaustedError:
+                    raise
+                except Exception as exc:
+                    store.append_event(
+                        "proof_continuation_failed",
+                        {
+                            "path_id": path_id,
+                            "checkpoint_id": checkpoint.checkpoint_id,
+                            "segment_index": next_segment,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        },
+                    )
+                    targeted_feedback = [
+                        *targeted_feedback,
+                        f"Continuation call failed after retry/failover: {type(exc).__name__}. Resume from checkpoint {checkpoint.checkpoint_id}.",
+                    ]
+                    break
+
+                latest_raw_ref = result.raw_ref
+                cumulative_usage = self._sum_usage([cumulative_usage, result.usage])
+                tried_agents = self._deduplicate_strings([*tried_agents, *just_tried])
+                failover_chain = self._deduplicate_strings(
+                    [*failover_chain, *just_tried]
+                )
+                agent = result.agent
+                turn = (
+                    result.value
+                    if isinstance(result.value, ContinuationTurn)
+                    else ContinuationTurn(
+                        action=(
+                            ContinuationAction.COMPLETE
+                            if result.value.proof_complete
+                            else ContinuationAction.SUBMIT_DELTA
+                        ),
+                        delta=result.value,
+                    )
+                )
+                if (
+                    confirmed_counterexample_pending
+                    and turn.action != ContinuationAction.REQUEST_COMPUTATION
+                    and turn.experiment_impact is None
+                ):
+                    targeted_feedback = [
+                        *targeted_feedback,
+                        "A confirmed counterexample must be acknowledged by classifying its impact as execution, plan, or strategy before this path can advance.",
+                    ]
+                    break
+                if turn.experiment_impact is not None:
+                    store.append_event(
+                        "experiment_impact_classified",
+                        {
+                            "path_id": path_id,
+                            "strategy_id": strategy.strategy_id,
+                            "failure_level": turn.experiment_impact,
+                            "reason": turn.reason,
+                        },
+                    )
+                if turn.action in {
+                    ContinuationAction.SUBMIT_DELTA,
+                    ContinuationAction.COMPLETE,
+                }:
+                    delta = turn.delta
+                    break
+                if turn.action == ContinuationAction.ABANDON:
+                    targeted_feedback = [
+                        *targeted_feedback,
+                        turn.reason or "Explorer abandoned this continuation segment.",
+                    ]
+                    break
+                if (
+                    compute_cycles
+                    >= self.config.computation.max_compute_cycles_per_segment
+                ):
+                    targeted_feedback = [
+                        *targeted_feedback,
+                        "Per-segment computation cycle limit reached; no checkpoint was advanced.",
+                    ]
+                    break
+                assert turn.experiment_spec is not None
+                decision, experiment = await self._run_requested_computation(
                     problem,
-                    strategy.model_dump(mode="json"),
-                    checkpoint,
-                    current_agent.id,
-                    round_index,
-                    next_segment,
-                    [claim.model_dump(mode="json") for claim in relevant],
-                    targeted_feedback,
-                    max_new_steps=cfg.max_new_steps_per_call,
-                    max_new_claims=cfg.max_new_claims_per_call,
-                    checkpoint_policy=cfg.checkpoint_policy,
-                    remaining_call_budget=runner.ledger.remaining_calls,
-                )
-                return PromptBundle(
-                    bundle.stage,
-                    bundle.system,
-                    bundle.user,
-                    bundle.response_model,
-                    temperature=bundle.temperature,
-                    max_output_tokens=min(
-                        cfg.max_output_tokens_per_segment,
-                        current_agent.config.max_output_tokens,
-                    ),
-                )
-
-            try:
-                result, tried_agents = await runner.call_with_failover(
-                    "explorer",
-                    bundle_factory,
-                    primary_agent=agent,
-                    specialty_hints=strategy.tags,
+                    turn.experiment_spec,
+                    agent,
+                    path_id=path_id,
+                    parent_checkpoint_id=checkpoint.checkpoint_id,
+                    stalled_rounds=round_index,
+                    meta_review_approved=computation_meta_approved,
+                    runner=runner,
+                    prompts=prompts,
+                    tools=tools,
                     budget_bucket=budget_bucket,
-                    max_failover_agents=cfg.max_failover_agents,
-                    allow_failover=cfg.resume_on_disconnect
-                    and cfg.allow_cross_agent_failover,
-                    failover_only_on_retryable=True,
                 )
-            except BudgetExhaustedError:
-                raise
-            except Exception as exc:
-                store.append_event(
-                    "proof_continuation_failed",
-                    {
-                        "path_id": path_id,
-                        "checkpoint_id": checkpoint.checkpoint_id,
-                        "segment_index": next_segment,
-                        "error_type": type(exc).__name__,
-                        "error": str(exc),
-                    },
-                )
-                targeted_feedback = [
-                    *targeted_feedback,
-                    f"Continuation call failed after retry/failover: {type(exc).__name__}. Resume from checkpoint {checkpoint.checkpoint_id}.",
-                ]
-                break
+                compute_cycles += 1
+                computation_feedback.append(decision.model_dump(mode="json"))
+                if experiment is not None:
+                    experiment_results.append(experiment.model_dump(mode="json"))
+                    confirmed_counterexample_pending = (
+                        confirmed_counterexample_pending
+                        or (
+                            experiment.outcome == ExperimentOutcome.COUNTEREXAMPLE_FOUND
+                            and experiment.evidence_strength
+                            == EvidenceStrength.COUNTEREXAMPLE
+                            and experiment.independently_verified
+                        )
+                    )
 
-            delta: ProofDelta = result.value
+            if delta is None or result is None:
+                break
             delta.problem_hash = problem.integrity_hash
             delta.path_id = checkpoint.path_id
             delta.strategy_id = strategy.strategy_id
@@ -2013,9 +2232,6 @@ class ProofMeshOrchestrator:
             delta.segment_index = next_segment
             delta.raw_artifact_ref = result.raw_ref
             delta.usage = result.usage
-            latest_raw_ref = result.raw_ref
-            failover_chain = self._deduplicate_strings([*failover_chain, *tried_agents])
-            cumulative_usage = self._sum_usage([cumulative_usage, result.usage])
             store.save_proof_delta(delta.delta_id, delta)
 
             local_report = local_delta_verification(problem, checkpoint, delta)
@@ -2090,6 +2306,7 @@ class ProofMeshOrchestrator:
                         runner,
                         prompts,
                         memory,
+                        tools,
                         store,
                     )
                 )
@@ -2229,9 +2446,19 @@ class ProofMeshOrchestrator:
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
         memory: LemmaMemory,
+        tools: ToolBroker,
         store: ArtifactStore,
     ) -> list[VerificationReport]:
         reports: list[VerificationReport] = []
+        experiment_audit = tools.audit_key_results(
+            path_id=checkpoint.path_id,
+            report_name=f"checkpoint_experiment_audit_{delta.delta_id}",
+        )
+        auditable_experiments = self._experiment_context(
+            tools,
+            checkpoint.path_id,
+            audit_records=experiment_audit,
+        )
         excluded = {author.id}
         replicas = self.config.continuation.delta_verifier_replicas
         for _ in range(replicas):
@@ -2253,6 +2480,7 @@ class ProofMeshOrchestrator:
                     delta,
                     current_agent.id,
                     [claim.model_dump(mode="json") for claim in memory.verified()],
+                    auditable_experiments,
                 )
 
             try:
@@ -2312,6 +2540,65 @@ class ProofMeshOrchestrator:
                 report.verdict = VerificationVerdict.FAIL
             report.raw_artifact_ref = result.raw_ref
             report.usage = result.usage
+            if report.tool_requests:
+                tool_results = tools.execute_many(report.tool_requests)
+                report.tool_results = tool_results
+                self._apply_deterministic_tool_guard(report)
+                if runner.ledger.remaining_calls > 0:
+                    follow_up = prompts.verify_delta(
+                        problem,
+                        strategy.model_dump(mode="json"),
+                        checkpoint,
+                        delta,
+                        result.agent.id,
+                        [claim.model_dump(mode="json") for claim in memory.verified()],
+                        auditable_experiments,
+                        [item.model_dump(mode="json") for item in tool_results],
+                    )
+                    follow_result = await self._safe_call(
+                        runner,
+                        "detailed_verifier",
+                        follow_up,
+                        fixed_agent=result.agent,
+                        budget_bucket="verification",
+                    )
+                    if follow_result is not None:
+                        interpreted: VerificationReport = follow_result.value
+                        interpreted.target_id = delta.delta_id
+                        interpreted.target_type = "proof_delta"
+                        interpreted.agent_id = result.agent.id
+                        interpreted.stage = VerificationStage.DETAILED
+                        interpreted.raw_artifact_ref = follow_result.raw_ref
+                        interpreted.usage = self._sum_usage(
+                            [result.usage, follow_result.usage]
+                        )
+                        interpreted.tool_requests = report.tool_requests
+                        interpreted.tool_results = tool_results
+                        self._apply_deterministic_tool_guard(interpreted)
+                        report = interpreted
+                if (
+                    any(not item.ok for item in tool_results)
+                    and report.verdict == VerificationVerdict.PASS
+                ):
+                    report.issues.append(
+                        VerificationIssue(
+                            phase="deterministic_tool_guard",
+                            severity=Severity.WARNING,
+                            description=(
+                                "A requested deterministic tool was inconclusive; it cannot support checkpoint acceptance."
+                            ),
+                        )
+                    )
+                    report.verdict = VerificationVerdict.UNCERTAIN
+                    report.concise_feedback = (
+                        "A requested tool was inconclusive. " + report.concise_feedback
+                    )
+            self._apply_experiment_counterexample_guard(
+                delta,
+                report,
+                tools.results_for_path(checkpoint.path_id),
+            )
+            self._apply_experiment_audit_guard(report, experiment_audit)
             reports.append(report)
             excluded.update(tried)
             store.write_json(
@@ -2334,53 +2621,150 @@ class ProofMeshOrchestrator:
         router: SparseTopologyRouter,
         memory: LemmaMemory,
         store: ArtifactStore,
+        tools: ToolBroker,
         targeted_feedback: list[str],
         previous_attempt: ProofAttempt | None,
         budget_bucket: str,
+        computation_meta_approved: bool,
     ) -> ProofAttempt:
         relevant = router.relevant_claims(memory.claims, strategy, targeted_feedback)
-        bundle = prompts.explore(
-            problem,
-            strategy.model_dump(mode="json"),
-            agent.id,
-            round_index,
-            [c.model_dump(mode="json") for c in relevant],
-            targeted_feedback,
-            self._attempt_context_dict(previous_attempt, full=False)
-            if previous_attempt
-            else None,
-            runner.ledger.remaining_calls,
+        path_id = (
+            previous_attempt.path_id
+            if previous_attempt and previous_attempt.path_id
+            else f"path_{strategy.strategy_id}"
         )
-        result = await self._safe_call(
-            runner,
-            "explorer",
-            bundle,
-            fixed_agent=agent,
-            budget_bucket=budget_bucket,
-        )
-        if result is None:
-            return self._failed_attempt(
+        experiment_results: list[dict[str, Any]] = []
+        computation_feedback: list[dict[str, Any]] = []
+        compute_cycles = 0
+        confirmed_counterexample_pending = False
+        cumulative_usage = UsageRecord()
+        latest_raw_ref: str | None = None
+        attempt: ProofAttempt | None = None
+        while True:
+            bundle = prompts.explore(
                 problem,
-                strategy,
+                strategy.model_dump(mode="json"),
                 agent.id,
                 round_index,
-                RuntimeError("explorer returned no valid structured result"),
+                [c.model_dump(mode="json") for c in relevant],
+                targeted_feedback,
+                self._attempt_context_dict(previous_attempt, full=False)
+                if previous_attempt
+                else None,
+                runner.ledger.remaining_calls,
+                experiment_results,
+                computation_feedback,
             )
-        attempt: ProofAttempt = result.value
+            result = await self._safe_call(
+                runner,
+                "explorer",
+                bundle,
+                fixed_agent=agent,
+                budget_bucket=budget_bucket,
+            )
+            if result is None:
+                return self._failed_attempt(
+                    problem,
+                    strategy,
+                    agent.id,
+                    round_index,
+                    RuntimeError("explorer returned no valid structured result"),
+                )
+            cumulative_usage = self._sum_usage([cumulative_usage, result.usage])
+            latest_raw_ref = result.raw_ref
+            turn = (
+                result.value
+                if isinstance(result.value, InitialExplorationTurn)
+                else InitialExplorationTurn(
+                    action=InitialExplorationAction.SUBMIT_ATTEMPT,
+                    attempt=result.value,
+                )
+            )
+            if (
+                confirmed_counterexample_pending
+                and turn.action != InitialExplorationAction.REQUEST_COMPUTATION
+                and turn.experiment_impact is None
+            ):
+                return self._failed_attempt(
+                    problem,
+                    strategy,
+                    agent.id,
+                    round_index,
+                    RuntimeError(
+                        "confirmed counterexample was not classified as execution, plan, or strategy"
+                    ),
+                )
+            if turn.experiment_impact is not None:
+                store.append_event(
+                    "experiment_impact_classified",
+                    {
+                        "path_id": path_id,
+                        "strategy_id": strategy.strategy_id,
+                        "failure_level": turn.experiment_impact,
+                        "reason": turn.reason,
+                    },
+                )
+            if turn.action == InitialExplorationAction.SUBMIT_ATTEMPT:
+                attempt = turn.attempt
+                break
+            if turn.action == InitialExplorationAction.ABANDON:
+                return self._failed_attempt(
+                    problem,
+                    strategy,
+                    agent.id,
+                    round_index,
+                    RuntimeError(turn.reason or "explorer abandoned the route"),
+                )
+            if compute_cycles >= self.config.computation.max_compute_cycles_per_segment:
+                return self._failed_attempt(
+                    problem,
+                    strategy,
+                    agent.id,
+                    round_index,
+                    RuntimeError("per-segment computation cycle limit reached"),
+                )
+            assert turn.experiment_spec is not None
+            decision, experiment = await self._run_requested_computation(
+                problem,
+                turn.experiment_spec,
+                agent,
+                path_id=path_id,
+                parent_checkpoint_id=None,
+                stalled_rounds=round_index,
+                meta_review_approved=computation_meta_approved,
+                runner=runner,
+                prompts=prompts,
+                tools=tools,
+                budget_bucket=budget_bucket,
+            )
+            compute_cycles += 1
+            computation_feedback.append(decision.model_dump(mode="json"))
+            if experiment is not None:
+                experiment_results.append(experiment.model_dump(mode="json"))
+                confirmed_counterexample_pending = confirmed_counterexample_pending or (
+                    experiment.outcome == ExperimentOutcome.COUNTEREXAMPLE_FOUND
+                    and experiment.evidence_strength == EvidenceStrength.COUNTEREXAMPLE
+                    and experiment.independently_verified
+                )
+
+        assert attempt is not None
         # Authoritative metadata is assigned by the orchestrator, not trusted from model text.
         attempt.problem_hash = problem.integrity_hash
         attempt.strategy_id = strategy.strategy_id
         attempt.agent_id = agent.id
         attempt.round_index = round_index
-        attempt.raw_artifact_ref = result.raw_ref
-        attempt.usage = result.usage
+        attempt.path_id = path_id
+        attempt.raw_artifact_ref = latest_raw_ref
+        attempt.usage = cumulative_usage
         for lemma in attempt.proposed_lemmas:
             lemma.source_attempt_id = attempt.attempt_id
             lemma.source_agent_id = agent.id
-            if not any(e.artifact_ref == result.raw_ref for e in lemma.evidence_refs):
+            if latest_raw_ref and not any(
+                e.artifact_ref == latest_raw_ref for e in lemma.evidence_refs
+            ):
                 lemma.evidence_refs.append(
                     EvidenceRef(
-                        artifact_ref=result.raw_ref,
+                        artifact_ref=latest_raw_ref,
                         summary="Raw explorer response containing the proposed lemma.",
                     )
                 )
@@ -2526,6 +2910,14 @@ class ProofMeshOrchestrator:
         store: ArtifactStore,
     ) -> VerificationBundle:
         reports: list[VerificationReport] = []
+        experiment_audit = (
+            tools.audit_key_results(
+                path_id=attempt.path_id,
+                report_name=f"attempt_experiment_audit_{attempt.attempt_id}",
+            )
+            if attempt.path_id
+            else []
+        )
 
         structural_reviewers = router.select_reviewers(
             attempt,
@@ -2573,6 +2965,7 @@ class ProofMeshOrchestrator:
             VerificationStage.STRUCTURAL,
             structural_reports,
         )
+        self._apply_experiment_audit_guard(structural_aggregate, experiment_audit)
         reports.append(structural_aggregate)
         store.write_json(
             "structured",
@@ -2604,6 +2997,7 @@ class ProofMeshOrchestrator:
                 tools,
                 store,
                 stage="detailed",
+                experiment_audit=experiment_audit,
             )
             reports.extend(detailed_reports)
 
@@ -2638,6 +3032,7 @@ class ProofMeshOrchestrator:
                     tools,
                     store,
                     stage="detailed",
+                    experiment_audit=experiment_audit,
                 )
                 detailed_reports.extend(extra_reports)
                 reports.extend(extra_reports)
@@ -2796,11 +3191,40 @@ class ProofMeshOrchestrator:
         store: ArtifactStore,
         *,
         stage: str,
+        experiment_audit: Sequence[dict[str, Any]] | None = None,
     ) -> list[VerificationReport]:
         target_id = (
             target.attempt_id if isinstance(target, ProofAttempt) else "final_proof"
         )
         target_type = "attempt" if isinstance(target, ProofAttempt) else "final_proof"
+        audit_by_hash = {
+            str(record.get("request_hash")): record
+            for record in (experiment_audit or [])
+        }
+        auditable_experiments = (
+            self._experiment_context(
+                tools,
+                target.path_id,
+                audit_records=experiment_audit,
+            )
+            if isinstance(target, ProofAttempt) and target.path_id
+            else [
+                {
+                    **result.model_dump(mode="json"),
+                    **(
+                        {"independent_replay_audit": audit_by_hash[result.request_hash]}
+                        if result.request_hash in audit_by_hash
+                        else {}
+                    ),
+                }
+                for result in tools.results
+            ]
+        )
+        guard_experiments = (
+            tools.results_for_path(target.path_id)
+            if isinstance(target, ProofAttempt) and target.path_id
+            else tools.results
+        )
 
         async def one(reviewer: AgentRuntime) -> VerificationReport:
             bundle = prompts.detailed_verify(
@@ -2813,6 +3237,7 @@ class ProofMeshOrchestrator:
                     max_chars=max(2000, self.config.topology.max_context_chars // 4),
                 ),
                 reviewer.id,
+                experiment_results=auditable_experiments,
                 stage=stage,
             )
             result = await self._safe_call(
@@ -2845,6 +3270,12 @@ class ProofMeshOrchestrator:
                 usage=result.usage,
             )
             self._apply_local_target_integrity_guard(problem, target, report)
+            self._apply_experiment_counterexample_guard(
+                target,
+                report,
+                guard_experiments,
+            )
+            self._apply_experiment_audit_guard(report, experiment_audit or [])
 
             if report.tool_requests:
                 tool_results = tools.execute_many(report.tool_requests)
@@ -2865,6 +3296,7 @@ class ProofMeshOrchestrator:
                         ),
                         reviewer.id,
                         [t.model_dump(mode="json") for t in tool_results],
+                        auditable_experiments,
                         stage=stage,
                     )
                     follow_result = await self._safe_call(
@@ -2895,6 +3327,14 @@ class ProofMeshOrchestrator:
                             problem, target, interpreted
                         )
                         self._apply_deterministic_tool_guard(interpreted)
+                        self._apply_experiment_counterexample_guard(
+                            target,
+                            interpreted,
+                            guard_experiments,
+                        )
+                        self._apply_experiment_audit_guard(
+                            interpreted, experiment_audit or []
+                        )
                         report = interpreted
             store.write_json("structured", f"report_{report.report_id}", report)
             return report
@@ -2984,6 +3424,7 @@ class ProofMeshOrchestrator:
         router: SparseTopologyRouter,
         memory: LemmaMemory,
         store: ArtifactStore,
+        tools: ToolBroker,
     ) -> ProofAttempt | None:
         strategy = next(
             (s for s in state.strategies if s.strategy_id == strategy_id), None
@@ -3001,6 +3442,10 @@ class ProofMeshOrchestrator:
         except KeyError:
             agent = runner.pool.select("explorer", specialty_hints=strategy.tags)
         feedback = self._targeted_feedback(previous, state)
+        computation_meta_approved = any(
+            strategy_id in review.broad_computation_approved_strategy_ids
+            for review in state.meta_reviews[-1:]
+        )
         router.add_edge(
             source="meta-reviewer",
             target=agent.id,
@@ -3018,9 +3463,11 @@ class ProofMeshOrchestrator:
             router=router,
             memory=memory,
             store=store,
+            tools=tools,
             targeted_feedback=feedback,
             previous_attempt=previous,
             budget_bucket="depth",
+            computation_meta_approved=computation_meta_approved,
         )
 
     async def _widen(
@@ -3034,6 +3481,7 @@ class ProofMeshOrchestrator:
         router: SparseTopologyRouter,
         memory: LemmaMemory,
         store: ArtifactStore,
+        tools: ToolBroker,
         *,
         requested_count: int | None = None,
     ) -> list[ProofAttempt]:
@@ -3092,6 +3540,7 @@ class ProofMeshOrchestrator:
             router,
             memory,
             store,
+            tools,
         )
 
     async def _parallel_round_exploration(
@@ -3104,6 +3553,7 @@ class ProofMeshOrchestrator:
         router: SparseTopologyRouter,
         memory: LemmaMemory,
         store: ArtifactStore,
+        tools: ToolBroker,
     ) -> list[ProofAttempt]:
         results = await asyncio.gather(
             *(
@@ -3117,6 +3567,7 @@ class ProofMeshOrchestrator:
                     router=router,
                     memory=memory,
                     store=store,
+                    tools=tools,
                     targeted_feedback=[],
                     previous_attempt=None,
                     budget_bucket="breadth",
@@ -3256,6 +3707,10 @@ class ProofMeshOrchestrator:
         store: ArtifactStore,
     ) -> VerificationBundle:
         reports: list[VerificationReport] = []
+        experiment_audit = tools.audit_key_results()
+        failed_experiment_audits = [
+            record for record in experiment_audit if not record.get("valid", False)
+        ]
         exclude = {synthesizer.id} if synthesizer is not None else set()
         structural = runner.pool.select(
             "structural_verifier",
@@ -3300,6 +3755,26 @@ class ProofMeshOrchestrator:
                 usage=result.usage,
             )
             self._apply_local_target_integrity_guard(problem, proof, structural_report)
+        if failed_experiment_audits:
+            structural_report.issues.append(
+                VerificationIssue(
+                    phase="final_experiment_audit",
+                    severity=Severity.CRITICAL,
+                    description=(
+                        f"{len(failed_experiment_audits)} proof-relevant experiment artifact(s) failed hash, tool-version, or deterministic replay validation."
+                    ),
+                    repair_hint=(
+                        "Re-run the affected experiment with the pinned tool and independently review its mathematical mapping."
+                    ),
+                )
+            )
+            structural_report.failure_level = FailureLevel.EXECUTION
+            structural_report.verdict = VerificationVerdict.FAIL
+            structural_report.confidence = 1.0
+            structural_report.concise_feedback = (
+                "Final experiment replay audit failed. "
+                + structural_report.concise_feedback
+            )
         reports.append(structural_report)
 
         if structural_report.verdict != VerificationVerdict.PASS:
@@ -3350,6 +3825,7 @@ class ProofMeshOrchestrator:
             tools,
             store,
             stage="final",
+            experiment_audit=experiment_audit,
         )
         reports.extend(detailed)
 
@@ -3380,6 +3856,7 @@ class ProofMeshOrchestrator:
                 tools,
                 store,
                 stage="final",
+                experiment_audit=experiment_audit,
             )
             detailed.extend(extra_reports)
             reports.extend(extra_reports)
@@ -3665,21 +4142,34 @@ class ProofMeshOrchestrator:
                 result.kind == "numeric_counterexample"
                 and payload.get("counterexample_found") is True
             )
+            typed_refuted = (
+                result.kind
+                in {
+                    "modular_exhaustive",
+                    "bounded_integer_search",
+                    "recurrence_check",
+                    "exact_geometry",
+                }
+                and payload.get("outcome") == "counterexample_found"
+                and payload.get("independently_verified") is True
+            )
             lean_rejected = (
                 result.kind == "lean_check" and payload.get("accepted") is False
             )
-            if refuted or lean_rejected:
+            if refuted or typed_refuted or lean_rejected:
                 report.issues.append(
                     VerificationIssue(
                         phase="deterministic_tool_guard",
                         severity=Severity.CRITICAL if refuted else Severity.ERROR,
                         description=(
-                            "Verifier-requested numeric formalization produced a counterexample."
-                            if refuted
+                            "Verifier-requested deterministic check produced an independently confirmed counterexample."
+                            if refuted or typed_refuted
                             else "Submitted Lean fragment was rejected by the configured checker."
                         ),
-                        counterexample=str(payload.get("assignment"))
-                        if refuted
+                        counterexample=str(
+                            payload.get("assignment") or payload.get("counterexample")
+                        )
+                        if refuted or typed_refuted
                         else None,
                         repair_hint="Check the formalization mapping, then repair or remove the refuted inference.",
                     )
@@ -3697,6 +4187,97 @@ class ProofMeshOrchestrator:
                     + report.concise_feedback
                 )
 
+    def _apply_experiment_audit_guard(
+        self,
+        report: VerificationReport,
+        audit_records: Sequence[dict[str, Any]],
+    ) -> None:
+        failed = [record for record in audit_records if not record.get("valid", False)]
+        if not failed:
+            return
+        report.issues.append(
+            VerificationIssue(
+                phase="experiment_replay_guard",
+                severity=Severity.CRITICAL,
+                description=(
+                    f"{len(failed)} experiment artifact(s) failed independent hash, tool-version, or deterministic replay validation."
+                ),
+                repair_hint=(
+                    "Discard the affected evidence, rerun it with the pinned typed tool, and review its mathematical mapping again."
+                ),
+            )
+        )
+        report.failure_level = max(
+            report.failure_level,
+            FailureLevel.EXECUTION,
+            key=self._failure_rank,
+        )
+        report.verdict = VerificationVerdict.FAIL
+        report.confidence = 1.0
+        if report.first_error_step is None:
+            report.first_error_step = "experiment_replay_guard"
+        report.concise_feedback = (
+            "Independent experiment replay failed. " + report.concise_feedback
+        )
+
+    def _apply_experiment_counterexample_guard(
+        self,
+        target: ProofAttempt | ProofDelta | FinalProof,
+        report: VerificationReport,
+        experiments: Sequence[ExperimentResult],
+    ) -> None:
+        if isinstance(target, ProofAttempt):
+            mathematical_text = "\n".join(
+                [target.final_answer or ""]
+                + [step.statement for step in target.proof_steps]
+            )
+        elif isinstance(target, ProofDelta):
+            mathematical_text = "\n".join(
+                [target.candidate_final_answer or ""]
+                + [step.statement for step in target.new_steps]
+            )
+        else:
+            mathematical_text = "\n".join(
+                [target.answer] + [step.statement for step in target.proof_steps]
+            )
+        normalized_target = self._normalize_statement(mathematical_text).casefold()
+        for experiment in experiments:
+            if (
+                experiment.outcome != ExperimentOutcome.COUNTEREXAMPLE_FOUND
+                or experiment.evidence_strength != EvidenceStrength.COUNTEREXAMPLE
+                or not experiment.independently_verified
+            ):
+                continue
+            claim = self._normalize_statement(experiment.target_claim).casefold()
+            if len(claim) < 8 or claim not in normalized_target:
+                continue
+            report.issues.append(
+                VerificationIssue(
+                    phase="experiment_counterexample_guard",
+                    severity=Severity.CRITICAL,
+                    description=(
+                        "An independently rechecked experiment refutes a claim still used in the submitted proof."
+                    ),
+                    counterexample=str(experiment.counterexample),
+                    repair_hint=(
+                        "Remove or repair the refuted claim, then rebuild every dependent proof step."
+                    ),
+                )
+            )
+            report.failure_level = max(
+                report.failure_level,
+                FailureLevel.EXECUTION,
+                key=self._failure_rank,
+            )
+            report.verdict = VerificationVerdict.FAIL
+            if report.first_error_step is None:
+                report.first_error_step = "experiment_counterexample"
+            report.concise_feedback = (
+                "A confirmed counterexample overrides the model verdict. "
+                + report.concise_feedback
+            )
+            break
+
     @staticmethod
     def _has_deterministic_refutation(report: VerificationReport) -> bool:
         return any(
@@ -3706,6 +4287,17 @@ class ProofMeshOrchestrator:
                 (
                     result.kind == "numeric_counterexample"
                     and result.result.get("counterexample_found") is True
+                )
+                or (
+                    result.kind
+                    in {
+                        "modular_exhaustive",
+                        "bounded_integer_search",
+                        "recurrence_check",
+                        "exact_geometry",
+                    }
+                    and result.result.get("outcome") == "counterexample_found"
+                    and result.result.get("independently_verified") is True
                 )
                 or (
                     result.kind == "lean_check"
@@ -4418,6 +5010,10 @@ class ProofMeshOrchestrator:
             verification_reports=state.reports,
             meta_reviews=state.meta_reviews,
             proof_checkpoints=store.list_proof_checkpoints(),
+            experiments=[
+                ExperimentResult.model_validate(payload)
+                for payload in store.list_experiment_results()
+            ],
             resumed=state.resumed,
             resumed_from_checkpoint_id=state.resumed_from_checkpoint_id,
             agent_metrics=metrics,
@@ -4462,6 +5058,7 @@ class ProofMeshOrchestrator:
                 "aggregate_reports": state.aggregate_reports,
                 "meta_reviews": state.meta_reviews,
                 "proof_checkpoints": store.list_proof_checkpoints(),
+                "experiments": store.list_experiment_results(),
                 "resumed": state.resumed,
                 "resumed_from_checkpoint_id": state.resumed_from_checkpoint_id,
                 "final_proof": state.final_proof,

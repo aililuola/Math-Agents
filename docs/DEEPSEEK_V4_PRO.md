@@ -18,7 +18,7 @@ Reasoning effort: max
   "model": "deepseek-v4-pro",
   "thinking": {"type": "enabled"},
   "reasoning_effort": "max",
-  "max_tokens": 24000,
+  "max_tokens": 100000,
   "stream": true,
   "stream_options": {"include_usage": true}
 }
@@ -125,7 +125,7 @@ $env:DEEPSEEK_AGENT_5_KEY="..."
 
 ## 5. 实时运行时间线
 
-DeepSeek 处于长推理模式时，单次请求可能持续较长时间。v0.5.1 在 CLI 中默认开启 `compact` Activity 面板，按时间顺序显示题目分析、路线生成、并行探索、Claim 提取、两级验证、Meta-review、综合和终审；每个长调用还会按 `activity_heartbeat_seconds` 发出低频“仍在处理”状态。
+DeepSeek 处于长推理模式时，单次请求可能持续较长时间。v0.6.0 在 CLI 中默认开启 `compact` Activity 面板，按时间顺序显示题目分析、路线生成、并行探索、受控计算、Claim 提取、两级验证、Meta-review、综合和终审；每个长调用还会按 `activity_heartbeat_seconds` 发出低频“仍在处理”状态。
 
 ```bash
 mathproofmesh solve problem.txt \
@@ -268,6 +268,34 @@ MathProofMesh 当前不把 DeepSeek 的 provider-side tool calls 作为 Agent �
 
 未来若直接启用 DeepSeek provider-side tool calls，必须完整实现其 `reasoning_content` 回放要求，不能直接沿用当前的无状态请求路径。
 
-## 12. 密钥安全
+## 12. 0.6.0 计算协议
+
+`config.deepseek-v4-pro.smoke.yaml` 和 `config.deepseek-v4-pro.yaml` 均设置：
+
+```yaml
+computation:
+  enabled: true
+  policy: reasoning_first
+  typed_tools_enabled: true
+  sandboxed_python_enabled: true
+  sandbox_image: python@sha256:<配置文件中的固定摘要>
+  targeted_falsification_fast_path: true
+  soft_experiments_per_path: 2
+  hard_experiments_per_path: 6
+  max_compute_cycles_per_segment: 1
+```
+
+Planner 同时具有 `experimenter` 角色，但只有在 Gate 确认强类型工具无法表达请求后，才会调用代码生成阶段。两个 DeepSeek 预设已显式启用带固定 digest 的 Docker 沙箱；没有安装 Docker 的环境应把 `sandboxed_python_enabled` 改回 `false`，强类型工具仍可继续工作。
+
+安装完成后可分别验证两个预设：
+
+```powershell
+python scripts/verify_sandbox.py --config config.deepseek-v4-pro.smoke.yaml
+python scripts/verify_sandbox.py --config config.deepseek-v4-pro.yaml
+```
+
+计算结果通过新的自包含请求返回原 Explorer，不依赖供应商对话中的 tool-call 状态，也不会回放 `reasoning_content`。详细安全和证据规则见 [COMPUTATION_POLICY.md](COMPUTATION_POLICY.md)。
+
+## 13. 密钥安全
 
 密钥一旦粘贴到聊天、工单、日志或截图中，就应视为已经暴露。完成本地联调后，建议在 DeepSeek 控制台撤销旧 key、生成新 key，并只把新 key 注入部署环境。仓库交付物中不应出现任何 `sk-...` 明文。

@@ -87,7 +87,7 @@ def demo_responder(
             "coverage_notes": "The paths use recursive, algebraic telescoping, and geometric mechanisms.",
             "omitted_directions": [],
         }
-    if schema_name == "ProofDelta":
+    if schema_name in {"ContinuationTurn", "ProofDelta"}:
         parent_match = re.search(r'"checkpoint_id"\s*:\s*"([^"]+)"', text)
         problem_match = re.search(r'"integrity_hash"\s*:\s*"([^"]+)"', text)
         path_match = re.search(r'"path_id"\s*:\s*"([^"]+)"', text)
@@ -95,7 +95,7 @@ def demo_responder(
         segment_match = re.search(r"segment_index=(\d+)", text)
         round_match = re.search(r"round_index=(\d+)", text)
         agent_match = re.search(r"agent_id=\'([^\']+)\'", text)
-        return {
+        delta = {
             "problem_hash": problem_match.group(1) if problem_match else "0" * 64,
             "path_id": path_match.group(1) if path_match else "path_mock",
             "strategy_id": strategy_match.group(1)
@@ -145,8 +145,11 @@ def demo_responder(
             "raw_artifact_ref": None,
             "usage": {},
         }
-    if schema_name == "ProofAttempt":
-        return {
+        if schema_name == "ContinuationTurn":
+            return {"action": "complete", "delta": delta, "reason": ""}
+        return delta
+    if schema_name in {"InitialExplorationTurn", "ProofAttempt"}:
+        attempt = {
             "problem_hash": "0" * 64,
             "strategy_id": "strategy_mock",
             "agent_id": "mock-explorer",
@@ -183,6 +186,13 @@ def demo_responder(
             "raw_artifact_ref": None,
             "usage": {},
         }
+        if schema_name == "InitialExplorationTurn":
+            return {
+                "action": "submit_attempt",
+                "attempt": attempt,
+                "reason": "",
+            }
+        return attempt
     if schema_name == "ClaimBatch":
         attempt_match = re.search(r'"attempt_id"\s*:\s*"([^"]+)"', text)
         attempt_id = attempt_match.group(1) if attempt_match else "attempt_mock"
@@ -222,6 +232,34 @@ def demo_responder(
             ],
             "discarded_material": [],
             "summary": "One reusable telescoping identity was extracted with source provenance.",
+        }
+    if schema_name == "ExperimentProgram":
+        experiment_match = re.search(r"Set experiment_id='([^']+)'", text)
+        return {
+            "experiment_id": (
+                experiment_match.group(1) if experiment_match else "experiment_mock"
+            ),
+            "source": (
+                "def run(data):\n"
+                "    return {'outcome': 'not_refuted', 'cases_checked': 0, "
+                "'scope': {}, 'exact_arithmetic': True}\n"
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {"seed": {"type": "integer"}},
+                "required": ["seed"],
+            },
+            "output_schema": {
+                "type": "object",
+                "properties": {
+                    "outcome": {"type": "string"},
+                    "cases_checked": {"type": "integer"},
+                    "scope": {"type": "object"},
+                    "exact_arithmetic": {"type": "boolean"},
+                },
+                "required": ["outcome", "cases_checked", "scope", "exact_arithmetic"],
+            },
+            "dependencies": [],
         }
     if schema_name == "VerificationReport":
         if "[STAGE:structural_verification]" in text:
@@ -278,6 +316,7 @@ def demo_responder(
             ],
             "unresolved_conflicts": [],
             "required_actions": [],
+            "broad_computation_approved_strategy_ids": [],
             "failure_level": "none",
             "can_synthesize": True,
             "confidence": 0.96,
@@ -323,7 +362,7 @@ def build_demo_config(run_root: str = "runs") -> SystemConfig:
             id="planner",
             provider="mock",
             model="mock",
-            roles=["planner", "meta_reviewer"],
+            roles=["planner", "meta_reviewer", "experimenter"],
         ),
         AgentConfig(
             id="explorer-a",

@@ -11,7 +11,7 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [planner, meta_reviewer, final_verifier]
+    roles: [planner, meta_reviewer, final_verifier, experimenter]
     specialties: [problem_decomposition, strategy_generation, failure_classification, meta_review]
     max_concurrency: 1
     temperature: 0.0
@@ -186,6 +186,28 @@ continuation:
   max_failover_agents: 2
   process_resume_enabled: true
   retain_rejected_deltas: true
+
+computation:
+  enabled: true
+  policy: reasoning_first
+  typed_tools_enabled: true
+  sandboxed_python_enabled: true
+  sandbox_image: python@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93
+  sandbox_timeout_seconds: 20
+  sandbox_memory_mb: 256
+  sandbox_cpus: 1
+  sandbox_pids_limit: 32
+  execute_planner_hints_immediately: false
+  targeted_falsification_fast_path: true
+  soft_experiments_per_path: 2
+  hard_experiments_per_path: 6
+  max_compute_cycles_per_segment: 1
+  max_total_cpu_seconds: 120
+  max_cases_per_experiment: 1000000
+  max_output_chars: 20000
+  broad_search_after_stalled_rounds: 1
+  broad_search_requires_meta_review: true
+  cache_results: true
 
 runtime:
   run_root: runs
