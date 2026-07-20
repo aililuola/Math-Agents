@@ -2,7 +2,7 @@
 
 MathProofMesh 是面向高难度数学证明、逻辑推演和研究型推理任务的多智能体系统。它强调四件事：**隔离探索、抽象推理优先、独立验证、可恢复执行**。
 
-当前源码版本为 **0.6.0**。本地目录仍名为 `MathProofMesh-0.5.0`，这只是旧目录名；实际版本以 `pyproject.toml`、`BUILD_INFO.json` 和 `mathproofmesh.__version__` 为准。
+当前源码版本和本地目录版本均为 **0.6.0**；实际包版本以 `pyproject.toml`、`BUILD_INFO.json` 和 `mathproofmesh.__version__` 为准。
 
 > `verified` 表示结果通过了当前配置的自然语言独立审计链，并不等价于 Lean、Coq 或 Isabelle 内核证明。高风险结论仍应由领域专家或形式化证明助手复核。
 
@@ -39,7 +39,7 @@ MathProofMesh 是面向高难度数学证明、逻辑推演和研究型推理任
 Windows PowerShell：
 
 ```powershell
-cd C:\Users\yanxinyu\Desktop\MathProofMesh-0.3.1-DeepSeek-SSE\MathProofMesh-0.5.0
+cd C:\Users\yanxinyu\Desktop\MathProofMesh-0.3.1-DeepSeek-SSE\MathProofMesh-0.6.0
 
 # 仅第一次需要创建虚拟环境
 python -m venv .venv
