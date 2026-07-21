@@ -193,6 +193,10 @@ def demo_responder(
                         "status": "accepted",
                         "parsed_assumptions": message.get("assumptions", []),
                         "parsed_conclusion": message.get("conclusion", ""),
+                        "parsed_quantifiers": message.get("quantifiers", []),
+                        "parsed_variable_bindings": message.get(
+                            "variable_bindings", []
+                        ),
                         "semantic_hash": "",
                         "reason": "",
                         "delivered_round": int(requirement.get("delivered_round", 0)),
@@ -473,6 +477,33 @@ def demo_responder(
             "rejected_targets": {},
             "score_breakdown": {"mock_referee": 1.0},
         }
+    if schema_name == "ToolAuditReport":
+        context = _sanitized_context(text)
+        experiments = context.get("experiment_results", [])
+        replay = context.get("deterministic_replay_audits", [])
+        all_replayed = all(item.get("valid", False) for item in replay) and all(
+            item.get("outcome") != "counterexample_found"
+            or item.get("independently_verified", False)
+            for item in experiments
+        )
+        return {
+            "agent_id": context.get("authoritative_agent_id", "tool-mock"),
+            "route_id": context.get("route_id", "route-mock"),
+            "experiment_ids": [
+                str(item.get("request_hash") or item.get("experiment_id", ""))
+                for item in experiments
+            ],
+            "replay_artifact_refs": [
+                str(item.get("artifact_ref", ""))
+                for item in replay
+                if item.get("artifact_ref")
+            ],
+            "mathematical_mapping_checked": True,
+            "all_results_replayed_independently": all_replayed,
+            "issues": [] if all_replayed else ["deterministic replay is incomplete"],
+            "verdict": "pass" if all_replayed else "fail",
+            "confidence": 0.95,
+        }
     if schema_name == "MessageReceipt":
         context = _sanitized_context(text)
         message = context.get("message", {})
@@ -482,6 +513,8 @@ def demo_responder(
             "status": "accepted",
             "parsed_assumptions": message.get("assumptions", []),
             "parsed_conclusion": message.get("conclusion", ""),
+            "parsed_quantifiers": message.get("quantifiers", []),
+            "parsed_variable_bindings": message.get("variable_bindings", []),
             "semantic_hash": "",
             "reason": "",
             "delivered_round": int(context.get("delivered_round", 0)),

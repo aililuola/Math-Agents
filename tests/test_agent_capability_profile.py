@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from mathproofmesh.llm.pool import AgentPool
+from mathproofmesh.mock_demo import demo_responders
 from mathproofmesh.schemas import ProofStep
 from mathproofmesh.verification.capability_profile import AgentCapabilityProfile
 from mathproofmesh.verification.mutation import (
@@ -56,3 +58,44 @@ def test_accepting_mutated_false_proof_lowers_verifier_capability(tmp_path) -> N
         profile=profile,
     )
     assert profile.score("reviewer", "inequalities", "detailed_verifier") == 0.0
+
+
+def test_agent_pool_dispatch_uses_domain_role_capability(tmp_path) -> None:
+    config = make_v07_config(tmp_path / "runs")
+    config.topology.agent_capability.min_observations_before_trust_update = 1
+    next(agent for agent in config.agents if agent.id == "explorer-a").roles.append(
+        "representation_switchboard"
+    )
+    profile = AgentCapabilityProfile(config.topology.agent_capability)
+    profile.update(
+        "explorer-a",
+        "number_theory",
+        "prover",
+        kind="recent_task",
+        success=False,
+    )
+    profile.update(
+        "explorer-b",
+        "number_theory",
+        "prover",
+        kind="recent_task",
+        success=True,
+    )
+    profile.update(
+        "explorer-a",
+        "number_theory",
+        "representation_switchboard",
+        kind="recent_task",
+        success=False,
+    )
+    profile.update(
+        "explorer-b",
+        "number_theory",
+        "representation_switchboard",
+        kind="recent_task",
+        success=True,
+    )
+    pool = AgentPool(config, mock_responders=demo_responders(config))
+    pool.set_capability_context(profile, domain="number_theory")
+    assert pool.select("route_prover").id == "explorer-b"
+    assert pool.select("representation_switchboard").id == "explorer-b"

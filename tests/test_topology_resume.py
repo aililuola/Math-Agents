@@ -73,6 +73,11 @@ async def test_inspiration_resume_does_not_materialize_proposal_twice(tmp_path) 
         recommendation="attach_to_existing_route",
         confidence=0.9,
     )
+    review = (
+        await engine.review(
+            [proposal], precomputed_reviews={proposal.proposal_id: review}
+        )
+    )[0]
     first = engine.materialize([review], snapshot)
     state = engine.export_state()
 
@@ -149,6 +154,11 @@ async def test_inspiration_shadow_records_decision_without_state_mutation(
     )
     before_graph = graph.export_state()
     before_routes = registry.export_state()
+    review = (
+        await engine.review(
+            [proposal], precomputed_reviews={proposal.proposal_id: review}
+        )
+    )[0]
     decision = engine.materialize([review], snapshot)[0]
     assert decision.action == "shadow_only"
     assert memory.facts == memory.insights == memory.negatives == []
@@ -213,6 +223,11 @@ async def test_active_surprise_can_create_one_novel_route_within_budget(
         recommendation="create_new_route",
         confidence=0.9,
     )
+    review = (
+        await engine.review(
+            [proposal], precomputed_reviews={proposal.proposal_id: review}
+        )
+    )[0]
     decision = engine.materialize([review], snapshot)[0]
     assert decision.action == "route_created"
     assert decision.route_id is not None

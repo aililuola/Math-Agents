@@ -1,7 +1,7 @@
 """Risk-based validation escalation and empirical agent capability."""
 
-from .capability_profile import AgentCapabilityProfile
-from .escalation import ValidationEscalator
+from .capability_profile import AgentCapabilityProfile, infer_capability_domain
+from .escalation import ValidationEscalationExecutor, ValidationEscalator
 from .formal_microcert import (
     CompilerFeedbackInterpreter,
     FormalizationCandidateSelector,
@@ -19,5 +19,7 @@ __all__ = [
     "FormalVerifierBackend",
     "MutationKind",
     "ProofMutationHarness",
+    "ValidationEscalationExecutor",
     "ValidationEscalator",
+    "infer_capability_domain",
 ]

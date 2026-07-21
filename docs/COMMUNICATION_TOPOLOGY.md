@@ -61,6 +61,11 @@ packets. The returned `MessageReceipt` objects are checked against hashes
 recomputed by the Broker; a missing or mismatched required receipt prevents
 that continuation call from advancing its checkpoint.
 
+The old global `LemmaMemory` remains available to legacy mode and migration
+code, but `hierarchical_sparse` passes an empty `verified_legacy_claims` list to
+every Route Prover. A claim rejected by the Route Referee therefore cannot
+reappear in a neighboring route through the legacy router.
+
 ## Active Route Pipeline
 
 An active route is not labeled as a team after the old proof flow has already
@@ -74,6 +79,19 @@ The Skeptic is mandatory for key steps, computation-backed artifacts and
 anything approaching the global Fact gate. The Referee receives a sanitized
 artifact rather than raw route transcripts. If any required role is missing,
 fails, or returns an unrecognized result, the candidate remains route-local.
+Prover, Skeptic, Tool Specialist and Referee are pairwise distinct. A
+computation-backed delta invokes the assigned Tool Specialist through a typed
+LLM prompt and combines that mathematical scope audit with deterministic replay.
+
+Validation escalation is executed as a ladder rather than stored as a plan:
+deterministic integrity, same-model blind attack, adversarial referee,
+role-capable cross-provider review when available, and tool/formal evidence.
+Any configured required level that is missing or fails blocks Fact promotion.
+
+A successful Receipt only proves semantic delivery. Message utility remains
+zero until a committed verified Delta demonstrably cites the message or closes
+an obligation it claimed to close; route-wide progress alone is not attributed
+to every message in the inbox.
 
 ## Bridge And Conflict
 

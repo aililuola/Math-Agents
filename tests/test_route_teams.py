@@ -44,6 +44,17 @@ def test_high_risk_computation_uses_skeptic_tool_and_independent_referee(
     assert plan.skeptic is not None and plan.skeptic.agent_id != "explorer-a"
     assert plan.tool_specialist is not None
     assert plan.referee.agent_id not in {None, "explorer-a"}
+    assert (
+        len(
+            {
+                plan.prover.agent_id,
+                plan.skeptic.agent_id,
+                plan.tool_specialist.agent_id,
+                plan.referee.agent_id,
+            }
+        )
+        == 4
+    )
     assert registry.owns_agent("route-a", plan.referee.agent_id, RouteRole.REFEREE)
 
 

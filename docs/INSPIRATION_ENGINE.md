@@ -20,6 +20,12 @@ failed, high mechanism redundancy, a route consuming too much budget without
 progress, failed final repair and manual requests. It selects at most
 `max_inspiration_tasks_per_round`; it never opens every mechanism at once.
 
+Trigger detection and task construction are deterministic and cheap. Before
+any generator, referee or quick-skeptic model call, every task is converted to
+a typed scheduler action with a three-call cost estimate and passed through
+`SoftBudgetAllocator.admit_decision()`. Rejected tasks emit an admission record
+and make no provider call.
+
 A cheap exact falsification is still allowed early. Reasoning-first forbids
 computation as the default route generator, not inexpensive rejection of a
 precise false premise.
@@ -107,6 +113,12 @@ distinctness, relevance, coherence, hidden assumptions and immediate
 counterexamples, then chooses reject, store insight, attach, create route,
 request computation or request bridge verification. Self-reviewed inspiration
 cannot be broadcast.
+
+With `require_inspiration_referee: true`, missing, local-deterministic or
+self-review can at most store an Insight; it cannot attach or create a route.
+With the switch explicitly disabled, deterministic local admission is allowed.
+`max_new_routes_per_trigger` is counted across all mechanisms sharing the same
+trigger, not only Surprise proposals.
 
 ## Modes, Checkpoint And Activity
 

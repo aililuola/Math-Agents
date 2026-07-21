@@ -36,6 +36,30 @@ path rather than only recording post-hoc topology metadata:
   end-to-end deterministic tests. Inspiration and route-team state are emitted
   as stable structured artifacts for audit.
 
+## Secondary Audit Closure
+
+- Hierarchical Route Provers receive no legacy global ClaimMemory context;
+  all cross-route premises must arrive through Broker delivery and TypedMemory.
+- Receipts independently restate ordered quantifiers and variable bindings.
+  A scope or quantifier reversal is rejected before checkpoint advancement.
+- Prover, Skeptic, Tool Specialist and Referee assignments are pairwise
+  distinct. Missing independence leaves the artifact route-local.
+- Active hierarchical configuration now requires continuation, so users cannot
+  accidentally bypass the live typed route pipeline.
+- Validation escalation has an executor for deterministic, blind,
+  adversarial, cross-provider and tool/formal evidence. Agent capability
+  scores now participate in domain-role dispatch.
+- Blind final packets include Typed Fact scope/evidence/artifact metadata,
+  anonymized referee provenance and Typed NegativeMemory.
+- Inspiration tasks pass unified scheduler admission before model calls;
+  `require_inspiration_referee` and `max_new_routes_per_trigger` are enforced.
+- Message utility is credited only after a committed, verified delta cites the
+  message or closes a claimed obligation. Receipt acceptance alone is zero.
+- Computation-backed route artifacts invoke a real independent Tool Specialist
+  typed prompt in addition to deterministic replay.
+- Active output uses a 384K provider ceiling with a 64K operating limit per
+  Agent and continuation segment.
+
 ## Compatibility
 
 `legacy_sparse` remains the default for generic configuration and preserves the

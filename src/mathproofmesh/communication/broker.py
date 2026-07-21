@@ -54,6 +54,8 @@ class MessageBroker:
         self._deliveries: dict[str, dict[str, Any]] = {}
         self._route_queues: dict[str, list[str]] = defaultdict(list)
         self._receipts: dict[str, MessageReceipt] = {}
+        self._utility_records: dict[str, dict[str, Any]] = {}
+        self._review_provenance: dict[str, dict[str, Any]] = {}
         self._isolation_pending: dict[str, list[str]] = defaultdict(list)
         self._round_route_counts: dict[str, int] = defaultdict(int)
         self._round_global_counts: dict[int, int] = defaultdict(int)
@@ -277,6 +279,12 @@ class MessageBroker:
 
         self._messages[message.message_id] = message
         self._dedup[duplicate_key] = message.message_id
+        if referee_agent_id is not None:
+            self._review_provenance[message.message_id] = {
+                "referee_agent_id": referee_agent_id,
+                "independent": referee_agent_id != message.source_agent_id,
+                "review_round": current_round,
+            }
         # Only broker-admitted deliveries may make an artifact visible in a
         # target route's persistent typed-memory context. Requested but rejected
         # targets must not bypass the broker through MessageEnvelope metadata.
@@ -408,7 +416,11 @@ class MessageBroker:
                 "assumptions": receipt.parsed_assumptions,
                 "conclusion": receipt.parsed_conclusion,
                 "quantifiers": [
-                    item.model_dump(mode="json") for item in message.quantifiers
+                    item.model_dump(mode="json") for item in receipt.parsed_quantifiers
+                ],
+                "variable_bindings": [
+                    item.model_dump(mode="json")
+                    for item in receipt.parsed_variable_bindings
                 ],
             }
         )
@@ -419,6 +431,89 @@ class MessageBroker:
         delivery["status"] = receipt.status.value
         self._receipts[key] = receipt
         self._emit_delivery_event("message_acknowledged", receipt)
+
+    def record_utility(
+        self,
+        message_id: str,
+        target_route_id: str,
+        *,
+        referenced_step_ids: list[str] | None = None,
+        closed_obligation_ids: list[str] | None = None,
+        proof_debt_before: float | None = None,
+        proof_debt_after: float | None = None,
+    ) -> bool:
+        """Record only externally verified mathematical use, never mere receipt."""
+        key = delivery_key(message_id, target_route_id)
+        receipt = self._receipts.get(key)
+        if receipt is None or receipt.status != ReceiptStatus.ACCEPTED:
+            return False
+        step_ids = sorted(set(referenced_step_ids or []))
+        obligation_ids = sorted(set(closed_obligation_ids or []))
+        debt_reduction = 0.0
+        if proof_debt_before is not None and proof_debt_after is not None:
+            debt_reduction = max(0.0, proof_debt_before - proof_debt_after)
+        # A route-wide debt drop is not, by itself, attributable to this
+        # particular message. Require a verified citation or obligation closure;
+        # debt reduction then strengthens that already-established use.
+        if not step_ids and not obligation_ids:
+            return False
+        score = min(
+            1.0,
+            (0.4 if step_ids else 0.0)
+            + (0.4 if obligation_ids else 0.0)
+            + min(0.2, debt_reduction),
+        )
+        record = {
+            "message_id": message_id,
+            "target_route_id": target_route_id,
+            "referenced_step_ids": step_ids,
+            "closed_obligation_ids": obligation_ids,
+            "proof_debt_reduction": debt_reduction,
+            "score": score,
+        }
+        self._utility_records[key] = record
+        self._emit_delivery_event("message_used", record)
+        return True
+
+    def utility_for_route(self, route_id: str) -> float:
+        accepted_keys = [
+            key
+            for key, receipt in self._receipts.items()
+            if receipt.target_route_id == route_id
+            and receipt.status == ReceiptStatus.ACCEPTED
+        ]
+        if not accepted_keys:
+            return 0.0
+        return sum(
+            float(self._utility_records.get(key, {}).get("score", 0.0))
+            for key in accepted_keys
+        ) / len(accepted_keys)
+
+    def blind_review_provenance(self, message_id: str) -> dict[str, Any]:
+        """Return auditable referee provenance without leaking reviewer identity."""
+        record = self._review_provenance.get(message_id)
+        if record is None:
+            return {
+                "independent_referee_recorded": False,
+                "reviewer_count": 0,
+            }
+        referee = str(record.get("referee_agent_id", ""))
+        return {
+            "independent_referee_recorded": bool(record.get("independent", False)),
+            "reviewer_count": 1 if referee else 0,
+            "reviewer_identity_hash": (
+                stable_hash(
+                    {
+                        "problem_hash": self.route_registry.problem_hash,
+                        "message_id": message_id,
+                        "referee": referee,
+                    }
+                )
+                if referee
+                else ""
+            ),
+            "review_round": record.get("review_round"),
+        }
 
     def expire(self, current_round: int) -> list[str]:
         expired: list[str] = []
@@ -453,6 +548,8 @@ class MessageBroker:
                 key: value.model_dump(mode="json")
                 for key, value in self._receipts.items()
             },
+            "utility_records": dict(self._utility_records),
+            "review_provenance": dict(self._review_provenance),
             "isolation_pending": dict(self._isolation_pending),
             "round_route_counts": dict(self._round_route_counts),
             "round_global_counts": dict(self._round_global_counts),
@@ -502,6 +599,14 @@ class MessageBroker:
         broker._receipts = {
             str(key): MessageReceipt.model_validate(value)
             for key, value in dict(state.get("receipts", {})).items()
+        }
+        broker._utility_records = {
+            str(key): dict(value)
+            for key, value in dict(state.get("utility_records", {})).items()
+        }
+        broker._review_provenance = {
+            str(key): dict(value)
+            for key, value in dict(state.get("review_provenance", {})).items()
         }
         broker._isolation_pending = defaultdict(
             list,

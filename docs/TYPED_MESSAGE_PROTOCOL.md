@@ -51,8 +51,8 @@ status.
   "normalized_statement": "forall n:int l(n)",
   "assumptions": [],
   "conclusion": "L(n)",
-  "quantifiers": [{"variable_id": "n", "kind": "forall", "domain": "integer", "position": 0}],
-  "variable_bindings": [{"variable_id": "n", "display_name": "n"}],
+  "quantifiers": [{"order": 0, "variable_id": "n", "display_name": "n", "kind": "forall", "domain": "integer", "restrictions": []}],
+  "variable_bindings": [{"variable_id": "n", "display_name": "n", "domain": "integer", "owner_scope": "claim", "aliases": []}],
   "dependencies": [],
   "scope_limitations": [],
   "evidence_type": "natural_proof_audited",
@@ -69,10 +69,19 @@ status.
 ## Receipts And Exactly Once
 
 `MessageReceipt` binds the message hash, target route, delivery key, status and
-round. Status is `accepted`, `rejected`, `duplicate`, `expired` or `deferred`.
+round. The receiver must independently return `parsed_assumptions`,
+`parsed_conclusion`, `parsed_quantifiers` and `parsed_variable_bindings`; the
+Broker recomputes the semantic hash from those parsed fields rather than
+reusing the sender's scope. Status is `accepted`, `rejected`, `duplicate`,
+`expired` or `deferred`.
 `prompt_consumed` is checkpointed separately from acknowledgement. On resume,
 a consumed delivery is never emitted again even when its receipt remains
 pending.
+
+Optional `referenced_in_step_ids` and `claimed_closed_obligation_ids` are only
+utility claims. After the checkpoint passes, the Broker phase checks them
+against the actual Delta and Proof Graph. Receipt acceptance alone never
+increases mathematical message utility.
 
 Rejected examples include a mismatched problem hash, external/path-traversing
 artifact reference, author-refereed fact, bounded experiment labeled as fact,

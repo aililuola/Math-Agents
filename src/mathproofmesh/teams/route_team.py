@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from ..config import SystemConfig
+from ..cross_route_phase import distinct_agent_exclusions
 from ..schemas import (
     BrokerDecision,
     ClaimStatus,
@@ -11,6 +12,7 @@ from ..schemas import (
     ProofAttempt,
     ProofDelta,
     RouteRole,
+    ToolAuditReport,
     VerificationReport,
     VerificationVerdict,
 )
@@ -178,16 +180,24 @@ class RouteTeam:
                 route_id,
                 RouteRole.TOOL_SPECIALIST,
                 round_index=round_index,
-                exclude={prover_agent_id},
+                exclude=distinct_agent_exclusions(
+                    prover_agent_id,
+                    skeptic.agent_id if skeptic is not None else None,
+                ),
             )
             if risk.needs_tool and self.config.topology.route_teams.tool_agent_on_demand
             else None
+        )
+        referee_exclude = distinct_agent_exclusions(
+            prover_agent_id,
+            skeptic.agent_id if skeptic is not None else None,
+            tool.agent_id if tool is not None else None,
         )
         referee = self.role_runner.select(
             route_id,
             RouteRole.REFEREE,
             round_index=round_index,
-            exclude={prover_agent_id},
+            exclude=referee_exclude,
         )
         diagnostics: list[str] = []
         global_share = referee.agent_id is not None
@@ -249,12 +259,20 @@ class RouteTeam:
                 )
             else:
                 result.tool_result = await tool_handler(plan.tool_specialist, artifact)
-                if result.tool_result is None or (
+                tool_passed = (
+                    isinstance(result.tool_result, ToolAuditReport)
+                    and result.tool_result.verdict == "pass"
+                    and result.tool_result.mathematical_mapping_checked
+                    and result.tool_result.all_results_replayed_independently
+                ) or (
                     isinstance(result.tool_result, dict)
-                    and not result.tool_result.get(
-                        "all_results_replayed_independently", False
+                    and bool(
+                        result.tool_result.get(
+                            "all_results_replayed_independently", False
+                        )
                     )
-                ):
+                )
+                if not tool_passed:
                     result.global_share_allowed = False
                     result.diagnostics.append(
                         "tool evidence was not independently replayed; artifact remains route-local"

@@ -392,6 +392,9 @@ class MessageEnvelope(StrictModel):
                 "quantifiers": [
                     item.model_dump(mode="json") for item in self.quantifiers
                 ],
+                "variable_bindings": [
+                    item.model_dump(mode="json") for item in self.variable_bindings
+                ],
             }
         )
 
@@ -428,10 +431,49 @@ class MessageReceipt(StrictModel):
     status: ReceiptStatus
     parsed_assumptions: list[str] = Field(default_factory=list)
     parsed_conclusion: str = ""
+    parsed_quantifiers: list[QuantifierSpec] = Field(default_factory=list)
+    parsed_variable_bindings: list[VariableBinding] = Field(default_factory=list)
+    referenced_in_step_ids: list[str] = Field(default_factory=list)
+    claimed_closed_obligation_ids: list[str] = Field(default_factory=list)
     semantic_hash: str = ""
     reason: str = ""
     delivered_round: int = Field(ge=0)
     acknowledged_at: str = Field(default_factory=utc_now_iso)
+
+    @model_validator(mode="after")
+    def validate_parsed_scope(self) -> "MessageReceipt":
+        orders = [item.order for item in self.parsed_quantifiers]
+        if len(orders) != len(set(orders)):
+            raise ValueError("parsed quantifier orders must be unique")
+        if orders and sorted(orders) != list(range(len(orders))):
+            raise ValueError(
+                "parsed quantifier orders must be contiguous and start at zero"
+            )
+        binding_ids = [item.variable_id for item in self.parsed_variable_bindings]
+        if len(binding_ids) != len(set(binding_ids)):
+            raise ValueError("parsed variable binding IDs must be unique")
+        bindings = {item.variable_id: item for item in self.parsed_variable_bindings}
+        for quantifier in self.parsed_quantifiers:
+            binding = bindings.get(quantifier.variable_id)
+            if binding is None:
+                raise ValueError(
+                    f"parsed quantified variable {quantifier.variable_id!r} has no binding"
+                )
+            if binding.domain != quantifier.domain:
+                raise ValueError("parsed quantifier and binding domains must agree")
+        return self
+
+
+class ToolAuditReport(StrictModel):
+    agent_id: str
+    route_id: str
+    experiment_ids: list[str] = Field(default_factory=list)
+    replay_artifact_refs: list[str] = Field(default_factory=list)
+    mathematical_mapping_checked: bool = False
+    all_results_replayed_independently: bool = False
+    issues: list[str] = Field(default_factory=list)
+    verdict: Literal["pass", "fail", "inconclusive"] = "inconclusive"
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class RouteMember(StrictModel):
@@ -1124,6 +1166,7 @@ class BlindReviewPacket(StrictModel):
     problem: ProblemContract
     final_proof_text: str
     cited_fact_packets: list[dict[str, Any]] = Field(default_factory=list)
+    negative_evidence_packets: list[dict[str, Any]] = Field(default_factory=list)
     forbidden_claims: list[str] = Field(default_factory=list)
 
 

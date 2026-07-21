@@ -6,7 +6,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 import httpx
 
@@ -19,7 +19,34 @@ from .gemini import GeminiClient
 from .mock import MockClient, MockResponder
 from .openai_compatible import OpenAICompatibleClient
 
+if TYPE_CHECKING:
+    from ..verification.capability_profile import AgentCapabilityProfile
+
 logger = logging.getLogger(__name__)
+
+CAPABILITY_ROLE_MAP: dict[str, str] = {
+    "planner": "prover",
+    "explorer": "prover",
+    "route_prover": "prover",
+    "general": "prover",
+    "route_skeptic": "skeptic",
+    "counterexample_hunter": "skeptic",
+    "route_referee": "route_referee",
+    "structural_verifier": "structural_verifier",
+    "detailed_verifier": "detailed_verifier",
+    "final_verifier": "detailed_verifier",
+    "analogy_agent": "analogy_agent",
+    "construction_inventor": "construction_inventor",
+    "representation_switchboard": "representation_switchboard",
+    "invariant_hypothesis_agent": "invariant_hypothesis_agent",
+    "reverse_goal_analyzer": "reverse_goal_analyzer",
+    "meta_strategist": "meta_strategist",
+    "inspiration_referee": "inspiration_referee",
+    "bridge_prover": "bridge_prover",
+    "conflict_resolver": "conflict_resolver",
+    "tool_specialist": "tool_agent",
+    "experimenter": "tool_agent",
+}
 
 
 class AgentCallFailure(RuntimeError):
@@ -239,6 +266,8 @@ class AgentPool:
         self._global_semaphore = asyncio.Semaphore(config.runtime.max_parallel_calls)
         self._agents: dict[str, AgentRuntime] = {}
         self._selection_counter = 0
+        self._capability_profile: AgentCapabilityProfile | None = None
+        self._capability_domain = "algebra"
         mock_responders = mock_responders or {}
         for agent_config in config.agents:
             if not agent_config.enabled:
@@ -310,6 +339,22 @@ class AgentPool:
         except KeyError as exc:
             raise KeyError(f"unknown agent: {agent_id}") from exc
 
+    def set_capability_context(
+        self,
+        profile: "AgentCapabilityProfile | None",
+        *,
+        domain: str,
+    ) -> None:
+        self._capability_profile = profile
+        self._capability_domain = domain
+
+    def capability_score(self, agent: AgentRuntime, role: str) -> float:
+        profile = self._capability_profile
+        capability_role = CAPABILITY_ROLE_MAP.get(role)
+        if profile is None or capability_role is None or not profile.config.enabled:
+            return 0.5
+        return profile.score(agent.id, self._capability_domain, capability_role)
+
     def select(
         self,
         role: str,
@@ -355,8 +400,10 @@ class AgentPool:
                 hashlib.sha256(agent.id.encode("utf-8")).digest()[:4], "big"
             )
             rotation = ((stable_id + self._selection_counter) % 17) / 10000.0
+            capability = self.capability_score(agent, role)
             return (
-                agent.trust_score
+                0.72 * capability
+                + 0.28 * agent.trust_score
                 + cross_provider
                 + specialty
                 - load_penalty

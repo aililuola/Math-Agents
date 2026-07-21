@@ -22,6 +22,8 @@ MathProofMesh 是面向高难度数学证明、逻辑推演和研究型推理任
 
 通用配置仍默认 `legacy_sparse`。DeepSeek 正式版和冒烟版先以 `proof_graph: shadow`、`inspiration: shadow` 观察诊断；实验配置 `config.deepseek-v4-pro.topology-active.yaml` 才会正式让图和灵感提案改变调度。
 
+二次符合性审计指出的运行闭环现已收口：`hierarchical_sparse` 的 Route Prover 不再读取旧 `LemmaMemory` 的跨路线 Claim；Receipt 会独立回传并校验有序量词与变量绑定；Prover、Skeptic、Tool Specialist、Referee 强制相互独立；Active 拓扑强制启用 continuation；Validation Escalation 会执行而不只生成计划；domain-role Capability 参与派工；盲终审包含匿名化的 Typed Fact/Negative provenance；灵感任务在模型调用前经过统一预算准入；消息只有被已验证 Delta 实际引用后才获得 utility；计算证据由真实 Tool Specialist Agent 审计。上述阶段逻辑已分别下沉到 `route_pipeline.py`、`broker_phase.py`、`inspiration_phase.py`、`cross_route_phase.py`、`synthesis_phase.py` 和 `resume_phase.py`。
+
 ## 0.6.0 推理优先计算基础
 
 0.6.0 在 0.5.1 的验证式多 Agent 工作流上增加了“推理优先计算协议”。目标不是让系统优先穷举，而是把必要的数值检查从长篇推理文本中抽离出来，用可审计、受预算约束的工具完成。
@@ -166,6 +168,8 @@ Activity 只显示阶段、任务和结构化结果摘要，不显示原始 `rea
 | 模型生成 Python 沙箱 | 开启（需 Docker） | 开启（需 Docker） |
 
 “正式版最多 12 步”指 `continuation.max_new_steps_per_call: 12`：一次分段调用最多提交 12 个新的结构化证明步骤。它不表示整道题只能有 12 步。正式版每条路线最多 12 个分段，仍受总调用、总 token、费用和调度预算限制。
+
+高预算 Active 拓扑配置把供应商硬上限与日常运行上限分开：`provider_max_output_tokens: 384000` 只用于校验供应商能力，Agent 与单段证明默认实际请求上限均为 `64000`。该配置仍保留 150 次调用和 10,000,000 tokens 的整次运行硬上限，但调度器会保护综合、终审与修订储备。
 
 ## 推理优先计算流程
 

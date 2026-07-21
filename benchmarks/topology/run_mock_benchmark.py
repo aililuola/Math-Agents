@@ -152,6 +152,7 @@ VARIANTS = (
 def _config(run_root: Path) -> SystemConfig:
     payload = build_demo_config(str(run_root)).model_dump(mode="python")
     payload["budget"].update({"max_total_calls": 64, "max_paths": 8})
+    payload["continuation"]["enabled"] = True
     payload["topology"] = {
         "mode": "hierarchical_sparse",
         "typed_communication": {"enabled": True},

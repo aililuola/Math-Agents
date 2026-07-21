@@ -28,6 +28,13 @@ CAPABILITY_ROLES = frozenset(
         "detailed_verifier",
         "analogy_agent",
         "construction_inventor",
+        "representation_switchboard",
+        "invariant_hypothesis_agent",
+        "reverse_goal_analyzer",
+        "meta_strategist",
+        "inspiration_referee",
+        "bridge_prover",
+        "conflict_resolver",
         "tool_agent",
     }
 )
@@ -141,3 +148,57 @@ class AgentCapabilityProfile:
             profile._cells[(cell.agent_id, cell.domain, cell.role)] = cell
         profile.ignored_self_reports = int(state.get("ignored_self_reports", 0))
         return profile
+
+
+def infer_capability_domain(*texts: str) -> str:
+    """Infer a coarse dispatch domain; this score never changes proof truth gates."""
+    text = " ".join(texts).casefold()
+    keyword_groups = (
+        (
+            "geometry",
+            (
+                "triangle",
+                "circle",
+                "angle",
+                "collinear",
+                "geometry",
+                "三角",
+                "圆",
+                "角",
+            ),
+        ),
+        (
+            "number_theory",
+            (
+                "prime",
+                "integer",
+                "divisib",
+                "congruen",
+                "modulo",
+                "素数",
+                "整数",
+                "整除",
+                "同余",
+            ),
+        ),
+        (
+            "combinatorics",
+            ("graph", "count", "pigeonhole", "coloring", "组合", "计数", "图论"),
+        ),
+        (
+            "inequalities",
+            ("inequal", "cauchy", "jensen", "bound", "不等式", "柯西"),
+        ),
+        (
+            "logic",
+            ("quantifier", "logical", "if and only if", "量词", "逻辑", "当且仅当"),
+        ),
+        (
+            "computation",
+            ("algorithm", "enumerat", "program", "python", "算法", "枚举", "计算"),
+        ),
+    )
+    for domain, keywords in keyword_groups:
+        if any(keyword in text for keyword in keywords):
+            return domain
+    return "algebra"

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Iterable
+import inspect
+from typing import Awaitable, Callable, Iterable, Mapping
 
 from pydantic import Field
 
@@ -22,6 +23,27 @@ class EscalationPlan(StrictModel):
     levels: list[ValidationLevel]
     diagnostics: list[str] = Field(default_factory=list)
     blocks_fact_promotion: bool = False
+
+
+class ValidationStepResult(StrictModel):
+    level: ValidationLevel
+    executed: bool
+    passed: bool
+    evidence_refs: list[str] = Field(default_factory=list)
+    diagnostic: str = ""
+
+
+class ValidationExecution(StrictModel):
+    plan: EscalationPlan
+    steps: list[ValidationStepResult] = Field(default_factory=list)
+    passed: bool = False
+    fact_promotion_allowed: bool = False
+    diagnostics: list[str] = Field(default_factory=list)
+
+
+ValidationHandler = Callable[
+    [], bool | ValidationStepResult | Awaitable[bool | ValidationStepResult]
+]
 
 
 class ValidationEscalator:
@@ -81,4 +103,63 @@ class ValidationEscalator:
             levels=list(dict.fromkeys(levels)),
             diagnostics=diagnostics,
             blocks_fact_promotion=(before_fact_promotion and should_escalate),
+        )
+
+
+class ValidationEscalationExecutor:
+    """Execute every admitted validation level and fail closed on missing evidence."""
+
+    async def execute(
+        self,
+        plan: EscalationPlan,
+        handlers: Mapping[ValidationLevel, ValidationHandler],
+    ) -> ValidationExecution:
+        steps: list[ValidationStepResult] = []
+        diagnostics = list(plan.diagnostics)
+        for level in plan.levels:
+            handler = handlers.get(level)
+            if handler is None:
+                result = ValidationStepResult(
+                    level=level,
+                    executed=False,
+                    passed=False,
+                    diagnostic=f"required {level.value} validation was not executed",
+                )
+            else:
+                try:
+                    value = handler()
+                    if inspect.isawaitable(value):
+                        value = await value
+                    result = (
+                        value
+                        if isinstance(value, ValidationStepResult)
+                        else ValidationStepResult(
+                            level=level,
+                            executed=True,
+                            passed=bool(value),
+                        )
+                    )
+                    if result.level != level:
+                        result = result.model_copy(update={"level": level})
+                except Exception as exc:  # validation failure is evidence, not a crash
+                    result = ValidationStepResult(
+                        level=level,
+                        executed=True,
+                        passed=False,
+                        diagnostic=f"{type(exc).__name__}: {exc}",
+                    )
+            steps.append(result)
+            if result.diagnostic:
+                diagnostics.append(result.diagnostic)
+        required_backend_missing = any(
+            "remains pending" in diagnostic for diagnostic in diagnostics
+        )
+        passed = all(step.executed and step.passed for step in steps)
+        passed = passed and not required_backend_missing
+        return ValidationExecution(
+            plan=plan,
+            steps=steps,
+            passed=passed,
+            fact_promotion_allowed=(passed if plan.blocks_fact_promotion else True),
+            diagnostics=diagnostics,
         )

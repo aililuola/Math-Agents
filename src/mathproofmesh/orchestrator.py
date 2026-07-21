@@ -96,6 +96,7 @@ from .schemas import (
     StrategyCard,
     StrategySet,
     TriageResult,
+    ToolAuditReport,
     UsageRecord,
     VerificationIssue,
     VerificationReport,
@@ -114,7 +115,19 @@ from .topology import (
     select_sparse_route_neighbors,
     strategy_text,
 )
-from .verification import AgentCapabilityProfile, ValidationEscalator
+from .verification import (
+    AgentCapabilityProfile,
+    ValidationEscalationExecutor,
+    ValidationEscalator,
+    infer_capability_domain,
+)
+from .verification.escalation import ValidationLevel, ValidationStepResult
+from .synthesis_phase import build_blind_review_packet
+from .broker_phase import record_verified_message_usage
+from .inspiration_phase import admit_inspiration_tasks
+from .cross_route_phase import team_reviews_allow_global_share
+from .resume_phase import export_hierarchical_checkpoint
+from .route_pipeline import acknowledge_route_messages, build_route_prompt_context
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
@@ -155,6 +168,7 @@ class SolveState:
     validation_escalator: ValidationEscalator | None = None
     final_repair_failed: bool = False
     route_team_reviews: dict[str, list[dict[str, Any]]] | None = None
+    capability_domain: str = "algebra"
 
 
 class ProofMeshOrchestrator:
@@ -292,6 +306,16 @@ class ProofMeshOrchestrator:
             )
             state.triage = await self._triage(problem, runner, prompts, store)
             problem.problem_kind = state.triage.problem_kind
+            state.capability_domain = infer_capability_domain(
+                problem.exact_statement,
+                state.triage.rationale,
+                *state.triage.key_risks,
+                *state.triage.likely_tools,
+            )
+            pool.set_capability_context(
+                state.capability_profile,
+                domain=state.capability_domain,
+            )
             activity.complete_task(
                 triage_task,
                 title=activity.text("题目分析完成", "Problem triage completed"),
@@ -618,6 +642,7 @@ class ProofMeshOrchestrator:
                     store=store,
                     runner=runner,
                     prompts=prompts,
+                    allocator=allocator,
                 )
                 graph_signals = self._hierarchical_graph_signals(state)
                 stats = budget_manager.build_path_stats(
@@ -1026,6 +1051,7 @@ class ProofMeshOrchestrator:
                         memory,
                         tools,
                         store,
+                        state=state,
                     )
                     state.reports.extend(final_bundle.reports)
                     state.final_verification = final_bundle.aggregate
@@ -1145,6 +1171,7 @@ class ProofMeshOrchestrator:
                             memory,
                             tools,
                             store,
+                            state=state,
                         )
                         state.reports.extend(final_bundle.reports)
                         state.final_verification = final_bundle.aggregate
@@ -1429,6 +1456,7 @@ class ProofMeshOrchestrator:
         )
         pool = AgentPool(self.config, mock_responders=self.mock_responders)
         runner = StructuredAgentRunner(self.config, pool, store, activity=activity)
+        allocator = SoftBudgetAllocator(self.config, runner.ledger)
         prompts = PromptFactory(
             self.config.runtime.output_language,
             computation_enabled=self.config.computation.enabled,
@@ -1563,6 +1591,16 @@ class ProofMeshOrchestrator:
 
             if state.triage is None:
                 state.triage = await self._triage(problem, runner, prompts, store)
+            state.capability_domain = infer_capability_domain(
+                problem.exact_statement,
+                state.triage.rationale,
+                *state.triage.key_risks,
+                *state.triage.likely_tools,
+            )
+            pool.set_capability_context(
+                state.capability_profile,
+                domain=state.capability_domain,
+            )
             if not state.strategies:
                 state.strategies = await self._initial_strategies(
                     problem,
@@ -1680,6 +1718,7 @@ class ProofMeshOrchestrator:
                     store=store,
                     runner=runner,
                     prompts=prompts,
+                    allocator=allocator,
                 )
                 if state.attempts and runner.ledger.remaining_calls > 0:
                     review = await self._meta_review(
@@ -1731,6 +1770,7 @@ class ProofMeshOrchestrator:
                         memory,
                         tools,
                         store,
+                        state=state,
                     )
                     state.reports.extend(final_bundle.reports)
                     state.final_verification = final_bundle.aggregate
@@ -2120,10 +2160,9 @@ class ProofMeshOrchestrator:
             team_reviews = (state.route_team_reviews or {}).get(attempt.attempt_id, [])
             team_review = team_reviews[-1] if team_reviews else None
             teams_enabled = self.config.topology.route_teams.enabled
-            team_global_allowed = (
-                all(bool(item.get("global_share_allowed")) for item in team_reviews)
-                if team_reviews
-                else not teams_enabled
+            team_global_allowed = team_reviews_allow_global_share(
+                team_reviews,
+                teams_enabled=teams_enabled,
             )
             if teams_enabled:
                 referee_id = (
@@ -2194,58 +2233,6 @@ class ProofMeshOrchestrator:
                 tier = MemoryTier.FACT
                 evidence = EvidenceType.NATURAL_PROOF_AUDITED
                 message_type = MessageType.VERIFIED_LEMMA
-                target_reports = [
-                    item
-                    for item in state.reports
-                    if item.target_id == attempt.attempt_id
-                    and item.agent_id != "system-aggregate"
-                ]
-                if state.validation_escalator is not None:
-                    escalation = state.validation_escalator.plan(
-                        risk_score=min(
-                            1.0,
-                            (1.0 - confidence)
-                            + 0.08 * len(report.issues if report else []),
-                        ),
-                        reviewer_verdicts=[
-                            item.verdict.value for item in target_reports
-                        ],
-                        cross_provider_available=(
-                            len(
-                                {
-                                    item.provider
-                                    for item in self.config.agents
-                                    if item.enabled
-                                }
-                            )
-                            > 1
-                        ),
-                        tool_or_formal_available=(
-                            self.config.verification.enable_sympy_tools
-                            or self.config.verification.enable_lean
-                        ),
-                        before_fact_promotion=True,
-                    )
-                    store.append_event(
-                        "validation_escalation_planned",
-                        {
-                            "target_id": attempt.attempt_id,
-                            **escalation.model_dump(mode="json"),
-                        },
-                    )
-                    independent_reviewers = {
-                        item.agent_id
-                        for item in target_reports
-                        if item.agent_id != attempt.agent_id
-                    }
-                    if (
-                        escalation.blocks_fact_promotion
-                        and len(independent_reviewers) < 2
-                    ):
-                        tier = MemoryTier.INSIGHT
-                        evidence = EvidenceType.UNVERIFIED_IDEA
-                        message_type = MessageType.CLAIM_PROPOSAL
-                        verification_status = ClaimStatus.UNCERTAIN
             elif claim.status == ClaimStatus.REJECTED:
                 tier = MemoryTier.NEGATIVE
                 message_type = MessageType.FAILURE_RECORD
@@ -2598,18 +2585,10 @@ class ProofMeshOrchestrator:
         )
         message_utility_by_route: dict[str, float] = {}
         if state.message_broker is not None:
-            for route in routes:
-                receipts = [
-                    item
-                    for item in state.message_broker.receipts
-                    if item.target_route_id == route.route_id
-                ]
-                accepted = sum(
-                    item.status == ReceiptStatus.ACCEPTED for item in receipts
-                )
-                message_utility_by_route[route.route_id] = (
-                    accepted / len(receipts) if receipts else 0.0
-                )
+            message_utility_by_route = {
+                route.route_id: state.message_broker.utility_for_route(route.route_id)
+                for route in routes
+            }
         return InspirationSnapshot(
             round_index=state.current_round,
             domain=(state.triage.problem_kind.value if state.triage else "unknown"),
@@ -2671,6 +2650,7 @@ class ProofMeshOrchestrator:
         store: ArtifactStore,
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
+        allocator: SoftBudgetAllocator,
     ) -> None:
         snapshot = self._inspiration_snapshot(state, remaining_calls=remaining_calls)
         engine = state.inspiration_engine
@@ -2678,6 +2658,25 @@ class ProofMeshOrchestrator:
             return
         triggers = engine.detect_triggers(snapshot)
         tasks = engine.select_tasks(triggers, snapshot)
+        admission = admit_inspiration_tasks(
+            tasks,
+            allocator,
+            current_path_count=snapshot.current_path_count,
+            has_candidate=self._has_synthesis_ready_candidate(state),
+        )
+        store.append_event(
+            "inspiration_scheduler_admission",
+            {
+                "admitted_task_ids": [
+                    task.task_id for task in admission.admitted_tasks
+                ],
+                "rejected": admission.rejected,
+                "decision": admission.decision.model_dump(mode="json"),
+            },
+        )
+        tasks = admission.admitted_tasks
+        if not tasks:
+            return
         proposals = await self._generate_inspiration_proposals(
             engine,
             tasks,
@@ -2765,7 +2764,7 @@ class ProofMeshOrchestrator:
             if not candidates:
                 proposals.extend(await engine.generate([task]))
                 continue
-            agent = max(candidates, key=lambda item: (item.trust_score, item.id))
+            agent = runner.pool.select(role)
             result = await self._safe_call(
                 runner,
                 role,
@@ -2912,11 +2911,16 @@ class ProofMeshOrchestrator:
                     open_obligation_ids=snapshot.open_obligation_ids,
                     existing_signatures=snapshot.route_signatures,
                 )
-                precomputed[proposal.proposal_id] = local.model_copy(
-                    update={"recommendation": "store_insight"}
+                precomputed[proposal.proposal_id] = (
+                    local.model_copy(update={"recommendation": "store_insight"})
+                    if engine.inspiration_config.require_inspiration_referee
+                    else local
                 )
                 continue
-            reviewer = max(eligible, key=lambda item: (item.trust_score, item.id))
+            reviewer = runner.pool.select(
+                "inspiration_referee",
+                exclude={proposal.source_agent_id},
+            )
             result = await self._safe_call(
                 runner,
                 "inspiration_referee",
@@ -2939,8 +2943,10 @@ class ProofMeshOrchestrator:
                     open_obligation_ids=snapshot.open_obligation_ids,
                     existing_signatures=snapshot.route_signatures,
                 )
-                precomputed[proposal.proposal_id] = local.model_copy(
-                    update={"recommendation": "store_insight"}
+                precomputed[proposal.proposal_id] = (
+                    local.model_copy(update={"recommendation": "store_insight"})
+                    if engine.inspiration_config.require_inspiration_referee
+                    else local
                 )
                 continue
             review = result.value
@@ -3489,6 +3495,7 @@ class ProofMeshOrchestrator:
                 str(key): [dict(item) for item in value]
                 for key, value in dict(payload.get("route_team_reviews", {})).items()
             },
+            capability_domain=str(payload.get("capability_domain", "algebra")),
         )
 
     async def _triage(
@@ -3710,45 +3717,15 @@ class ProofMeshOrchestrator:
         if route_id is None:
             return None, [], {}
 
-        delivered = state.message_broker.inbox(
-            route_id,
+        delivered, context = build_route_prompt_context(
+            self.config,
+            route_id=route_id,
             current_round=current_round,
+            broker=state.message_broker,
+            typed_memory=state.typed_memory,
+            proof_graph=state.proof_graph,
         )
-        open_obligations = []
-        if state.proof_graph is not None:
-            open_obligations = [
-                obligation
-                for obligation in state.proof_graph.obligations
-                if obligation.status not in {"closed", "refuted"}
-                and (not obligation.route_ids or route_id in obligation.route_ids)
-            ]
-        receipt_requirements: list[dict[str, Any]] = []
-        for message in delivered:
-            delivery = (
-                state.message_broker.delivery_record(message.message_id, route_id) or {}
-            )
-            receipt_requirements.append(
-                {
-                    "message_id": message.message_id,
-                    "target_route_id": route_id,
-                    "delivered_round": int(
-                        delivery.get("delivered_round", current_round)
-                    ),
-                }
-            )
-        return (
-            route_id,
-            delivered,
-            {
-                "route_id": route_id,
-                "broker_messages": delivered,
-                "message_receipt_requirements": receipt_requirements,
-                "fact_inbox": state.typed_memory.facts_for_route(route_id),
-                "insight_hints": state.typed_memory.insights_for_route(route_id),
-                "negative_memory": state.typed_memory.negatives_for_route(route_id),
-                "open_obligations": open_obligations,
-            },
-        )
+        return route_id, delivered, context
 
     @staticmethod
     def _acknowledge_route_messages(
@@ -3759,45 +3736,13 @@ class ProofMeshOrchestrator:
         route_id: str,
         current_round: int,
     ) -> list[MessageReceipt]:
-        candidates = {receipt.message_id: receipt for receipt in receipts}
-        acknowledged: list[MessageReceipt] = []
-        for message in delivered:
-            candidate = candidates.get(message.message_id)
-            delivery = broker.delivery_record(message.message_id, route_id) or {}
-            delivered_round = int(delivery.get("delivered_round", current_round))
-            if candidate is None:
-                receipt = MessageReceipt(
-                    message_id=message.message_id,
-                    target_route_id=route_id,
-                    status=ReceiptStatus.REJECTED,
-                    reason="target route omitted the required semantic receipt",
-                    delivered_round=delivered_round,
-                )
-            else:
-                parsed_hash = stable_hash(
-                    {
-                        "assumptions": candidate.parsed_assumptions,
-                        "conclusion": candidate.parsed_conclusion,
-                        "quantifiers": [
-                            item.model_dump(mode="json") for item in message.quantifiers
-                        ],
-                    }
-                )
-                receipt = MessageReceipt(
-                    receipt_id=candidate.receipt_id,
-                    message_id=message.message_id,
-                    target_route_id=route_id,
-                    status=candidate.status,
-                    parsed_assumptions=candidate.parsed_assumptions,
-                    parsed_conclusion=candidate.parsed_conclusion,
-                    semantic_hash=parsed_hash,
-                    reason=candidate.reason,
-                    delivered_round=delivered_round,
-                    acknowledged_at=candidate.acknowledged_at,
-                )
-            broker.acknowledge(receipt)
-            acknowledged.append(receipt)
-        return acknowledged
+        return acknowledge_route_messages(
+            broker,
+            delivered,
+            receipts,
+            route_id=route_id,
+            current_round=current_round,
+        )
 
     async def _run_active_route_team(
         self,
@@ -3815,6 +3760,7 @@ class ProofMeshOrchestrator:
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
         store: ArtifactStore,
+        tools: ToolBroker,
     ) -> Any | None:
         if (
             state is None
@@ -3902,18 +3848,84 @@ class ProofMeshOrchestrator:
             store.append_event("route_skeptic_completed", report)
             return report
 
-        async def tool_handler(assignment: Any, _artifact: Any) -> Any:
-            audit = {
-                "agent_id": assignment.agent_id,
-                "route_id": route_id,
-                "experiment_results": list(experiment_results),
-                "all_results_replayed_independently": all(
-                    bool(item.get("independently_verified"))
-                    for item in experiment_results
-                    if item.get("outcome")
-                    == ExperimentOutcome.COUNTEREXAMPLE_FOUND.value
-                ),
+        async def tool_handler(assignment: Any, artifact: Any) -> Any:
+            specialist = team.role_runner.runtime(assignment)
+            expected_request_hashes = {
+                str(item.get("request_hash"))
+                for item in experiment_results
+                if item.get("request_hash")
             }
+            replay_audits = [
+                item
+                for item in tools.audit_key_results()
+                if str(item.get("request_hash")) in expected_request_hashes
+            ]
+            call = await self._safe_call(
+                runner,
+                "tool_specialist",
+                prompts.route_tool_audit(
+                    problem=problem,
+                    route_id=route_id,
+                    strategy=strategy,
+                    candidate_delta=artifact,
+                    experiment_results=list(experiment_results),
+                    deterministic_replay_audits=replay_audits,
+                    authoritative_agent_id=specialist.id,
+                ),
+                fixed_agent=specialist,
+                budget_bucket="verification",
+            )
+            if call is None:
+                return None
+            audit: ToolAuditReport = call.value
+            replayed_hashes = {str(item.get("request_hash")) for item in replay_audits}
+            reported_experiments_match = (
+                set(audit.experiment_ids) == expected_request_hashes
+            )
+            deterministic_pass = (
+                bool(expected_request_hashes)
+                and replayed_hashes == expected_request_hashes
+                and reported_experiments_match
+                and all(bool(item.get("valid", False)) for item in replay_audits)
+                and all(
+                    item.get("outcome") != ExperimentOutcome.COUNTEREXAMPLE_FOUND.value
+                    or bool(item.get("independently_verified"))
+                    for item in experiment_results
+                )
+            )
+            audit.agent_id = specialist.id
+            audit.route_id = route_id
+            audit.experiment_ids = sorted(expected_request_hashes)
+            audit.all_results_replayed_independently = (
+                audit.all_results_replayed_independently and deterministic_pass
+            )
+            if not audit.all_results_replayed_independently:
+                audit.verdict = "fail"
+                audit.issues = list(
+                    dict.fromkeys(
+                        [
+                            *audit.issues,
+                            "deterministic replay or authoritative experiment-ID gate did not pass",
+                        ]
+                    )
+                )
+            audit.replay_artifact_refs = list(
+                dict.fromkeys(
+                    [
+                        *audit.replay_artifact_refs,
+                        *[
+                            str(item.get("artifact_ref"))
+                            for item in replay_audits
+                            if item.get("artifact_ref")
+                        ],
+                    ]
+                )
+            )
+            store.write_json(
+                "structured",
+                f"route_tool_audit_{delta.delta_id}_{specialist.id}",
+                audit,
+            )
             store.append_event("route_tool_audit_completed", audit)
             return audit
 
@@ -3955,6 +3967,190 @@ class ProofMeshOrchestrator:
             tool_handler=tool_handler,
             referee_handler=referee_handler,
         )
+        reviewer_verdicts = []
+        if isinstance(result.skeptic_result, VerificationReport):
+            reviewer_verdicts.append(result.skeptic_result.verdict.value)
+        if isinstance(result.referee_result, BrokerDecision):
+            reviewer_verdicts.append(
+                "pass" if result.referee_result.accepted else "fail"
+            )
+        referee_runtime = (
+            team.role_runner.runtime(plan.referee)
+            if plan.referee.agent_id is not None
+            else None
+        )
+        assigned_agent_ids = {
+            author.id,
+            plan.skeptic.agent_id if plan.skeptic is not None else None,
+            plan.tool_specialist.agent_id if plan.tool_specialist is not None else None,
+            plan.referee.agent_id,
+        }
+        cross_provider_candidates = [
+            candidate
+            for candidate in runner.pool.agents
+            if candidate.id not in assigned_agent_ids
+            and candidate.provider != author.provider
+            and candidate.supports_role("route_referee")
+            and not candidate.in_cooldown
+        ]
+        existing_cross_provider_review = (
+            referee_runtime is not None
+            and referee_runtime.provider != author.provider
+            and isinstance(result.referee_result, BrokerDecision)
+        )
+        escalation_plan = (
+            state.validation_escalator
+            or ValidationEscalator(self.config.topology.validation_escalation)
+        ).plan(
+            risk_score=plan.risk.score,
+            reviewer_verdicts=reviewer_verdicts,
+            cross_provider_available=(
+                existing_cross_provider_review or bool(cross_provider_candidates)
+            ),
+            tool_or_formal_available=result.tool_result is not None,
+            before_fact_promotion=bool(delta.new_claims or delta.proof_complete),
+        )
+        cross_provider_referee = (
+            referee_runtime if existing_cross_provider_review else None
+        )
+        cross_provider_decision = (
+            result.referee_result if existing_cross_provider_review else None
+        )
+        if (
+            ValidationLevel.CROSS_PROVIDER in escalation_plan.levels
+            and cross_provider_decision is None
+            and cross_provider_candidates
+        ):
+            cross_provider_referee = max(
+                cross_provider_candidates,
+                key=lambda candidate: (
+                    runner.pool.capability_score(candidate, "route_referee"),
+                    candidate.trust_score,
+                    candidate.id,
+                ),
+            )
+            cross_call = await self._safe_call(
+                runner,
+                "route_referee",
+                prompts.route_referee(
+                    problem=problem,
+                    candidate_message_id=f"route_artifact_{delta.delta_id}",
+                    route_id=route_id,
+                    author_agent_id=author.id,
+                    sanitized_artifact={
+                        "artifact": delta.model_dump(mode="json"),
+                        "skeptic_result": result.skeptic_result,
+                        "tool_result": result.tool_result,
+                    },
+                    required_fact_threshold=(
+                        self.config.topology.typed_memory.fact_pass_threshold
+                    ),
+                    validation_level=ValidationLevel.CROSS_PROVIDER.value,
+                ),
+                fixed_agent=cross_provider_referee,
+                budget_bucket="verification",
+            )
+            if cross_call is not None:
+                cross_provider_decision = cross_call.value
+                cross_provider_decision.message_id = f"route_artifact_{delta.delta_id}"
+                store.write_json(
+                    "structured",
+                    f"route_cross_provider_referee_{delta.delta_id}_{cross_provider_referee.id}",
+                    cross_provider_decision,
+                )
+                store.append_event(
+                    "route_cross_provider_referee_completed",
+                    {
+                        "agent_id": cross_provider_referee.id,
+                        "provider": cross_provider_referee.provider,
+                        **cross_provider_decision.model_dump(mode="json"),
+                    },
+                )
+        execution = await ValidationEscalationExecutor().execute(
+            escalation_plan,
+            {
+                ValidationLevel.DETERMINISTIC: lambda: ValidationStepResult(
+                    level=ValidationLevel.DETERMINISTIC,
+                    executed=True,
+                    passed=(
+                        delta.problem_hash == problem.integrity_hash
+                        and delta.parent_checkpoint_id == checkpoint.checkpoint_id
+                        and delta.segment_index == checkpoint.segment_index + 1
+                    ),
+                    evidence_refs=[delta.delta_id],
+                ),
+                ValidationLevel.BLIND_SAME_MODEL: lambda: ValidationStepResult(
+                    level=ValidationLevel.BLIND_SAME_MODEL,
+                    executed=isinstance(result.skeptic_result, VerificationReport),
+                    passed=(
+                        isinstance(result.skeptic_result, VerificationReport)
+                        and result.skeptic_result.verdict == VerificationVerdict.PASS
+                        and result.skeptic_result.agent_id != author.id
+                    ),
+                    evidence_refs=(
+                        [result.skeptic_result.raw_artifact_ref]
+                        if isinstance(result.skeptic_result, VerificationReport)
+                        and result.skeptic_result.raw_artifact_ref
+                        else []
+                    ),
+                ),
+                ValidationLevel.ADVERSARIAL_BLIND: lambda: ValidationStepResult(
+                    level=ValidationLevel.ADVERSARIAL_BLIND,
+                    executed=isinstance(result.referee_result, BrokerDecision),
+                    passed=(
+                        isinstance(result.referee_result, BrokerDecision)
+                        and result.referee_result.accepted
+                        and plan.referee.agent_id
+                        not in {
+                            author.id,
+                            plan.skeptic.agent_id if plan.skeptic else None,
+                            plan.tool_specialist.agent_id
+                            if plan.tool_specialist
+                            else None,
+                        }
+                    ),
+                    evidence_refs=[f"route_referee:{delta.delta_id}"],
+                ),
+                ValidationLevel.CROSS_PROVIDER: lambda: ValidationStepResult(
+                    level=ValidationLevel.CROSS_PROVIDER,
+                    executed=(
+                        cross_provider_referee is not None
+                        and isinstance(cross_provider_decision, BrokerDecision)
+                    ),
+                    passed=(
+                        cross_provider_referee is not None
+                        and cross_provider_referee.provider != author.provider
+                        and isinstance(cross_provider_decision, BrokerDecision)
+                        and cross_provider_decision.accepted
+                    ),
+                    evidence_refs=[f"route_cross_provider_referee:{delta.delta_id}"],
+                ),
+                ValidationLevel.TOOL_OR_FORMAL: lambda: ValidationStepResult(
+                    level=ValidationLevel.TOOL_OR_FORMAL,
+                    executed=result.tool_result is not None,
+                    passed=(
+                        isinstance(result.tool_result, ToolAuditReport)
+                        and result.tool_result.verdict == "pass"
+                        and result.tool_result.mathematical_mapping_checked
+                        and result.tool_result.all_results_replayed_independently
+                    ),
+                    evidence_refs=[
+                        str(item.get("request_hash") or item.get("experiment_id"))
+                        for item in experiment_results
+                    ],
+                ),
+            },
+        )
+        result.global_share_allowed = (
+            result.global_share_allowed and execution.fact_promotion_allowed
+        )
+        store.append_event(
+            "validation_escalation_executed",
+            {
+                "target_id": delta.delta_id,
+                **execution.model_dump(mode="json"),
+            },
+        )
         summary = {
             "route_id": route_id,
             "attempt_id": attempt_id,
@@ -3980,6 +4176,8 @@ class ProofMeshOrchestrator:
                 else False
             ),
             "global_share_allowed": result.global_share_allowed,
+            "validation_passed": execution.passed,
+            "validation_execution": execution.model_dump(mode="json"),
             "diagnostics": list(result.diagnostics),
         }
         if state.route_team_reviews is None:
@@ -4149,6 +4347,13 @@ class ProofMeshOrchestrator:
                     current_round=round_index,
                 )
             )
+            proof_debt_before = (
+                state.proof_graph.proof_debt(route_id)
+                if state is not None
+                and state.proof_graph is not None
+                and route_id is not None
+                else None
+            )
             next_segment = checkpoint.segment_index + 1
             experiment_results: list[dict[str, Any]] = []
             computation_feedback: list[dict[str, Any]] = []
@@ -4158,6 +4363,7 @@ class ProofMeshOrchestrator:
             result: StructuredCallResult[Any] | None = None
             tried_agents: list[str] = []
             receipts_processed = False
+            acknowledged_receipts: list[MessageReceipt] = []
 
             while True:
 
@@ -4168,7 +4374,10 @@ class ProofMeshOrchestrator:
                             strategy=strategy,
                             checkpoint=checkpoint,
                             agent_id=current_agent.id,
-                            verified_legacy_claims=relevant,
+                            # In hierarchical mode all cross-route knowledge must
+                            # pass through Broker + TypedMemory. LemmaMemory is a
+                            # legacy verifier/migration store, never a route inbox.
+                            verified_legacy_claims=[],
                             targeted_feedback=targeted_feedback,
                             experiment_results=experiment_results,
                             computation_feedback=computation_feedback,
@@ -4276,7 +4485,7 @@ class ProofMeshOrchestrator:
                     and state.message_broker is not None
                     and not receipts_processed
                 ):
-                    acknowledged = self._acknowledge_route_messages(
+                    acknowledged_receipts = self._acknowledge_route_messages(
                         state.message_broker,
                         delivered_messages,
                         turn.message_receipts,
@@ -4286,7 +4495,7 @@ class ProofMeshOrchestrator:
                     receipts_processed = True
                     if self.config.topology.typed_communication.require_receipt and any(
                         receipt.status != ReceiptStatus.ACCEPTED
-                        for receipt in acknowledged
+                        for receipt in acknowledged_receipts
                     ):
                         targeted_feedback = [
                             *targeted_feedback,
@@ -4448,6 +4657,7 @@ class ProofMeshOrchestrator:
                     runner=runner,
                     prompts=prompts,
                     store=store,
+                    tools=tools,
                 )
                 if team_result is not None and isinstance(
                     team_result.skeptic_result, VerificationReport
@@ -4549,6 +4759,21 @@ class ProofMeshOrchestrator:
                 failover_chain=tried_agents,
             )
             store.commit_proof_checkpoint(checkpoint)
+            if (
+                route_id is not None
+                and state is not None
+                and state.message_broker is not None
+                and acknowledged_receipts
+            ):
+                record_verified_message_usage(
+                    state.message_broker,
+                    delivered_messages,
+                    acknowledged_receipts,
+                    delta,
+                    route_id=route_id,
+                    proof_graph=state.proof_graph,
+                    proof_debt_before=proof_debt_before,
+                )
             store.write_json(
                 "structured",
                 f"proof_checkpoint_{checkpoint.checkpoint_id}",
@@ -6053,40 +6278,15 @@ class ProofMeshOrchestrator:
         problem: ProblemContract,
         proof: FinalProof,
         memory: LemmaMemory,
+        typed_memory: TypedMemory | None = None,
+        message_broker: MessageBroker | None = None,
     ) -> BlindReviewPacket:
-        proof_text = json.dumps(
-            {
-                "answer": proof.answer,
-                "proof_steps": [
-                    step.model_dump(
-                        mode="json",
-                        exclude={"confidence"},
-                    )
-                    for step in proof.proof_steps
-                ],
-                "dependencies": proof.dependencies,
-                "caveats": proof.caveats,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-        fact_packets = [
-            {
-                "claim_id": claim.claim_id,
-                "statement": claim.statement,
-                "assumptions": claim.assumptions,
-                "conclusion": claim.conclusion,
-                "dependencies": claim.dependencies,
-                "scope_limitations": claim.scope_limitations,
-                "content_hash": claim.content_hash,
-            }
-            for claim in memory.verified()
-        ]
-        return BlindReviewPacket(
-            problem=problem,
-            final_proof_text=proof_text,
-            cited_fact_packets=fact_packets,
-            forbidden_claims=[claim.statement for claim in memory.rejected()],
+        return build_blind_review_packet(
+            problem,
+            proof,
+            memory,
+            typed_memory=typed_memory,
+            message_broker=message_broker,
         )
 
     async def _verify_final(
@@ -6100,9 +6300,17 @@ class ProofMeshOrchestrator:
         memory: LemmaMemory,
         tools: ToolBroker,
         store: ArtifactStore,
+        *,
+        state: SolveState | None = None,
     ) -> VerificationBundle:
         reports: list[VerificationReport] = []
-        blind_packet = self._build_blind_review_packet(problem, proof, memory)
+        blind_packet = self._build_blind_review_packet(
+            problem,
+            proof,
+            memory,
+            state.typed_memory if state is not None else None,
+            state.message_broker if state is not None else None,
+        )
         hierarchical = self.config.topology.mode == "hierarchical_sparse"
         blind_structural = (
             hierarchical and self.config.topology.final_stage.blind_structural_review
@@ -6112,24 +6320,27 @@ class ProofMeshOrchestrator:
         )
         if blind_structural or blind_detailed:
             store.write_json("structured", "blind_final_review_packet", blind_packet)
+        experiment_audit = tools.audit_key_results()
+        final_cross_provider_candidates = [
+            candidate
+            for candidate in runner.pool.agents
+            if synthesizer is not None
+            and candidate.id != synthesizer.id
+            and candidate.provider != synthesizer.provider
+            and candidate.supports_role("final_verifier")
+        ]
         escalation = ValidationEscalator(
             self.config.topology.validation_escalation
         ).plan(
             risk_score=max(0.0, 1.0 - proof.confidence),
-            cross_provider_available=(
-                len({item.provider for item in self.config.agents if item.enabled}) > 1
-            ),
-            tool_or_formal_available=(
-                self.config.verification.enable_sympy_tools
-                or self.config.verification.enable_lean
-            ),
+            cross_provider_available=bool(final_cross_provider_candidates),
+            tool_or_formal_available=(bool(experiment_audit)),
             final_proof=True,
         )
         store.append_event(
             "validation_escalation_planned",
             {"target_id": "final_proof", **escalation.model_dump(mode="json")},
         )
-        experiment_audit = tools.audit_key_results()
         failed_experiment_audits = [
             record for record in experiment_audit if not record.get("valid", False)
         ]
@@ -6214,6 +6425,27 @@ class ProofMeshOrchestrator:
         reports.append(structural_report)
 
         if structural_report.verdict != VerificationVerdict.PASS:
+            execution = await ValidationEscalationExecutor().execute(
+                escalation,
+                {
+                    ValidationLevel.DETERMINISTIC: lambda: ValidationStepResult(
+                        level=ValidationLevel.DETERMINISTIC,
+                        executed=True,
+                        passed=False,
+                        evidence_refs=[structural_report.raw_artifact_ref]
+                        if structural_report.raw_artifact_ref
+                        else [],
+                        diagnostic="structural theorem-integrity gate did not pass",
+                    )
+                },
+            )
+            store.append_event(
+                "validation_escalation_executed",
+                {
+                    "target_id": "final_proof",
+                    **execution.model_dump(mode="json"),
+                },
+            )
             aggregate = VerificationReport(
                 target_id="final_proof",
                 target_type="final_proof",
@@ -6323,12 +6555,172 @@ class ProofMeshOrchestrator:
             detailed.extend(extra_reports)
             reports.extend(extra_reports)
 
+        if (
+            ValidationLevel.CROSS_PROVIDER in escalation.levels
+            and synthesizer is not None
+            and not any(
+                report.problem_integrity_ok
+                and report.verdict == VerificationVerdict.PASS
+                and runner.pool.get(report.agent_id).provider != synthesizer.provider
+                for report in detailed
+                if report.agent_id in {agent.id for agent in runner.pool.agents}
+            )
+        ):
+            excluded_reviewers = (
+                exclude | {structural.id} | {report.agent_id for report in detailed}
+            )
+            available_cross_reviewers = [
+                candidate
+                for candidate in final_cross_provider_candidates
+                if candidate.id not in excluded_reviewers and not candidate.in_cooldown
+            ]
+            if available_cross_reviewers:
+                cross_reviewer = max(
+                    available_cross_reviewers,
+                    key=lambda candidate: (
+                        runner.pool.capability_score(candidate, "final_verifier"),
+                        candidate.trust_score,
+                        candidate.id,
+                    ),
+                )
+                if blind_detailed:
+                    cross_reports = await self._call_blind_final_reviewers(
+                        problem,
+                        proof,
+                        blind_packet,
+                        [cross_reviewer],
+                        runner,
+                        prompts,
+                        tools,
+                        store,
+                        experiment_audit=experiment_audit,
+                    )
+                else:
+                    cross_reports = await self._call_detailed_reviewers(
+                        problem,
+                        proof,
+                        structural_report,
+                        [cross_reviewer],
+                        runner,
+                        prompts,
+                        memory,
+                        tools,
+                        store,
+                        stage="final_cross_provider",
+                        experiment_audit=experiment_audit,
+                    )
+                detailed.extend(cross_reports)
+                reports.extend(cross_reports)
+
         aggregate = self._aggregate_reports(
             "final_proof",
             "final_proof",
             VerificationStage.FINAL,
             detailed,
         )
+        detailed_passes = [
+            report
+            for report in detailed
+            if report.problem_integrity_ok
+            and report.verdict == VerificationVerdict.PASS
+            and (synthesizer is None or report.agent_id != synthesizer.id)
+        ]
+
+        def cross_provider_passed() -> ValidationStepResult:
+            if synthesizer is None:
+                return ValidationStepResult(
+                    level=ValidationLevel.CROSS_PROVIDER,
+                    executed=False,
+                    passed=False,
+                    diagnostic="synthesizer provider is unavailable",
+                )
+            different_provider_reports: list[VerificationReport] = []
+            for report in detailed_passes:
+                try:
+                    reviewer = runner.pool.get(report.agent_id)
+                except KeyError:
+                    continue
+                if reviewer.provider != synthesizer.provider:
+                    different_provider_reports.append(report)
+            return ValidationStepResult(
+                level=ValidationLevel.CROSS_PROVIDER,
+                executed=bool(different_provider_reports),
+                passed=bool(different_provider_reports),
+                evidence_refs=[
+                    report.raw_artifact_ref
+                    for report in different_provider_reports
+                    if report.raw_artifact_ref
+                ],
+            )
+
+        execution = await ValidationEscalationExecutor().execute(
+            escalation,
+            {
+                ValidationLevel.DETERMINISTIC: lambda: ValidationStepResult(
+                    level=ValidationLevel.DETERMINISTIC,
+                    executed=True,
+                    passed=(
+                        structural_report.problem_integrity_ok
+                        and structural_report.verdict == VerificationVerdict.PASS
+                        and not failed_experiment_audits
+                    ),
+                    evidence_refs=[structural_report.raw_artifact_ref]
+                    if structural_report.raw_artifact_ref
+                    else [],
+                ),
+                ValidationLevel.BLIND_SAME_MODEL: lambda: ValidationStepResult(
+                    level=ValidationLevel.BLIND_SAME_MODEL,
+                    executed=bool(detailed),
+                    passed=bool(detailed_passes),
+                    evidence_refs=[
+                        report.raw_artifact_ref
+                        for report in detailed_passes
+                        if report.raw_artifact_ref
+                    ],
+                ),
+                ValidationLevel.ADVERSARIAL_BLIND: lambda: ValidationStepResult(
+                    level=ValidationLevel.ADVERSARIAL_BLIND,
+                    executed=bool(detailed),
+                    passed=(
+                        bool(detailed_passes)
+                        and all(
+                            report.verdict == VerificationVerdict.PASS
+                            for report in detailed
+                        )
+                    ),
+                    evidence_refs=[
+                        report.raw_artifact_ref
+                        for report in detailed
+                        if report.raw_artifact_ref
+                    ],
+                ),
+                ValidationLevel.CROSS_PROVIDER: cross_provider_passed,
+                ValidationLevel.TOOL_OR_FORMAL: lambda: ValidationStepResult(
+                    level=ValidationLevel.TOOL_OR_FORMAL,
+                    executed=bool(experiment_audit),
+                    passed=bool(experiment_audit) and not failed_experiment_audits,
+                    evidence_refs=[
+                        str(record.get("request_hash") or record.get("experiment_id"))
+                        for record in experiment_audit
+                    ],
+                ),
+            },
+        )
+        store.append_event(
+            "validation_escalation_executed",
+            {
+                "target_id": "final_proof",
+                **execution.model_dump(mode="json"),
+            },
+        )
+        store.write_json("structured", "final_validation_execution", execution)
+        if aggregate.verdict == VerificationVerdict.PASS and not execution.passed:
+            aggregate.verdict = VerificationVerdict.UNCERTAIN
+            aggregate.concise_feedback = (
+                "The mathematical reviewers passed, but the configured validation "
+                "escalation ladder did not complete: "
+                + "; ".join(execution.diagnostics)
+            )
         # Final PASS has a configured minimum confidence floor.
         if (
             aggregate.verdict == VerificationVerdict.PASS
@@ -6817,17 +7209,7 @@ class ProofMeshOrchestrator:
             state.aggregate_reports[bundle.aggregate.target_id] = bundle.aggregate
             if state.capability_profile is None or state.triage is None:
                 continue
-            domain = state.triage.problem_kind.value
-            if domain not in {
-                "number_theory",
-                "combinatorics",
-                "algebra",
-                "inequalities",
-                "geometry",
-                "logic",
-                "computation",
-            }:
-                domain = "logic"
+            domain = state.capability_domain
             role_by_stage = {
                 VerificationStage.STRUCTURAL: "structural_verifier",
                 VerificationStage.DETAILED: "detailed_verifier",
@@ -7557,50 +7939,21 @@ class ProofMeshOrchestrator:
                 "final_proof": state.final_proof,
                 "final_verification": state.final_verification,
                 "budget_exhausted": state.budget_exhausted,
-                "current_round": state.current_round,
-                "graph_frozen": state.graph_frozen,
-                "final_repair_failed": state.final_repair_failed,
-                "proof_debt_history": state.proof_debt_history or {},
-                "route_team_reviews": state.route_team_reviews or {},
-                "route_registry": (
-                    state.route_registry.export_state()
-                    if state.route_registry is not None
-                    else None
-                ),
-                "typed_memory": (
-                    state.typed_memory.export_state()
-                    if state.typed_memory is not None
-                    else None
-                ),
-                "proof_graph": (
-                    state.proof_graph.export_state()
-                    if state.proof_graph is not None
-                    else None
-                ),
-                "message_broker": (
-                    state.message_broker.export_state()
-                    if state.message_broker is not None
-                    else None
-                ),
-                "bridge_broker": (
-                    state.bridge_broker.export_state()
-                    if state.bridge_broker is not None
-                    else None
-                ),
-                "contradiction_broker": (
-                    state.contradiction_broker.export_state()
-                    if state.contradiction_broker is not None
-                    else None
-                ),
-                "inspiration_engine": (
-                    state.inspiration_engine.export_state()
-                    if state.inspiration_engine is not None
-                    else None
-                ),
-                "agent_capability": (
-                    state.capability_profile.export_state()
-                    if state.capability_profile is not None
-                    else None
+                **export_hierarchical_checkpoint(
+                    current_round=state.current_round,
+                    graph_frozen=state.graph_frozen,
+                    final_repair_failed=state.final_repair_failed,
+                    proof_debt_history=state.proof_debt_history,
+                    route_team_reviews=state.route_team_reviews,
+                    capability_domain=state.capability_domain,
+                    route_registry=state.route_registry,
+                    typed_memory=state.typed_memory,
+                    proof_graph=state.proof_graph,
+                    message_broker=state.message_broker,
+                    bridge_broker=state.bridge_broker,
+                    contradiction_broker=state.contradiction_broker,
+                    inspiration_engine=state.inspiration_engine,
+                    capability_profile=state.capability_profile,
                 ),
                 "claims": memory.claims,
                 "calls_started": runner.ledger.calls_started,

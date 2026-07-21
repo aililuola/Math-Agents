@@ -36,6 +36,7 @@ from .schemas import (
     ReverseGoalPlan,
     StrategySet,
     TriageResult,
+    ToolAuditReport,
     VerificationReport,
 )
 
@@ -797,8 +798,11 @@ JSON SCHEMA:
                 "reasoning-first gate permits it, complete the proof, or abandon with a "
                 "specific obstruction. Never use not_refuted or bounded evidence as "
                 "proof. For every broker_messages item, return exactly one "
-                "message_receipt that restates only its assumptions and conclusion. Mark "
-                "the receipt accepted only when that parse is exact; semantic_hash may be "
+                "message_receipt that independently restates its assumptions, conclusion, "
+                "ordered quantifiers, and variable bindings. A quantifier or scope reversal "
+                "must be rejected. Mark the receipt accepted only when that parse is exact; "
+                "record referenced_in_step_ids and claimed_closed_obligation_ids only when "
+                "the returned delta actually uses the message. semantic_hash may be "
                 "empty because the broker recomputes and validates it. Expose every new "
                 "obligation and do not repeat a consumed message as a new discovery."
             ),
@@ -820,6 +824,14 @@ JSON SCHEMA:
             "route_referee",
             "Judge only global admissibility, memory tier, scope, dependencies, quantifiers, and need for escalation. Do not invent new proof steps.",
             BrokerDecision,
+            context,
+        )
+
+    def route_tool_audit(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "route_tool_audit",
+            "Independently audit the supplied deterministic replay records and the mathematical mapping from each experiment to the candidate proof delta. Do not rerun arbitrary generated code, infer an unbounded theorem from bounded evidence, or pass a missing/invalid replay. Return pass only when every proof-relevant result was replayed and its scope is used correctly.",
+            ToolAuditReport,
             context,
         )
 

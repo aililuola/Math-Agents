@@ -409,6 +409,17 @@ class InspirationEngine:
             if review.proposal_id in self.materializations:
                 continue
             proposal = self.proposals[review.proposal_id]
+            recorded_review = self.reviews.get(review.proposal_id)
+            referee_required_but_missing = (
+                self.inspiration_config.mode == "active"
+                and self.inspiration_config.require_inspiration_referee
+                and (
+                    recorded_review is None
+                    or recorded_review.reviewer_agent_id == proposal.source_agent_id
+                    or recorded_review.reviewer_agent_id
+                    == "local_deterministic_referee"
+                )
+            )
             if self.inspiration_config.mode == "shadow":
                 decision = InspirationMaterialization(
                     proposal_id=proposal.proposal_id,
@@ -416,6 +427,16 @@ class InspirationEngine:
                     reason=(
                         "shadow mode records the referee recommendation without "
                         "changing memory, graph, routes, or scheduler state"
+                    ),
+                )
+            elif referee_required_but_missing:
+                self.typed_memory.add_insight(proposal)
+                decision = InspirationMaterialization(
+                    proposal_id=proposal.proposal_id,
+                    action="stored_insight",
+                    reason=(
+                        "require_inspiration_referee is enabled, but no independent "
+                        "agent referee admitted this proposal"
                     ),
                 )
             elif review.recommendation == "reject":
@@ -732,6 +753,25 @@ class InspirationEngine:
             proposal.mechanism == InspirationMechanism.SURPRISE_EXPLORATION
             and not proposal.target_route_ids
         ):
+            routes_from_trigger = sum(
+                1
+                for proposal_id, materialization in self.materializations.items()
+                if materialization.action == "route_created"
+                and self.proposals.get(proposal_id) is not None
+                and self.proposals[proposal_id].trigger_id == proposal.trigger_id
+            )
+            if (
+                routes_from_trigger
+                >= self.inspiration_config.max_new_routes_per_trigger
+            ):
+                return InspirationMaterialization(
+                    proposal_id=proposal.proposal_id,
+                    action="stored_insight",
+                    obligation_ids=obligation_ids,
+                    reason=(
+                        "max_new_routes_per_trigger prevents another route from this trigger"
+                    ),
+                )
             if (
                 len(self.route_registry.active_routes(snapshot.round_index))
                 >= snapshot.max_paths

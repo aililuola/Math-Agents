@@ -15,8 +15,9 @@ agents:
     specialties: [problem_decomposition, strategy_generation, failure_classification, meta_review]
     max_concurrency: 1
     temperature: 0.0
-    # DeepSeek V4 Pro's API maximum is 384K output tokens per request.
-    max_output_tokens: 384000
+    # Keep the provider ceiling separate from the normal per-call operating budget.
+    provider_max_output_tokens: 384000
+    max_output_tokens: 64000
     timeout_seconds: 900
     trust_prior: 0.55
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
@@ -34,7 +35,8 @@ agents:
     specialties: [number_theory, algebra, combinatorics, invariants, extremal_arguments]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 384000
+    provider_max_output_tokens: 384000
+    max_output_tokens: 64000
     timeout_seconds: 900
     trust_prior: 0.52
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
@@ -52,7 +54,8 @@ agents:
     specialties: [analysis, inequalities, geometry, probability, analytic_methods]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 384000
+    provider_max_output_tokens: 384000
+    max_output_tokens: 64000
     timeout_seconds: 900
     trust_prior: 0.52
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
@@ -70,7 +73,8 @@ agents:
     specialties: [logic, graph_theory, constructive_proofs, counterexample_search, dependency_audit]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 384000
+    provider_max_output_tokens: 384000
+    max_output_tokens: 64000
     timeout_seconds: 900
     trust_prior: 0.54
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
@@ -88,7 +92,8 @@ agents:
     specialties: [proof_synthesis, rigorous_exposition, proof_audit, symbolic_checks]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 384000
+    provider_max_output_tokens: 384000
+    max_output_tokens: 64000
     timeout_seconds: 900
     trust_prior: 0.56
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
@@ -209,7 +214,7 @@ continuation:
   checkpoint_policy: verified_subgoal
   max_new_steps_per_call: 20
   max_new_claims_per_call: 3
-  max_output_tokens_per_segment: 384000
+  max_output_tokens_per_segment: 64000
   # Keep each scheduler action small enough to preserve breadth and final-audit calls.
   segments_per_explore_call: 1
   max_segments_per_path: 20

@@ -41,6 +41,7 @@ def make_v07_config(
             "max_revisions": 1,
         }
     )
+    payload["continuation"]["enabled"] = True
     payload["topology"] = {
         "mode": "hierarchical_sparse",
         "neighbor_k": 2,

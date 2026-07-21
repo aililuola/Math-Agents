@@ -70,6 +70,7 @@ class AgentConfig(ConfigModel):
     requests_per_minute: int | None = Field(default=None, ge=1)
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     max_output_tokens: int = Field(default=8192, ge=256, le=384000)
+    provider_max_output_tokens: int = Field(default=384000, ge=256, le=384000)
     timeout_seconds: float = Field(default=180.0, ge=5.0, le=3600.0)
     trust_prior: float = Field(default=0.5, ge=0.0, le=1.0)
     enabled: bool = True
@@ -88,6 +89,10 @@ class AgentConfig(ConfigModel):
         if self.reasoning_effort is not None and not self.thinking_enabled:
             raise ValueError(
                 f"agent {self.id}: reasoning_effort requires thinking_enabled=true"
+            )
+        if self.max_output_tokens > self.provider_max_output_tokens:
+            raise ValueError(
+                f"agent {self.id}: max_output_tokens cannot exceed provider_max_output_tokens"
             )
         if self.provider == "deepseek" and not self.model.startswith("deepseek-"):
             raise ValueError(
@@ -575,6 +580,20 @@ class SystemConfig(ConfigModel):
 
     @model_validator(mode="after")
     def validate_hierarchical_budget_reserve(self) -> "SystemConfig":
+        active_hierarchical = self.topology.mode == "hierarchical_sparse" and (
+            self.topology.typed_communication.enabled
+            or self.topology.route_teams.enabled
+            or self.topology.proof_graph.mode == "active"
+            or (
+                self.topology.inspiration.enabled
+                and self.topology.inspiration.mode == "active"
+            )
+        )
+        if active_hierarchical and not self.continuation.enabled:
+            raise ValueError(
+                "active hierarchical topology requires continuation.enabled=true "
+                "so Broker, typed route prompts, and RouteTeam execute in the live pipeline"
+            )
         inspiration = self.topology.inspiration
         if (
             self.topology.mode != "hierarchical_sparse"
