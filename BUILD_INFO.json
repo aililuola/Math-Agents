@@ -37,6 +37,8 @@
     "semantic_receipt_validation": true,
     "receipt_quantifier_and_binding_reparse": true,
     "legacy_claim_bypass_closed": true,
+    "broker_admitted_global_fact_context": true,
+    "legacy_checkpoint_claim_quarantine": true,
     "pairwise_distinct_route_roles": true,
     "continuation_required_for_active_topology": true,
     "validation_escalation_executor": true,
@@ -65,6 +67,7 @@
     "scheduler_admission_before_model_calls": true,
     "per_trigger_route_cap_enforced": true,
     "required_referee_switch_enforced": true,
+    "rejected_proposal_blind_serialization": true,
     "checkpoint_and_activity": true,
     "deepseek_default_mode": "shadow"
   },
@@ -72,7 +75,7 @@
     "compileall": "PASS",
     "ruff_check": "PASS",
     "ruff_format_check": "PASS",
-    "pytest": "149 passed",
+    "pytest": "169 passed",
     "offline_topology_benchmark": {
       "status": "PASS",
       "provider_calls": 0,
@@ -85,12 +88,12 @@
     "real_provider_calls": "NOT RUN; credentials intentionally unused"
   },
   "counts": {
-    "source_python_files": 77,
-    "test_python_files": 51,
-    "documentation_files": 24,
-    "source_lines": 25865,
-    "test_lines": 5585,
-    "docs_directory_lines": 2140
+    "source_python_files": 78,
+    "test_python_files": 61,
+    "documentation_files": 25,
+    "source_lines": 26163,
+    "test_lines": 6661,
+    "docs_directory_lines": 2144
   },
   "artifacts": {
     "status": "SOURCE RELEASE; DISTRIBUTION ARTIFACTS NOT COMMITTED",

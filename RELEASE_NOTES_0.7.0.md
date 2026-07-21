@@ -76,3 +76,18 @@ The release gate runs the complete Pytest suite, Ruff check and format check,
 `compileall`, all shipped configuration parses and the offline topology
 benchmark. Real provider calls are intentionally excluded from automated
 validation.
+
+## Final P0 Audit Closure
+
+- Rejected `InspirationProposal` values now use an exact blind-negative
+  serializer. The packet preserves the mathematical proposal and rejection
+  rationale without exposing route or Agent identity.
+- Hierarchical verification, synthesis, blind review and final revision now
+  share one admissible global-fact policy. A global premise must be a live
+  TypedMemory Fact admitted by the Broker with independent-referee provenance;
+  unresolved dependencies fail closed.
+- Legacy LemmaMemory remains available to `legacy_sparse`, while hierarchical
+  resume quarantines legacy-only checkpoint claims instead of promoting them.
+- Dynamic and AST regressions cover rejected active Inspiration, rejected
+  route-local claims, verifier tool follow-ups, synthesis, blind packets,
+  revision, dependency gates and old-checkpoint resume.

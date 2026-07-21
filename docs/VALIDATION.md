@@ -226,3 +226,18 @@ Python 3.11
 - Docker Desktop/WSL2 已安装，固定 digest 的 `python:3.11-slim` 已在无网络、只读、非 root、cap-drop、进程/内存/CPU 限制下完成 `sandbox-ok` 实机探针。真实模型生成程序的数学正确性仍必须经过现有证据门和独立重放。
 
 真实联调应先执行 `mathproofmesh probe`，再使用 `config.deepseek-v4-pro.smoke.yaml`，最后切换正式配置。详见 [DEEPSEEK_V4_PRO.md](DEEPSEEK_V4_PRO.md)、[CHECKPOINT_RESUME.md](CHECKPOINT_RESUME.md) 与 [DEPLOYMENT.md](DEPLOYMENT.md)。
+
+## 11. v0.7 最终 P0 事实门与灵感拒绝回归
+
+本轮只验证最终 P0 bugfix，不调用真实 DeepSeek API，也不改变调度、预算、Prompt 策略或供应商参数。确定性测试覆盖：
+
+- 被拒 `InspirationProposal` 可进入 Blind Negative Packet，保留数学内容和拒绝理由，但不泄漏 Agent/Route 身份；
+- Active hierarchical + Active Inspiration + rejected proposal 的完整 Mock 流程最终为 `verified`，并且没有 `run_failed`；
+- hierarchical 全局事实统一经过 `build_admissible_fact_context()`，只接收 Broker admitted 且仍存在于 TypedMemory 的 Fact；
+- ProofDelta/ProofAttempt verifier、工具复核、Synthesizer、Blind Judge 与 Final Revision 均不能看到被 Route Referee 拒绝的 legacy marker Claim；
+- Typed Fact 为零时不允许 legacy Claim 补位，未满足的 typed dependency fail closed；
+- 旧 checkpoint 中只有 LemmaMemory 的历史 Claim 会被隔离，不会自动升级为全局 Fact；
+- `legacy_sparse` 继续使用原有 LemmaMemory 兼容路径；
+- AST 回归测试禁止关键 hierarchical 全局路径重新直接调用 `memory.verified()`。
+
+最终完整验证结果记录在 `BUILD_INFO.json`。Pytest、Ruff check、Ruff format check、`compileall` 和离线 topology Mock benchmark 全部通过；真实 provider 调用保持 `NOT RUN`。
