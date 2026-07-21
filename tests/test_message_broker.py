@@ -3,6 +3,7 @@ from __future__ import annotations
 from mathproofmesh.broker_phase import record_verified_message_usage
 from mathproofmesh.communication.broker import MessageBroker
 from mathproofmesh.communication.receipts import build_receipt
+from mathproofmesh.context_policy import select_typed_fact_context
 from mathproofmesh.schemas import (
     ProofDelta,
     ProofStep,
@@ -49,6 +50,77 @@ def test_broker_shares_only_gated_artifacts_and_deduplicates(tmp_path) -> None:
     )
     decision = broker.publish(duplicate, referee_agent_id="referee-a", current_round=1)
     assert decision.duplicate_of == "fact-a"
+
+
+def test_only_broker_admitted_facts_are_global_context(tmp_path) -> None:
+    config = make_v07_config(tmp_path / "runs")
+    _, _, typed_memory, _, broker = make_broker_runtime(config, tmp_path)
+    direct_fact = make_fact(
+        message_id="direct-typed-fact",
+        statement="a directly inserted typed fact",
+    )
+    typed_memory.add_fact(
+        direct_fact,
+        referee_agent_id="independent-referee",
+    )
+    broker_fact = make_fact(
+        message_id="broker-admitted-fact",
+        statement="a broker admitted typed fact",
+    )
+    decision = broker.publish(
+        broker_fact,
+        referee_agent_id="independent-referee",
+        current_round=1,
+    )
+
+    assert decision.accepted
+    assert direct_fact in typed_memory.facts
+    assert broker_fact in typed_memory.facts
+    admitted_ids = {item.message_id for item in broker.admitted_facts()}
+    assert broker_fact.message_id in admitted_ids
+    assert direct_fact.message_id not in admitted_ids
+
+
+def test_admitted_fact_context_includes_only_complete_dependency_closures(
+    tmp_path,
+) -> None:
+    config = make_v07_config(tmp_path / "runs")
+    _, _, _, _, broker = make_broker_runtime(config, tmp_path)
+    dependency = make_fact(
+        message_id="fact-dependency",
+        statement="the exact local difference identity",
+    )
+    root = make_fact(
+        message_id="fact-root",
+        statement="the global telescoping identity",
+        dependencies=[dependency.message_id],
+    )
+    assert broker.publish(
+        dependency,
+        referee_agent_id="independent-referee",
+        current_round=1,
+    ).accepted
+    assert broker.publish(
+        root,
+        referee_agent_id="independent-referee",
+        current_round=1,
+    ).accepted
+
+    context = select_typed_fact_context(
+        broker.admitted_facts(),
+        broker=broker,
+        query="global telescoping identity",
+        max_chars=20000,
+        max_items=4,
+    )
+
+    assert [item["message_id"] for item in context] == [
+        dependency.message_id,
+        root.message_id,
+    ]
+    serialized = str(context)
+    assert "author-a" not in serialized
+    assert "route-a" not in serialized
 
 
 def test_broker_resume_preserves_exactly_once_prompt_delivery(tmp_path) -> None:

@@ -89,5 +89,5 @@ async def test_active_rejected_inspiration_survives_blind_finalization(
         for line in (root / "events.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert not any(
-        item.get("event") in {"run_failed", "run_resume_failed"} for item in events
+        item.get("event_type") in {"run_failed", "run_resume_failed"} for item in events
     )

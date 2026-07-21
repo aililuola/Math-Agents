@@ -517,9 +517,12 @@ class TypedMemory:
     def dependencies_resolved(self, dependencies: Iterable[str]) -> bool:
         fact_ids = {item.message_id for item in self.facts}
         fact_hashes = {item.content_hash for item in self.facts}
+        allow_legacy_dependencies = (
+            self.config is None or self.config.topology.mode == "legacy_sparse"
+        )
         legacy_ids = (
             {item.claim_id for item in self.lemma_memory.verified()}
-            if self.lemma_memory is not None
+            if allow_legacy_dependencies and self.lemma_memory is not None
             else set()
         )
         return all(

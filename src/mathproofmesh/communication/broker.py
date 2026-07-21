@@ -7,7 +7,9 @@ from ..activity import ActivityStream
 from ..config import SystemConfig
 from ..schemas import (
     BrokerDecision,
+    ClaimStatus,
     EvidenceType,
+    MemoryTier,
     MessageEnvelope,
     MessageReceipt,
     ReceiptStatus,
@@ -514,6 +516,32 @@ class MessageBroker:
             ),
             "review_round": record.get("review_round"),
         }
+
+    def is_globally_admitted_fact(self, message_id: str) -> bool:
+        """Return whether a live typed fact passed this broker and an independent referee."""
+        message = self._messages.get(message_id)
+        if message is None:
+            return False
+        if message.memory_tier != MemoryTier.FACT:
+            return False
+        if message.verification_status != ClaimStatus.VERIFIED:
+            return False
+        current_fact = next(
+            (fact for fact in self.typed_memory.facts if fact.message_id == message_id),
+            None,
+        )
+        if current_fact is None or current_fact.content_hash != message.content_hash:
+            return False
+        provenance = self.blind_review_provenance(message_id)
+        return bool(provenance["independent_referee_recorded"])
+
+    def admitted_facts(self) -> list[MessageEnvelope]:
+        """Return globally admissible facts in stable broker insertion order."""
+        return [
+            message
+            for message in self._messages.values()
+            if self.is_globally_admitted_fact(message.message_id)
+        ]
 
     def expire(self, current_round: int) -> list[str]:
         expired: list[str] = []

@@ -27,6 +27,11 @@ from .communication.broker import MessageBroker
 from .communication.route_registry import RouteRegistry
 from .config import SystemConfig
 from .computation.policy import ComputationContext
+from .context_policy import (
+    ContextPurpose,
+    build_admissible_fact_context,
+    select_legacy_claim_context,
+)
 from .continuation import (
     attempt_from_checkpoint,
     checkpoint_to_route_message,
@@ -512,6 +517,7 @@ class ProofMeshOrchestrator:
                 memory,
                 tools,
                 store,
+                state=state,
             )
             self._record_verification_bundles(state, verification_bundles)
             self._sync_hierarchical_artifacts(
@@ -861,6 +867,7 @@ class ProofMeshOrchestrator:
                                 memory,
                                 tools,
                                 store,
+                                state=state,
                             )
                             self._record_verification_bundles(state, [bundle])
                             performed = True
@@ -924,6 +931,7 @@ class ProofMeshOrchestrator:
                         memory,
                         tools,
                         store,
+                        state=state,
                     )
                     self._record_verification_bundles(state, [bundle])
                     performed = True
@@ -1141,6 +1149,7 @@ class ProofMeshOrchestrator:
                             memory,
                             store,
                             revisions + 1,
+                            state=state,
                         )
                         if revised is None:
                             state.final_repair_failed = True
@@ -1489,6 +1498,19 @@ class ProofMeshOrchestrator:
             if isinstance(lemma_payload, list):
                 persisted_claims.extend(lemma_payload)
         memory.add_many([ClaimCard.model_validate(item) for item in persisted_claims])
+        if self.config.topology.mode == "hierarchical_sparse" and not all(
+            isinstance(payload.get(key), dict)
+            for key in ("typed_memory", "message_broker")
+        ):
+            verified_count = len(memory.verified())
+            if verified_count:
+                store.append_event(
+                    "legacy_claims_quarantined",
+                    {
+                        "verified_count": verified_count,
+                        "policy": "not_admitted_without_typed_broker_provenance",
+                    },
+                )
         runtime_payload = (
             store.read_named_json("checkpoints", "runtime_ledger")
             if store.has_named_json("checkpoints", "runtime_ledger")
@@ -1702,6 +1724,7 @@ class ProofMeshOrchestrator:
                     memory,
                     tools,
                     store,
+                    state=state,
                 )
                 self._record_verification_bundles(state, verification_bundles)
                 self._sync_hierarchical_artifacts(
@@ -4679,6 +4702,7 @@ class ProofMeshOrchestrator:
                         memory,
                         tools,
                         store,
+                        state=state,
                     )
                 )
 
@@ -4834,6 +4858,8 @@ class ProofMeshOrchestrator:
         memory: LemmaMemory,
         tools: ToolBroker,
         store: ArtifactStore,
+        *,
+        state: SolveState | None = None,
     ) -> list[VerificationReport]:
         reports: list[VerificationReport] = []
         experiment_audit = tools.audit_key_results(
@@ -4844,6 +4870,21 @@ class ProofMeshOrchestrator:
             tools,
             checkpoint.path_id,
             audit_records=experiment_audit,
+        )
+        verification_query = json.dumps(
+            {
+                "checkpoint": checkpoint.model_dump(mode="json"),
+                "delta": delta.model_dump(mode="json"),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        fact_context = self._admissible_fact_context(
+            state=state,
+            legacy_memory=memory,
+            query=verification_query,
+            max_chars=max(2000, self.config.topology.max_context_chars // 4),
+            purpose=ContextPurpose.DELTA_VERIFICATION,
         )
         excluded = {author.id}
         replicas = self.config.continuation.delta_verifier_replicas
@@ -4865,7 +4906,7 @@ class ProofMeshOrchestrator:
                     checkpoint,
                     delta,
                     current_agent.id,
-                    [claim.model_dump(mode="json") for claim in memory.verified()],
+                    fact_context,
                     auditable_experiments,
                 )
 
@@ -4937,7 +4978,7 @@ class ProofMeshOrchestrator:
                         checkpoint,
                         delta,
                         result.agent.id,
-                        [claim.model_dump(mode="json") for claim in memory.verified()],
+                        fact_context,
                         auditable_experiments,
                         [item.model_dump(mode="json") for item in tool_results],
                     )
@@ -5247,6 +5288,8 @@ class ProofMeshOrchestrator:
         memory: LemmaMemory,
         tools: ToolBroker,
         store: ArtifactStore,
+        *,
+        state: SolveState | None = None,
     ) -> list[VerificationBundle]:
         results = await asyncio.gather(
             *(
@@ -5259,6 +5302,7 @@ class ProofMeshOrchestrator:
                     memory,
                     tools,
                     store,
+                    state=state,
                 )
                 for attempt in attempts
             ),
@@ -5294,6 +5338,8 @@ class ProofMeshOrchestrator:
         memory: LemmaMemory,
         tools: ToolBroker,
         store: ArtifactStore,
+        *,
+        state: SolveState | None = None,
     ) -> VerificationBundle:
         reports: list[VerificationReport] = []
         experiment_audit = (
@@ -5384,6 +5430,7 @@ class ProofMeshOrchestrator:
                 store,
                 stage="detailed",
                 experiment_audit=experiment_audit,
+                state=state,
             )
             reports.extend(detailed_reports)
 
@@ -5419,6 +5466,7 @@ class ProofMeshOrchestrator:
                     store,
                     stage="detailed",
                     experiment_audit=experiment_audit,
+                    state=state,
                 )
                 detailed_reports.extend(extra_reports)
                 reports.extend(extra_reports)
@@ -5579,6 +5627,7 @@ class ProofMeshOrchestrator:
         stage: str,
         experiment_audit: Sequence[dict[str, Any]] | None = None,
         prompt_target: dict[str, Any] | None = None,
+        state: SolveState | None = None,
     ) -> list[VerificationReport]:
         target_id = (
             target.attempt_id if isinstance(target, ProofAttempt) else "final_proof"
@@ -5611,6 +5660,17 @@ class ProofMeshOrchestrator:
         sanitized_query = json.dumps(
             sanitized_target, ensure_ascii=False, sort_keys=True
         )
+        fact_context = self._admissible_fact_context(
+            state=state,
+            legacy_memory=memory,
+            query=sanitized_query,
+            max_chars=max(2000, self.config.topology.max_context_chars // 4),
+            purpose=(
+                ContextPurpose.FINAL_VERIFICATION
+                if stage.startswith("final")
+                else ContextPurpose.ATTEMPT_VERIFICATION
+            ),
+        )
         guard_experiments = (
             tools.results_for_path(target.path_id)
             if isinstance(target, ProofAttempt) and target.path_id
@@ -5622,11 +5682,7 @@ class ProofMeshOrchestrator:
                 problem,
                 sanitized_target,
                 structural_report,
-                self._select_claim_context(
-                    memory.verified(),
-                    sanitized_query,
-                    max_chars=max(2000, self.config.topology.max_context_chars // 4),
-                ),
+                fact_context,
                 reviewer.id,
                 experiment_results=auditable_experiments,
                 stage=stage,
@@ -5678,13 +5734,7 @@ class ProofMeshOrchestrator:
                         problem,
                         sanitized_target,
                         structural_report,
-                        self._select_claim_context(
-                            memory.verified(),
-                            sanitized_query,
-                            max_chars=max(
-                                2000, self.config.topology.max_context_chars // 4
-                            ),
-                        ),
+                        fact_context,
                         reviewer.id,
                         [t.model_dump(mode="json") for t in tool_results],
                         auditable_experiments,
@@ -6172,24 +6222,13 @@ class ProofMeshOrchestrator:
             + " ".join(step.statement for step in attempt.proof_steps)
             for attempt in selected
         )
-        claim_context = self._select_claim_context(
-            memory.verified(),
-            claim_query,
+        claim_context = self._admissible_fact_context(
+            state=state,
+            legacy_memory=memory,
+            query=claim_query,
             max_chars=max(2000, int(self.config.topology.max_context_chars * 0.25)),
+            purpose=ContextPurpose.SYNTHESIS,
         )
-        if state.typed_memory is not None:
-            claim_context.extend(
-                {
-                    "statement": fact.statement,
-                    "assumptions": fact.assumptions,
-                    "conclusion": fact.conclusion,
-                    "dependencies": fact.dependencies,
-                    "scope_limitations": fact.scope_limitations,
-                    "evidence_type": fact.evidence_type.value,
-                    "content_hash": fact.content_hash,
-                }
-                for fact in state.typed_memory.facts
-            )
         open_obligations = (
             [
                 {
@@ -6285,6 +6324,7 @@ class ProofMeshOrchestrator:
             problem,
             proof,
             memory,
+            topology_mode=self.config.topology.mode,
             typed_memory=typed_memory,
             message_broker=message_broker,
         )
@@ -6304,6 +6344,17 @@ class ProofMeshOrchestrator:
         state: SolveState | None = None,
     ) -> VerificationBundle:
         reports: list[VerificationReport] = []
+        hierarchical = self.config.topology.mode == "hierarchical_sparse"
+        if hierarchical and (
+            state is None or state.typed_memory is None or state.message_broker is None
+        ):
+            store.append_event(
+                "global_fact_context_fail_closed",
+                {
+                    "purpose": ContextPurpose.BLIND_REVIEW.value,
+                    "reason": "typed memory or message broker is unavailable",
+                },
+            )
         blind_packet = self._build_blind_review_packet(
             problem,
             proof,
@@ -6311,7 +6362,6 @@ class ProofMeshOrchestrator:
             state.typed_memory if state is not None else None,
             state.message_broker if state is not None else None,
         )
-        hierarchical = self.config.topology.mode == "hierarchical_sparse"
         blind_structural = (
             hierarchical and self.config.topology.final_stage.blind_structural_review
         )
@@ -6507,6 +6557,7 @@ class ProofMeshOrchestrator:
                 store,
                 stage="final",
                 experiment_audit=experiment_audit,
+                state=state,
             )
         reports.extend(detailed)
 
@@ -6551,6 +6602,7 @@ class ProofMeshOrchestrator:
                     store,
                     stage="final",
                     experiment_audit=experiment_audit,
+                    state=state,
                 )
             detailed.extend(extra_reports)
             reports.extend(extra_reports)
@@ -6608,6 +6660,7 @@ class ProofMeshOrchestrator:
                         store,
                         stage="final_cross_provider",
                         experiment_audit=experiment_audit,
+                        state=state,
                     )
                 detailed.extend(cross_reports)
                 reports.extend(cross_reports)
@@ -6746,6 +6799,8 @@ class ProofMeshOrchestrator:
         memory: LemmaMemory,
         store: ArtifactStore,
         revision_index: int,
+        *,
+        state: SolveState | None = None,
     ) -> FinalProof | None:
         reviser = synthesizer or runner.pool.select("synthesizer")
         result = await self._safe_call(
@@ -6755,10 +6810,12 @@ class ProofMeshOrchestrator:
                 problem,
                 proof,
                 verification,
-                self._select_claim_context(
-                    memory.verified(),
-                    proof.model_dump_json(),
+                self._admissible_fact_context(
+                    state=state,
+                    legacy_memory=memory,
+                    query=proof.model_dump_json(),
                     max_chars=max(2000, self.config.topology.max_context_chars // 4),
+                    purpose=ContextPurpose.FINAL_REVISION,
                 ),
                 reviser.id,
             ),
@@ -7688,72 +7745,32 @@ class ProofMeshOrchestrator:
         *,
         max_chars: int,
     ) -> list[dict[str, Any]]:
-        """Rank verified claims by relevance and include dependency closures without field truncation."""
-        if not claims:
-            return []
-        by_id = {claim.claim_id: claim for claim in claims}
-        ranked = sorted(
+        return select_legacy_claim_context(
             claims,
-            key=lambda claim: (
-                jaccard_similarity(
-                    query,
-                    f"{claim.statement} {claim.conclusion} {' '.join(claim.tags)}",
-                ),
-                claim.verification_confidence or 0.0,
-                claim.self_confidence,
-            ),
-            reverse=True,
+            query=query,
+            max_chars=max_chars,
+            max_items=self.config.topology.max_verified_claims_per_context,
         )
-        selected: list[ClaimCard] = []
-        selected_ids: set[str] = set()
-        used = 0
 
-        def closure(
-            claim: ClaimCard, visiting: set[str] | None = None
-        ) -> list[ClaimCard]:
-            visiting = set(visiting or set())
-            if claim.claim_id in visiting:
-                return []
-            visiting.add(claim.claim_id)
-            ordered: list[ClaimCard] = []
-            for dep_id in claim.dependencies:
-                dep = by_id.get(dep_id)
-                if dep is not None:
-                    ordered.extend(closure(dep, visiting))
-            ordered.append(claim)
-            deduped: list[ClaimCard] = []
-            seen: set[str] = set()
-            for item in ordered:
-                if item.claim_id not in seen:
-                    deduped.append(item)
-                    seen.add(item.claim_id)
-            return deduped
-
-        for claim in ranked:
-            packet = [
-                item for item in closure(claim) if item.claim_id not in selected_ids
-            ]
-            if not packet:
-                continue
-            encoded = [
-                json.dumps(
-                    item.model_dump(mode="json"),
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )
-                for item in packet
-            ]
-            packet_size = sum(len(value) for value in encoded)
-            if selected and used + packet_size > max_chars:
-                continue
-            for item in packet:
-                if item.claim_id not in selected_ids:
-                    selected.append(item)
-                    selected_ids.add(item.claim_id)
-            used += packet_size
-            if len(selected) >= self.config.topology.max_verified_claims_per_context:
-                break
-        return [claim.model_dump(mode="json") for claim in selected]
+    def _admissible_fact_context(
+        self,
+        *,
+        state: SolveState | None,
+        legacy_memory: LemmaMemory,
+        query: str,
+        max_chars: int,
+        purpose: ContextPurpose,
+    ) -> list[dict[str, Any]]:
+        return build_admissible_fact_context(
+            self.config,
+            legacy_memory=legacy_memory,
+            typed_memory=state.typed_memory if state is not None else None,
+            message_broker=state.message_broker if state is not None else None,
+            query=query,
+            max_chars=max_chars,
+            max_items=self.config.topology.max_verified_claims_per_context,
+            purpose=purpose,
+        )
 
     def _claim_dedup_index(self, claims: Sequence[ClaimCard]) -> list[dict[str, Any]]:
         """Minimal lossless-for-dedup index instead of rebroadcasting every full proof packet."""
