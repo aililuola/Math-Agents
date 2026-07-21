@@ -41,37 +41,65 @@ def _typed_fact_packet(
     }
 
 
+def message_negative_packet(item: MessageEnvelope) -> dict[str, Any]:
+    return {
+        "item_id": item.message_id,
+        "statement": item.statement,
+        "normalized_statement": item.normalized_statement,
+        "assumptions": item.assumptions,
+        "conclusion": item.conclusion,
+        "quantifiers": [value.model_dump(mode="json") for value in item.quantifiers],
+        "variable_bindings": [
+            value.model_dump(mode="json") for value in item.variable_bindings
+        ],
+        "scope_limitations": item.scope_limitations,
+        "evidence_type": item.evidence_type.value,
+        "artifact_refs": item.artifact_refs,
+        "content_hash": item.content_hash,
+    }
+
+
+def inspiration_proposal_to_blind_negative_packet(
+    item: InspirationProposal,
+) -> dict[str, Any]:
+    payload = item.model_dump(mode="json")
+    novelty = dict(payload["novelty_signature"])
+    return {
+        "item_id": payload["proposal_id"],
+        "proposal_kind": payload["mechanism"],
+        "statement": payload["statement"],
+        "rationale_summary": payload["rationale_summary"],
+        "generated_obligations": list(payload["generated_obligations"]),
+        "expected_information_gain": payload["expected_information_gain"],
+        "estimated_cost": payload["estimated_cost"],
+        "evidence_type": payload["evidence_type"],
+        "novelty_score": payload["novelty_score"],
+        "novelty_hash": novelty["normalized_hash"],
+        "representation": payload.get("representation"),
+        "analogy": payload.get("analogy"),
+        "construction": payload.get("construction"),
+        "invariant": payload.get("invariant"),
+        "reverse_goal": payload.get("reverse_goal"),
+    }
+
+
 def _negative_packet(
     item: MessageEnvelope | InspirationProposal,
 ) -> dict[str, Any]:
     if isinstance(item, MessageEnvelope):
-        return {
-            "item_id": item.message_id,
-            "statement": item.statement,
-            "normalized_statement": item.normalized_statement,
-            "assumptions": item.assumptions,
-            "conclusion": item.conclusion,
-            "quantifiers": [
-                value.model_dump(mode="json") for value in item.quantifiers
-            ],
-            "variable_bindings": [
-                value.model_dump(mode="json") for value in item.variable_bindings
-            ],
-            "scope_limitations": item.scope_limitations,
-            "evidence_type": item.evidence_type.value,
-            "artifact_refs": item.artifact_refs,
-            "content_hash": item.content_hash,
-        }
-    return {
-        "item_id": item.proposal_id,
-        "proposal_kind": item.kind.value,
-        "hypothesis": item.hypothesis,
-        "mechanism": item.mechanism,
-        "expected_payoff": item.expected_payoff,
-        "failure_modes": item.failure_modes,
-        "falsification_test": item.falsification_test,
-        "novelty_hash": item.novelty_signature.normalized_hash,
-    }
+        return message_negative_packet(item)
+    if isinstance(item, InspirationProposal):
+        return inspiration_proposal_to_blind_negative_packet(item)
+    raise TypeError(f"unsupported negative evidence type: {type(item)!r}")
+
+
+def _negative_statement(packet: dict[str, Any]) -> str:
+    return str(
+        packet.get("statement")
+        or packet.get("conclusion")
+        or packet.get("rationale_summary")
+        or ""
+    )
 
 
 def build_blind_review_packet(
@@ -132,10 +160,7 @@ def build_blind_review_packet(
         else []
     )
     forbidden = [claim.statement for claim in legacy_memory.rejected()]
-    forbidden.extend(
-        str(packet.get("statement") or packet.get("hypothesis") or "")
-        for packet in negative_packets
-    )
+    forbidden.extend(_negative_statement(packet) for packet in negative_packets)
     return BlindReviewPacket(
         problem=problem,
         final_proof_text=proof_text,
