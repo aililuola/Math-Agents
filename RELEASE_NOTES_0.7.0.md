@@ -57,7 +57,7 @@ path rather than only recording post-hoc topology metadata:
   message or closes a claimed obligation. Receipt acceptance alone is zero.
 - Computation-backed route artifacts invoke a real independent Tool Specialist
   typed prompt in addition to deterministic replay.
-- Active output uses a 384K provider ceiling with a 64K operating limit per
+- Active output uses a 384K provider ceiling with a 96K operating limit per
   Agent and continuation segment.
 
 ## Compatibility

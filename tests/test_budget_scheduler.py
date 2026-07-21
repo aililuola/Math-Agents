@@ -470,8 +470,8 @@ def test_smoke_and_formal_output_limits() -> None:
     assert all(agent.max_output_tokens == 100000 for agent in formal.agents)
     assert formal.continuation.max_output_tokens_per_segment == 100000
     assert all(agent.provider_max_output_tokens == 384000 for agent in active.agents)
-    assert all(agent.max_output_tokens == 64000 for agent in active.agents)
-    assert active.continuation.max_output_tokens_per_segment == 64000
+    assert all(agent.max_output_tokens == 96000 for agent in active.agents)
+    assert active.continuation.max_output_tokens_per_segment == 96000
     assert active.budget.max_total_tokens == 10000000
     assert active.budget.max_total_calls == 150
     assert active.budget.max_rounds == 8
