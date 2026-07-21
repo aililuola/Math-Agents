@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import secrets
 from typing import TYPE_CHECKING, Any
 
 from ..activity import ActivityStream
@@ -75,6 +76,30 @@ class MessageBroker:
     ) -> dict[str, Any] | None:
         delivery = self._deliveries.get(delivery_key(message_id, target_route_id))
         return dict(delivery) if delivery is not None else None
+
+    def contains(
+        self, message: MessageEnvelope, *, current_round: int | None = None
+    ) -> bool:
+        """Return whether the semantic delta has already passed through this broker."""
+
+        message_id = (
+            message.message_id
+            if message.message_id in self._messages
+            else self._dedup.get(self._dedup_key(message))
+        )
+        if message_id is None:
+            return False
+        if current_round is None:
+            return True
+        existing_targets = {
+            str(delivery["target_route_id"])
+            for delivery in self._deliveries.values()
+            if delivery["message_id"] == message_id
+        } | set(self._isolation_pending.get(message_id, []))
+        desired = set(message.target_route_ids) or set(
+            self.route_registry.neighbors(message.source_route_id, current_round)
+        )
+        return desired.issubset(existing_targets)
 
     def _dedup_key(self, message: MessageEnvelope) -> str:
         return stable_hash(
@@ -198,10 +223,26 @@ class MessageBroker:
             existing.artifact_refs = list(
                 dict.fromkeys(existing.artifact_refs + message.artifact_refs)
             )
+            candidate_targets = list(
+                message.target_route_ids
+            ) or self.route_registry.neighbors(existing.source_route_id, current_round)
+            existing_targets = {
+                str(delivery["target_route_id"])
+                for delivery in self._deliveries.values()
+                if delivery["message_id"] == duplicate_id
+            } | set(self._isolation_pending.get(duplicate_id, []))
+            new_targets = [
+                target
+                for target in candidate_targets
+                if target != existing.source_route_id and target not in existing_targets
+            ]
+            for target in new_targets:
+                self._enqueue(existing, target, current_round)
             decision = BrokerDecision(
                 message_id=message.message_id,
                 accepted=True,
                 duplicate_of=duplicate_id,
+                selected_targets=new_targets,
             )
             self._record_decision(decision, "message_deduplicated")
             return decision
@@ -230,9 +271,7 @@ class MessageBroker:
         explicit = list(dict.fromkeys(message.target_route_ids))
         if message.evidence_type == EvidenceType.COUNTEREXAMPLE:
             explicit.extend(
-                self.typed_memory.affected_routes_for_counterexample(
-                    message.normalized_statement
-                )
+                self.typed_memory.affected_routes_for_counterexample(message)
             )
         candidate_targets = explicit or self.route_registry.neighbors(
             message.source_route_id, current_round
@@ -337,6 +376,8 @@ class MessageBroker:
             "prompt_consumed": False,
             "acknowledged": False,
             "status": "pending",
+            "receipt_token": secrets.token_urlsafe(24),
+            "processing_opportunities": 0,
         }
         if target_route_id not in message.target_route_ids:
             message.target_route_ids.append(target_route_id)
@@ -379,12 +420,29 @@ class MessageBroker:
     ) -> list[MessageEnvelope]:
         self.route_registry.get(route_id)
         self._release_isolation(current_round)
+        for key in self._route_queues.get(route_id, []):
+            delivery = self._deliveries[key]
+            if delivery["status"] == "pending":
+                delivery["processing_opportunities"] = (
+                    int(delivery.get("processing_opportunities", 0)) + 1
+                )
         self.expire(current_round)
         limit = max_messages
         if limit is None:
             limit = self.config.topology.cross_route.max_messages_per_route_per_round
         result: list[MessageEnvelope] = []
-        for key in self._route_queues.get(route_id, []):
+        queue = sorted(
+            self._route_queues.get(route_id, []),
+            key=lambda key: (
+                0
+                if self._messages[self._deliveries[key]["message_id"]].evidence_type
+                == EvidenceType.COUNTEREXAMPLE
+                else 1,
+                self._deliveries[key]["delivered_round"],
+                key,
+            ),
+        )
+        for key in queue:
             delivery = self._deliveries[key]
             if delivery["status"] != "pending" or delivery["prompt_consumed"]:
                 continue
@@ -426,9 +484,26 @@ class MessageBroker:
                 ],
             }
         )
-        if receipt.semantic_hash != expected or parsed_hash != expected:
+        expected_token = str(delivery.get("receipt_token", ""))
+        token_valid = bool(receipt.receipt_token) and secrets.compare_digest(
+            receipt.receipt_token, expected_token
+        )
+        # Compatibility for v0.7 checkpoints created before opaque tokens. The
+        # semantic hash is computed by trusted local code, never copied from a
+        # model-generated field.
+        legacy_receipt = not receipt.receipt_token and bool(receipt.semantic_hash)
+        legacy_semantic_valid = (
+            legacy_receipt
+            and receipt.semantic_hash == expected
+            and parsed_hash == expected
+        )
+        if not token_valid and not legacy_semantic_valid:
             receipt.status = ReceiptStatus.REJECTED
-            receipt.reason = "semantic hash mismatch"
+            receipt.reason = (
+                "semantic hash mismatch"
+                if legacy_receipt
+                else "invalid or missing broker receipt token"
+            )
         delivery["acknowledged"] = True
         delivery["status"] = receipt.status.value
         self._receipts[key] = receipt
@@ -549,7 +624,7 @@ class MessageBroker:
             if delivery["status"] != "pending":
                 continue
             message = self._messages[delivery["message_id"]]
-            if current_round >= message.round_created + message.ttl_rounds:
+            if int(delivery.get("processing_opportunities", 0)) > message.ttl_rounds:
                 delivery["status"] = ReceiptStatus.EXPIRED.value
                 expired.append(key)
                 self._emit_delivery_event(
@@ -558,6 +633,9 @@ class MessageBroker:
                         "message_id": message.message_id,
                         "target_route_id": delivery["target_route_id"],
                         "current_round": current_round,
+                        "processing_opportunities": delivery.get(
+                            "processing_opportunities", 0
+                        ),
                     },
                 )
         return expired

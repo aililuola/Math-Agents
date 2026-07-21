@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import logging
 import time
-from collections import deque
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Iterable
 
@@ -69,6 +69,123 @@ class AgentCallFailure(RuntimeError):
         )
 
 
+class ProviderCircuitOpenError(RuntimeError):
+    """Raised when distinct keys show that a shared provider transport is down."""
+
+    def __init__(
+        self,
+        provider_scope: str,
+        agent_ids: list[str],
+        *,
+        retry_after_seconds: float,
+        cause: Exception | None = None,
+    ) -> None:
+        self.provider_scope = provider_scope
+        self.agent_ids = sorted(set(agent_ids))
+        self.retry_after_seconds = max(0.0, retry_after_seconds)
+        self.cause = cause
+        super().__init__(
+            f"provider circuit open for {provider_scope}; distinct agents="
+            f"{self.agent_ids}; retry after {self.retry_after_seconds:.1f}s"
+        )
+
+
+class ProviderCircuitBreaker:
+    """Provider-scoped circuit breaker shared by every configured API key."""
+
+    def __init__(self, config: SystemConfig) -> None:
+        runtime = config.runtime
+        self.enabled = runtime.provider_circuit_breaker_enabled
+        self.threshold = runtime.provider_circuit_failure_threshold
+        self.window_seconds = runtime.provider_circuit_window_seconds
+        self.cooldown_seconds = runtime.provider_circuit_cooldown_seconds
+        self._failures: dict[str, deque[tuple[float, str, str]]] = defaultdict(deque)
+        self._open_until: dict[str, float] = {}
+
+    @staticmethod
+    def scope_for(config: AgentConfig) -> str:
+        endpoint = (config.base_url or config.provider).rstrip("/").casefold()
+        return f"{config.provider}:{endpoint}"
+
+    def _prune(self, scope: str, now: float) -> None:
+        history = self._failures[scope]
+        while history and now - history[0][0] > self.window_seconds:
+            history.popleft()
+
+    def assert_available(self, scope: str) -> None:
+        if not self.enabled:
+            return
+        now = time.time()
+        opened_until = self._open_until.get(scope, 0.0)
+        if opened_until <= now:
+            if scope in self._open_until:
+                self._open_until.pop(scope, None)
+                self._failures.pop(scope, None)
+            return
+        agents = [agent_id for _, agent_id, _ in self._failures.get(scope, ())]
+        raise ProviderCircuitOpenError(
+            scope,
+            agents,
+            retry_after_seconds=opened_until - now,
+        )
+
+    def record_transport_failure(
+        self, scope: str, agent_id: str, error: Exception
+    ) -> None:
+        if not self.enabled:
+            return
+        now = time.time()
+        self._prune(scope, now)
+        self._failures[scope].append((now, agent_id, type(error).__name__))
+        distinct_agents = {item[1] for item in self._failures[scope]}
+        if len(distinct_agents) < self.threshold:
+            return
+        opened_until = now + self.cooldown_seconds
+        self._open_until[scope] = opened_until
+        raise ProviderCircuitOpenError(
+            scope,
+            sorted(distinct_agents),
+            retry_after_seconds=self.cooldown_seconds,
+            cause=error,
+        ) from error
+
+    def record_success(self, scope: str) -> None:
+        if scope not in self._open_until:
+            self._failures.pop(scope, None)
+
+    def export_state(self) -> dict[str, Any]:
+        return {
+            "failures": {
+                scope: [
+                    {"timestamp": timestamp, "agent_id": agent_id, "error_type": kind}
+                    for timestamp, agent_id, kind in entries
+                ]
+                for scope, entries in self._failures.items()
+            },
+            "open_until": dict(self._open_until),
+        }
+
+    def restore_state(self, state: dict[str, Any]) -> None:
+        now = time.time()
+        self._failures.clear()
+        for scope, entries in dict(state.get("failures", {})).items():
+            for entry in entries:
+                timestamp = float(entry.get("timestamp", 0.0) or 0.0)
+                if now - timestamp <= self.window_seconds:
+                    self._failures[str(scope)].append(
+                        (
+                            timestamp,
+                            str(entry.get("agent_id", "")),
+                            str(entry.get("error_type", "unknown")),
+                        )
+                    )
+        self._open_until = {
+            str(scope): float(value)
+            for scope, value in dict(state.get("open_until", {})).items()
+            if float(value) > now
+        }
+
+
 class SlidingWindowRateLimiter:
     def __init__(self, requests_per_minute: int | None) -> None:
         self.limit = requests_per_minute
@@ -96,11 +213,15 @@ class AgentRuntime:
     client: LLMClient
     global_semaphore: asyncio.Semaphore
     request_retries: int
+    provider_circuit: ProviderCircuitBreaker
+    provider_scope: str
     semaphore: asyncio.Semaphore = field(init=False)
     rate_limiter: SlidingWindowRateLimiter = field(init=False)
     trust_score: float = field(init=False)
     calls: int = 0
     failures: int = 0
+    failed_attempts: int = 0
+    failure_categories: dict[str, int] = field(default_factory=dict)
     consecutive_failures: int = 0
     cooldown_until: float = 0.0
     active_calls: int = 0
@@ -147,6 +268,7 @@ class AgentRuntime:
         schema_name: str | None = None,
         schema: dict[str, Any] | None = None,
     ) -> LLMResponse:
+        self.provider_circuit.assert_available(self.provider_scope)
         await self.rate_limiter.acquire()
         async with self.global_semaphore, self.semaphore:
             self.active_calls += 1
@@ -155,6 +277,7 @@ class AgentRuntime:
                 last_retryable = True
                 last_status: int | None = None
                 for attempt in range(self.request_retries + 1):
+                    self.provider_circuit.assert_available(self.provider_scope)
                     try:
                         response = await self.client.complete(
                             messages,
@@ -171,10 +294,15 @@ class AgentRuntime:
                             schema=schema,
                         )
                         self._record(response)
+                        self.provider_circuit.record_success(self.provider_scope)
                         return response
                     except httpx.HTTPStatusError as exc:
                         last_error = exc
                         last_status = exc.response.status_code
+                        self.failed_attempts += 1
+                        self.failure_categories["http_status"] = (
+                            self.failure_categories.get("http_status", 0) + 1
+                        )
                         last_retryable = (
                             last_status == 408
                             or last_status == 409
@@ -190,6 +318,22 @@ class AgentRuntime:
                     ) as exc:
                         last_error = exc
                         last_retryable = True
+                        self.failed_attempts += 1
+                        category = self._failure_category(exc)
+                        self.failure_categories[category] = (
+                            self.failure_categories.get(category, 0) + 1
+                        )
+                        if isinstance(
+                            exc,
+                            (
+                                httpx.ConnectError,
+                                httpx.ConnectTimeout,
+                                httpx.RemoteProtocolError,
+                            ),
+                        ):
+                            self.provider_circuit.record_transport_failure(
+                                self.provider_scope, self.id, exc
+                            )
                         if attempt >= self.request_retries:
                             break
                     except (
@@ -197,6 +341,11 @@ class AgentRuntime:
                     ) as exc:  # Provider-specific parse/transport failures.
                         last_error = exc
                         last_retryable = True
+                        self.failed_attempts += 1
+                        category = self._failure_category(exc)
+                        self.failure_categories[category] = (
+                            self.failure_categories.get(category, 0) + 1
+                        )
                         if attempt >= self.request_retries:
                             break
                     delay = min(8.0, 0.5 * (2**attempt))
@@ -207,12 +356,21 @@ class AgentRuntime:
                         delay,
                     )
                     await asyncio.sleep(delay)
-                self.failures += 1
-                self.consecutive_failures += 1
-                cooldown_seconds = min(
-                    120.0, 5.0 * (2 ** max(0, self.consecutive_failures - 1))
+                shared_transport = isinstance(
+                    last_error,
+                    (
+                        httpx.ConnectError,
+                        httpx.ConnectTimeout,
+                        httpx.RemoteProtocolError,
+                    ),
                 )
-                self.cooldown_until = time.monotonic() + cooldown_seconds
+                if not shared_transport:
+                    self.failures += 1
+                    self.consecutive_failures += 1
+                    cooldown_seconds = min(
+                        120.0, 5.0 * (2 ** max(0, self.consecutive_failures - 1))
+                    )
+                    self.cooldown_until = time.monotonic() + cooldown_seconds
                 raise AgentCallFailure(
                     self.id,
                     last_error,
@@ -221,6 +379,19 @@ class AgentRuntime:
                 ) from last_error
             finally:
                 self.active_calls -= 1
+
+    @staticmethod
+    def _failure_category(error: Exception) -> str:
+        if isinstance(
+            error,
+            (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError),
+        ):
+            return "transport"
+        if isinstance(error, httpx.TimeoutException):
+            return "timeout"
+        if isinstance(error, httpx.HTTPStatusError):
+            return "http_status"
+        return "provider_protocol"
 
     def _record(self, response: LLMResponse) -> None:
         self.calls += 1
@@ -252,6 +423,9 @@ class AgentRuntime:
             ),
             trust_score=self.trust_score,
             failures=self.failures,
+            successful_responses=self.calls,
+            failed_attempts=self.failed_attempts,
+            failure_categories=dict(self.failure_categories),
         )
 
 
@@ -264,6 +438,7 @@ class AgentPool:
     ) -> None:
         self.config = config
         self._global_semaphore = asyncio.Semaphore(config.runtime.max_parallel_calls)
+        self.provider_circuit = ProviderCircuitBreaker(config)
         self._agents: dict[str, AgentRuntime] = {}
         self._selection_counter = 0
         self._capability_profile: AgentCapabilityProfile | None = None
@@ -280,6 +455,8 @@ class AgentPool:
                 client=client,
                 global_semaphore=self._global_semaphore,
                 request_retries=config.runtime.request_retries,
+                provider_circuit=self.provider_circuit,
+                provider_scope=ProviderCircuitBreaker.scope_for(agent_config),
             )
 
     def _make_client(
@@ -524,6 +701,19 @@ class AgentPool:
             agent.total_latency_ms = metric.usage.latency_ms
             agent.trust_score = metric.trust_score
             agent.failures = metric.failures
+            if (
+                metric.successful_responses
+                and metric.successful_responses != metric.calls
+            ):
+                agent.calls = metric.successful_responses
+            agent.failed_attempts = metric.failed_attempts
+            agent.failure_categories = dict(metric.failure_categories)
+
+    def provider_circuit_state(self) -> dict[str, Any]:
+        return self.provider_circuit.export_state()
+
+    def restore_provider_circuit_state(self, state: dict[str, Any]) -> None:
+        self.provider_circuit.restore_state(state)
 
     async def aclose(self) -> None:
         await asyncio.gather(

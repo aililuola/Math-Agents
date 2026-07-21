@@ -190,7 +190,9 @@ def demo_responder(
                         "message_id": message_id,
                         "target_route_id": requirement.get("target_route_id")
                         or context.get("route_id", "route-mock"),
+                        "receipt_token": requirement.get("receipt_token", ""),
                         "status": "accepted",
+                        "used": False,
                         "parsed_assumptions": message.get("assumptions", []),
                         "parsed_conclusion": message.get("conclusion", ""),
                         "parsed_quantifiers": message.get("quantifiers", []),

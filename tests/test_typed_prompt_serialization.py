@@ -4,8 +4,35 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from mathproofmesh.prompts import PromptBundle, PromptFactory, _json
-from mathproofmesh.schemas import ProblemContract, RouteRole
+from mathproofmesh.prompts import PromptBundle, PromptFactory, _json, _schema
+from mathproofmesh.schemas import (
+    AnalogyMapping,
+    BlindVerificationReport,
+    BrokerDecision,
+    ClaimBatch,
+    ConstructionProposal,
+    ContinuationTurn,
+    ExperimentProgram,
+    FinalProof,
+    InitialExplorationTurn,
+    InspirationProposal,
+    InspirationReview,
+    InvariantHypothesis,
+    MessageEnvelope,
+    MessageReceipt,
+    MetaReview,
+    MetaStrategyDecision,
+    ProblemContract,
+    ProofAttempt,
+    ProofDelta,
+    RepresentationCandidate,
+    ReverseGoalPlan,
+    RouteRole,
+    StrategySet,
+    ToolAuditReport,
+    TriageResult,
+    VerificationReport,
+)
 
 
 @dataclass(frozen=True)
@@ -72,3 +99,39 @@ def test_every_v07_typed_prompt_constructs_with_nested_models() -> None:
         assert context["nested"]["contract"]["integrity_hash"] == problem.integrity_hash
         assert context["nested"]["artifact_path"] == str(Path("structured/item.json"))
         assert "JSON SCHEMA:" in bundle.user
+
+
+def test_cross_field_prompt_examples_are_actually_schema_valid() -> None:
+    models = [
+        TriageResult,
+        StrategySet,
+        ProofAttempt,
+        ProofDelta,
+        InitialExplorationTurn,
+        ContinuationTurn,
+        ExperimentProgram,
+        ClaimBatch,
+        VerificationReport,
+        BlindVerificationReport,
+        MetaReview,
+        FinalProof,
+        RepresentationCandidate,
+        AnalogyMapping,
+        ConstructionProposal,
+        InvariantHypothesis,
+        ReverseGoalPlan,
+        MetaStrategyDecision,
+        InspirationProposal,
+        InspirationReview,
+        BrokerDecision,
+        MessageReceipt,
+        ToolAuditReport,
+        MessageEnvelope,
+    ]
+    marker = (
+        "MINIMAL JSON SHAPE EXAMPLE (replace placeholders; leave all hash fields "
+        "empty because the server computes them):\n"
+    )
+    for model in models:
+        example = json.loads(_schema(model).split(marker, 1)[1])
+        model.model_validate(example)

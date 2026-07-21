@@ -265,5 +265,43 @@ runtime:
   activity_persist: true
   activity_include_agent_calls: true
   activity_heartbeat_seconds: 20
+  # Bound the whole SSE request, not only the provider socket's idle read time.
+  agent_call_wall_timeout_seconds: 1200
+  # Abort a stream that spends twelve minutes in reasoning without starting JSON.
+  reasoning_only_abort_seconds: 720
+  reasoning_only_min_characters: 4096
+  json_repair_max_output_tokens: 8192
+  # Deep route work escalates only after earlier verified segments need more room.
+  exploration_output_token_tiers: [32000, 64000, 96000]
+  stage_output_token_limits:
+    triage: 12000
+    strategy_generation: 24000
+    claim_extraction: 12000
+    structural_verification: 16000
+    checkpoint_verification: 24000
+    detailed_verification: 32000
+    final_verification: 32000
+    blind_structural_verification: 16000
+    blind_detailed_verification: 32000
+    meta_review: 16000
+    route_skeptic: 24000
+    route_referee: 16000
+    route_tool_audit: 16000
+    representation_switchboard: 24000
+    structural_analogy_search: 24000
+    invent_auxiliary_construction: 24000
+    hypothesize_invariant: 24000
+    reverse_goal_analysis: 24000
+    persistent_meta_strategy: 24000
+    surprise_exploration: 24000
+    inspiration_referee: 16000
+    synthesis: 64000
+    final_revision: 64000
+    experiment_codegen: 12000
+  # Two distinct keys failing in one short window identify a shared transport fault.
+  provider_circuit_breaker_enabled: true
+  provider_circuit_failure_threshold: 2
+  provider_circuit_window_seconds: 90
+  provider_circuit_cooldown_seconds: 300
   log_level: INFO
   random_seed: 20260719

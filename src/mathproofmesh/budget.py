@@ -1248,7 +1248,15 @@ class SoftBudgetAllocator:
             ActionKind.TRIGGER_INSPIRATION,
             ActionKind.SURPRISE_WIDEN,
         }:
-            return 3
+            # Inspiration is admitted atomically: proposal generation,
+            # independent referee, quick skeptic, and one route attempt.
+            local_validation = (
+                self.config.continuation.delta_verifier_replicas
+                if self.config.continuation.enabled
+                and self.config.continuation.verify_each_delta
+                else 0
+            )
+            return 4 + local_validation
         return 0
 
     def _calls_per_explored_path(self) -> int:

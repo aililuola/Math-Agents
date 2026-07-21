@@ -5,6 +5,10 @@ from mathproofmesh.communication.broker import MessageBroker
 from mathproofmesh.communication.receipts import build_receipt
 from mathproofmesh.context_policy import select_typed_fact_context
 from mathproofmesh.schemas import (
+    ClaimStatus,
+    EvidenceType,
+    MemoryTier,
+    MessageType,
     ProofDelta,
     ProofStep,
     QuantifierSpec,
@@ -228,6 +232,48 @@ def test_message_utility_requires_verified_mathematical_use(tmp_path) -> None:
     )
     assert broker.record_utility("useful", "route-b", referenced_step_ids=["step-2"])
     assert broker.utility_for_route("route-b") > 0.0
+
+
+def test_counterexample_dependencies_propagate_to_every_affected_route(
+    tmp_path,
+) -> None:
+    config = make_v07_config(tmp_path / "runs")
+    _, _, typed_memory, _, broker = make_broker_runtime(config, tmp_path)
+    fact = make_fact(
+        message_id="shared-premise",
+        statement="Every generated term is congruent to one modulo four.",
+        target_routes=["route-b"],
+    )
+    broker.publish(fact, referee_agent_id="referee-a", current_round=1)
+    counterexample = make_message(
+        message_id="premise-counterexample",
+        route_id="route-c",
+        agent_id="author-c",
+        statement="The generated term at index five is three modulo four.",
+        conclusion=fact.normalized_statement,
+        dependencies=[fact.message_id],
+        message_type=MessageType.COUNTEREXAMPLE,
+        evidence_type=EvidenceType.COUNTEREXAMPLE,
+        memory_tier=MemoryTier.NEGATIVE,
+        status=ClaimStatus.REJECTED,
+        confidence=0.95,
+        normalization_confidence=0.95,
+    )
+
+    decision = broker.publish(
+        counterexample,
+        referee_agent_id="referee-c",
+        current_round=1,
+    )
+
+    assert decision.accepted
+    assert set(decision.selected_targets) == {"route-a", "route-b"}
+    assert fact.message_id not in {item.message_id for item in typed_memory.facts}
+    assert fact.message_id in {
+        item.message_id
+        for item in typed_memory.negatives
+        if hasattr(item, "message_id")
+    }
 
 
 def test_broker_phase_credits_only_a_verified_delta_reference(tmp_path) -> None:

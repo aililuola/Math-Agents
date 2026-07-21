@@ -187,19 +187,32 @@ def solve(
         if cfg.runtime.activity_persist
         else "disabled"
     )
+    run_report = str(Path(result.run_directory) / "reports" / "run_report.md")
     console.print(
         Panel.fit(
             f"status: [bold]{result.status.value}[/bold]\n"
+            f"math status: {result.math_status.value}\n"
+            f"execution status: {result.execution_status.value}\n"
             f"final verification: {verdict}\n"
             f"calls: {result.total_calls}\n"
             f"tokens: {result.total_usage.total_tokens}\n"
             f"run directory: {result.run_directory}\n"
-            f"activity timeline: {timeline}",
+            f"activity timeline: {timeline}\n"
+            f"run report: {run_report}",
             title="MathProofMesh",
         )
     )
-    if result.final_proof:
+    if result.final_proof and result.math_status.value == "verified":
         console.print("\n[bold]Answer[/bold]\n" + result.final_proof.answer)
+    elif result.research_progress_report:
+        heading = (
+            "研究进展"
+            if cfg.runtime.output_language.lower().startswith("zh")
+            else "Research progress"
+        )
+        console.print(
+            f"\n[bold]{heading}[/bold]\n" + result.research_progress_report.summary
+        )
 
 
 @app.command()
@@ -241,19 +254,38 @@ def resume(
     verdict = (
         result.final_verification.verdict.value if result.final_verification else "none"
     )
+    timeline = (
+        str(Path(result.run_directory) / "reports" / "activity_timeline.md")
+        if cfg.runtime.activity_persist
+        else "disabled"
+    )
+    run_report = str(Path(result.run_directory) / "reports" / "run_report.md")
     console.print(
         Panel.fit(
             f"status: [bold]{result.status.value}[/bold]\n"
+            f"math status: {result.math_status.value}\n"
+            f"execution status: {result.execution_status.value}\n"
             f"resumed: {result.resumed}\n"
             f"resume checkpoint: {result.resumed_from_checkpoint_id or 'none'}\n"
             f"final verification: {verdict}\n"
             f"calls recorded: {result.total_calls}\n"
-            f"run directory: {result.run_directory}",
+            f"run directory: {result.run_directory}\n"
+            f"activity timeline: {timeline}\n"
+            f"run report: {run_report}",
             title="MathProofMesh resume",
         )
     )
-    if result.final_proof:
+    if result.final_proof and result.math_status.value == "verified":
         console.print("\n[bold]Answer[/bold]\n" + result.final_proof.answer)
+    elif result.research_progress_report:
+        heading = (
+            "研究进展"
+            if cfg.runtime.output_language.lower().startswith("zh")
+            else "Research progress"
+        )
+        console.print(
+            f"\n[bold]{heading}[/bold]\n" + result.research_progress_report.summary
+        )
 
 
 @app.command()
@@ -296,12 +328,14 @@ def demo(
         if cfg.runtime.activity_persist
         else "disabled"
     )
+    run_report = str(Path(result.run_directory) / "reports" / "run_report.md")
     console.print(
         Panel.fit(
             f"status: [bold]{result.status.value}[/bold]\n"
             f"calls: {result.total_calls}\n"
             f"run directory: {result.run_directory}\n"
-            f"activity timeline: {timeline}",
+            f"activity timeline: {timeline}\n"
+            f"run report: {run_report}",
             title="Deterministic demo",
         )
     )

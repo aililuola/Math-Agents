@@ -55,6 +55,16 @@ class DeepSeekClient(LLMClient):
         }
         headers.update(extra_headers or {})
         self._client = httpx.AsyncClient(timeout=timeout_seconds, headers=headers)
+        self._progress: dict[str, Any] = {}
+
+    def progress_snapshot(self) -> dict[str, Any]:
+        snapshot = dict(self._progress)
+        last_data_at = snapshot.pop("last_data_at_monotonic", None)
+        if last_data_at is not None:
+            snapshot["last_data_age_seconds"] = max(
+                0.0, time.monotonic() - float(last_data_at)
+            )
+        return snapshot
 
     async def list_models(self) -> list[str]:
         response = await self._client.get(f"{self.base_url}/models")
@@ -72,6 +82,14 @@ class DeepSeekClient(LLMClient):
         schema_name: str | None = None,
         schema: dict[str, Any] | None = None,
     ) -> LLMResponse:
+        self._progress = {
+            "streaming": self.streaming,
+            "chunks": 0,
+            "reasoning_characters": 0,
+            "content_characters": 0,
+            "approx_output_tokens": 0,
+            "last_data_at_monotonic": time.monotonic(),
+        }
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -190,6 +208,8 @@ class DeepSeekClient(LLMClient):
                     raise RuntimeError(f"DeepSeek streaming error: {detail}")
 
                 chunk_count += 1
+                self._progress["chunks"] = chunk_count
+                self._progress["last_data_at_monotonic"] = time.monotonic()
                 if first_chunk_latency_ms is None:
                     first_chunk_latency_ms = (time.perf_counter() - started) * 1000.0
 
@@ -219,12 +239,20 @@ class DeepSeekClient(LLMClient):
                 content = self._text_value(delta.get("content"))
                 if content:
                     content_parts.append(content)
+                    self._progress["content_characters"] = int(
+                        self._progress.get("content_characters", 0)
+                    ) + len(content)
 
                 reasoning = self._text_value(delta.get("reasoning_content"))
                 if reasoning:
                     reasoning_present = True
                     reasoning_characters += len(reasoning)
                     reasoning_hash.update(reasoning.encode("utf-8"))
+                    self._progress["reasoning_characters"] = reasoning_characters
+                total_characters = int(
+                    self._progress.get("reasoning_characters", 0)
+                ) + int(self._progress.get("content_characters", 0))
+                self._progress["approx_output_tokens"] = (total_characters + 3) // 4
 
         if not done_received:
             raise RuntimeError("DeepSeek SSE stream ended before data: [DONE]")

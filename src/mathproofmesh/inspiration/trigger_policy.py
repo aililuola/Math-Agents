@@ -199,6 +199,7 @@ class TriggerPolicy:
         self,
         triggers: list[InspirationTrigger],
         snapshot: InspirationSnapshot,
+        mechanism_history: dict[str, dict[str, int | float | str]] | None = None,
     ) -> list[InspirationTask]:
         mapping = {
             InspirationTriggerType.SHARED_BOTTLENECK: (
@@ -247,30 +248,63 @@ class TriggerPolicy:
             InspirationMechanism.SURPRISE_EXPLORATION: self.config.surprise_exploration,
             InspirationMechanism.META_REPLAN: self.config.persistent_meta_strategist,
         }
-        tasks: list[InspirationTask] = []
+        if not triggers:
+            return []
+        history = mechanism_history or {}
+        candidates: list[tuple[int, InspirationTrigger, InspirationMechanism]] = []
         seen: set[InspirationMechanism] = set()
         for trigger in triggers:
             for mechanism in mapping[trigger.trigger_type]:
                 if mechanism in seen or not enabled[mechanism]:
                     continue
                 seen.add(mechanism)
-                task_hash = stable_hash((trigger.trigger_id, mechanism.value))
-                tasks.append(
-                    InspirationTask(
-                        task_id=f"inspiration_task_{task_hash[:12]}",
-                        trigger_id=trigger.trigger_id,
-                        mechanism=mechanism,
-                        target_route_ids=trigger.affected_route_ids,
-                        target_obligation_ids=(
-                            trigger.evidence_refs
-                            if trigger.trigger_type
-                            == InspirationTriggerType.SHARED_BOTTLENECK
-                            else snapshot.open_obligation_ids
-                        ),
-                        reason=trigger.reason,
-                        max_proposals=self.config.max_proposals_per_task,
-                    )
+                candidates.append((len(candidates), trigger, mechanism))
+        # Stagnation must not repeatedly consume only the first two mapped
+        # mechanisms. Add every enabled mechanism as a fair-rotation fallback,
+        # while retaining the first trigger as the auditable cause.
+        primary_trigger = triggers[0]
+        for mechanism, is_enabled in enabled.items():
+            if not is_enabled or mechanism in seen:
+                continue
+            seen.add(mechanism)
+            candidates.append((len(candidates), primary_trigger, mechanism))
+
+        def priority(
+            item: tuple[int, InspirationTrigger, InspirationMechanism],
+        ) -> tuple[int, int, int, int]:
+            source_rank, _trigger, mechanism = item
+            stat = history.get(mechanism.value, {})
+            selected = int(stat.get("selected_count", 0) or 0)
+            no_gain = int(stat.get("consecutive_no_verified_gain", 0) or 0)
+            raw_last_round = stat.get("last_selected_round", -1)
+            last_round = -1 if raw_last_round is None else int(raw_last_round)
+            return (
+                0 if selected == 0 else 1,
+                1 if no_gain >= 2 else 0,
+                last_round,
+                source_rank,
+            )
+
+        candidates.sort(key=priority)
+        tasks: list[InspirationTask] = []
+        for _source_rank, trigger, mechanism in candidates:
+            task_hash = stable_hash((trigger.trigger_id, mechanism.value))
+            tasks.append(
+                InspirationTask(
+                    task_id=f"inspiration_task_{task_hash[:12]}",
+                    trigger_id=trigger.trigger_id,
+                    mechanism=mechanism,
+                    target_route_ids=trigger.affected_route_ids,
+                    target_obligation_ids=(
+                        trigger.evidence_refs
+                        if trigger.trigger_type
+                        == InspirationTriggerType.SHARED_BOTTLENECK
+                        else snapshot.open_obligation_ids
+                    ),
+                    reason=trigger.reason,
+                    max_proposals=self.config.max_proposals_per_task,
                 )
-                if len(tasks) >= self.config.max_inspiration_tasks_per_round:
-                    return tasks
+            )
+            if len(tasks) >= self.config.max_inspiration_tasks_per_round:
+                return tasks
         return tasks

@@ -49,6 +49,7 @@ class PromptBundle:
     response_model: Type[BaseModel]
     temperature: float | None = None
     max_output_tokens: int | None = None
+    output_tier: int | None = None
 
 
 BLIND_REVIEW_FORBIDDEN_TOKENS = (
@@ -102,20 +103,340 @@ def _json(value: Any) -> str:
     return json.dumps(_to_jsonable(value), ensure_ascii=False, indent=2)
 
 
+def _minimal_schema_value(
+    node: dict[str, Any], root: dict[str, Any], *, required: bool = True
+) -> Any:
+    ref = node.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/"):
+        target: Any = root
+        for part in ref[2:].split("/"):
+            target = target[part.replace("~1", "/").replace("~0", "~")]
+        return _minimal_schema_value(target, root, required=required)
+    if "const" in node:
+        return node["const"]
+    choices = node.get("enum")
+    if isinstance(choices, list) and choices:
+        return choices[0]
+    for union_key in ("anyOf", "oneOf"):
+        union = node.get(union_key)
+        if isinstance(union, list):
+            choice = next(
+                (item for item in union if item.get("type") != "null"), union[0]
+            )
+            return _minimal_schema_value(choice, root, required=required)
+    value_type = node.get("type")
+    if value_type == "object" or "properties" in node:
+        properties = dict(node.get("properties", {}))
+        required_keys = list(node.get("required", []))
+        return {
+            key: _minimal_schema_value(properties[key], root, required=True)
+            for key in required_keys
+            if key in properties
+        }
+    if value_type == "array":
+        count = max(0, int(node.get("minItems", 0) or 0))
+        if required and count == 0:
+            return []
+        item = _minimal_schema_value(dict(node.get("items", {})), root)
+        return [item for _ in range(count)]
+    if value_type == "integer":
+        return int(node.get("minimum", 0) or 0)
+    if value_type == "number":
+        return float(node.get("minimum", 0.0) or 0.0)
+    if value_type == "boolean":
+        return False
+    if "default" in node:
+        return node["default"]
+    return "value" if int(node.get("minLength", 0) or 0) else ""
+
+
+def _validated_model_example(
+    model: Type[BaseModel], schema: dict[str, Any]
+) -> dict[str, Any]:
+    """Return a minimal example that also satisfies model-level validators."""
+
+    step = {
+        "step_id": "new-step-1",
+        "statement": "State one auditable mathematical consequence.",
+        "justification": "Derive it from the explicitly listed dependencies.",
+        "dependencies": [],
+    }
+    delta = {
+        "problem_hash": "problem-hash-from-context",
+        "path_id": "path-from-context",
+        "strategy_id": "strategy-from-context",
+        "parent_checkpoint_id": "checkpoint-from-context",
+        "agent_id": "agent-from-context",
+        "round_index": 0,
+        "segment_index": 1,
+        "referenced_checkpoint_step_ids": [],
+        "new_steps": [step],
+        "remaining_subgoals": ["State the next unresolved subgoal."],
+        "current_goal": "State the next unresolved subgoal.",
+    }
+    attempt = {
+        "problem_hash": "problem-hash-from-context",
+        "strategy_id": "strategy-from-context",
+        "agent_id": "agent-from-context",
+        "round_index": 0,
+        "status": "partial",
+        "proof_steps": [step],
+        "unresolved_gaps": ["State the next unresolved subgoal."],
+    }
+    novelty = {
+        "representation_tags": ["target representation"],
+        "mechanism_tags": ["candidate mechanism"],
+        "core_objects": ["main object"],
+        "key_transformations": ["proposed transformation"],
+        "proof_principles": ["candidate principle"],
+        "targeted_obligation_ids": ["obligation-from-context"],
+        "normalized_hash": "",
+    }
+    examples: dict[str, dict[str, Any]] = {
+        "StrategySet": {
+            "strategies": [
+                {
+                    "strategy_id": "strategy-candidate-1",
+                    "title": "One structurally distinct route",
+                    "core_idea": "Describe the mechanism rather than renamed notation.",
+                    "independence_basis": "Explain why this mechanism is distinct.",
+                    "expected_lemmas": ["One necessary intermediate lemma"],
+                    "bottleneck": "The decisive unresolved implication",
+                    "falsification_test": "Give one precise fast failure test.",
+                    "estimated_success": 0.5,
+                }
+            ],
+            "coverage_notes": "Explain which mathematical mechanisms are covered.",
+        },
+        "ProofAttempt": attempt,
+        "ProofDelta": delta,
+        "InitialExplorationTurn": {
+            "action": "submit_attempt",
+            "attempt": attempt,
+            "reason": "A nonempty auditable partial route is ready for review.",
+        },
+        "ContinuationTurn": {
+            "action": "submit_delta",
+            "delta": delta,
+            "message_receipts": [],
+            "reason": "One bounded mathematical delta is ready for review.",
+        },
+        "ExperimentProgram": {
+            "experiment_id": "experiment-from-context",
+            "source": (
+                "def run(data):\n"
+                "    return {'outcome': 'not_refuted', 'cases_checked': 0, "
+                "'scope': {}, 'exact_arithmetic': True}\n"
+            ),
+            "input_schema": {"type": "object"},
+            "output_schema": {"type": "object"},
+            "dependencies": [],
+            "code_hash": "",
+        },
+        "VerificationReport": {
+            "target_id": "target-from-context",
+            "target_type": "attempt",
+            "agent_id": "agent-from-context",
+            "stage": "structural",
+            "problem_integrity_ok": True,
+            "verdict": "uncertain",
+            "issues": [],
+            "checked_dependencies": [],
+            "failure_level": "none",
+            "confidence": 0.5,
+            "concise_feedback": "State exactly what remains unchecked.",
+        },
+        "BlindVerificationReport": {
+            "problem_integrity_ok": True,
+            "verdict": "uncertain",
+            "issues": [],
+            "checked_dependencies": [],
+            "failure_level": "none",
+            "confidence": 0.5,
+            "concise_feedback": "State exactly what remains unchecked.",
+        },
+        "MetaReview": {
+            "selected_target_id": None,
+            "assessments": [],
+            "shared_agreements": [],
+            "unresolved_conflicts": [],
+            "required_actions": ["Obtain a reviewed nonempty proof delta."],
+            "failure_level": "none",
+            "can_synthesize": False,
+            "confidence": 0.5,
+            "summary": "No route currently meets the synthesis gate.",
+        },
+        "FinalProof": {
+            "problem_hash": "problem-hash-from-context",
+            "answer": "State the exact conclusion proved by the listed steps.",
+            "proof_steps": [step],
+            "dependencies": [],
+            "caveats": [],
+            "source_attempt_ids": ["reviewed-attempt-from-context"],
+            "confidence": 0.5,
+        },
+        "RepresentationCandidate": {
+            "candidate_id": "representation-candidate-1",
+            "source_problem_hash": "problem-hash-from-context",
+            "representation_name": "Equivalent structural representation",
+            "rewritten_problem_view": "Rewrite the target without changing its scope.",
+            "object_mapping": {"original object": "represented object"},
+            "preserved_invariants": ["One condition preserved in both directions"],
+            "expected_advantage": "Expose the current proof obstruction.",
+            "failure_risks": ["The reverse implication may fail."],
+            "fast_failure_tests": ["Check both directions on a boundary case."],
+            "novelty_signature": novelty,
+        },
+        "AnalogyMapping": {
+            "analogy_id": "analogy-candidate-1",
+            "source_record_id": "verified-local-record-1",
+            "source_problem_summary": "A verified local problem with the same mechanism.",
+            "target_problem_hash": "problem-hash-from-context",
+            "object_correspondence": {"source object": "target object"},
+            "operation_correspondence": {"source operation": "target operation"},
+            "transferable_lemmas": ["A structurally transferable lemma"],
+            "non_transferable_conditions": ["A source-only hypothesis"],
+            "transfer_risks": ["The target may lack the source closure property."],
+            "required_bridge_lemmas": ["Prove the target closure property."],
+            "novelty_signature": novelty,
+        },
+        "ConstructionProposal": {
+            "proposal_id": "construction-candidate-1",
+            "construction_type": "auxiliary object",
+            "constructed_objects": ["auxiliary object A"],
+            "definition": "Define A exactly from the original hypotheses.",
+            "intended_obligations": ["obligation-from-context"],
+            "expected_invariant_or_relation": "A satisfies the needed relation.",
+            "falsification_tests": ["Check whether A exists in the boundary case."],
+            "failure_conditions": ["A is not well-defined."],
+            "novelty_signature": novelty,
+        },
+        "InvariantHypothesis": {
+            "hypothesis_id": "invariant-candidate-1",
+            "target_obligation_ids": ["obligation-from-context"],
+            "state_definition": "Define the state and its domain exactly.",
+            "allowed_operations": ["one allowed transition"],
+            "candidate_expression": "I(state)",
+            "behavior": "invariant",
+            "boundary_case": "the initial state",
+            "boundary_result": "I(initial state) has the required value",
+            "falsification_request": "Check one transition that could change I.",
+            "novelty_signature": novelty,
+        },
+        "ReverseGoalPlan": {
+            "plan_id": "reverse-goal-candidate-1",
+            "target_obligation_id": "obligation-from-context",
+            "goal": "The exact current obligation",
+            "sufficient_intermediate_claims": ["One sufficient intermediate claim"],
+            "fact_supported_claims": [],
+            "minimal_gaps": ["The smallest unsupported implication"],
+            "bridge_requests": ["Prove the unsupported implication."],
+            "novelty_signature": novelty,
+        },
+        "InspirationProposal": {
+            "proposal_id": "inspiration-candidate-1",
+            "trigger_id": "trigger-from-context",
+            "mechanism": "surprise_exploration",
+            "source_agent_id": "agent-from-context",
+            "target_route_ids": [],
+            "statement": "A precise, falsifiable new mechanism.",
+            "rationale_summary": "Explain its structural relation to the open gap.",
+            "generated_obligations": ["Verify the new mechanism's key implication."],
+            "novelty_signature": novelty,
+            "novelty_score": 0.8,
+            "expected_information_gain": 0.7,
+            "estimated_cost": 1,
+        },
+        "MessageReceipt": {
+            "message_id": "message-from-context",
+            "target_route_id": "route-from-context",
+            "receipt_token": "copy-the-opaque-token-from-context",
+            "status": "accepted",
+            "used": False,
+            "parsed_assumptions": [],
+            "parsed_conclusion": "State the parsed conclusion.",
+            "referenced_in_step_ids": [],
+            "claimed_closed_obligation_ids": [],
+            "delivered_round": 0,
+            "reason": "Parsed successfully but not yet used in a verified step.",
+        },
+        "MessageEnvelope": {
+            "problem_hash": "problem-hash-from-context",
+            "source_agent_id": "agent-from-context",
+            "source_route_id": "route-from-context",
+            "source_role": "prover",
+            "target_route_ids": [],
+            "message_type": "claim_proposal",
+            "statement": "A route-local claim awaiting independent review.",
+            "normalized_statement": "a route-local claim awaiting independent review",
+            "assumptions": [],
+            "conclusion": "The precise candidate conclusion.",
+            "dependencies": [],
+            "scope_limitations": ["Not globally admissible until reviewed."],
+            "evidence_type": "unverified_idea",
+            "memory_tier": "insight",
+            "verification_status": "proposed",
+            "verification_confidence": 0.0,
+            "normalization_confidence": 0.0,
+            "round_created": 0,
+            "ttl_rounds": 2,
+            "content_hash": "",
+        },
+        "BrokerDecision": {
+            "message_id": "message-from-context",
+            "accepted": False,
+            "rejection_reason": "State the exact failed gate.",
+            "selected_targets": [],
+            "rejected_targets": {},
+            "score_breakdown": {},
+        },
+        "ToolAuditReport": {
+            "agent_id": "auditor-from-context",
+            "route_id": "route-from-context",
+            "experiment_ids": [],
+            "replay_artifact_refs": [],
+            "mathematical_mapping_checked": False,
+            "all_results_replayed_independently": False,
+            "issues": ["No replay evidence was supplied."],
+            "verdict": "inconclusive",
+            "confidence": 0.0,
+        },
+    }
+    example = examples.get(model.__name__)
+    if example is None:
+        candidate = _minimal_schema_value(schema, schema)
+        if not isinstance(candidate, dict):
+            raise TypeError(f"{model.__name__} requires a JSON object example")
+        example = candidate
+    # Fail immediately if a future schema change invalidates an advertised shape.
+    model.model_validate(example)
+    return example
+
+
 def _schema(model: Type[BaseModel]) -> str:
-    return json.dumps(model.model_json_schema(), ensure_ascii=False, indent=2)
+    schema = model.model_json_schema()
+    example = _validated_model_example(model, schema)
+    return (
+        f"{json.dumps(schema, ensure_ascii=False, indent=2)}\n\n"
+        "MINIMAL JSON SHAPE EXAMPLE (replace placeholders; leave all hash fields "
+        "empty because the server computes them):\n"
+        f"{json.dumps(example, ensure_ascii=False, indent=2)}"
+    )
 
 
 COMMON_SYSTEM = """
 You are one component in a verification-first mathematical reasoning system.
 The original problem statement is immutable: never change a quantifier, hypothesis, domain, requested conclusion, or definition.
 Reason privately, but output only explicit, auditable mathematical claims and proof steps. Do not output hidden scratch work.
+A field ending in `_ids` contains string references only. A ProofStep field contains complete objects only; never put a step ID where a ProofStep object is required.
+Leave cryptographic hash fields empty. The server computes hashes from canonical structured objects and ignores model-supplied hashes.
 A confidence value is metadata, not evidence. Never treat another agent's confidence as proof.
 Never invent a theorem or bibliographic citation. A standard named theorem may be used without a bibliographic source location only when the exact invoked form is stated and every hypothesis is explicitly verified from prior steps; otherwise mark the use unverified.
 Distinguish rigorously proved facts, plausible conjectures, failed directions, and unresolved gaps.
 Abstract mathematical reasoning is the default. Computation is evidence for a precisely stated decision, never a replacement for proof and never a default strategy generator.
 No finite sample or failure to find a counterexample verifies a universal claim. A computation request must expose only an auditable mathematical basis, not private chain of thought.
 Return exactly one JSON object conforming to the supplied JSON Schema. Do not add markdown fences or prose outside the JSON object.
+Inside JSON strings, escape every LaTeX backslash as `\\`; an unescaped backslash makes the whole artifact invalid.
 """.strip()
 
 
@@ -255,6 +576,7 @@ JSON SCHEMA:
             user,
             response_model,
             temperature=0.45,
+            output_tier=0,
         )
 
     def continue_proof(
@@ -273,6 +595,7 @@ JSON SCHEMA:
         remaining_call_budget: int = 0,
         experiment_results: list[dict[str, Any]] | None = None,
         computation_feedback: list[dict[str, Any]] | None = None,
+        previous_working_checkpoint: dict[str, Any] | None = None,
     ) -> PromptBundle:
         targeted_feedback = targeted_feedback or []
         experiment_results = experiment_results or []
@@ -288,6 +611,7 @@ JSON SCHEMA:
 You are explorer {agent_id}. Continue one proof path from a verified external checkpoint.
 The checkpoint is authoritative mathematical state, not a suggestion. Do not re-prove committed steps unless you identify an explicit contradiction; if a contradiction exists, report it in detected_conflicts and do not silently overwrite the checkpoint.
 Produce at most {max_new_steps} new logically complete proof steps and at most {max_new_claims} new reusable claims. Each new step must name all dependencies and may depend only on committed step IDs, verified claim IDs, explicit external theorems, or earlier steps in this same delta.
+Put existing checkpoint references only in `referenced_checkpoint_step_ids` as string IDs. Put newly proved mathematics only in `new_steps` as complete ProofStep objects; never place a bare step ID in `new_steps`.
 Encode every external theorem dependency as `external:<exact theorem name>` and state its applicable hypotheses in the step justification. A bare theorem title is not a valid dependency ID.
 Work on the checkpoint's current_goal first. Finish a coherent subgoal rather than emitting a long unfinished transcript.
 Use abstract reasoning first and limit manual numerical examples to three representative checks. {computation_instruction}
@@ -306,6 +630,10 @@ ASSIGNED STRATEGY:
 
 LATEST VERIFIED CHECKPOINT:
 {_json(checkpoint)}
+
+PREVIOUS ROUTE-LOCAL WORKING CHECKPOINT (not verified and never a premise; use only
+to repair or continue the same route without repeating useful local work):
+{_json(previous_working_checkpoint or {})}
 
 VERIFIED LEMMA LIBRARY:
 {_json(verified_claims)}
@@ -339,6 +667,7 @@ JSON SCHEMA:
             user,
             response_model,
             temperature=0.25,
+            output_tier=max(0, segment_index - 1),
         )
 
     def experiment_codegen(
@@ -757,6 +1086,7 @@ JSON SCHEMA:
         context: dict[str, Any],
         *,
         temperature: float = 0.0,
+        output_tier: int | None = None,
     ) -> PromptBundle:
         user = f"""
 [STAGE:{stage}]
@@ -779,6 +1109,7 @@ JSON SCHEMA:
             user,
             response_model,
             temperature=temperature,
+            output_tier=output_tier,
         )
 
     def route_prove(
@@ -786,6 +1117,13 @@ JSON SCHEMA:
         problem: ProblemContract,
         **context: Any,
     ) -> PromptBundle:
+        checkpoint = context.get("checkpoint")
+        if isinstance(checkpoint, ProofCheckpoint):
+            output_tier = checkpoint.segment_index
+        elif isinstance(checkpoint, Mapping):
+            output_tier = int(checkpoint.get("segment_index", 0) or 0)
+        else:
+            output_tier = 0
         return self._typed_stage(
             "route_prove",
             (
@@ -797,18 +1135,23 @@ JSON SCHEMA:
                 "bounded ProofDelta, request one precisely scoped computation when the "
                 "reasoning-first gate permits it, complete the proof, or abandon with a "
                 "specific obstruction. Never use not_refuted or bounded evidence as "
-                "proof. For every broker_messages item, return exactly one "
-                "message_receipt that independently restates its assumptions, conclusion, "
-                "ordered quantifiers, and variable bindings. A quantifier or scope reversal "
-                "must be rejected. Mark the receipt accepted only when that parse is exact; "
-                "record referenced_in_step_ids and claimed_closed_obligation_ids only when "
-                "the returned delta actually uses the message. semantic_hash may be "
-                "empty because the broker recomputes and validates it. Expose every new "
+                "proof. Put prior checkpoint references in "
+                "delta.referenced_checkpoint_step_ids as string IDs, while "
+                "delta.new_steps must contain complete ProofStep objects rather than "
+                "bare IDs. For every broker_messages item, return exactly one "
+                "message_receipt. Copy only the opaque receipt_token supplied in "
+                "message_receipt_requirements; never invent a hash. Report accepted or "
+                "rejected, used, referenced_in_step_ids, claimed_closed_obligation_ids, "
+                "and a short reason. Set used=true and add references only when the "
+                "returned delta actually cites the message. The server validates use "
+                "against the verified delta; reading or accepting a message is not use. "
+                "Expose every new "
                 "obligation and do not repeat a consumed message as a new discovery."
             ),
             ContinuationTurn,
             {"problem": problem, **context},
             temperature=0.25,
+            output_tier=max(0, output_tier),
         )
 
     def route_skeptic(self, **context: Any) -> PromptBundle:
@@ -855,7 +1198,7 @@ JSON SCHEMA:
     def acknowledge_message(self, **context: Any) -> PromptBundle:
         return self._typed_stage(
             "acknowledge_message",
-            "Restate parsed assumptions and conclusion without extending them, then compute the semantic receipt fields.",
+            "Return the supplied opaque receipt token, accepted/rejected status, actual-use flag, cited step IDs, affected obligation IDs, and a short reason. Do not compute or invent a semantic hash.",
             MessageReceipt,
             context,
         )

@@ -29,6 +29,7 @@ def write_hierarchical_reports(
     deliveries = dict(message_broker.get("deliveries", {}))
     decisions = list(message_broker.get("decisions", []))
     receipts = dict(message_broker.get("receipts", {}))
+    utility_records = dict(message_broker.get("utility_records", {}))
     obligations = dict(proof_graph.get("obligations", {}))
     edges = dict(proof_graph.get("edges", {}))
     tiers = dict(typed_memory.get("tiers", {}))
@@ -87,10 +88,17 @@ def write_hierarchical_reports(
         "reports", "message_diagnostics", "\n".join(diagnostic_lines), suffix=".md"
     )
 
-    published = sum(bool(item.get("accepted")) for item in decisions)
-    rejected = len(decisions) - published
+    publication_attempts = len(decisions)
+    published = len(messages)
+    rejected = sum(not bool(item.get("accepted")) for item in decisions)
     duplicates = sum(bool(item.get("duplicate_of")) for item in decisions)
     acknowledged = sum(item.get("status") == "accepted" for item in receipts.values())
+    consumed = sum(bool(item.get("prompt_consumed")) for item in deliveries.values())
+    mathematically_used = len(utility_records)
+    materialization_counts = Counter(
+        str(item.get("action", "unknown"))
+        for item in dict(inspiration_engine.get("materializations", {})).values()
+    )
     cross_route_chars = sum(
         len(str(messages.get(str(item.get("message_id")), {})))
         for item in deliveries.values()
@@ -114,14 +122,18 @@ def write_hierarchical_reports(
         ),
         "contradiction_count": len(contradiction_broker.get("records", [])),
         "bridge_task_count": len(bridge_broker.get("tasks", [])),
-        "messages_published": published,
-        "messages_delivered": sum(
-            bool(item.get("prompt_consumed")) for item in deliveries.values()
-        ),
+        "message_publication_attempts": publication_attempts,
+        "messages_published_unique": published,
+        "delivery_records": len(deliveries),
+        "messages_consumed": consumed,
+        "messages_semantically_accepted": acknowledged,
+        "messages_mathematically_used": mathematically_used,
         "messages_rejected": rejected,
         "duplicate_message_rate": duplicates / max(1, len(decisions)),
         "cross_route_token_estimate": (cross_route_chars + 3) // 4,
-        "message_utilization_rate": acknowledged / max(1, len(deliveries)),
+        "message_consumption_rate": consumed / max(1, len(deliveries)),
+        "message_semantic_acceptance_rate": acknowledged / max(1, consumed),
+        "message_mathematical_use_rate": mathematically_used / max(1, consumed),
         "graph_mode": proof_graph.get("mode", "off"),
         "inspiration_mode": inspiration_engine.get("mode", "off"),
         "inspiration_trigger_count": len(inspiration_engine.get("triggers", {})),
@@ -129,6 +141,7 @@ def write_hierarchical_reports(
         "inspiration_verified_count": len(
             inspiration_engine.get("verified_proposals", {})
         ),
+        "inspiration_materialization_actions": dict(materialization_counts),
         "surprise_budget": inspiration_engine.get("surprise_budget", {}),
     }
     store.write_json("reports", "hierarchical_metrics", metrics)
@@ -151,6 +164,7 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
     verdict_counts = Counter(
         report.verdict.value for report in result.verification_reports
     )
+    working_checkpoints = store.list_working_checkpoints()
     lines = [
         f"# {store.run_id}：MathProofMesh 运行报告",
         "",
@@ -160,11 +174,14 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
         "",
         f"- 完整性哈希：`{result.problem.integrity_hash}`",
         f"- 运行状态：**{result.status.value}**",
+        f"- 数学状态：**{result.math_status.value}**",
+        f"- 执行状态：**{result.execution_status.value}**",
         f"- API 调用数：{result.total_calls}",
         f"- Token：{result.total_usage.total_tokens}",
         f"- 估算费用：${result.total_usage.estimated_cost_usd:.4f}",
         f"- 验证报告：{dict(verdict_counts)}",
         f"- 已提交证明检查点：{len(result.proof_checkpoints)}",
+        f"- 路线私有 Working checkpoint：{len(working_checkpoints)}",
         f"- 本次是否为恢复运行：{'是' if result.resumed else '否'}",
         f"- 恢复起点：`{result.resumed_from_checkpoint_id or '无'}`",
         "- 运行时间线：`activity_timeline.md`（仅含阶段状态与结构化摘要，不含模型原始思考链）",
@@ -172,8 +189,31 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
         "## 最终结果",
         "",
     ]
-    if result.final_proof is None:
+    if result.final_proof is None or result.math_status.value != "verified":
         lines.extend(["未形成可提交的最终证明。", ""])
+        if result.final_proof is not None:
+            lines.extend(
+                [
+                    "已保留一份尚未通过最终独立审计的候选草稿；该草稿不作为答案或全局事实。",
+                    "",
+                ]
+            )
+        if result.research_progress_report is not None:
+            progress = result.research_progress_report
+            lines.extend(
+                [
+                    "### 研究进展报告",
+                    "",
+                    progress.summary,
+                    "",
+                    f"- 有效局部路线：{len(progress.valid_partial_attempt_ids)}",
+                    f"- 已审查步骤：{len(progress.verified_step_ids)}",
+                    f"- 已反驳路线：{len(progress.refuted_routes)}",
+                    f"- 开放义务：{len(progress.open_obligations)}",
+                    f"- 剩余缺口：{len(progress.remaining_gaps)}",
+                    "",
+                ]
+            )
     else:
         lines.extend(
             [
@@ -212,7 +252,7 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
     for attempt in result.attempts:
         lines.append(
             f"- `{attempt.attempt_id}` / `{attempt.strategy_id}` / {attempt.agent_id}："
-            f"{attempt.status.value}，自评 {attempt.self_confidence:.2f}，"
+            f"{attempt.status.value}，"
             f"步骤 {len(attempt.proof_steps)}，证明段 {attempt.segment_count}，"
             f"未解缺口 {len(attempt.unresolved_gaps)}，"
             f"最新检查点 `{attempt.latest_checkpoint_id or '无'}`"
@@ -245,9 +285,20 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
         obligations = list(dict(proof_graph_state.get("obligations", {})).values())
         decisions = list(broker_state.get("decisions", []))
         deliveries = list(dict(broker_state.get("deliveries", {})).values())
-        published = sum(1 for item in decisions if item.get("accepted"))
+        messages = dict(broker_state.get("messages", {}))
+        receipts = dict(broker_state.get("receipts", {}))
+        utility_records = dict(broker_state.get("utility_records", {}))
+        published = len(messages)
         rejected = sum(1 for item in decisions if not item.get("accepted"))
         duplicates = sum(1 for item in decisions if item.get("duplicate_of"))
+        consumed = sum(bool(item.get("prompt_consumed")) for item in deliveries)
+        semantic_accepts = sum(
+            item.get("status") == "accepted" for item in receipts.values()
+        )
+        materializations = dict(inspiration_state.get("materializations", {}))
+        materialization_counts = Counter(
+            str(item.get("action", "unknown")) for item in materializations.values()
+        )
         lines.extend(
             [
                 "## v0.7 分层稀疏拓扑指标",
@@ -256,8 +307,8 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
                 f"- Typed Memory：Fact {sum(value == 'fact' for value in tiers.values())}；Insight {sum(value == 'insight' for value in tiers.values())}；Negative {sum(value == 'negative' for value in tiers.values())}",
                 f"- Proof Obligation：open {sum(item.get('status') != 'closed' for item in obligations)}；closed {sum(item.get('status') == 'closed' for item in obligations)}",
                 f"- Bridge tasks：{len(bridge_state.get('tasks', []))}；Contradictions：{len(conflict_state.get('records', []))}",
-                f"- Typed messages：published {published}；delivered {len(deliveries)}；rejected {rejected}；duplicate rate {(duplicates / max(1, len(decisions))):.3f}",
-                f"- Inspiration：triggers {len(inspiration_state.get('triggers', {}))}；proposals {len(inspiration_state.get('proposals', {}))}；materialized {len(inspiration_state.get('materializations', {}))}",
+                f"- Typed messages：publication attempts {len(decisions)}；unique published {published}；delivery records {len(deliveries)}；consumed {consumed}；semantically accepted {semantic_accepts}；mathematically used {len(utility_records)}；rejected {rejected}；duplicate rate {(duplicates / max(1, len(decisions))):.3f}",
+                f"- Inspiration：triggers {len(inspiration_state.get('triggers', {}))}；proposals {len(inspiration_state.get('proposals', {}))}；actions {dict(materialization_counts)}；verified {len(inspiration_state.get('verified_proposals', {}))}",
                 "- 跨路线只传递门控后的结构化数学对象；上述计数不包含原始思考链。",
                 "",
             ]
@@ -297,7 +348,8 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
         lines.append(
             f"- {metric.agent_id}：调用 {metric.calls}，token {metric.usage.total_tokens}，"
             f"估算费用 ${metric.usage.estimated_cost_usd:.4f}，信任分 {metric.trust_score:.3f}，"
-            f"失败 {metric.failures}"
+            f"成功响应 {metric.successful_responses}，失败尝试 {metric.failed_attempts}，"
+            f"失败分类 {metric.failure_categories}"
         )
     lines.append("")
     lines.extend(

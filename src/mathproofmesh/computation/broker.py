@@ -5,6 +5,7 @@ import random
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from importlib.metadata import PackageNotFoundError, version
@@ -39,6 +40,10 @@ from .handlers.graph import run_graph_certificate
 from .handlers.integer_search import run_bounded_integer_search
 from .handlers.modular import run_modular
 from .handlers.recurrence import run_recurrence_check
+from .handlers.sequence import (
+    run_bounded_greedy_sequence,
+    run_candidate_period_check,
+)
 from .handlers.symbolic import (
     numeric_counterexample_payload,
     polynomial_factor_payload,
@@ -627,6 +632,10 @@ class ComputationBroker:
             return run_graph_certificate(spec)
         if spec.method == ComputationMethod.RECURRENCE_CHECK:
             return run_recurrence_check(spec)
+        if spec.method == ComputationMethod.BOUNDED_GREEDY_SEQUENCE:
+            return run_bounded_greedy_sequence(spec)
+        if spec.method == ComputationMethod.CANDIDATE_PERIOD_CHECK:
+            return run_candidate_period_check(spec)
         if spec.method == ComputationMethod.EXACT_GEOMETRY:
             return run_exact_geometry(spec)
         if spec.method == ComputationMethod.SANDBOXED_PYTHON:
@@ -670,6 +679,15 @@ class ComputationBroker:
         )
 
     def _tool_identity(self, method: ComputationMethod) -> tuple[str, str]:
+        if method in {
+            ComputationMethod.BOUNDED_GREEDY_SEQUENCE,
+            ComputationMethod.CANDIDATE_PERIOD_CHECK,
+        }:
+            python_version = ".".join(str(item) for item in sys.version_info[:3])
+            return (
+                method.value,
+                f"python-stdlib/{python_version};sequence-v1;{TOOL_VERSION}",
+            )
         if method.value.startswith("sympy") or method in {
             ComputationMethod.POLYNOMIAL_FACTOR,
             ComputationMethod.MODULAR_EXHAUSTIVE,

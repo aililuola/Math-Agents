@@ -44,3 +44,12 @@ class LLMClient(ABC):
 
     async def aclose(self) -> None:
         return None
+
+    def progress_snapshot(self) -> dict[str, Any]:
+        """Return content-free transport progress for Activity heartbeats.
+
+        Provider adapters may override this. The snapshot must never expose private
+        reasoning text or response content.
+        """
+
+        return {}

@@ -67,6 +67,7 @@ class ClaimStatus(StrEnum):
 
 
 class CheckpointStatus(StrEnum):
+    WORKING = "working"
     TENTATIVE = "tentative"
     VERIFIED = "verified"
     REJECTED = "rejected"
@@ -140,6 +141,8 @@ class ComputationMethod(StrEnum):
     BOUNDED_INTEGER_SEARCH = "bounded_integer_search"
     GRAPH_CERTIFICATE = "graph_certificate"
     RECURRENCE_CHECK = "recurrence_check"
+    BOUNDED_GREEDY_SEQUENCE = "bounded_greedy_sequence"
+    CANDIDATE_PERIOD_CHECK = "candidate_period_check"
     EXACT_GEOMETRY = "exact_geometry"
     NUMERIC_COUNTEREXAMPLE = "numeric_counterexample"
     SANDBOXED_PYTHON = "sandboxed_python"
@@ -428,7 +431,9 @@ class MessageReceipt(StrictModel):
     receipt_id: str = Field(default_factory=lambda: new_id("receipt"))
     message_id: str
     target_route_id: str
+    receipt_token: str = ""
     status: ReceiptStatus
+    used: bool = False
     parsed_assumptions: list[str] = Field(default_factory=list)
     parsed_conclusion: str = ""
     parsed_quantifiers: list[QuantifierSpec] = Field(default_factory=list)
@@ -495,6 +500,11 @@ class RouteDescriptor(StrictModel):
     stagnation_rounds: int = Field(default=0, ge=0)
     cooldown_until_round: int | None = Field(default=None, ge=0)
     merged_into_route_id: str | None = None
+    strategy_signature: str = ""
+    shared_assumptions: list[str] = Field(default_factory=list)
+    inspiration_proposal_id: str | None = None
+    requires_revision: bool = False
+    revision_summary: str | None = None
 
 
 class ProofObligation(StrictModel):
@@ -1124,6 +1134,8 @@ class ToolRequest(StrictModel):
         "bounded_integer_search",
         "graph_certificate",
         "recurrence_check",
+        "bounded_greedy_sequence",
+        "candidate_period_check",
         "exact_geometry",
         "lean_check",
     ]
@@ -1197,6 +1209,8 @@ class StrategyCard(StrictModel):
     tags: list[str] = Field(default_factory=list)
     computation_hints: list[ComputationHint] = Field(default_factory=list)
     assigned_agent_id: str | None = None
+    inspiration_proposal_id: str | None = None
+    parent_strategy_ids: list[str] = Field(default_factory=list)
 
 
 class StrategySet(StrictModel):
@@ -1295,6 +1309,9 @@ class ProofDelta(StrictModel):
     agent_id: str
     round_index: int = Field(ge=0)
     segment_index: int = Field(ge=1)
+    # References to already committed steps are IDs. New mathematical content
+    # belongs in new_steps as full ProofStep objects.
+    referenced_checkpoint_step_ids: list[str] = Field(default_factory=list)
     completed_subgoal: str | None = None
     new_steps: list[ProofStep] = Field(default_factory=list)
     new_claims: list[ClaimCard] = Field(default_factory=list)
@@ -1440,6 +1457,36 @@ class ProofCheckpoint(StrictModel):
         if self.content_hash and self.content_hash != expected:
             raise ValueError("checkpoint content_hash mismatch")
         object.__setattr__(self, "content_hash", expected)
+        return self
+
+
+class WorkingProofCheckpoint(StrictModel):
+    """Route-local continuation state that is never globally admissible evidence."""
+
+    working_checkpoint_id: str = Field(default_factory=lambda: new_id("working"))
+    parent_verified_checkpoint_id: str
+    problem_hash: str
+    path_id: str
+    strategy_id: str
+    source_agent_id: str
+    segment_index: int = Field(ge=1)
+    delta: ProofDelta
+    status: Literal["candidate", "uncertain", "rejected"] = "candidate"
+    verification_report_ids: list[str] = Field(default_factory=list)
+    feedback: list[str] = Field(default_factory=list)
+    created_at: str = Field(default_factory=utc_now_iso)
+
+    @model_validator(mode="after")
+    def validate_working_scope(self) -> "WorkingProofCheckpoint":
+        if self.delta.parent_checkpoint_id != self.parent_verified_checkpoint_id:
+            raise ValueError("working checkpoint changed its verified parent")
+        if (
+            self.delta.problem_hash != self.problem_hash
+            or self.delta.path_id != self.path_id
+            or self.delta.strategy_id != self.strategy_id
+            or self.delta.segment_index != self.segment_index
+        ):
+            raise ValueError("working checkpoint and delta identities do not match")
         return self
 
 
@@ -1627,21 +1674,56 @@ class AgentMetric(StrictModel):
     usage: UsageRecord = Field(default_factory=UsageRecord)
     trust_score: float = Field(default=0.5, ge=0.0, le=1.0)
     failures: int = Field(default=0, ge=0)
+    successful_responses: int = Field(default=0, ge=0)
+    failed_attempts: int = Field(default=0, ge=0)
+    failure_categories: dict[str, int] = Field(default_factory=dict)
+
+
+class MathStatus(StrEnum):
+    VERIFIED = "verified"
+    INCONCLUSIVE = "inconclusive"
+    REFUTED = "refuted"
+
+
+class ExecutionStatus(StrEnum):
+    COMPLETED = "completed"
+    BUDGET_EXHAUSTED = "budget_exhausted"
+    NETWORK_INTERRUPTED = "network_interrupted"
+    FAILED = "failed"
+
+
+class ResearchProgressReport(StrictModel):
+    problem_hash: str
+    valid_partial_attempt_ids: list[str] = Field(default_factory=list)
+    strongest_partial_attempt_id: str | None = None
+    verified_step_ids: list[str] = Field(default_factory=list)
+    verified_local_claim_ids: list[str] = Field(default_factory=list)
+    refuted_routes: list[dict[str, Any]] = Field(default_factory=list)
+    negative_evidence: list[str] = Field(default_factory=list)
+    open_obligations: list[dict[str, Any]] = Field(default_factory=list)
+    remaining_gaps: list[str] = Field(default_factory=list)
+    execution_notes: list[str] = Field(default_factory=list)
+    summary: str
+    created_at: str = Field(default_factory=utc_now_iso)
 
 
 class RunStatus(StrEnum):
     VERIFIED = "verified"
     UNVERIFIED = "unverified"
     BUDGET_EXHAUSTED = "budget_exhausted"
+    PAUSED_EXTERNAL_FAILURE = "paused_external_failure"
     FAILED = "failed"
 
 
 class RunResult(StrictModel):
     run_id: str
     status: RunStatus
+    math_status: MathStatus = MathStatus.INCONCLUSIVE
+    execution_status: ExecutionStatus = ExecutionStatus.COMPLETED
     problem: ProblemContract
     final_proof: FinalProof | None = None
     final_verification: VerificationReport | None = None
+    research_progress_report: ResearchProgressReport | None = None
     attempts: list[ProofAttempt] = Field(default_factory=list)
     claims: list[ClaimCard] = Field(default_factory=list)
     verification_reports: list[VerificationReport] = Field(default_factory=list)

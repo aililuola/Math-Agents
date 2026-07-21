@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections.abc import Callable
 from typing import Any, Generic, TypeVar
 
@@ -13,8 +13,13 @@ from pydantic import BaseModel, ValidationError
 
 from .activity import ActivityImportance, ActivityStatus, ActivityStream, stage_label
 from .config import SystemConfig
-from .llm.pool import AgentCallFailure, AgentPool, AgentRuntime
-from .prompts import PromptBundle, assert_blind_prompt_safe
+from .llm.pool import (
+    AgentCallFailure,
+    AgentPool,
+    AgentRuntime,
+    ProviderCircuitOpenError,
+)
+from .prompts import PromptBundle, _validated_model_example, assert_blind_prompt_safe
 from .schemas import UsageRecord
 from .store import ArtifactStore
 
@@ -28,6 +33,18 @@ class BudgetExhaustedError(RuntimeError):
 
 
 class StructuredOutputError(RuntimeError):
+    pass
+
+
+class AgentCallWallTimeoutError(RuntimeError):
+    pass
+
+
+class ReasoningOnlyStallError(RuntimeError):
+    pass
+
+
+class ReasoningBudgetExhaustedError(RuntimeError):
     pass
 
 
@@ -121,6 +138,7 @@ class StructuredAgentRunner:
                 "stage_calls": self.ledger.stage_calls,
                 "bucket_calls": self.ledger.bucket_calls,
                 "agent_metrics": self.pool.metrics(),
+                "provider_circuit": self.pool.provider_circuit_state(),
             },
         )
 
@@ -183,6 +201,11 @@ class StructuredAgentRunner:
             for parse_attempt in range(self.config.runtime.parse_retries + 1):
                 self.ledger.start(bundle.stage, budget_bucket)
                 self.persist_runtime_state()
+                effective_max_output_tokens = self._effective_output_limit(
+                    bundle,
+                    agent,
+                    repair=parse_attempt > 0,
+                )
                 if parse_attempt > 0:
                     repair_system = (
                         "You repair malformed structured output. Return only one JSON object matching the schema. "
@@ -191,6 +214,8 @@ class StructuredAgentRunner:
                     repair_user = (
                         f"[STAGE:{bundle.stage}_json_repair]\n"
                         f"JSON SCHEMA:\n{json.dumps(schema, ensure_ascii=False, indent=2)}\n\n"
+                        "MINIMAL JSON SHAPE EXAMPLE:\n"
+                        f"{json.dumps(_validated_model_example(bundle.response_model, schema), ensure_ascii=False, indent=2)}\n\n"
                         f"MALFORMED OUTPUT:\n{response_text}\n\n"
                         f"VALIDATION ERROR:\n{last_error}"
                     )
@@ -227,7 +252,7 @@ class StructuredAgentRunner:
                     agent,
                     messages,
                     temperature=bundle.temperature,
-                    max_output_tokens=bundle.max_output_tokens,
+                    max_output_tokens=effective_max_output_tokens,
                     json_mode=True,
                     schema_name=bundle.response_model.__name__,
                     schema=schema,
@@ -271,8 +296,28 @@ class StructuredAgentRunner:
                 )
                 total_usage.latency_ms += response.latency_ms
                 self.persist_runtime_state()
+                finish_reason = str(response.raw.get("finish_reason") or "")
+                if finish_reason == "length" and not response.text.strip():
+                    self._record_runner_failure(agent, "reasoning_budget_exhausted")
+                    self.store.append_event(
+                        "reasoning_budget_exhausted",
+                        {
+                            "stage": bundle.stage,
+                            "agent_id": agent.id,
+                            "raw_ref": raw_ref,
+                            "output_tokens": response.output_tokens,
+                            "max_output_tokens": effective_max_output_tokens,
+                            "finish_reason": finish_reason,
+                            "recovery": "restart_from_external_checkpoint",
+                        },
+                    )
+                    raise ReasoningBudgetExhaustedError(
+                        f"{agent.id} exhausted {effective_max_output_tokens} output "
+                        "tokens without returning a structured artifact"
+                    )
                 try:
                     payload = extract_json_object(response.text)
+                    self._strip_server_owned_hashes(payload)
                     value = bundle.response_model.model_validate(payload)
                     self._attach_metadata(value, raw_ref, total_usage)
                     self.store.append_event(
@@ -321,6 +366,7 @@ class StructuredAgentRunner:
                         usage=total_usage,
                     )
                 except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+                    self._record_runner_failure(agent, "schema")
                     last_error = exc
                     logger.warning(
                         "Structured output validation failed at stage=%s agent=%s: %s",
@@ -398,6 +444,7 @@ class StructuredAgentRunner:
         """Try one key with its normal retries, then move the same task to backup keys."""
         tried: list[str] = []
         errors: list[str] = []
+        last_exception: Exception | None = None
         excluded = set(exclude_agent_ids or set())
         if primary_agent.id in excluded:
             raise ValueError(
@@ -444,9 +491,15 @@ class StructuredAgentRunner:
                         metrics={"tried_agents": list(tried)},
                     )
             try:
+                bundle = bundle_factory(agent)
+                if isinstance(
+                    last_exception,
+                    (ReasoningBudgetExhaustedError, ReasoningOnlyStallError),
+                ):
+                    bundle = self._recovery_bundle(bundle, last_exception)
                 result = await self.call(
                     role,
-                    bundle_factory(agent),
+                    bundle,
                     fixed_agent=agent,
                     budget_bucket=budget_bucket,
                 )
@@ -460,7 +513,7 @@ class StructuredAgentRunner:
                         },
                     )
                 return result, tried
-            except BudgetExhaustedError:
+            except (BudgetExhaustedError, ProviderCircuitOpenError):
                 raise
             except (
                 AgentCallFailure,
@@ -468,6 +521,7 @@ class StructuredAgentRunner:
                 RuntimeError,
                 ValueError,
             ) as exc:
+                last_exception = exc
                 errors.append(f"{agent.id}:{type(exc).__name__}:{exc}")
                 self.store.append_event(
                     "agent_failover_candidate_failed",
@@ -492,6 +546,80 @@ class StructuredAgentRunner:
 
         raise AgentFailoverExhausted(role, tried, errors)
 
+    def _effective_output_limit(
+        self,
+        bundle: PromptBundle,
+        agent: AgentRuntime,
+        *,
+        repair: bool,
+    ) -> int:
+        limits = [
+            agent.config.max_output_tokens,
+            agent.config.provider_max_output_tokens,
+        ]
+        if bundle.max_output_tokens is not None:
+            limits.append(bundle.max_output_tokens)
+        stage_limit = self.config.runtime.stage_output_token_limits.get(bundle.stage)
+        if stage_limit is not None:
+            limits.append(stage_limit)
+        if bundle.output_tier is not None:
+            tiers = self.config.runtime.exploration_output_token_tiers
+            limits.append(tiers[min(bundle.output_tier, len(tiers) - 1)])
+        if repair:
+            limits.append(self.config.runtime.json_repair_max_output_tokens)
+        return max(256, min(limits))
+
+    def _recovery_bundle(self, bundle: PromptBundle, error: Exception) -> PromptBundle:
+        """Restart from external state; never pretend to resume private reasoning."""
+
+        instruction = (
+            "\n\nRECOVERY MODE: The previous provider call produced no usable artifact "
+            f"({type(error).__name__}). Do not continue or reconstruct its private "
+            "reasoning. Restart only from the verified checkpoint and typed context in "
+            "this prompt. Address the smallest current obligation and emit a valid, "
+            "bounded JSON artifact immediately; leave unresolved work explicit."
+        )
+        first_tier = self.config.runtime.exploration_output_token_tiers[0]
+        explicit = (
+            min(bundle.max_output_tokens, first_tier)
+            if bundle.max_output_tokens is not None
+            else first_tier
+        )
+        return replace(
+            bundle,
+            user=f"{bundle.user}{instruction}",
+            max_output_tokens=explicit,
+            output_tier=0,
+        )
+
+    @staticmethod
+    def _record_runner_failure(agent: AgentRuntime, category: str) -> None:
+        agent.failed_attempts += 1
+        agent.failure_categories[category] = (
+            agent.failure_categories.get(category, 0) + 1
+        )
+
+    @classmethod
+    def _strip_server_owned_hashes(cls, value: Any) -> None:
+        """Ignore hashes invented by a model; validators recompute canonical values."""
+
+        if isinstance(value, dict):
+            for key in (
+                "content_hash",
+                "normalized_hash",
+                "request_hash",
+                "code_hash",
+                "result_hash",
+                "semantic_hash",
+            ):
+                if key in value:
+                    value[key] = ""
+            for item in value.values():
+                cls._strip_server_owned_hashes(item)
+        elif isinstance(value, list):
+            for item in value:
+                cls._strip_server_owned_hashes(item)
+
     async def _call_with_activity_heartbeat(
         self,
         agent: AgentRuntime,
@@ -508,6 +636,10 @@ class StructuredAgentRunner:
         """Await one provider call while emitting low-frequency, content-free heartbeats."""
 
         interval = self.config.runtime.activity_heartbeat_seconds
+        poll_interval = max(0.01, min(interval if interval > 0 else 5.0, 5.0))
+        wall_timeout = self.config.runtime.agent_call_wall_timeout_seconds
+        reasoning_timeout = self.config.runtime.reasoning_only_abort_seconds
+        minimum_reasoning = self.config.runtime.reasoning_only_min_characters
         task = asyncio.create_task(
             agent.call(
                 messages,
@@ -518,32 +650,99 @@ class StructuredAgentRunner:
                 schema=schema,
             )
         )
-        if self.activity is None or activity_task is None or interval <= 0:
-            return await task
-
         started = time.monotonic()
+        last_activity_update = started - max(0.0, interval)
         try:
             while True:
-                done, _ = await asyncio.wait({task}, timeout=interval)
+                done, _ = await asyncio.wait({task}, timeout=poll_interval)
                 if task in done:
                     return task.result()
-                elapsed = max(0, int(time.monotonic() - started))
+                now = time.monotonic()
+                elapsed_float = max(0.0, now - started)
+                elapsed = int(elapsed_float)
+                client = getattr(agent, "client", None)
+                progress = (
+                    client.progress_snapshot()
+                    if client is not None and hasattr(client, "progress_snapshot")
+                    else {}
+                )
+                if elapsed_float >= wall_timeout:
+                    self._record_runner_failure(agent, "wall_timeout")
+                    self.store.append_event(
+                        "agent_call_wall_timeout",
+                        {
+                            "stage": stage,
+                            "agent_id": agent.id,
+                            "elapsed_seconds": elapsed_float,
+                            "progress": progress,
+                        },
+                    )
+                    raise AgentCallWallTimeoutError(
+                        f"{agent.id} exceeded the {wall_timeout:.0f}s whole-call limit"
+                    )
+                if (
+                    elapsed_float >= reasoning_timeout
+                    and int(progress.get("reasoning_characters", 0) or 0)
+                    >= minimum_reasoning
+                    and int(progress.get("content_characters", 0) or 0) == 0
+                ):
+                    self._record_runner_failure(agent, "reasoning_only_stall")
+                    self.store.append_event(
+                        "reasoning_only_stream_aborted",
+                        {
+                            "stage": stage,
+                            "agent_id": agent.id,
+                            "elapsed_seconds": elapsed_float,
+                            "progress": progress,
+                            "recovery": "restart_from_external_checkpoint",
+                        },
+                    )
+                    raise ReasoningOnlyStallError(
+                        f"{agent.id} streamed private reasoning for {elapsed_float:.0f}s "
+                        "without beginning the requested artifact"
+                    )
+                if (
+                    self.activity is None
+                    or activity_task is None
+                    or interval <= 0
+                    or now - last_activity_update < interval
+                ):
+                    continue
+                last_activity_update = now
                 minutes, seconds = divmod(elapsed, 60)
                 elapsed_text = f"{minutes:02d}:{seconds:02d}"
+                chunks = int(progress.get("chunks", 0) or 0)
+                approx_tokens = int(progress.get("approx_output_tokens", 0) or 0)
+                last_data_age = float(progress.get("last_data_age_seconds", 0.0) or 0.0)
                 self.activity.update_task(
                     activity_task,
                     title=stage_label(stage, self.config.runtime.output_language),
                     detail=(
-                        f"{agent.id} 仍在处理当前任务（本次调用已运行 {elapsed_text}）"
+                        f"{agent.id} 仍在处理（{elapsed_text}；已收 {chunks} chunks；"
+                        f"约 {approx_tokens:,} tokens；最后数据 {last_data_age:.1f} 秒前）"
                         if self.activity.is_zh
-                        else f"{agent.id} is still working ({elapsed_text} elapsed for this call)"
+                        else (
+                            f"{agent.id} is still working ({elapsed_text}; {chunks} chunks; "
+                            f"~{approx_tokens:,} tokens; last data {last_data_age:.1f}s ago)"
+                        )
                     ),
                     status=ActivityStatus.RUNNING,
                     event_type="agent_call_heartbeat",
                     stage=stage,
                     agent_id=agent.id,
                     importance=ActivityImportance.DETAIL,
-                    metrics={"elapsed_seconds": elapsed},
+                    metrics={
+                        "elapsed_seconds": elapsed,
+                        "chunks": chunks,
+                        "approx_output_tokens": approx_tokens,
+                        "reasoning_characters": int(
+                            progress.get("reasoning_characters", 0) or 0
+                        ),
+                        "content_characters": int(
+                            progress.get("content_characters", 0) or 0
+                        ),
+                        "last_data_age_seconds": last_data_age,
+                    },
                 )
         except BaseException:
             if not task.done():

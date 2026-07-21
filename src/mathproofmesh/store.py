@@ -13,6 +13,7 @@ from .schemas import (
     CheckpointStatus,
     EvidenceRef,
     ProofCheckpoint,
+    WorkingProofCheckpoint,
     stable_hash,
     utc_now_iso,
 )
@@ -216,6 +217,77 @@ class ArtifactStore:
             return None
         with latest_path.open("r", encoding="utf-8") as f:
             return ProofCheckpoint.model_validate(json.load(f))
+
+    def save_working_checkpoint(self, checkpoint: WorkingProofCheckpoint) -> str:
+        """Persist route-local work without advancing the verified resume pointer."""
+
+        path_dir = (
+            self.root / "checkpoints" / "working" / _safe_name(checkpoint.path_id)
+        )
+        path_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_path = path_dir / (
+            f"{checkpoint.segment_index:04d}_"
+            f"{_safe_name(checkpoint.working_checkpoint_id)}.json"
+        )
+        content = json.dumps(
+            _to_jsonable(checkpoint), ensure_ascii=False, indent=2, sort_keys=True
+        )
+        self._atomic_write(checkpoint_path, content)
+        self._atomic_write(path_dir / "latest.json", content)
+        self.append_event(
+            "working_checkpoint_saved",
+            {
+                "working_checkpoint_id": checkpoint.working_checkpoint_id,
+                "parent_verified_checkpoint_id": (
+                    checkpoint.parent_verified_checkpoint_id
+                ),
+                "path_id": checkpoint.path_id,
+                "segment_index": checkpoint.segment_index,
+                "status": checkpoint.status,
+            },
+        )
+        return self.ref(checkpoint_path)
+
+    def load_latest_working_checkpoint(
+        self, path_id: str
+    ) -> WorkingProofCheckpoint | None:
+        path = (
+            self.root / "checkpoints" / "working" / _safe_name(path_id) / "latest.json"
+        )
+        if not path.exists():
+            return None
+        with path.open("r", encoding="utf-8") as handle:
+            return WorkingProofCheckpoint.model_validate(json.load(handle))
+
+    def list_working_checkpoints(
+        self, path_id: str | None = None
+    ) -> list[WorkingProofCheckpoint]:
+        root = self.root / "checkpoints" / "working"
+        if not root.exists():
+            return []
+        roots = (
+            [root / _safe_name(path_id)]
+            if path_id
+            else [item for item in root.iterdir() if item.is_dir()]
+        )
+        result: list[WorkingProofCheckpoint] = []
+        for item in roots:
+            for path in sorted(item.glob("[0-9][0-9][0-9][0-9]_*.json")):
+                try:
+                    with path.open("r", encoding="utf-8") as handle:
+                        result.append(
+                            WorkingProofCheckpoint.model_validate(json.load(handle))
+                        )
+                except (OSError, ValueError, json.JSONDecodeError):
+                    continue
+        return sorted(
+            result,
+            key=lambda checkpoint: (
+                checkpoint.path_id,
+                checkpoint.segment_index,
+                checkpoint.created_at,
+            ),
+        )
 
     def list_proof_checkpoints(
         self, path_id: str | None = None

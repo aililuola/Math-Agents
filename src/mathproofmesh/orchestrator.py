@@ -41,7 +41,7 @@ from .continuation import (
     normalize_delta_claims,
 )
 from .llm.mock import MockResponder
-from .llm.pool import AgentPool, AgentRuntime
+from .llm.pool import AgentPool, AgentRuntime, ProviderCircuitOpenError
 from .inspiration.engine import InspirationEngine
 from .inspiration.trigger_policy import InspirationSnapshot
 from .memory import LemmaMemory, TypedMemory
@@ -64,7 +64,9 @@ from .schemas import (
     ClaimStatus,
     ComputationDecision,
     ComputationDecisionStatus,
+    ComputationHint,
     ComputationMethod,
+    ComputationPurpose,
     ContinuationAction,
     ContinuationTurn,
     Difficulty,
@@ -75,6 +77,7 @@ from .schemas import (
     ExperimentProgram,
     ExperimentResult,
     ExperimentSpec,
+    ExecutionStatus,
     FailureLevel,
     FinalProof,
     InitialExplorationAction,
@@ -87,6 +90,7 @@ from .schemas import (
     MessageEnvelope,
     MessageReceipt,
     MessageType,
+    MathStatus,
     NoveltySignature,
     ProblemContract,
     ProblemKind,
@@ -94,6 +98,7 @@ from .schemas import (
     ProofCheckpoint,
     ProofDelta,
     ReceiptStatus,
+    ResearchProgressReport,
     RunResult,
     RunStatus,
     RouteRole,
@@ -107,6 +112,7 @@ from .schemas import (
     VerificationReport,
     VerificationStage,
     VerificationVerdict,
+    WorkingProofCheckpoint,
     new_id,
     stable_hash,
 )
@@ -174,6 +180,9 @@ class SolveState:
     final_repair_failed: bool = False
     route_team_reviews: dict[str, list[dict[str, Any]]] | None = None
     capability_domain: str = "algebra"
+    math_status: MathStatus = MathStatus.INCONCLUSIVE
+    execution_status: ExecutionStatus = ExecutionStatus.COMPLETED
+    research_progress_report: ResearchProgressReport | None = None
 
 
 class ProofMeshOrchestrator:
@@ -568,6 +577,7 @@ class ProofMeshOrchestrator:
                     store,
                 )
                 state.meta_reviews.append(review)
+                self._apply_meta_route_controls(state, review, 0, store)
                 meta_detail_zh = (
                     "已有候选可进入综合"
                     if review.can_synthesize
@@ -649,6 +659,9 @@ class ProofMeshOrchestrator:
                     runner=runner,
                     prompts=prompts,
                     allocator=allocator,
+                    router=router,
+                    memory=memory,
+                    tools=tools,
                 )
                 graph_signals = self._hierarchical_graph_signals(state)
                 stats = budget_manager.build_path_stats(
@@ -949,6 +962,7 @@ class ProofMeshOrchestrator:
                         store,
                     )
                     state.meta_reviews.append(review)
+                    self._apply_meta_route_controls(state, review, round_index, store)
 
                 self._sync_hierarchical_artifacts(
                     state,
@@ -991,8 +1005,10 @@ class ProofMeshOrchestrator:
                 state.proof_graph.freeze()
                 state.graph_frozen = True
 
-            # Form a final proof even when all paths are partial; caveats preserve honesty.
-            if state.attempts:
+            # Final synthesis is a proof-producing stage, not a generic summarizer.
+            # When no candidate meets the evidence gate, preserve the mathematics in
+            # a separate research-progress report instead of fabricating closure.
+            if self._can_enter_synthesis(state):
                 synthesis_task = activity.start_task(
                     "stage",
                     title=activity.text(
@@ -1270,20 +1286,37 @@ class ProofMeshOrchestrator:
                         importance=ActivityImportance.MAJOR,
                     )
             else:
+                state.research_progress_report = self._build_research_progress_report(
+                    problem,
+                    state,
+                    execution_note=(
+                        "未达到最终证明综合门槛；保留已审查的局部进展。"
+                        if self.config.runtime.output_language.lower().startswith("zh")
+                        else "Final-proof synthesis gate was not met; reviewed partial progress was preserved."
+                    ),
+                )
+                store.write_json(
+                    "reports",
+                    "research_progress_report",
+                    state.research_progress_report,
+                )
                 activity.info(
-                    "no_attempts",
+                    "research_progress_report_ready",
                     title=activity.text(
-                        "没有可综合的证明路线",
-                        "No proof route is available for synthesis",
+                        "未达到最终综合门槛，已生成研究进展报告",
+                        "Synthesis gate not met; research progress report created",
                     ),
                     detail=activity.text(
-                        "运行将以未验证状态结束，并保留审计记录",
-                        "The run will finish unverified while preserving the audit trail",
+                        "局部步骤、反例、失败路线与剩余缺口均已保留",
+                        "Partial steps, counterevidence, failed routes, and remaining gaps were preserved",
                     ),
                     stage="synthesis",
                     parent_task_id=run_activity_task,
                     importance=ActivityImportance.MAJOR,
                 )
+                if runner.ledger.remaining_calls == 0:
+                    state.budget_exhausted = True
+                    state.execution_status = ExecutionStatus.BUDGET_EXHAUSTED
 
             self._checkpoint(store, "final", state, memory, runner)
             status = self._run_status(state)
@@ -1327,6 +1360,84 @@ class ProofMeshOrchestrator:
             activity.finalize()
             write_run_report(store, result)
             return result
+        except ProviderCircuitOpenError as exc:
+            state.execution_status = ExecutionStatus.NETWORK_INTERRUPTED
+            state.math_status = MathStatus.INCONCLUSIVE
+            state.research_progress_report = self._build_research_progress_report(
+                problem,
+                state,
+                execution_note=(
+                    f"公共模型服务连接中断，已暂停；约 {exc.retry_after_seconds:.0f} 秒后可恢复。"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else (
+                        "The shared model-provider transport was interrupted; the run "
+                        f"was paused and may be resumed after about {exc.retry_after_seconds:.0f}s."
+                    )
+                ),
+            )
+            self._checkpoint(store, "paused_external_failure", state, memory, runner)
+            store.write_json(
+                "reports", "research_progress_report", state.research_progress_report
+            )
+            store.append_event(
+                "provider_circuit_open",
+                {
+                    "provider_scope": exc.provider_scope,
+                    "agent_ids": exc.agent_ids,
+                    "retry_after_seconds": exc.retry_after_seconds,
+                    "resume_stage": "paused_external_failure",
+                },
+            )
+            result = self._build_result(
+                run_id,
+                RunStatus.PAUSED_EXTERNAL_FAILURE,
+                problem,
+                state,
+                pool.metrics(),
+                runner,
+                pool,
+                store,
+                memory,
+                summary_override=(
+                    "公共 API 连接故障已触发 provider 熔断；数学结论仍为 inconclusive，"
+                    "所有外部检查点和局部结果已保存，可恢复运行。"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else (
+                        "A shared provider transport failure opened the circuit. The "
+                        "mathematical status remains inconclusive; external checkpoints "
+                        "and partial results were saved for resume."
+                    )
+                ),
+            )
+            router.export()
+            store.write_json("structured", "run_result", result)
+            activity.close_open_tasks(
+                status=ActivityStatus.WARNING,
+                detail=activity.text(
+                    "公共网络故障触发暂停；已保存检查点，未继续消耗备用 Agent",
+                    "A shared transport failure paused the run; checkpoints were saved and backup agents were not consumed",
+                ),
+                exclude_task_ids={run_activity_task},
+            )
+            activity.warn_task(
+                run_activity_task,
+                title=activity.text(
+                    "外部服务中断，运行已安全暂停",
+                    "External service interrupted; run safely paused",
+                ),
+                detail=str(exc),
+                event_type="provider_circuit_open",
+                stage="run",
+                importance=ActivityImportance.MAJOR,
+                metrics={
+                    "provider_scope": exc.provider_scope,
+                    "agent_ids": exc.agent_ids,
+                    "retry_after_seconds": exc.retry_after_seconds,
+                },
+            )
+            activity.finalize()
+            write_run_report(store, result)
+            return result
         except BudgetExhaustedError as exc:
             state.budget_exhausted = True
             logger.warning("Budget exhausted: %s", exc)
@@ -1341,7 +1452,11 @@ class ProofMeshOrchestrator:
                 pool,
                 store,
                 memory,
-                summary_override="Global call/token/cost budget was exhausted; partial artifacts were preserved.",
+                summary_override=(
+                    "全局调用、Token 或费用预算已耗尽；所有可用的局部结果均已保留。"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else "Global call/token/cost budget was exhausted; partial artifacts were preserved."
+                ),
             )
             router.export()
             store.write_json("structured", "run_result", result)
@@ -1390,7 +1505,11 @@ class ProofMeshOrchestrator:
                 pool,
                 store,
                 memory,
-                summary_override=f"Run failed with {type(exc).__name__}: {exc}",
+                summary_override=(
+                    f"运行因 {type(exc).__name__} 异常终止；当前产物已保留：{exc}"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else f"Run failed with {type(exc).__name__}: {exc}"
+                ),
             )
             router.export()
             store.write_json("structured", "run_result", result)
@@ -1528,6 +1647,9 @@ class ProofMeshOrchestrator:
         pool.restore_metrics(
             runtime_payload.get("agent_metrics") or payload.get("agent_metrics") or []
         )
+        pool.restore_provider_circuit_state(
+            dict(runtime_payload.get("provider_circuit") or {})
+        )
         runner.persist_runtime_state()
 
         run_task = activity.start_task(
@@ -1575,9 +1697,15 @@ class ProofMeshOrchestrator:
                     store,
                     memory,
                     summary_override=(
-                        f"Completed run recovered from stage {resume_stage} and proof "
-                        f"checkpoint {state.resumed_from_checkpoint_id or 'none'} without "
-                        "new model calls."
+                        f"已从阶段 {resume_stage} 和证明检查点 "
+                        f"{state.resumed_from_checkpoint_id or '无'} 恢复已完成结果，"
+                        "未产生新的模型调用。"
+                        if self.config.runtime.output_language.lower().startswith("zh")
+                        else (
+                            f"Completed run recovered from stage {resume_stage} and proof "
+                            f"checkpoint {state.resumed_from_checkpoint_id or 'none'} without "
+                            "new model calls."
+                        )
                     ),
                 )
                 store.write_json("structured", "run_result", result)
@@ -1742,6 +1870,9 @@ class ProofMeshOrchestrator:
                     runner=runner,
                     prompts=prompts,
                     allocator=allocator,
+                    router=router,
+                    memory=memory,
+                    tools=tools,
                 )
                 if state.attempts and runner.ledger.remaining_calls > 0:
                     review = await self._meta_review(
@@ -1753,6 +1884,7 @@ class ProofMeshOrchestrator:
                         store,
                     )
                     state.meta_reviews.append(review)
+                    self._apply_meta_route_controls(state, review, resume_round, store)
                 self._checkpoint(
                     store,
                     f"resume_round_{resume_round}",
@@ -1772,7 +1904,7 @@ class ProofMeshOrchestrator:
             ):
                 state.proof_graph.freeze()
                 state.graph_frozen = True
-            if state.attempts:
+            if self._can_enter_synthesis(state):
                 state.final_proof, synthesizer = await self._synthesize(
                     problem,
                     state,
@@ -1797,6 +1929,24 @@ class ProofMeshOrchestrator:
                     )
                     state.reports.extend(final_bundle.reports)
                     state.final_verification = final_bundle.aggregate
+            else:
+                state.research_progress_report = self._build_research_progress_report(
+                    problem,
+                    state,
+                    execution_note=(
+                        "恢复运行后仍未达到最终证明综合门槛。"
+                        if self.config.runtime.output_language.lower().startswith("zh")
+                        else "The resumed run still did not meet the final-proof synthesis gate."
+                    ),
+                )
+                store.write_json(
+                    "reports",
+                    "research_progress_report",
+                    state.research_progress_report,
+                )
+                if runner.ledger.remaining_calls == 0:
+                    state.budget_exhausted = True
+                    state.execution_status = ExecutionStatus.BUDGET_EXHAUSTED
 
             state.checkpoints = store.list_proof_checkpoints()
             self._checkpoint(store, "resume_final", state, memory, runner)
@@ -1812,8 +1962,15 @@ class ProofMeshOrchestrator:
                 store,
                 memory,
                 summary_override=(
-                    f"Run resumed from stage {resume_stage} and proof checkpoint "
-                    f"{state.resumed_from_checkpoint_id or 'none'}; {self._result_summary(status, state)}"
+                    f"运行已从阶段 {resume_stage} 和证明检查点 "
+                    f"{state.resumed_from_checkpoint_id or '无'} 恢复；"
+                    f"{self._result_summary(status, state)}"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else (
+                        f"Run resumed from stage {resume_stage} and proof checkpoint "
+                        f"{state.resumed_from_checkpoint_id or 'none'}; "
+                        f"{self._result_summary(status, state)}"
+                    )
                 ),
             )
             router.export()
@@ -1843,6 +2000,58 @@ class ProofMeshOrchestrator:
             activity.finalize()
             write_run_report(store, result)
             return result
+        except ProviderCircuitOpenError as exc:
+            state.execution_status = ExecutionStatus.NETWORK_INTERRUPTED
+            state.math_status = MathStatus.INCONCLUSIVE
+            state.research_progress_report = self._build_research_progress_report(
+                problem,
+                state,
+                execution_note=(
+                    "恢复期间公共 API 连接再次中断；运行已停在最近外部检查点。"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else "The shared provider connection failed during resume; the run stopped at the latest external checkpoint."
+                ),
+            )
+            self._checkpoint(store, "paused_external_failure", state, memory, runner)
+            store.write_json(
+                "reports", "research_progress_report", state.research_progress_report
+            )
+            result = self._build_result(
+                run_id,
+                RunStatus.PAUSED_EXTERNAL_FAILURE,
+                problem,
+                state,
+                pool.metrics(),
+                runner,
+                pool,
+                store,
+                memory,
+                summary_override=(
+                    "恢复期间 provider 熔断；数学状态仍为 inconclusive，可在网络恢复后再次 resume。"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else "The provider circuit opened during resume; mathematical status remains inconclusive and the run can be resumed after recovery."
+                ),
+            )
+            store.write_json("structured", "run_result", result)
+            activity.close_open_tasks(
+                status=ActivityStatus.WARNING,
+                detail=activity.text(
+                    "外部服务中断；已保存恢复检查点",
+                    "External service interrupted; resume checkpoint saved",
+                ),
+                exclude_task_ids={run_task},
+            )
+            activity.warn_task(
+                run_task,
+                title=activity.text("恢复运行已安全暂停", "Resumed run safely paused"),
+                detail=str(exc),
+                event_type="provider_circuit_open",
+                stage="run_resume",
+                importance=ActivityImportance.MAJOR,
+            )
+            activity.finalize()
+            write_run_report(store, result)
+            return result
         except BudgetExhaustedError as exc:
             state.budget_exhausted = True
             result = self._build_result(
@@ -1855,7 +2064,11 @@ class ProofMeshOrchestrator:
                 pool,
                 store,
                 memory,
-                summary_override=f"Resume budget exhausted: {exc}",
+                summary_override=(
+                    f"恢复运行的预算已耗尽；当前检查点和局部结果已保留：{exc}"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else f"Resume budget exhausted: {exc}"
+                ),
             )
             store.write_json("structured", "run_result", result)
             activity.emit(
@@ -1886,7 +2099,11 @@ class ProofMeshOrchestrator:
                 pool,
                 store,
                 memory,
-                summary_override=f"Resume failed with {type(exc).__name__}: {exc}",
+                summary_override=(
+                    f"恢复运行因 {type(exc).__name__} 异常终止；最近的已验证检查点已保留：{exc}"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else f"Resume failed with {type(exc).__name__}: {exc}"
+                ),
             )
             store.write_json("structured", "run_result", result)
             activity.close_open_tasks(
@@ -2014,14 +2231,7 @@ class ProofMeshOrchestrator:
         state.final_repair_failed = bool(payload.get("final_repair_failed", False))
 
         for strategy in state.strategies:
-            route = next(
-                (
-                    item
-                    for item in state.route_registry.routes
-                    if item.strategy_id == strategy.strategy_id
-                ),
-                None,
-            )
+            route = state.route_registry.route_for_strategy(strategy.strategy_id)
             if route is None:
                 route = state.route_registry.register_route(strategy)
             if strategy.assigned_agent_id and not state.route_registry.owns_agent(
@@ -2140,14 +2350,7 @@ class ProofMeshOrchestrator:
     def _route_for_strategy(self, state: SolveState, strategy_id: str) -> str | None:
         if state.route_registry is None:
             return None
-        route = next(
-            (
-                item
-                for item in state.route_registry.routes
-                if item.strategy_id == strategy_id
-            ),
-            None,
-        )
+        route = state.route_registry.route_for_strategy(strategy_id)
         return route.route_id if route else None
 
     def _sync_hierarchical_artifacts(
@@ -2291,6 +2494,8 @@ class ProofMeshOrchestrator:
                 round_created=current_round,
                 ttl_rounds=self.config.topology.cross_route.message_ttl_rounds,
             )
+            if broker.contains(message, current_round=current_round):
+                continue
             publication = broker.publish(
                 message,
                 referee_agent_id=referee_id,
@@ -2301,17 +2506,26 @@ class ProofMeshOrchestrator:
                 and tier == MemoryTier.FACT
                 and state.inspiration_engine is not None
             ):
-                proposal = next(
+                source_strategy = next(
                     (
                         item
-                        for item in state.inspiration_engine.proposals.values()
-                        if f"strategy_{item.proposal_id}" == attempt.strategy_id
+                        for item in state.strategies
+                        if item.strategy_id == attempt.strategy_id
                     ),
                     None,
                 )
-                if proposal is not None:
+                proposal_id = (
+                    source_strategy.inspiration_proposal_id
+                    if source_strategy is not None
+                    else None
+                )
+                if proposal_id is None and attempt.strategy_id.startswith(
+                    "strategy_inspiration_"
+                ):
+                    proposal_id = attempt.strategy_id.removeprefix("strategy_")
+                if proposal_id in state.inspiration_engine.proposals:
                     state.inspiration_engine.mark_verified(
-                        proposal.proposal_id, message.message_id
+                        proposal_id, message.message_id
                     )
         for attempt in state.attempts:
             route_id = self._route_for_strategy(state, attempt.strategy_id)
@@ -2340,11 +2554,12 @@ class ProofMeshOrchestrator:
                     round_created=current_round,
                     ttl_rounds=self.config.topology.cross_route.message_ttl_rounds,
                 )
-                broker.publish(
-                    message,
-                    referee_agent_id=None,
-                    current_round=current_round,
-                )
+                if not broker.contains(message, current_round=current_round):
+                    broker.publish(
+                        message,
+                        referee_agent_id=None,
+                        current_round=current_round,
+                    )
 
         for checkpoint in state.checkpoints:
             route_id = self._route_for_strategy(state, checkpoint.strategy_id)
@@ -2358,17 +2573,19 @@ class ProofMeshOrchestrator:
                     )
                 except ValueError:
                     continue
-            broker.publish(
-                checkpoint_to_route_message(
-                    checkpoint,
-                    route_id=route_id,
-                    source_agent_id=source_agent_id,
-                    round_index=current_round,
-                    ttl_rounds=self.config.topology.cross_route.message_ttl_rounds,
-                ),
-                referee_agent_id=None,
-                current_round=current_round,
+            checkpoint_message = checkpoint_to_route_message(
+                checkpoint,
+                route_id=route_id,
+                source_agent_id=source_agent_id,
+                round_index=current_round,
+                ttl_rounds=self.config.topology.cross_route.message_ttl_rounds,
             )
+            if not broker.contains(checkpoint_message, current_round=current_round):
+                broker.publish(
+                    checkpoint_message,
+                    referee_agent_id=None,
+                    current_round=current_round,
+                )
 
         self._update_route_progress_state(state, current_round=current_round)
 
@@ -2674,6 +2891,9 @@ class ProofMeshOrchestrator:
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
         allocator: SoftBudgetAllocator,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        tools: ToolBroker,
     ) -> None:
         snapshot = self._inspiration_snapshot(state, remaining_calls=remaining_calls)
         engine = state.inspiration_engine
@@ -2726,12 +2946,56 @@ class ProofMeshOrchestrator:
             immediate_counterexamples=counterexamples,
             hidden_assumptions=hidden_assumptions,
         )
-        engine.materialize(reviews, snapshot)
+        materializations = engine.materialize(reviews, snapshot)
+        newly_created_ids = {
+            item.proposal_id
+            for item in materializations
+            if item.action == "route_created"
+        }
+        new_strategies: list[StrategyCard] = []
         for strategy in engine.materialized_strategies.values():
             if all(
                 item.strategy_id != strategy.strategy_id for item in state.strategies
             ):
                 state.strategies.append(strategy)
+                if strategy.inspiration_proposal_id in newly_created_ids:
+                    new_strategies.append(strategy)
+        if new_strategies:
+            assignments = router.assign_explorers(new_strategies)
+            if state.route_registry is not None:
+                for strategy, agent in assignments:
+                    route = state.route_registry.register_route(strategy)
+                    state.route_registry.assign_member(
+                        route.route_id,
+                        agent.id,
+                        RouteRole.PROVER,
+                        state.current_round,
+                    )
+                state.route_registry.recompute_neighbors()
+            attempts = await self._parallel_round_exploration(
+                problem,
+                state,
+                assignments,
+                state.current_round,
+                runner,
+                prompts,
+                router,
+                memory,
+                store,
+                tools,
+                max_segments_this_call=1,
+            )
+            state.attempts.extend(attempts)
+            store.append_event(
+                "inspiration_route_attempted",
+                {
+                    "strategy_ids": [item.strategy_id for item in new_strategies],
+                    "attempt_ids": [item.attempt_id for item in attempts],
+                    "proposal_ids": [
+                        item.inspiration_proposal_id for item in new_strategies
+                    ],
+                },
+            )
         store.write_json(
             "inspiration",
             f"round_{state.current_round}",
@@ -2740,11 +3004,7 @@ class ProofMeshOrchestrator:
                 "tasks": tasks,
                 "proposals": proposals,
                 "reviews": reviews,
-                "materializations": [
-                    engine.materializations[item.proposal_id]
-                    for item in reviews
-                    if item.proposal_id in engine.materializations
-                ],
+                "materializations": materializations,
             },
         )
 
@@ -2767,10 +3027,8 @@ class ProofMeshOrchestrator:
                 task.mechanism == InspirationMechanism.STRUCTURAL_ANALOGY
                 and not engine.analogy_library.records
             ):
-                proposals.extend(await engine.generate([task]))
                 continue
             if runner.ledger.remaining_calls <= final_reserve:
-                proposals.extend(await engine.generate([task]))
                 continue
             role, bundle = self._inspiration_agent_prompt(
                 engine,
@@ -2785,7 +3043,6 @@ class ProofMeshOrchestrator:
                 if agent.supports_role(role) and not agent.in_cooldown
             ]
             if not candidates:
-                proposals.extend(await engine.generate([task]))
                 continue
             agent = runner.pool.select(role)
             result = await self._safe_call(
@@ -2796,7 +3053,6 @@ class ProofMeshOrchestrator:
                 budget_bucket="breadth",
             )
             if result is None:
-                proposals.extend(await engine.generate([task]))
                 continue
             try:
                 proposals.append(
@@ -2818,7 +3074,6 @@ class ProofMeshOrchestrator:
                             "reason": str(exc),
                         },
                     )
-                proposals.extend(await engine.generate([task]))
         return proposals
 
     def _inspiration_agent_prompt(
@@ -3444,6 +3699,13 @@ class ProofMeshOrchestrator:
         )
         if not decision.accepted:
             return False
+        if verified_message.evidence_type == EvidenceType.COUNTEREXAMPLE:
+            self._cool_routes_for_counterexample(
+                state,
+                verified_message,
+                current_round=current_round,
+                store=store,
+            )
         if action == ActionKind.BRIDGE and state.bridge_broker is not None:
             state.bridge_broker.accept_verified_result(target.task_id, verified_message)
         elif (
@@ -3455,6 +3717,57 @@ class ProofMeshOrchestrator:
                 resolution_message_id=verified_message.message_id,
             )
         return True
+
+    def _cool_routes_for_counterexample(
+        self,
+        state: SolveState,
+        message: MessageEnvelope,
+        *,
+        current_round: int,
+        store: ArtifactStore,
+    ) -> None:
+        registry = state.route_registry
+        if registry is None:
+            return
+        refuted_statements = {self._normalize_statement(message.conclusion)}
+        refuted_statements.add(self._normalize_statement(message.normalized_statement))
+        affected = set(message.target_route_ids) | {message.source_route_id}
+        if state.typed_memory is not None:
+            affected.update(
+                state.typed_memory.affected_routes_for_counterexample(message)
+            )
+            refuted_statements.update(
+                state.typed_memory.refuted_statements_for_counterexample(message)
+            )
+        for route in registry.routes:
+            normalized_assumptions = [
+                self._normalize_statement(item) for item in route.shared_assumptions
+            ]
+            if any(
+                target == assumption or target in assumption or assumption in target
+                for target in refuted_statements
+                for assumption in normalized_assumptions
+                if target and assumption
+            ):
+                affected.add(route.route_id)
+        for route_id in sorted(affected):
+            try:
+                registry.mark_cooling(
+                    route_id,
+                    current_round + self.config.scheduler.failed_path_cooldown_rounds,
+                    f"confirmed counterexample to shared premise: {message.statement}",
+                    requires_revision=True,
+                )
+            except KeyError:
+                continue
+        store.append_event(
+            "counterexample_route_cooldown",
+            {
+                "message_id": message.message_id,
+                "affected_route_ids": sorted(affected),
+                "requires_explicit_revision": True,
+            },
+        )
 
     @staticmethod
     def _route_authors(registry: RouteRegistry, route_ids: Iterable[str]) -> set[str]:
@@ -3508,6 +3821,19 @@ class ProofMeshOrchestrator:
                 else None
             ),
             budget_exhausted=bool(payload.get("budget_exhausted", False)),
+            math_status=MathStatus(
+                payload.get("math_status", MathStatus.INCONCLUSIVE.value)
+            ),
+            execution_status=ExecutionStatus(
+                payload.get("execution_status", ExecutionStatus.COMPLETED.value)
+            ),
+            research_progress_report=(
+                ResearchProgressReport.model_validate(
+                    payload["research_progress_report"]
+                )
+                if payload.get("research_progress_report")
+                else None
+            ),
             current_round=int(payload.get("current_round", 0)),
             graph_frozen=bool(payload.get("graph_frozen", False)),
             proof_debt_history={
@@ -3579,13 +3905,155 @@ class ProofMeshOrchestrator:
             if result is not None
             else self._fallback_strategy_set(problem, requested)
         )
-        selected = router.select_diverse_strategies(
-            strategy_set.strategies,
-            min(self.config.budget.initial_paths, len(strategy_set.strategies)),
+        target = self.config.budget.initial_paths
+        candidates = self._deduplicate_strategy_cards(
+            self._attach_planner_computation_hints(strategy_set.strategies)
         )
+        selected = router.select_diverse_strategies(
+            candidates, min(target, len(candidates))
+        )
+        if (
+            result is not None
+            and len(selected) < target
+            and runner.ledger.remaining_calls > 0
+        ):
+            missing = target - len(selected)
+            supplement = await self._safe_call(
+                runner,
+                "planner",
+                prompts.strategies(
+                    problem,
+                    triage,
+                    missing,
+                    prior_strategy_titles=[item.title for item in selected],
+                    regulator_feedback=[
+                        "Return only mechanisms genuinely different from the listed routes; do not rename an existing idea."
+                    ],
+                ),
+                budget_bucket="breadth",
+            )
+            if supplement is not None:
+                candidates = self._deduplicate_strategy_cards(
+                    [
+                        *selected,
+                        *self._attach_planner_computation_hints(
+                            supplement.value.strategies
+                        ),
+                    ]
+                )
+                selected = router.select_diverse_strategies(
+                    candidates, min(target, len(candidates))
+                )
+        if len(selected) < target:
+            fallbacks = self._fallback_strategy_set(problem, target).strategies
+            candidates = self._deduplicate_strategy_cards([*selected, *fallbacks])
+            selected = router.select_diverse_strategies(
+                candidates, min(target, len(candidates))
+            )
         store.write_json("structured", "strategy_set", strategy_set)
         store.write_json("structured", "selected_strategies", selected)
         return selected
+
+    def _attach_planner_computation_hints(
+        self, strategies: Iterable[StrategyCard]
+    ) -> list[StrategyCard]:
+        """Turn explicit numerical-check language into inert, auditable hints."""
+        simulation_markers = (
+            "模拟",
+            "枚举",
+            "数值检验",
+            "具体检验",
+            "检验若干",
+            "测试周期",
+            "simulate",
+            "enumerate",
+            "numerically test",
+            "test a period",
+            "check a period",
+        )
+        broad_markers = ("寻找规律", "猜测规律", "find a pattern", "discover a pattern")
+        enriched: list[StrategyCard] = []
+        for strategy in strategies:
+            text = " ".join(
+                filter(
+                    None,
+                    [
+                        strategy.title,
+                        strategy.core_idea,
+                        strategy.bottleneck,
+                        strategy.falsification_test,
+                        strategy.key_original_step or "",
+                    ],
+                )
+            )
+            folded = text.casefold()
+            if strategy.computation_hints or not any(
+                marker in folded for marker in simulation_markers
+            ):
+                enriched.append(strategy)
+                continue
+            if "周期" in folded or "period" in folded:
+                method = ComputationMethod.CANDIDATE_PERIOD_CHECK
+            elif any(marker in folded for marker in ("贪心", "greedy sequence")):
+                method = ComputationMethod.BOUNDED_GREEDY_SEQUENCE
+            else:
+                method = ComputationMethod.BOUNDED_INTEGER_SEARCH
+            broad = any(marker in folded for marker in broad_markers)
+            target = strategy.falsification_test.strip() or (
+                f"Check the finite numerical assertion used by strategy {strategy.strategy_id}."
+            )
+            hint = ComputationHint(
+                purpose=(
+                    ComputationPurpose.DISCOVER_PATTERN
+                    if broad
+                    else ComputationPurpose.FALSIFY_CLAIM
+                ),
+                target_claim=target,
+                suggested_method=method,
+                decision_use=(
+                    "Reject or revise this route if a bounded exact check finds a counterexample; "
+                    "otherwise retain only not_refuted evidence and continue the proof."
+                ),
+                broad_search=broad,
+            )
+            enriched.append(strategy.model_copy(update={"computation_hints": [hint]}))
+        return enriched
+
+    def _deduplicate_strategy_cards(
+        self, strategies: Iterable[StrategyCard]
+    ) -> list[StrategyCard]:
+        result: list[StrategyCard] = []
+        seen_ids: set[str] = set()
+        seen_signatures: set[str] = set()
+        threshold = self.config.topology.broker.duplicate_strategy_threshold
+        token_sets: list[set[str]] = []
+        for strategy in strategies:
+            if strategy.strategy_id in seen_ids:
+                continue
+            signature = RouteRegistry.strategy_signature(strategy)
+            tokens = RouteRegistry._tokens(
+                " ".join(
+                    [
+                        strategy.title,
+                        strategy.core_idea,
+                        strategy.falsification_test,
+                        *strategy.tags,
+                        *strategy.prerequisites,
+                    ]
+                )
+            )
+            if signature in seen_signatures:
+                continue
+            if any(
+                len(tokens & prior) / max(1, len(tokens | prior)) >= threshold
+                for prior in token_sets
+            ):
+                continue
+            seen_ids.add(strategy.strategy_id)
+            seen_signatures.add(signature)
+            token_sets.append(tokens)
+            result.append(strategy)
+        return result
 
     async def _parallel_initial_exploration(
         self,
@@ -3621,6 +4089,7 @@ class ProofMeshOrchestrator:
             *(one(strategy, agent) for strategy, agent in assignments),
             return_exceptions=True,
         )
+        self._raise_if_provider_circuit(results)
         attempts: list[ProofAttempt] = []
         for (strategy, agent), result in zip(assignments, results):
             if isinstance(result, Exception):
@@ -4227,6 +4696,7 @@ class ProofMeshOrchestrator:
         previous_attempt: ProofAttempt | None,
         budget_bucket: str,
         computation_meta_approved: bool = False,
+        max_segments_this_call: int | None = None,
     ) -> ProofAttempt:
         if self.config.continuation.enabled:
             return await self._explore_path_segmented(
@@ -4245,6 +4715,7 @@ class ProofMeshOrchestrator:
                 previous_attempt=previous_attempt,
                 budget_bucket=budget_bucket,
                 computation_meta_approved=computation_meta_approved,
+                max_segments_this_call=max_segments_this_call,
             )
         return await self._explore_path_legacy(
             problem,
@@ -4281,6 +4752,7 @@ class ProofMeshOrchestrator:
         previous_attempt: ProofAttempt | None,
         budget_bucket: str,
         computation_meta_approved: bool,
+        max_segments_this_call: int | None,
     ) -> ProofAttempt:
         cfg = self.config.continuation
         path_id = (
@@ -4354,7 +4826,10 @@ class ProofMeshOrchestrator:
         verified_delta_claims: list[ClaimCard] = []
         failover_chain: list[str] = []
 
-        for _ in range(cfg.segments_per_explore_call):
+        segment_limit = cfg.segments_per_explore_call
+        if max_segments_this_call is not None:
+            segment_limit = min(segment_limit, max_segments_this_call)
+        for _ in range(segment_limit):
             if (
                 checkpoint.proof_complete
                 or checkpoint.segment_index >= cfg.max_segments_per_path
@@ -4378,6 +4853,13 @@ class ProofMeshOrchestrator:
                 else None
             )
             next_segment = checkpoint.segment_index + 1
+            prior_working = store.load_latest_working_checkpoint(path_id)
+            if (
+                prior_working is not None
+                and prior_working.parent_verified_checkpoint_id
+                != checkpoint.checkpoint_id
+            ):
+                prior_working = None
             experiment_results: list[dict[str, Any]] = []
             computation_feedback: list[dict[str, Any]] = []
             compute_cycles = 0
@@ -4396,6 +4878,7 @@ class ProofMeshOrchestrator:
                             problem,
                             strategy=strategy,
                             checkpoint=checkpoint,
+                            previous_working_checkpoint=prior_working,
                             agent_id=current_agent.id,
                             # In hierarchical mode all cross-route knowledge must
                             # pass through Broker + TypedMemory. LemmaMemory is a
@@ -4449,6 +4932,7 @@ class ProofMeshOrchestrator:
                             cfg.max_output_tokens_per_segment,
                             current_agent.config.max_output_tokens,
                         ),
+                        output_tier=bundle.output_tier,
                     )
 
                 try:
@@ -4463,7 +4947,7 @@ class ProofMeshOrchestrator:
                         and cfg.allow_cross_agent_failover,
                         failover_only_on_retryable=True,
                     )
-                except BudgetExhaustedError:
+                except (BudgetExhaustedError, ProviderCircuitOpenError):
                     raise
                 except Exception as exc:
                     store.append_event(
@@ -4606,6 +5090,16 @@ class ProofMeshOrchestrator:
             delta.raw_artifact_ref = result.raw_ref
             delta.usage = result.usage
             store.save_proof_delta(delta.delta_id, delta)
+            working_checkpoint = WorkingProofCheckpoint(
+                parent_verified_checkpoint_id=checkpoint.checkpoint_id,
+                problem_hash=problem.integrity_hash,
+                path_id=checkpoint.path_id,
+                strategy_id=strategy.strategy_id,
+                source_agent_id=result.agent.id,
+                segment_index=next_segment,
+                delta=delta,
+            )
+            store.save_working_checkpoint(working_checkpoint)
 
             local_report = local_delta_verification(problem, checkpoint, delta)
             policy_issues: list[VerificationIssue] = []
@@ -4725,6 +5219,16 @@ class ProofMeshOrchestrator:
                 )
 
             if not accepted:
+                working_checkpoint.status = (
+                    "rejected"
+                    if any(
+                        report.verdict == VerificationVerdict.FAIL for report in reports
+                    )
+                    else "uncertain"
+                )
+                working_checkpoint.verification_report_ids = [
+                    report.report_id for report in reports
+                ]
                 if cfg.retain_rejected_deltas:
                     store.save_proof_delta(delta.delta_id, delta, rejected=True)
                 feedback = next(
@@ -4735,6 +5239,8 @@ class ProofMeshOrchestrator:
                     ),
                     "The candidate delta did not pass checkpoint verification.",
                 )
+                working_checkpoint.feedback = [feedback]
+                store.save_working_checkpoint(working_checkpoint)
                 store.append_event(
                     "proof_checkpoint_rejected",
                     {
@@ -4922,7 +5428,7 @@ class ProofMeshOrchestrator:
                     failover_only_on_retryable=True,
                     exclude_agent_ids={author.id},
                 )
-            except BudgetExhaustedError:
+            except (BudgetExhaustedError, ProviderCircuitOpenError):
                 raise
             except Exception as exc:
                 store.append_event(
@@ -5266,6 +5772,7 @@ class ProofMeshOrchestrator:
         results = await asyncio.gather(
             *(one(a) for a in attempts), return_exceptions=True
         )
+        self._raise_if_provider_circuit(results)
         for attempt, result in zip(attempts, results):
             if isinstance(result, Exception):
                 store.append_event(
@@ -5291,6 +5798,22 @@ class ProofMeshOrchestrator:
         *,
         state: SolveState | None = None,
     ) -> list[VerificationBundle]:
+        eligible = [
+            attempt
+            for attempt in attempts
+            if attempt.proof_steps and attempt.status != AttemptStatus.FAILED
+        ]
+        for attempt in attempts:
+            if attempt not in eligible:
+                store.append_event(
+                    "empty_attempt_verification_skipped",
+                    {
+                        "attempt_id": attempt.attempt_id,
+                        "strategy_id": attempt.strategy_id,
+                        "status": attempt.status.value,
+                        "proof_step_count": len(attempt.proof_steps),
+                    },
+                )
         results = await asyncio.gather(
             *(
                 self._verify_attempt(
@@ -5304,12 +5827,13 @@ class ProofMeshOrchestrator:
                     store,
                     state=state,
                 )
-                for attempt in attempts
+                for attempt in eligible
             ),
             return_exceptions=True,
         )
+        self._raise_if_provider_circuit(results)
         bundles: list[VerificationBundle] = []
-        for attempt, result in zip(attempts, results):
+        for attempt, result in zip(eligible, results):
             if isinstance(result, Exception):
                 store.append_event(
                     "verification_pipeline_failed",
@@ -5596,6 +6120,7 @@ class ProofMeshOrchestrator:
         results = await asyncio.gather(
             *(one(r) for r in reviewers), return_exceptions=True
         )
+        self._raise_if_provider_circuit(results)
         reports: list[VerificationReport] = []
         for reviewer, result in zip(reviewers, results):
             if isinstance(result, Exception):
@@ -5783,6 +6308,7 @@ class ProofMeshOrchestrator:
         results = await asyncio.gather(
             *(one(r) for r in reviewers), return_exceptions=True
         )
+        self._raise_if_provider_circuit(results)
         reports: list[VerificationReport] = []
         for reviewer, result in zip(reviewers, results):
             if isinstance(result, Exception):
@@ -5925,6 +6451,7 @@ class ProofMeshOrchestrator:
         results = await asyncio.gather(
             *(one(reviewer) for reviewer in reviewers), return_exceptions=True
         )
+        self._raise_if_provider_circuit(results)
         reports: list[VerificationReport] = []
         for reviewer, result in zip(reviewers, results):
             if isinstance(result, Exception):
@@ -6095,8 +6622,16 @@ class ProofMeshOrchestrator:
         else:
             candidates = result.value.strategies
 
+        candidates = self._attach_planner_computation_hints(candidates)
+
         genuinely_new: list[StrategyCard] = []
-        for candidate in candidates:
+        deduplicated = self._deduplicate_strategy_cards(
+            [*state.strategies, *candidates]
+        )
+        existing_ids = {item.strategy_id for item in state.strategies}
+        for candidate in deduplicated:
+            if candidate.strategy_id in existing_ids:
+                continue
             max_similarity = max(
                 (
                     jaccard_similarity(
@@ -6120,6 +6655,7 @@ class ProofMeshOrchestrator:
                     route.route_id, agent.id, RouteRole.PROVER, round_index
                 )
                 store.append_event("route_registered", route)
+            state.route_registry.recompute_neighbors()
         return await self._parallel_round_exploration(
             problem,
             state,
@@ -6145,6 +6681,8 @@ class ProofMeshOrchestrator:
         memory: LemmaMemory,
         store: ArtifactStore,
         tools: ToolBroker,
+        *,
+        max_segments_this_call: int | None = None,
     ) -> list[ProofAttempt]:
         results = await asyncio.gather(
             *(
@@ -6163,11 +6701,13 @@ class ProofMeshOrchestrator:
                     targeted_feedback=[],
                     previous_attempt=None,
                     budget_bucket="breadth",
+                    max_segments_this_call=max_segments_this_call,
                 )
                 for strategy, agent in assignments
             ),
             return_exceptions=True,
         )
+        self._raise_if_provider_circuit(results)
         attempts: list[ProofAttempt] = []
         for (strategy, agent), result in zip(assignments, results):
             if isinstance(result, Exception):
@@ -6275,7 +6815,7 @@ class ProofMeshOrchestrator:
                 failover_only_on_retryable=True,
                 exclude_agent_ids=exclude,
             )
-        except BudgetExhaustedError:
+        except (BudgetExhaustedError, ProviderCircuitOpenError):
             raise
         except (StructuredOutputError, RuntimeError, ValueError) as exc:
             logger.warning("Agent call failed at synthesis (synthesizer): %s", exc)
@@ -6290,7 +6830,7 @@ class ProofMeshOrchestrator:
             )
             result = None
         if result is None:
-            proof = self._fallback_final_from_attempt(problem, selected[0])
+            return None, synthesizer
         else:
             if result.agent.id != synthesizer.id:
                 for attempt in selected:
@@ -6853,7 +7393,7 @@ class ProofMeshOrchestrator:
                 prefer_provider_not=prefer_provider_not,
                 budget_bucket=budget_bucket,
             )
-        except BudgetExhaustedError:
+        except (BudgetExhaustedError, ProviderCircuitOpenError):
             raise
         except (StructuredOutputError, RuntimeError, ValueError) as exc:
             logger.warning("Agent call failed at %s (%s): %s", bundle.stage, role, exc)
@@ -6867,6 +7407,12 @@ class ProofMeshOrchestrator:
                 },
             )
             return None
+
+    @staticmethod
+    def _raise_if_provider_circuit(results: Iterable[Any]) -> None:
+        for result in results:
+            if isinstance(result, ProviderCircuitOpenError):
+                raise result
 
     def _aggregate_reports(
         self,
@@ -7059,6 +7605,8 @@ class ProofMeshOrchestrator:
                     "modular_exhaustive",
                     "bounded_integer_search",
                     "recurrence_check",
+                    "bounded_greedy_sequence",
+                    "candidate_period_check",
                     "exact_geometry",
                 }
                 and payload.get("outcome") == "counterexample_found"
@@ -7205,6 +7753,8 @@ class ProofMeshOrchestrator:
                         "modular_exhaustive",
                         "bounded_integer_search",
                         "recurrence_check",
+                        "bounded_greedy_sequence",
+                        "candidate_period_check",
                         "exact_geometry",
                     }
                     and result.result.get("outcome") == "counterexample_found"
@@ -7290,36 +7840,18 @@ class ProofMeshOrchestrator:
         passed = [
             attempt
             for attempt in ranked
+            if attempt.status == AttemptStatus.COMPLETE and bool(attempt.proof_steps)
             if state.aggregate_reports.get(attempt.attempt_id)
             and state.aggregate_reports[attempt.attempt_id].verdict
             == VerificationVerdict.PASS
+            and state.aggregate_reports[attempt.attempt_id].confidence
+            >= self.config.budget.synthesis_threshold
         ]
         repairable_execution = (
             [] if passed else self._meta_selected_execution_repairs(state, ranked)
         )
-        uncertain_complete = [
-            attempt
-            for attempt in ranked
-            if attempt.status == AttemptStatus.COMPLETE
-            and attempt not in passed
-            and (
-                state.aggregate_reports.get(attempt.attempt_id) is None
-                or state.aggregate_reports[attempt.attempt_id].verdict
-                != VerificationVerdict.FAIL
-            )
-        ]
-        partial = [
-            attempt
-            for attempt in ranked
-            if attempt.status == AttemptStatus.PARTIAL
-            and (
-                state.aggregate_reports.get(attempt.attempt_id) is None
-                or state.aggregate_reports[attempt.attempt_id].verdict
-                != VerificationVerdict.FAIL
-            )
-        ]
         selected: list[ProofAttempt] = []
-        for group in (passed, repairable_execution, uncertain_complete, partial):
+        for group in (passed, repairable_execution):
             for attempt in group:
                 if attempt in selected:
                     continue
@@ -7391,8 +7923,7 @@ class ProofMeshOrchestrator:
             reverse=True,
         )
 
-    @staticmethod
-    def _attempt_local_quality(attempt: ProofAttempt) -> float:
+    def _attempt_local_quality(self, attempt: ProofAttempt) -> float:
         status_score = {
             AttemptStatus.COMPLETE: 0.36,
             AttemptStatus.PARTIAL: 0.18,
@@ -7402,7 +7933,6 @@ class ProofMeshOrchestrator:
         key_steps = sum(1 for step in attempt.proof_steps if step.is_key_step)
         key_score = min(0.08, 0.02 * key_steps)
         lemma_score = min(0.08, 0.025 * len(attempt.proposed_lemmas))
-        confidence_score = 0.20 * attempt.self_confidence
         gap_penalty = min(0.25, 0.05 * len(attempt.unresolved_gaps))
         dead_end_penalty = min(0.12, 0.03 * len(attempt.dead_ends))
         return max(
@@ -7413,7 +7943,6 @@ class ProofMeshOrchestrator:
                 + step_score
                 + key_score
                 + lemma_score
-                + confidence_score
                 - gap_penalty
                 - dead_end_penalty,
             ),
@@ -7434,6 +7963,46 @@ class ProofMeshOrchestrator:
         if state.meta_reviews:
             feedback.extend(state.meta_reviews[-1].required_actions[:6])
         return self._deduplicate_strings(feedback)
+
+    def _apply_meta_route_controls(
+        self,
+        state: SolveState,
+        review: MetaReview,
+        current_round: int,
+        store: ArtifactStore,
+    ) -> None:
+        registry = state.route_registry
+        if registry is None:
+            return
+        attempts = {item.attempt_id: item for item in state.attempts}
+        for assessment in review.assessments:
+            if assessment.recommended_action != ActionKind.COOLDOWN_ROUTE:
+                continue
+            attempt = attempts.get(assessment.target_id)
+            if attempt is None:
+                continue
+            route = registry.route_for_strategy(attempt.strategy_id)
+            if route is None:
+                continue
+            requires_revision = review.failure_level == FailureLevel.STRATEGY
+            reason = "; ".join(assessment.weaknesses[:3]) or review.summary
+            registry.mark_cooling(
+                route.route_id,
+                current_round + self.config.scheduler.failed_path_cooldown_rounds,
+                reason,
+                requires_revision=requires_revision,
+            )
+            store.append_event(
+                "meta_route_control_applied",
+                {
+                    "route_id": route.route_id,
+                    "strategy_id": attempt.strategy_id,
+                    "action": ActionKind.COOLDOWN_ROUTE.value,
+                    "until_round": route.cooldown_until_round,
+                    "requires_revision": requires_revision,
+                    "reason": reason,
+                },
+            )
 
     def _local_meta_review(
         self,
@@ -7503,31 +8072,6 @@ class ProofMeshOrchestrator:
             can_synthesize=can_synthesize,
             confidence=assessments[0].score if assessments else 0.0,
             summary="Deterministic evidence-weighted fallback meta-review.",
-        )
-
-    def _fallback_final_from_attempt(
-        self,
-        problem: ProblemContract,
-        attempt: ProofAttempt,
-    ) -> FinalProof:
-        answer = (
-            attempt.final_answer
-            or "No complete proof was established; the following is the strongest partial derivation."
-        )
-        caveats = list(attempt.unresolved_gaps)
-        if attempt.status != AttemptStatus.COMPLETE:
-            caveats.insert(
-                0,
-                "Source attempt is partial and has not established the full requested conclusion.",
-            )
-        return FinalProof(
-            problem_hash=problem.integrity_hash,
-            answer=answer,
-            proof_steps=attempt.proof_steps,
-            dependencies=[claim.claim_id for claim in attempt.proposed_lemmas],
-            caveats=self._deduplicate_strings(caveats),
-            source_attempt_ids=[attempt.attempt_id],
-            confidence=min(0.45, attempt.self_confidence),
         )
 
     def _fallback_strategy_set(
@@ -7852,12 +8396,156 @@ class ProofMeshOrchestrator:
     def _has_synthesis_ready_candidate(self, state: SolveState) -> bool:
         return any(
             attempt.status == AttemptStatus.COMPLETE
+            and bool(attempt.proof_steps)
             and state.aggregate_reports.get(attempt.attempt_id) is not None
             and state.aggregate_reports[attempt.attempt_id].verdict
             == VerificationVerdict.PASS
             and state.aggregate_reports[attempt.attempt_id].confidence
             >= self.config.budget.synthesis_threshold
             for attempt in state.attempts
+        )
+
+    def _can_enter_synthesis(self, state: SolveState) -> bool:
+        if self._has_synthesis_ready_candidate(state):
+            return True
+        ranked = self._rank_attempts(state.attempts)
+        return bool(self._meta_selected_execution_repairs(state, ranked))
+
+    def _build_research_progress_report(
+        self,
+        problem: ProblemContract,
+        state: SolveState,
+        *,
+        execution_note: str,
+    ) -> ResearchProgressReport:
+        reviewed = [
+            attempt
+            for attempt in state.attempts
+            if attempt.proof_steps
+            and (report := state.aggregate_reports.get(attempt.attempt_id)) is not None
+            and report.verdict
+            in {
+                VerificationVerdict.PASS,
+                VerificationVerdict.UNCERTAIN,
+            }
+        ]
+
+        def evidence_rank(attempt: ProofAttempt) -> tuple[int, int, int, int, int]:
+            report = state.aggregate_reports[attempt.attempt_id]
+            verdict_rank = 2 if report.verdict == VerificationVerdict.PASS else 1
+            route = (
+                state.route_registry.route_for_strategy(attempt.strategy_id)
+                if state.route_registry is not None
+                else None
+            )
+            closed_obligations = (
+                sum(
+                    item.status == "closed" and route.route_id in item.route_ids
+                    for item in state.proof_graph.obligations
+                )
+                if route is not None and state.proof_graph is not None
+                else 0
+            )
+            independent_passes = sum(
+                item.target_id == attempt.attempt_id
+                and item.agent_id != attempt.agent_id
+                and not item.agent_id.startswith("system-")
+                and item.verdict == VerificationVerdict.PASS
+                for item in state.reports
+            )
+            key_steps = sum(1 for step in attempt.proof_steps if step.is_key_step)
+            return (
+                verdict_rank,
+                closed_obligations,
+                independent_passes,
+                len(attempt.proof_steps),
+                key_steps,
+            )
+
+        reviewed.sort(key=evidence_rank, reverse=True)
+        verified_attempts = [
+            attempt
+            for attempt in reviewed
+            if state.aggregate_reports[attempt.attempt_id].verdict
+            == VerificationVerdict.PASS
+        ]
+        verified_step_ids = [
+            step.step_id
+            for attempt in verified_attempts
+            for step in attempt.proof_steps
+        ]
+        refuted_routes: list[dict[str, Any]] = []
+        for attempt in state.attempts:
+            report = state.aggregate_reports.get(attempt.attempt_id)
+            if attempt.status != AttemptStatus.FAILED and not (
+                report is not None and report.verdict == VerificationVerdict.FAIL
+            ):
+                continue
+            refuted_routes.append(
+                {
+                    "attempt_id": attempt.attempt_id,
+                    "strategy_id": attempt.strategy_id,
+                    "failure_level": (
+                        report.failure_level.value if report is not None else "unknown"
+                    ),
+                    "first_error_step": (
+                        report.first_error_step if report is not None else None
+                    ),
+                    "dead_ends": list(attempt.dead_ends),
+                }
+            )
+        open_obligations = (
+            [
+                {
+                    "obligation_id": item.obligation_id,
+                    "statement": item.statement,
+                    "status": item.status,
+                    "route_ids": item.route_ids,
+                }
+                for item in state.proof_graph.obligations
+                if item.status != "closed"
+            ]
+            if state.proof_graph is not None
+            else []
+        )
+        negative_evidence = (
+            [item.statement for item in state.typed_memory.negatives]
+            if state.typed_memory is not None
+            else []
+        )
+        remaining_gaps = self._deduplicate_strings(
+            [gap for attempt in reviewed for gap in attempt.unresolved_gaps]
+            + [str(item["statement"]) for item in open_obligations]
+        )
+        zh = self.config.runtime.output_language.lower().startswith("zh")
+        summary = (
+            f"尚未建立完整证明。保留 {len(verified_attempts)} 条通过局部审查的路线、"
+            f"{len(verified_step_ids)} 个已审查步骤、{len(refuted_routes)} 条失败路线，"
+            f"以及 {len(open_obligations)} 个开放证明义务。"
+            if zh
+            else (
+                "No complete proof was established. Preserved "
+                f"{len(verified_attempts)} locally passed routes, "
+                f"{len(verified_step_ids)} reviewed steps, {len(refuted_routes)} failed "
+                f"routes, and {len(open_obligations)} open proof obligations."
+            )
+        )
+        return ResearchProgressReport(
+            problem_hash=problem.integrity_hash,
+            valid_partial_attempt_ids=[item.attempt_id for item in reviewed],
+            strongest_partial_attempt_id=(reviewed[0].attempt_id if reviewed else None),
+            verified_step_ids=self._deduplicate_strings(verified_step_ids),
+            verified_local_claim_ids=(
+                [item.message_id for item in state.typed_memory.facts]
+                if state.typed_memory is not None
+                else []
+            ),
+            refuted_routes=refuted_routes,
+            negative_evidence=self._deduplicate_strings(negative_evidence),
+            open_obligations=open_obligations,
+            remaining_gaps=remaining_gaps,
+            execution_notes=[execution_note],
+            summary=summary,
         )
 
     def _run_status(self, state: SolveState) -> RunStatus:
@@ -7870,9 +8558,7 @@ class ProofMeshOrchestrator:
             return RunStatus.VERIFIED
         if state.budget_exhausted:
             return RunStatus.BUDGET_EXHAUSTED
-        if state.final_proof is not None:
-            return RunStatus.UNVERIFIED
-        return RunStatus.FAILED
+        return RunStatus.UNVERIFIED
 
     def _build_result(
         self,
@@ -7890,12 +8576,32 @@ class ProofMeshOrchestrator:
     ) -> RunResult:
         total_usage = self._sum_usage([metric.usage for metric in metrics])
         summary = summary_override or self._result_summary(status, state)
+        if status != RunStatus.VERIFIED and state.research_progress_report is None:
+            state.research_progress_report = self._build_research_progress_report(
+                problem,
+                state,
+                execution_note=summary,
+            )
+            store.write_json(
+                "reports", "research_progress_report", state.research_progress_report
+            )
+        math_status = (
+            MathStatus.VERIFIED if status == RunStatus.VERIFIED else state.math_status
+        )
+        execution_status = state.execution_status
+        if status == RunStatus.BUDGET_EXHAUSTED:
+            execution_status = ExecutionStatus.BUDGET_EXHAUSTED
+        elif status == RunStatus.FAILED:
+            execution_status = ExecutionStatus.FAILED
         return RunResult(
             run_id=run_id,
             status=status,
+            math_status=math_status,
+            execution_status=execution_status,
             problem=problem,
             final_proof=state.final_proof,
             final_verification=state.final_verification,
+            research_progress_report=state.research_progress_report,
             attempts=state.attempts,
             claims=memory.claims,
             verification_reports=state.reports,
@@ -7914,20 +8620,42 @@ class ProofMeshOrchestrator:
             summary=summary,
         )
 
-    @staticmethod
-    def _result_summary(status: RunStatus, state: SolveState) -> str:
+    def _result_summary(self, status: RunStatus, state: SolveState) -> str:
+        zh = self.config.runtime.output_language.lower().startswith("zh")
         if status == RunStatus.VERIFIED:
-            return "A final proof passed independent structural and step-level verification under the configured threshold."
+            return (
+                "最终证明已通过独立结构审查和逐步审查。"
+                if zh
+                else "A final proof passed independent structural and step-level verification under the configured threshold."
+            )
         if status == RunStatus.UNVERIFIED:
             verdict = (
                 state.final_verification.verdict.value
                 if state.final_verification
                 else "missing"
             )
-            return f"A final answer/proof draft was produced, but final verification is {verdict}; inspect caveats and reports."
+            return (
+                f"尚未建立完整可验证证明；最终审查状态为 {verdict}。请查看研究进展报告。"
+                if zh
+                else f"No complete verified proof was established; final verification is {verdict}. Inspect the research progress report."
+            )
         if status == RunStatus.BUDGET_EXHAUSTED:
-            return "The configured inference budget was exhausted; all partial attempts and evidence were preserved."
-        return "No final proof could be formed; inspect failed paths and structured artifacts."
+            return (
+                "推理预算已耗尽；所有局部路线和证据均已保留。"
+                if zh
+                else "The configured inference budget was exhausted; all partial attempts and evidence were preserved."
+            )
+        if status == RunStatus.PAUSED_EXTERNAL_FAILURE:
+            return (
+                "外部模型服务中断，运行已暂停；数学状态保持 inconclusive。"
+                if zh
+                else "The external model service was interrupted; the run is paused and mathematical status remains inconclusive."
+            )
+        return (
+            "运行异常终止；请查看结构化错误记录。"
+            if zh
+            else "The run failed; inspect the structured error record."
+        )
 
     def _checkpoint(
         self,
@@ -7956,6 +8684,9 @@ class ProofMeshOrchestrator:
                 "final_proof": state.final_proof,
                 "final_verification": state.final_verification,
                 "budget_exhausted": state.budget_exhausted,
+                "math_status": state.math_status,
+                "execution_status": state.execution_status,
+                "research_progress_report": state.research_progress_report,
                 **export_hierarchical_checkpoint(
                     current_round=state.current_round,
                     graph_frozen=state.graph_frozen,
@@ -7977,6 +8708,7 @@ class ProofMeshOrchestrator:
                 "stage_calls": runner.ledger.stage_calls,
                 "bucket_calls": runner.ledger.bucket_calls,
                 "agent_metrics": runner.pool.metrics(),
+                "provider_circuit": runner.pool.provider_circuit_state(),
             },
         )
         if state.route_registry is not None:
@@ -8048,9 +8780,24 @@ class ProofMeshOrchestrator:
             tools.extend(["sympy_simplify", "sympy_equivalent", "polynomial_factor"])
         if self.config.verification.enable_numeric_counterexamples:
             tools.append("numeric_counterexample")
+        if (
+            self.config.computation.enabled
+            and self.config.computation.typed_tools_enabled
+        ):
+            tools.extend(
+                [
+                    "modular_exhaustive",
+                    "bounded_integer_search",
+                    "graph_certificate",
+                    "recurrence_check",
+                    "bounded_greedy_sequence",
+                    "candidate_period_check",
+                    "exact_geometry",
+                ]
+            )
         if self.config.verification.enable_lean:
             tools.append("lean_check")
-        return tools
+        return list(dict.fromkeys(tools))
 
     @staticmethod
     def _normalize_statement(text: str) -> str:

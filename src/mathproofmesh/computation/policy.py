@@ -32,6 +32,8 @@ class ComputationGate:
         ComputationMethod.BOUNDED_INTEGER_SEARCH,
         ComputationMethod.GRAPH_CERTIFICATE,
         ComputationMethod.RECURRENCE_CHECK,
+        ComputationMethod.BOUNDED_GREEDY_SEQUENCE,
+        ComputationMethod.CANDIDATE_PERIOD_CHECK,
         ComputationMethod.EXACT_GEOMETRY,
         ComputationMethod.NUMERIC_COUNTEREXAMPLE,
         ComputationMethod.LEAN_CHECK,

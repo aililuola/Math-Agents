@@ -557,22 +557,68 @@ class TypedMemory:
             for item in self.negatives
         )
 
+    @staticmethod
+    def _normalized_text(value: str) -> str:
+        return " ".join(value.casefold().split())
+
+    def _facts_refuted_by_counterexample(
+        self, counterexample: MessageEnvelope | str
+    ) -> list[MessageEnvelope]:
+        if isinstance(counterexample, str):
+            target_texts = {self._normalized_text(counterexample)}
+            dependency_ids: set[str] = set()
+        else:
+            target_texts = {
+                self._normalized_text(counterexample.normalized_statement),
+                self._normalized_text(counterexample.conclusion),
+            }
+            target_texts.discard("")
+            dependency_ids = set(counterexample.dependencies)
+        matched: list[MessageEnvelope] = []
+        for fact in self.facts:
+            fact_texts = {
+                self._normalized_text(fact.normalized_statement),
+                self._normalized_text(fact.conclusion),
+            }
+            fact_texts.discard("")
+            dependency_match = bool(
+                {fact.message_id, fact.content_hash} & dependency_ids
+            )
+            statement_match = any(
+                target == fact_text or target in fact_text or fact_text in target
+                for target in target_texts
+                for fact_text in fact_texts
+            )
+            if dependency_match or statement_match:
+                matched.append(fact)
+        return matched
+
+    def refuted_statements_for_counterexample(
+        self, counterexample: MessageEnvelope
+    ) -> list[str]:
+        values = {
+            self._normalized_text(counterexample.normalized_statement),
+            self._normalized_text(counterexample.conclusion),
+        }
+        values.update(
+            self._normalized_text(fact.normalized_statement)
+            for fact in self._facts_refuted_by_counterexample(counterexample)
+        )
+        return sorted(value for value in values if value)
+
     def affected_routes_for_counterexample(
-        self, normalized_statement: str
+        self, counterexample: MessageEnvelope | str
     ) -> list[str]:
         routes: set[str] = set()
-        for fact in self.facts:
-            if fact.normalized_statement == normalized_statement:
-                routes.add(fact.source_route_id)
-                routes.update(fact.target_route_ids)
+        for fact in self._facts_refuted_by_counterexample(counterexample):
+            routes.add(fact.source_route_id)
+            routes.update(fact.target_route_ids)
         return sorted(routes)
 
     def apply_counterexample(self, counterexample: MessageEnvelope) -> list[str]:
         affected = [
             fact.message_id
-            for fact in self.facts
-            if fact.normalized_statement == counterexample.normalized_statement
-            or counterexample.conclusion in fact.normalized_statement
+            for fact in self._facts_refuted_by_counterexample(counterexample)
         ]
         invalidated = self.invalidate_dependents(
             affected,

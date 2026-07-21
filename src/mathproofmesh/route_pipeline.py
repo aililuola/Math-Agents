@@ -43,6 +43,15 @@ def build_route_prompt_context(
                 "message_id": message.message_id,
                 "target_route_id": route_id,
                 "delivered_round": int(delivery.get("delivered_round", current_round)),
+                "receipt_token": str(delivery.get("receipt_token", "")),
+                "required_fields": [
+                    "receipt_token",
+                    "status",
+                    "used",
+                    "referenced_in_step_ids",
+                    "claimed_closed_obligation_ids",
+                    "reason",
+                ],
             }
         )
     return delivered, {
@@ -75,37 +84,46 @@ def acknowledge_route_messages(
             receipt = MessageReceipt(
                 message_id=message.message_id,
                 target_route_id=route_id,
+                receipt_token=str(delivery.get("receipt_token", "")),
                 status=ReceiptStatus.REJECTED,
+                used=False,
                 reason="target route omitted the required semantic receipt",
                 delivered_round=delivered_round,
             )
         else:
-            parsed_hash = stable_hash(
-                {
-                    "assumptions": candidate.parsed_assumptions,
-                    "conclusion": candidate.parsed_conclusion,
-                    "quantifiers": [
-                        item.model_dump(mode="json")
-                        for item in candidate.parsed_quantifiers
-                    ],
-                    "variable_bindings": [
-                        item.model_dump(mode="json")
-                        for item in candidate.parsed_variable_bindings
-                    ],
-                }
-            )
+            # Old route responders did not echo the opaque token. Preserve
+            # checkpoint compatibility by computing the semantic digest on the
+            # trusted side; new responders authenticate with receipt_token.
+            legacy_semantic_hash = ""
+            if not candidate.receipt_token:
+                legacy_semantic_hash = stable_hash(
+                    {
+                        "assumptions": candidate.parsed_assumptions,
+                        "conclusion": candidate.parsed_conclusion,
+                        "quantifiers": [
+                            item.model_dump(mode="json")
+                            for item in candidate.parsed_quantifiers
+                        ],
+                        "variable_bindings": [
+                            item.model_dump(mode="json")
+                            for item in candidate.parsed_variable_bindings
+                        ],
+                    }
+                )
             receipt = MessageReceipt(
                 receipt_id=candidate.receipt_id,
                 message_id=message.message_id,
                 target_route_id=route_id,
+                receipt_token=candidate.receipt_token,
                 status=candidate.status,
+                used=candidate.used,
                 parsed_assumptions=candidate.parsed_assumptions,
                 parsed_conclusion=candidate.parsed_conclusion,
                 parsed_quantifiers=candidate.parsed_quantifiers,
                 parsed_variable_bindings=candidate.parsed_variable_bindings,
                 referenced_in_step_ids=candidate.referenced_in_step_ids,
                 claimed_closed_obligation_ids=(candidate.claimed_closed_obligation_ids),
-                semantic_hash=parsed_hash,
+                semantic_hash=legacy_semantic_hash,
                 reason=candidate.reason,
                 delivered_round=delivered_round,
                 acknowledged_at=candidate.acknowledged_at,

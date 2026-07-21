@@ -552,8 +552,76 @@ class RuntimeConfig(ConfigModel):
     activity_persist: bool = True
     activity_include_agent_calls: bool = True
     activity_heartbeat_seconds: float = Field(default=20.0, ge=0.0, le=600.0)
+    # A provider read timeout only limits an idle socket. These two limits bound
+    # the complete model call and a stream that spends its whole budget in
+    # private reasoning without beginning the requested artifact.
+    agent_call_wall_timeout_seconds: float = Field(default=1200.0, ge=5.0, le=7200.0)
+    reasoning_only_abort_seconds: float = Field(default=720.0, ge=5.0, le=3600.0)
+    reasoning_only_min_characters: int = Field(default=4096, ge=0, le=10_000_000)
+    json_repair_max_output_tokens: int = Field(default=8192, ge=256, le=384000)
+    # The configured agent limit remains the hard ceiling. Routine stages get a
+    # smaller soft ceiling so 96K is reserved for genuinely deep route work.
+    stage_output_token_limits: dict[str, int] = Field(
+        default_factory=lambda: {
+            "triage": 12000,
+            "strategy_generation": 24000,
+            "claim_extraction": 12000,
+            "structural_verification": 16000,
+            "checkpoint_verification": 24000,
+            "detailed_verification": 32000,
+            "final_verification": 32000,
+            "blind_structural_verification": 16000,
+            "blind_detailed_verification": 32000,
+            "meta_review": 16000,
+            "route_skeptic": 24000,
+            "route_referee": 16000,
+            "route_tool_audit": 16000,
+            "representation_switchboard": 24000,
+            "structural_analogy_search": 24000,
+            "invent_auxiliary_construction": 24000,
+            "hypothesize_invariant": 24000,
+            "reverse_goal_analysis": 24000,
+            "persistent_meta_strategy": 24000,
+            "surprise_exploration": 24000,
+            "inspiration_referee": 16000,
+            "synthesis": 64000,
+            "final_revision": 64000,
+            "experiment_codegen": 12000,
+        }
+    )
+    exploration_output_token_tiers: list[int] = Field(
+        default_factory=lambda: [32000, 64000, 96000], min_length=1, max_length=8
+    )
+    provider_circuit_breaker_enabled: bool = True
+    provider_circuit_failure_threshold: int = Field(default=2, ge=2, le=32)
+    provider_circuit_window_seconds: float = Field(default=90.0, ge=1.0, le=3600.0)
+    provider_circuit_cooldown_seconds: float = Field(default=300.0, ge=1.0, le=86400.0)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     random_seed: int = 20260719
+
+    @field_validator("stage_output_token_limits")
+    @classmethod
+    def validate_stage_output_limits(cls, value: dict[str, int]) -> dict[str, int]:
+        normalized: dict[str, int] = {}
+        for stage, limit in value.items():
+            if not stage.strip():
+                raise ValueError("stage_output_token_limits keys must be non-empty")
+            if limit < 256 or limit > 384000:
+                raise ValueError(
+                    "stage_output_token_limits values must be between 256 and 384000"
+                )
+            normalized[str(stage)] = int(limit)
+        return normalized
+
+    @field_validator("exploration_output_token_tiers")
+    @classmethod
+    def validate_exploration_tiers(cls, value: list[int]) -> list[int]:
+        tiers = [int(item) for item in value]
+        if any(item < 512 or item > 384000 for item in tiers):
+            raise ValueError("exploration token tiers must be between 512 and 384000")
+        if tiers != sorted(set(tiers)):
+            raise ValueError("exploration token tiers must be strictly increasing")
+        return tiers
 
 
 class SystemConfig(ConfigModel):

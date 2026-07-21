@@ -120,6 +120,17 @@ class InspirationEngine:
         self.materializations: dict[str, InspirationMaterialization] = {}
         self.materialized_strategies: dict[str, StrategyCard] = {}
         self.verified_proposals: dict[str, str] = {}
+        self.mechanism_stats: dict[str, dict[str, int]] = {
+            mechanism.value: {
+                "selected_count": 0,
+                "consecutive_no_verified_gain": 0,
+                "last_selected_round": -1,
+                "proposal_count": 0,
+                "route_created_count": 0,
+                "verified_count": 0,
+            }
+            for mechanism in InspirationMechanism
+        }
         self._last_snapshot: InspirationSnapshot | None = None
         if self.enabled:
             self._event(
@@ -168,13 +179,19 @@ class InspirationEngine:
     ) -> list[InspirationTask]:
         del budget
         snapshot = self._coerce_snapshot(state)
-        selected = self.trigger_policy.select_tasks(triggers, snapshot)
+        selected = self.trigger_policy.select_tasks(
+            triggers, snapshot, self.mechanism_stats
+        )
         fresh: list[InspirationTask] = []
         for task in selected:
             if task.task_id in self.tasks:
                 continue
             self.tasks[task.task_id] = task
             fresh.append(task)
+            stats = self.mechanism_stats[task.mechanism.value]
+            stats["selected_count"] += 1
+            stats["consecutive_no_verified_gain"] += 1
+            stats["last_selected_round"] = snapshot.round_index
             self._event(
                 "inspiration_task_selected",
                 "Inspiration mechanism selected",
@@ -211,6 +228,7 @@ class InspirationEngine:
                     continue
                 self.proposals[proposal.proposal_id] = proposal
                 generated.append(proposal)
+                self.mechanism_stats[task.mechanism.value]["proposal_count"] += 1
                 generated_event = {
                     InspirationMechanism.REPRESENTATION_SWITCH: "representation_candidate_generated",
                     InspirationMechanism.STRUCTURAL_ANALOGY: "analogy_mapping_generated",
@@ -295,6 +313,7 @@ class InspirationEngine:
         if existing is not None:
             return existing
         self.proposals[normalized.proposal_id] = normalized
+        self.mechanism_stats[task.mechanism.value]["proposal_count"] += 1
         generated_event = {
             InspirationMechanism.REPRESENTATION_SWITCH: "representation_candidate_generated",
             InspirationMechanism.STRUCTURAL_ANALOGY: "analogy_mapping_generated",
@@ -463,6 +482,10 @@ class InspirationEngine:
             else:
                 decision = self._materialize_active(proposal, review, snapshot)
             self.materializations[proposal.proposal_id] = decision
+            if decision.action == "route_created":
+                self.mechanism_stats[proposal.mechanism.value][
+                    "route_created_count"
+                ] += 1
             decisions.append(decision)
             self._event(
                 "inspiration_proposal_materialized",
@@ -799,8 +822,26 @@ class InspirationEngine:
                     proposal.mechanism.value,
                     *proposal.novelty_signature.mechanism_tags,
                 ],
+                inspiration_proposal_id=proposal.proposal_id,
+                parent_strategy_ids=[
+                    self.route_registry.get(route_id).strategy_id
+                    for route_id in proposal.target_route_ids
+                    if route_id
+                    in {item.route_id for item in self.route_registry.routes}
+                ],
             )
             route = self.route_registry.register_route(strategy)
+            if route.strategy_id != strategy.strategy_id:
+                return InspirationMaterialization(
+                    proposal_id=proposal.proposal_id,
+                    action="stored_insight",
+                    route_id=route.route_id,
+                    obligation_ids=obligation_ids,
+                    reason=(
+                        "the proposal is semantically equivalent to an existing route; "
+                        "it was retained as route-local insight without consuming a new path"
+                    ),
+                )
             self.materialized_strategies[strategy.strategy_id] = strategy
             self.route_registry.assign_member(
                 route.route_id,
@@ -884,6 +925,10 @@ class InspirationEngine:
         if self.verified_proposals.get(proposal_id) == evidence_message_id:
             return
         self.verified_proposals[proposal_id] = evidence_message_id
+        mechanism = self.proposals[proposal_id].mechanism.value
+        stats = self.mechanism_stats[mechanism]
+        stats["verified_count"] += 1
+        stats["consecutive_no_verified_gain"] = 0
         self._event(
             "inspiration_proposal_verified",
             "Inspiration proposal produced a verified fact",
@@ -997,6 +1042,7 @@ class InspirationEngine:
                 for key, value in self.materialized_strategies.items()
             },
             "verified_proposals": dict(self.verified_proposals),
+            "mechanism_stats": self.mechanism_stats,
             "meta_strategist": self.meta_strategist.export_state(),
             "surprise_budget": self.surprise_explorer.export_state(),
             "last_snapshot": (
@@ -1036,6 +1082,15 @@ class InspirationEngine:
             str(key): str(value)
             for key, value in dict(state.get("verified_proposals", {})).items()
         }
+        restored_stats = dict(state.get("mechanism_stats", {}))
+        for mechanism in InspirationMechanism:
+            if mechanism.value in restored_stats:
+                self.mechanism_stats[mechanism.value].update(
+                    {
+                        str(key): int(value)
+                        for key, value in dict(restored_stats[mechanism.value]).items()
+                    }
+                )
         self.meta_strategist = PersistentMetaStrategist.from_state(
             dict(state.get("meta_strategist", {})), config=self.inspiration_config
         )
