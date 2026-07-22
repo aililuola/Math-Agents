@@ -184,3 +184,19 @@ validation.
 - Checkpoint, Activity, hierarchical metrics, Mock benchmark and regression
   coverage now include operators, mutations, frontiers, compositions and
   cross-run learning. The benchmark continues to make zero provider calls.
+
+## Explicit Inspiration Credit Attribution
+
+- Added checkpointed `InspirationCreditTarget` records linking every proposal
+  to its materialized route, obligation and Broker message IDs. Verified Fact
+  promotion, obligation closure and final-proof citation now use these IDs
+  instead of depending only on a newly created Strategy.
+- Existing-route attachments, computation and bridge requests,
+  obligation-only materializations and all sources of a composed proposal can
+  receive downstream credit without bypassing the Fact gate.
+- Outcome registration freezes the route and obligation measurement sets, so a
+  Surprise proposal with no initial target route cannot report a false proof
+  debt reduction by comparing a nonempty before-set with an empty after-set.
+- UCB and minimum exploration now consider only enabled members of
+  `SCHEDULABLE_MECHANISMS`. The derived `INSPIRATION_COMPOSITION` mechanism no
+  longer distorts the ordinary exploration floor.

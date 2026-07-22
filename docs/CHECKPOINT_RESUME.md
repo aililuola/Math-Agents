@@ -10,6 +10,8 @@
 
 Graph freeze、Meta-Strategist cooldown、最后可观测 Inspiration snapshot 和受保护预算都随 checkpoint 恢复。恢复的是可审计外部状态，不是模型私有解码状态。
 
+`InspirationCreditTarget` 及 outcome 中已固化的 `credit_route_ids` / `credit_obligation_ids` 也随 checkpoint 恢复。旧 checkpoint 若缺少这些字段，会根据既有 Proposal、Trigger 和 Materialization 幂等回填；恢复后不会改用新的路线集合重算历史 proof debt，也不会重复给同一 Fact 记账。
+
 MathProofMesh v0.5.0 将一次长证明从“单个超长模型调用”改造成若干可验证的数学增量。系统不能恢复供应商服务器在断线瞬间的隐藏神经网络状态，但可以恢复最近一个**已经独立验证并持久化**的证明状态。因此，用户看到的行为是“证明已通过第 7 步，断线后继续第 8 步”，而不是重新证明全部前置内容。
 
 ## 1. 恢复语义

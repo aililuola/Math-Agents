@@ -1078,6 +1078,8 @@ class InspirationOutcome(StrictModel):
     proof_debt_before: float = Field(default=0.0, ge=0.0)
     proof_debt_after: float | None = Field(default=None, ge=0.0)
     proof_debt_delta: float = 0.0
+    credit_route_ids: list[str] = Field(default_factory=list)
+    credit_obligation_ids: list[str] = Field(default_factory=list)
     obligations_closed: list[str] = Field(default_factory=list)
     cited_by_final_proof: bool = False
     refuted: bool = False
@@ -1125,6 +1127,16 @@ class NegativeAnalogyRecord(StrictModel):
     negative: Literal[True] = True
 
 
+class InspirationCreditTarget(StrictModel):
+    """Stable IDs through which downstream proof value is attributed."""
+
+    proposal_id: str
+    route_ids: list[str] = Field(default_factory=list)
+    obligation_ids: list[str] = Field(default_factory=list)
+    message_ids: list[str] = Field(default_factory=list)
+    materialization_action: str
+
+
 class InspirationMaterialization(StrictModel):
     proposal_id: str
     action: Literal[
@@ -1138,6 +1150,7 @@ class InspirationMaterialization(StrictModel):
     ]
     route_id: str | None = None
     obligation_ids: list[str] = Field(default_factory=list)
+    message_ids: list[str] = Field(default_factory=list)
     reason: str = ""
 
 

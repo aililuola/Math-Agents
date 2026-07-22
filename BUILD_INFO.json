@@ -83,7 +83,11 @@
     "parallel_candidate_generation_without_global_lock": true,
     "audited_meta_directive_control": true,
     "adaptive_outcome_ledger": true,
+    "explicit_inspiration_credit_targets": true,
+    "fixed_outcome_credit_scope": true,
+    "multi_proposal_fact_and_citation_credit": true,
     "ucb_with_minimum_exploration": true,
+    "schedulable_only_ucb_pool": true,
     "verified_experience_distiller": true,
     "negative_analogy_library": true,
     "typed_domain_operator_plugins": true,
@@ -102,7 +106,7 @@
     "compileall": "PASS",
     "ruff_check": "PASS",
     "ruff_format_check": "PASS",
-    "pytest": "239 passed with dev and server extras including z3-solver",
+    "pytest": "244 passed with dev and server extras including z3-solver",
     "offline_topology_benchmark": {
       "status": "PASS",
       "provider_calls": 0,
@@ -116,11 +120,11 @@
   },
   "counts": {
     "source_python_files": 90,
-    "test_python_files": 78,
+    "test_python_files": 79,
     "documentation_files": 25,
-    "source_lines": 38836,
-    "test_lines": 11310,
-    "docs_directory_lines": 3392
+    "source_lines": 39423,
+    "test_lines": 11714,
+    "docs_directory_lines": 3709
   },
   "artifacts": {
     "status": "SOURCE RELEASE; DISTRIBUTION ARTIFACTS NOT COMMITTED",

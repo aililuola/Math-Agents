@@ -15,6 +15,36 @@ from ..schemas import (
 )
 
 
+SCHEDULABLE_MECHANISMS: tuple[InspirationMechanism, ...] = (
+    InspirationMechanism.REPRESENTATION_SWITCH,
+    InspirationMechanism.STRUCTURAL_ANALOGY,
+    InspirationMechanism.AUXILIARY_CONSTRUCTION,
+    InspirationMechanism.INVARIANT_HYPOTHESIS,
+    InspirationMechanism.REVERSE_GOAL_ANALYSIS,
+    InspirationMechanism.BRIDGE_LEMMA,
+    InspirationMechanism.SURPRISE_EXPLORATION,
+    InspirationMechanism.META_REPLAN,
+)
+
+
+def enabled_schedulable_mechanisms(
+    config: InspirationConfig,
+) -> tuple[InspirationMechanism, ...]:
+    enabled = {
+        InspirationMechanism.REPRESENTATION_SWITCH: config.representation_switchboard,
+        InspirationMechanism.STRUCTURAL_ANALOGY: config.analogy_agent,
+        InspirationMechanism.AUXILIARY_CONSTRUCTION: (
+            config.auxiliary_construction_inventor
+        ),
+        InspirationMechanism.INVARIANT_HYPOTHESIS: config.invariant_hypothesis_agent,
+        InspirationMechanism.REVERSE_GOAL_ANALYSIS: config.reverse_goal_analysis,
+        InspirationMechanism.BRIDGE_LEMMA: config.bridge_lemma_generator,
+        InspirationMechanism.SURPRISE_EXPLORATION: config.surprise_exploration,
+        InspirationMechanism.META_REPLAN: config.persistent_meta_strategist,
+    }
+    return tuple(item for item in SCHEDULABLE_MECHANISMS if enabled[item])
+
+
 class InspirationSnapshot(StrictModel):
     round_index: int = Field(ge=0)
     problem_hash: str = ""
@@ -244,20 +274,7 @@ class TriggerPolicy:
                 InspirationMechanism.AUXILIARY_CONSTRUCTION,
             ),
         }
-        enabled = {
-            InspirationMechanism.REPRESENTATION_SWITCH: self.config.representation_switchboard,
-            InspirationMechanism.STRUCTURAL_ANALOGY: self.config.analogy_agent,
-            InspirationMechanism.AUXILIARY_CONSTRUCTION: self.config.auxiliary_construction_inventor,
-            InspirationMechanism.INVARIANT_HYPOTHESIS: self.config.invariant_hypothesis_agent,
-            InspirationMechanism.REVERSE_GOAL_ANALYSIS: self.config.reverse_goal_analysis,
-            InspirationMechanism.BRIDGE_LEMMA: self.config.bridge_lemma_generator,
-            InspirationMechanism.SURPRISE_EXPLORATION: self.config.surprise_exploration,
-            InspirationMechanism.META_REPLAN: self.config.persistent_meta_strategist,
-            # Compositions are created from reviewed proposals and re-enter through
-            # pending_directive_tasks. They must never appear as an ordinary
-            # fair-rotation mechanism without concrete source proposals.
-            InspirationMechanism.INSPIRATION_COMPOSITION: False,
-        }
+        enabled_mechanisms = set(enabled_schedulable_mechanisms(self.config))
         if not triggers:
             return []
         history = mechanism_history or {}
@@ -266,7 +283,7 @@ class TriggerPolicy:
         seen: set[InspirationMechanism] = set()
         for trigger in triggers:
             for mechanism in mapping[trigger.trigger_type]:
-                if mechanism in seen or not enabled[mechanism]:
+                if mechanism in seen or mechanism not in enabled_mechanisms:
                     continue
                 seen.add(mechanism)
                 candidates.append((len(candidates), trigger, mechanism))
@@ -274,8 +291,8 @@ class TriggerPolicy:
         # mechanisms. Add every enabled mechanism as a fair-rotation fallback,
         # while retaining the first trigger as the auditable cause.
         primary_trigger = triggers[0]
-        for mechanism, is_enabled in enabled.items():
-            if not is_enabled or mechanism in seen:
+        for mechanism in SCHEDULABLE_MECHANISMS:
+            if mechanism not in enabled_mechanisms or mechanism in seen:
                 continue
             seen.add(mechanism)
             candidates.append((len(candidates), primary_trigger, mechanism))

@@ -17,6 +17,7 @@ from ..schemas import (
     InspirationCallReservation,
     InspirationCandidateDecision,
     InspirationContextMode,
+    InspirationCreditTarget,
     InspirationMaterialization,
     InspirationMechanism,
     InspirationProposal,
@@ -66,6 +67,19 @@ from .trigger_policy import InspirationSnapshot, TriggerPolicy
 
 if TYPE_CHECKING:
     from ..communication.broker import MessageBroker
+
+
+_CREDITABLE_MATERIALIZATION_ACTIONS = frozenset(
+    {
+        "attached",
+        "route_created",
+        "computation_requested",
+        "bridge_requested",
+        "obligation_only",
+        "composition_source",
+    }
+)
+_ROUTE_CREDIT_ACTIONS = frozenset({"attached", "route_created", "composition_source"})
 
 
 def _protected_finalization_calls(config: SystemConfig) -> int:
@@ -157,6 +171,7 @@ class InspirationEngine:
         self.proposals: dict[str, InspirationProposal] = {}
         self.reviews: dict[str, InspirationReview] = {}
         self.materializations: dict[str, InspirationMaterialization] = {}
+        self.credit_targets: dict[str, InspirationCreditTarget] = {}
         self.materialized_strategies: dict[str, StrategyCard] = {}
         self.verified_proposals: dict[str, str] = {}
         self.candidate_decisions: dict[str, InspirationCandidateDecision] = {}
@@ -639,19 +654,26 @@ class InspirationEngine:
         trigger = self.triggers.get(proposal.trigger_id)
         if trigger is None:
             return
+        credit_route_ids, credit_obligation_ids = self._initial_credit_scope(
+            proposal, trigger
+        )
         kinds: list[ObligationKind] = []
-        for obligation_id in proposal.generated_obligations:
+        graph_obligations = {
+            item.obligation_id: item for item in self.proof_graph.obligations
+        }
+        for obligation_id in credit_obligation_ids:
             raw = snapshot.obligation_kinds.get(obligation_id)
+            if raw is None and obligation_id in graph_obligations:
+                raw = graph_obligations[obligation_id].kind.value
             if raw is None:
                 continue
             try:
                 kinds.append(ObligationKind(raw))
             except ValueError:
                 continue
-        target_routes = proposal.target_route_ids or trigger.affected_route_ids
         debt_before = sum(
             snapshot.proof_debt_by_route.get(route_id, 0.0)
-            for route_id in target_routes
+            for route_id in credit_route_ids
         )
         self.outcome_ledger.register(
             proposal,
@@ -659,7 +681,37 @@ class InspirationEngine:
             trigger=trigger,
             obligation_kinds=kinds,
             proof_debt_before=debt_before,
+            credit_route_ids=credit_route_ids,
+            credit_obligation_ids=credit_obligation_ids,
         )
+
+    def _initial_credit_scope(
+        self,
+        proposal: InspirationProposal,
+        trigger: InspirationTrigger,
+    ) -> tuple[list[str], list[str]]:
+        route_ids = list(
+            dict.fromkeys(proposal.target_route_ids or trigger.affected_route_ids)
+        )
+        task = self.tasks.get(proposal.task_id or "")
+        known_obligations = {
+            item.obligation_id for item in self.proof_graph.obligations
+        }
+        obligation_ids = list(
+            dict.fromkeys(
+                [
+                    *proposal.generated_obligations,
+                    *proposal.novelty_signature.targeted_obligation_ids,
+                    *(task.target_obligation_ids if task is not None else []),
+                    *(
+                        item
+                        for item in trigger.evidence_refs
+                        if item in known_obligations
+                    ),
+                ]
+            )
+        )
+        return route_ids, obligation_ids
 
     def select_proposals_for_review(
         self,
@@ -1367,6 +1419,7 @@ class InspirationEngine:
                 action=decision.action,
                 refuted=(decision.action == "rejected"),
             )
+            self._register_credit_target(proposal, decision)
             negative_analogy = self.experience_distiller.distill_negative_analogy(
                 problem=self.problem,
                 proposal=proposal,
@@ -1400,6 +1453,117 @@ class InspirationEngine:
             )
             self._checkpoint()
         return decisions
+
+    def _register_credit_target(
+        self,
+        proposal: InspirationProposal,
+        decision: InspirationMaterialization,
+        *,
+        emit_event: bool = True,
+    ) -> InspirationCreditTarget:
+        outcome = self.outcome_ledger.outcomes.get(proposal.proposal_id)
+        existing = self.credit_targets.get(proposal.proposal_id)
+        action = (
+            "obligation_only"
+            if decision.action == "stored_insight" and decision.obligation_ids
+            else decision.action
+        )
+        route_ids = list(
+            dict.fromkeys(
+                [
+                    *(outcome.credit_route_ids if outcome is not None else []),
+                    *(existing.route_ids if existing is not None else []),
+                    *proposal.target_route_ids,
+                    *([decision.route_id] if decision.route_id else []),
+                ]
+            )
+        )
+        obligation_ids = list(
+            dict.fromkeys(
+                [
+                    *(outcome.credit_obligation_ids if outcome is not None else []),
+                    *(existing.obligation_ids if existing is not None else []),
+                    *proposal.generated_obligations,
+                    *decision.obligation_ids,
+                ]
+            )
+        )
+        target = InspirationCreditTarget(
+            proposal_id=proposal.proposal_id,
+            route_ids=route_ids,
+            obligation_ids=obligation_ids,
+            message_ids=list(
+                dict.fromkeys(
+                    [
+                        *(existing.message_ids if existing is not None else []),
+                        *decision.message_ids,
+                    ]
+                )
+            ),
+            materialization_action=action,
+        )
+        self.credit_targets[proposal.proposal_id] = target
+
+        if proposal.composition is not None and action in {
+            "attached",
+            "route_created",
+            "obligation_only",
+        }:
+            for source_id in proposal.composition.source_proposal_ids:
+                source = self.credit_targets.get(source_id)
+                source_outcome = self.outcome_ledger.outcomes.get(source_id)
+                self.credit_targets[source_id] = InspirationCreditTarget(
+                    proposal_id=source_id,
+                    route_ids=list(
+                        dict.fromkeys(
+                            [
+                                *(
+                                    source.route_ids
+                                    if source is not None
+                                    else (
+                                        source_outcome.credit_route_ids
+                                        if source_outcome is not None
+                                        else []
+                                    )
+                                ),
+                                *route_ids,
+                            ]
+                        )
+                    ),
+                    obligation_ids=list(
+                        dict.fromkeys(
+                            [
+                                *(
+                                    source.obligation_ids
+                                    if source is not None
+                                    else (
+                                        source_outcome.credit_obligation_ids
+                                        if source_outcome is not None
+                                        else []
+                                    )
+                                ),
+                                *obligation_ids,
+                            ]
+                        )
+                    ),
+                    message_ids=list(
+                        dict.fromkeys(
+                            [
+                                *(source.message_ids if source is not None else []),
+                                *decision.message_ids,
+                            ]
+                        )
+                    ),
+                    materialization_action="composition_source",
+                )
+        if emit_event:
+            self._event(
+                "inspiration_credit_target_registered",
+                "Inspiration credit target registered",
+                proposal.statement,
+                target.model_dump(mode="json"),
+            )
+        return target
 
     def _generate_task(
         self, task: InspirationTask, snapshot: InspirationSnapshot
@@ -1862,7 +2026,9 @@ class InspirationEngine:
                 RouteRole.PROVER,
                 snapshot.round_index,
             )
-            self._publish_typed(proposal, route.route_id, snapshot.round_index)
+            message_id = self._publish_typed(
+                proposal, route.route_id, snapshot.round_index
+            )
             if proposal.mechanism == InspirationMechanism.SURPRISE_EXPLORATION:
                 self._event(
                     "surprise_route_created",
@@ -1879,6 +2045,7 @@ class InspirationEngine:
                 action="route_created",
                 route_id=route.route_id,
                 obligation_ids=obligation_ids,
+                message_ids=[message_id] if message_id is not None else [],
                 reason="active mode admitted an independently reviewed novel mechanism",
             )
         if review.recommendation == "request_computation":
@@ -1896,13 +2063,15 @@ class InspirationEngine:
                 reason="proposal isolates a shared bridge lemma",
             )
         route_id = proposal.target_route_ids[0] if proposal.target_route_ids else None
+        message_id: str | None = None
         if route_id:
-            self._publish_typed(proposal, route_id, snapshot.round_index)
+            message_id = self._publish_typed(proposal, route_id, snapshot.round_index)
         return InspirationMaterialization(
             proposal_id=proposal.proposal_id,
             action="attached" if route_id else "stored_insight",
             route_id=route_id,
             obligation_ids=obligation_ids,
+            message_ids=[message_id] if message_id is not None else [],
             reason="proposal remains an Insight pending ordinary proof validation",
         )
 
@@ -1958,7 +2127,105 @@ class InspirationEngine:
             if item_id in {item.obligation_id for item in self.proof_graph.obligations}
         ]
 
-    def mark_verified(self, proposal_id: str, evidence_message_id: str) -> None:
+    def attribute_verified_fact(
+        self,
+        evidence_message_id: str,
+        *,
+        source_route_id: str | None,
+        closed_obligation_ids: Iterable[str] = (),
+        dependency_message_ids: Iterable[str] = (),
+        direct_proposal_ids: Iterable[str] = (),
+    ) -> list[str]:
+        """Credit every explicitly mapped proposal that contributed to a Fact."""
+
+        closed = set(closed_obligation_ids)
+        dependencies = set(dependency_message_ids)
+        matched = {
+            proposal_id
+            for proposal_id in direct_proposal_ids
+            if proposal_id in self.proposals
+        }
+        for proposal_id, target in self.credit_targets.items():
+            if (
+                proposal_id not in self.proposals
+                or target.materialization_action
+                not in _CREDITABLE_MATERIALIZATION_ACTIONS
+            ):
+                continue
+            route_match = bool(
+                source_route_id
+                and target.materialization_action in _ROUTE_CREDIT_ACTIONS
+                and source_route_id in target.route_ids
+            )
+            obligation_match = bool(closed & set(target.obligation_ids))
+            message_match = bool(dependencies & set(target.message_ids))
+            if route_match or obligation_match or message_match:
+                matched.add(proposal_id)
+
+        for proposal_id in sorted(matched):
+            if proposal_id not in self.credit_targets:
+                proposal = self.proposals[proposal_id]
+                outcome = self.outcome_ledger.outcomes.get(proposal_id)
+                materialization = self.materializations.get(proposal_id)
+                self.credit_targets[proposal_id] = InspirationCreditTarget(
+                    proposal_id=proposal_id,
+                    route_ids=list(
+                        dict.fromkeys(
+                            [
+                                *(
+                                    outcome.credit_route_ids
+                                    if outcome is not None
+                                    else proposal.target_route_ids
+                                ),
+                                *([source_route_id] if source_route_id else []),
+                            ]
+                        )
+                    ),
+                    obligation_ids=list(
+                        dict.fromkeys(
+                            [
+                                *(
+                                    outcome.credit_obligation_ids
+                                    if outcome is not None
+                                    else proposal.generated_obligations
+                                ),
+                                *closed,
+                            ]
+                        )
+                    ),
+                    materialization_action=(
+                        materialization.action
+                        if materialization is not None
+                        else "route_created"
+                    ),
+                )
+            self.mark_verified(
+                proposal_id,
+                evidence_message_id,
+                closed_obligation_ids=closed,
+            )
+        if matched:
+            self._event(
+                "inspiration_fact_credit_attributed",
+                "Verified Fact attributed to inspiration",
+                evidence_message_id,
+                {
+                    "evidence_message_id": evidence_message_id,
+                    "proposal_ids": sorted(matched),
+                    "source_route_id": source_route_id,
+                    "closed_obligation_ids": sorted(closed),
+                    "dependency_message_ids": sorted(dependencies),
+                },
+            )
+        return sorted(matched)
+
+    def mark_verified(
+        self,
+        proposal_id: str,
+        evidence_message_id: str,
+        *,
+        closed_obligation_ids: Iterable[str] | None = None,
+    ) -> None:
         if proposal_id not in self.proposals:
             raise KeyError(proposal_id)
         evidence = next(
@@ -1973,7 +2240,16 @@ class InspirationEngine:
             raise ValueError(
                 "only an independently verified Fact can verify a proposal"
             )
-        if self.verified_proposals.get(proposal_id) == evidence_message_id:
+        credit_target = self.credit_targets.get(proposal_id)
+        if (
+            credit_target is not None
+            and evidence_message_id in credit_target.message_ids
+        ):
+            return
+        if (
+            credit_target is None
+            and self.verified_proposals.get(proposal_id) == evidence_message_id
+        ):
             return
         self.verified_proposals[proposal_id] = evidence_message_id
         proposal = self.proposals[proposal_id]
@@ -1982,18 +2258,37 @@ class InspirationEngine:
         stats["verified_count"] += 1
         stats["consecutive_no_verified_gain"] = 0
         snapshot = self._last_snapshot
-        target_routes = proposal.target_route_ids
+        outcome_before = self.outcome_ledger.outcomes.get(proposal_id)
+        target_routes = (
+            outcome_before.credit_route_ids
+            if outcome_before is not None
+            else proposal.target_route_ids
+        )
         proof_debt_after = sum(
             self.proof_graph.proof_debt(route_id)
             for route_id in target_routes
             if any(route.route_id == route_id for route in self.route_registry.routes)
         )
-        closed_obligations = [
-            item.obligation_id
-            for item in self.proof_graph.obligations
-            if item.obligation_id in proposal.generated_obligations
-            and item.status == "closed"
-        ]
+        eligible_obligations = set(
+            credit_target.obligation_ids
+            if credit_target is not None
+            else (
+                outcome_before.credit_obligation_ids
+                if outcome_before is not None
+                else proposal.generated_obligations
+            )
+        )
+        if closed_obligation_ids is None:
+            closed_obligations = [
+                item.obligation_id
+                for item in self.proof_graph.obligations
+                if item.obligation_id in eligible_obligations
+                and item.status == "closed"
+            ]
+        else:
+            closed_obligations = sorted(
+                eligible_obligations & set(closed_obligation_ids)
+            )
         round_index = (
             snapshot.round_index
             if snapshot is not None
@@ -2005,6 +2300,14 @@ class InspirationEngine:
             proof_debt_after=proof_debt_after,
             obligations_closed=closed_obligations,
         )
+        if credit_target is not None:
+            self.credit_targets[proposal_id] = credit_target.model_copy(
+                update={
+                    "message_ids": list(
+                        dict.fromkeys([*credit_target.message_ids, evidence_message_id])
+                    )
+                }
+            )
         experience = (
             self.experience_distiller.distill_verified(
                 problem=self.problem,
@@ -2040,6 +2343,37 @@ class InspirationEngine:
             },
         )
         self._checkpoint()
+
+    def mark_final_citations(
+        self,
+        *,
+        route_ids: Iterable[str] = (),
+        obligation_ids: Iterable[str] = (),
+        message_ids: Iterable[str] = (),
+        direct_proposal_ids: Iterable[str] = (),
+    ) -> list[str]:
+        routes = set(route_ids)
+        obligations = set(obligation_ids)
+        messages = set(message_ids)
+        cited = {
+            proposal_id
+            for proposal_id in direct_proposal_ids
+            if proposal_id in self.verified_proposals
+        }
+        for proposal_id, target in self.credit_targets.items():
+            if proposal_id not in self.verified_proposals:
+                continue
+            route_match = bool(
+                target.materialization_action in _ROUTE_CREDIT_ACTIONS
+                and routes & set(target.route_ids)
+            )
+            obligation_match = bool(obligations & set(target.obligation_ids))
+            message_match = bool(messages & set(target.message_ids))
+            if route_match or obligation_match or message_match:
+                cited.add(proposal_id)
+        for proposal_id in sorted(cited):
+            self.mark_proposal_cited(proposal_id)
+        return sorted(cited)
 
     def mark_proposal_cited(self, proposal_id: str) -> None:
         if proposal_id not in self.verified_proposals:
@@ -2086,9 +2420,9 @@ class InspirationEngine:
 
     def _publish_typed(
         self, proposal: InspirationProposal, route_id: str, current_round: int
-    ) -> None:
+    ) -> str | None:
         if self.broker is None:
-            return
+            return None
         if not self.route_registry.owns_agent(
             route_id, proposal.source_agent_id, RouteRole.PROVER
         ):
@@ -2100,7 +2434,7 @@ class InspirationEngine:
                     current_round,
                 )
             except ValueError:
-                return
+                return None
         message = MessageEnvelope(
             problem_hash=self.problem.integrity_hash,
             source_agent_id=proposal.source_agent_id,
@@ -2122,7 +2456,12 @@ class InspirationEngine:
             round_created=current_round,
             ttl_rounds=self.config.topology.cross_route.message_ttl_rounds,
         )
-        self.broker.publish(message, referee_agent_id=None, current_round=current_round)
+        decision = self.broker.publish(
+            message, referee_agent_id=None, current_round=current_round
+        )
+        if not decision.accepted:
+            return None
+        return decision.duplicate_of or message.message_id
 
     def _coerce_snapshot(
         self, state: InspirationSnapshot | dict[str, Any] | None
@@ -2198,6 +2537,14 @@ class InspirationEngine:
                     for key, value in self.compositions.items()
                 },
             )
+            self.store.write_json(
+                "inspiration",
+                "credit_targets",
+                {
+                    key: value.model_dump(mode="json")
+                    for key, value in self.credit_targets.items()
+                },
+            )
 
     def export_state(self) -> dict[str, Any]:
         return {
@@ -2220,6 +2567,10 @@ class InspirationEngine:
             "materializations": {
                 key: value.model_dump(mode="json")
                 for key, value in self.materializations.items()
+            },
+            "credit_targets": {
+                key: value.model_dump(mode="json")
+                for key, value in self.credit_targets.items()
             },
             "materialized_strategies": {
                 key: value.model_dump(mode="json")
@@ -2319,6 +2670,10 @@ class InspirationEngine:
             str(key): InspirationMaterialization.model_validate(value)
             for key, value in dict(state.get("materializations", {})).items()
         }
+        self.credit_targets = {
+            str(key): InspirationCreditTarget.model_validate(value)
+            for key, value in dict(state.get("credit_targets", {})).items()
+        }
         self.materialized_strategies = {
             str(key): StrategyCard.model_validate(value)
             for key, value in dict(state.get("materialized_strategies", {})).items()
@@ -2375,6 +2730,7 @@ class InspirationEngine:
             str(value) for value in state.get("quick_falsification_passed", [])
         }
         self.outcome_ledger.restore_state(dict(state.get("outcomes", {})))
+        self._migrate_credit_state()
         self.verified_experiences = {
             str(key): VerifiedExperienceRecord.model_validate(value)
             for key, value in dict(state.get("verified_experiences", {})).items()
@@ -2416,3 +2772,42 @@ class InspirationEngine:
         self.cross_run_loaded_negative_ids.update(
             str(value) for value in cross_run.get("loaded_negative_ids", [])
         )
+
+    def _migrate_credit_state(self) -> None:
+        """Backfill explicit attribution for checkpoints written before v0.7."""
+
+        for proposal_id, outcome in list(self.outcome_ledger.outcomes.items()):
+            proposal = self.proposals.get(proposal_id)
+            if proposal is None:
+                continue
+            trigger = self.triggers.get(proposal.trigger_id)
+            if trigger is None:
+                continue
+            route_ids, obligation_ids = self._initial_credit_scope(proposal, trigger)
+            self.outcome_ledger.outcomes[proposal_id] = outcome.model_copy(
+                update={
+                    "credit_route_ids": (outcome.credit_route_ids or route_ids),
+                    "credit_obligation_ids": (
+                        outcome.credit_obligation_ids or obligation_ids
+                    ),
+                }
+            )
+        for proposal_id, materialization in self.materializations.items():
+            proposal = self.proposals.get(proposal_id)
+            if proposal is not None:
+                self._register_credit_target(
+                    proposal,
+                    materialization,
+                    emit_event=False,
+                )
+        for proposal_id, evidence_message_id in self.verified_proposals.items():
+            target = self.credit_targets.get(proposal_id)
+            if target is None:
+                continue
+            self.credit_targets[proposal_id] = target.model_copy(
+                update={
+                    "message_ids": list(
+                        dict.fromkeys([*target.message_ids, evidence_message_id])
+                    )
+                }
+            )

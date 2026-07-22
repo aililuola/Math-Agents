@@ -172,6 +172,7 @@ def write_hierarchical_reports(
     proposals = dict(inspiration_engine.get("proposals", {}))
     candidate_decisions = dict(inspiration_engine.get("candidate_decisions", {}))
     call_reservations = dict(inspiration_engine.get("call_reservations", {}))
+    credit_targets = dict(inspiration_engine.get("credit_targets", {}))
     inspiration_outcomes = dict(inspiration_engine.get("outcomes", {}))
     meta_directives = dict(inspiration_engine.get("meta_directives", {}))
     meta_executions = dict(inspiration_engine.get("meta_directive_executions", {}))
@@ -259,6 +260,14 @@ def write_hierarchical_reports(
         "inspiration_outcome_final_citations": sum(
             bool(item.get("cited_by_final_proof"))
             for item in inspiration_outcomes.values()
+        ),
+        "inspiration_credit_target_count": len(credit_targets),
+        "inspiration_credited_message_count": len(
+            {
+                str(message_id)
+                for target in credit_targets.values()
+                for message_id in target.get("message_ids", [])
+            }
         ),
         "meta_directive_count": len(meta_directives),
         "meta_directive_executed_count": sum(

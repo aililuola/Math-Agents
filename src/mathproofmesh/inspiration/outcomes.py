@@ -12,7 +12,7 @@ from ..schemas import (
     InspirationTrigger,
     ObligationKind,
 )
-from .trigger_policy import InspirationSnapshot
+from .trigger_policy import InspirationSnapshot, enabled_schedulable_mechanisms
 
 
 class InspirationOutcomeLedger:
@@ -31,6 +31,8 @@ class InspirationOutcomeLedger:
         trigger: InspirationTrigger,
         obligation_kinds: Iterable[ObligationKind],
         proof_debt_before: float,
+        credit_route_ids: Iterable[str] = (),
+        credit_obligation_ids: Iterable[str] = (),
     ) -> InspirationOutcome:
         existing = self.outcomes.get(proposal.proposal_id)
         if existing is not None:
@@ -45,6 +47,8 @@ class InspirationOutcomeLedger:
             obligation_kinds=list(dict.fromkeys(obligation_kinds)),
             round_created=snapshot.round_index,
             proof_debt_before=max(0.0, proof_debt_before),
+            credit_route_ids=list(dict.fromkeys(credit_route_ids)),
+            credit_obligation_ids=list(dict.fromkeys(credit_obligation_ids)),
         )
         self.outcomes[proposal.proposal_id] = outcome
         return outcome
@@ -133,6 +137,9 @@ class InspirationOutcomeLedger:
     ) -> dict[str, dict[str, float | int | bool]]:
         if not self.config.adaptive_mechanism_selection:
             return {}
+        schedulable = enabled_schedulable_mechanisms(self.config)
+        if not schedulable:
+            return {}
         result: dict[str, dict[str, float | int | bool]] = {}
         for trigger in triggers:
             matching = [
@@ -143,6 +150,7 @@ class InspirationOutcomeLedger:
                 ]
                 if item.domain in {snapshot.domain, "unknown"}
                 and item.trigger_type == trigger.trigger_type
+                and item.mechanism in schedulable
                 and self._obligation_context_matches(item, snapshot)
             ]
             grouped: dict[InspirationMechanism, list[InspirationOutcome]] = defaultdict(
@@ -152,7 +160,7 @@ class InspirationOutcomeLedger:
                 grouped[item.mechanism].append(item)
             total = len(matching)
             minimum_observed = min(
-                (len(grouped.get(mechanism, [])) for mechanism in InspirationMechanism),
+                (len(grouped.get(mechanism, [])) for mechanism in schedulable),
                 default=0,
             )
             interval = (
@@ -161,7 +169,7 @@ class InspirationOutcomeLedger:
                 else 0
             )
             scheduled_exploration = bool(interval and total % interval == 0)
-            for mechanism in InspirationMechanism:
+            for mechanism in schedulable:
                 records = grouped.get(mechanism, [])
                 observations = len(records)
                 mean_reward = (

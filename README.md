@@ -32,6 +32,8 @@ Active 灵感任务现在不是“一种机制只问一次模型”。每个获�
 
 系统同时维护 `InspirationOutcome` 结果账本，记录每个提案的调用与 token 成本、物化结果、verified Fact 增益、proof debt 变化、关闭义务、反驳和最终证明引用。机制调度使用带最低探索率的确定性 UCB，在相同领域、触发类型和义务类型下学习哪些机制更有效，但奖励只能改变任务排序，不能成为数学证据。只有后来通过 Broker Fact Gate 的提案才会被 `Verified Experience Distiller` 提炼进正面类比经验；失败类比进入独立 Negative Analogy Library，防止同一题反复进行已知失败的迁移。
 
+结果归因现在不再只依赖 `Attempt.strategy_id`。每个已物化提案都会保存可恢复的 `InspirationCreditTarget`，显式固定其 Route、Proof Obligation、Broker Message 和物化动作；附着到旧路线、只创建义务、请求 Bridge/Computation 以及多个提案共同形成的组合路线，都能在 Fact 晋级、义务关闭和最终证明引用时获得对应 credit。`InspirationOutcome.credit_route_ids` 与 `credit_obligation_ids` 在注册时固化，proof debt 前后始终测量同一组路线，避免空 `target_route_ids` 的 Surprise 提案虚假获得 debt reduction。UCB 的最低探索池只包含配置已启用且可直接调度的机制，派生的 `INSPIRATION_COMPOSITION` 不再污染探索基线。
+
 第三批灵感升级补齐了领域算子、受控变异、双向边界和组合式灵感。数论、组合、不等式和几何算子不再只是提示词标签，而是带有前置条件、变换、派生义务、可逆性要求、快速失败测试、已知失败模式和建议工具的 `DomainOperatorSpec`。`Surprise Budget Explorer` 使用带固定种子的 `SurpriseMutationDirective` 执行对偶、补结构、商结构、提升、投影、极值化、逆操作、局部到整体及图/多项式/状态机编码；模型无法偷偷改写已经获准的变异指令。
 
 `Reverse Goal Analyzer` 现在维护仅由 Broker admitted Typed Facts 构成的前向边界和由目标充分条件构成的后向边界，只把两者之间缺失的最小蕴含登记为桥接义务。`InspirationComposer` 只组合指向相同或相邻义务、机制互补、已经独立审查且至少一个通过快速反驳检查的提案；组合结果在后续调度轮作为全新提案再次经过 Referee 和 Skeptic，不能直接进入 FactMemory。经最终证明实际引用的正面经验、失败类比和可观测结果账本可以写入 git 忽略的 `.mathproofmesh/learning`，供后续运行检索和 UCB 调度；其中不保存 Prompt、私有思维链、API 输出或密钥。

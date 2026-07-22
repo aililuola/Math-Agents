@@ -2739,10 +2739,23 @@ class ProofMeshOrchestrator:
                     "strategy_inspiration_"
                 ):
                     proposal_id = attempt.strategy_id.removeprefix("strategy_")
-                if proposal_id in state.inspiration_engine.proposals:
-                    state.inspiration_engine.mark_verified(
-                        proposal_id, message.message_id
-                    )
+                evidence_message_id = publication.duplicate_of or message.message_id
+                closed_obligation_ids = [
+                    item.obligation_id
+                    for item in graph.obligations
+                    if evidence_message_id in item.evidence_message_ids
+                ]
+                state.inspiration_engine.attribute_verified_fact(
+                    evidence_message_id,
+                    source_route_id=route_id,
+                    closed_obligation_ids=closed_obligation_ids,
+                    dependency_message_ids=message.dependencies,
+                    direct_proposal_ids=(
+                        [proposal_id]
+                        if proposal_id in state.inspiration_engine.proposals
+                        else []
+                    ),
+                )
         for attempt in state.attempts:
             route_id = self._route_for_strategy(state, attempt.strategy_id)
             if route_id is None or not registry.owns_agent(
@@ -4620,6 +4633,23 @@ class ProofMeshOrchestrator:
             state.contradiction_broker.resolve(
                 target.contradiction_id,
                 resolution_message_id=verified_message.message_id,
+            )
+        if (
+            memory_tier == MemoryTier.FACT
+            and state.inspiration_engine is not None
+            and state.proof_graph is not None
+        ):
+            evidence_message_id = decision.duplicate_of or verified_message.message_id
+            closed_obligation_ids = [
+                item.obligation_id
+                for item in state.proof_graph.obligations
+                if evidence_message_id in item.evidence_message_ids
+            ]
+            state.inspiration_engine.attribute_verified_fact(
+                evidence_message_id,
+                source_route_id=source_route_id,
+                closed_obligation_ids=closed_obligation_ids,
+                dependency_message_ids=verified_message.dependencies,
             )
         return True
 
@@ -9827,14 +9857,30 @@ class ProofMeshOrchestrator:
                 for attempt in state.attempts
                 if attempt.attempt_id in source_ids
             }
-            for strategy in state.strategies:
-                if (
-                    strategy.strategy_id in strategy_ids
-                    and strategy.inspiration_proposal_id is not None
-                ):
-                    state.inspiration_engine.mark_proposal_cited(
-                        strategy.inspiration_proposal_id
-                    )
+            direct_proposal_ids = {
+                strategy.inspiration_proposal_id
+                for strategy in state.strategies
+                if strategy.strategy_id in strategy_ids
+                and strategy.inspiration_proposal_id is not None
+            }
+            source_route_ids = {
+                route_id
+                for strategy_id in strategy_ids
+                if (route_id := self._route_for_strategy(state, strategy_id))
+                is not None
+            }
+            final_dependency_ids = set(state.final_proof.dependencies)
+            final_dependency_ids.update(
+                dependency
+                for step in state.final_proof.proof_steps
+                for dependency in step.dependencies
+            )
+            state.inspiration_engine.mark_final_citations(
+                route_ids=source_route_ids,
+                obligation_ids=final_dependency_ids,
+                message_ids=final_dependency_ids,
+                direct_proposal_ids=direct_proposal_ids,
+            )
         if state.inspiration_engine is not None:
             state.inspiration_engine.persist_cross_run_learning(
                 run_verified=status == RunStatus.VERIFIED

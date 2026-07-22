@@ -156,11 +156,23 @@ gain, proof-debt change, closed obligations, refutation, time to first gain and
 final-proof citation. A configurable reward combines only these observable
 downstream outcomes.
 
+At registration time the ledger freezes `credit_route_ids` and
+`credit_obligation_ids`. The before and after proof-debt measurements therefore
+use the same route set even when a Surprise proposal initially has no target
+route or later creates a new route. Materialization also creates an
+`InspirationCreditTarget` containing explicit route, obligation, Broker message
+and action IDs. Fact promotion, obligation closure and final citation match
+against those IDs instead of relying only on `Attempt.strategy_id`. This covers
+proposals attached to an existing route, computation and bridge requests,
+obligation-only materializations and every source proposal of a composed idea.
+
 Mechanism selection uses deterministic UCB scores conditioned on domain,
 trigger, mechanism and obligation kind. A fixed minimum exploration rate keeps
-untried mechanisms eligible. These scores affect task ordering only: they are
-not mathematical evidence and cannot promote a Claim, close an obligation or
-change a verification verdict.
+untried mechanisms eligible. The exploration pool is the configured subset of
+`SCHEDULABLE_MECHANISMS`; derived composition proposals are reviewed through
+their own pipeline and never count as an untried ordinary mechanism. These
+scores affect task ordering only: they are not mathematical evidence and cannot
+promote a Claim, close an obligation or change a verification verdict.
 
 ## Verified Experience Distillation
 
