@@ -22,6 +22,7 @@ MECHANISM_ACTION: dict[InspirationMechanism, ActionKind] = {
     InspirationMechanism.BRIDGE_LEMMA: ActionKind.BRIDGE,
     InspirationMechanism.META_REPLAN: ActionKind.META_REPLAN,
     InspirationMechanism.SURPRISE_EXPLORATION: ActionKind.SURPRISE_WIDEN,
+    InspirationMechanism.INSPIRATION_COMPOSITION: ActionKind.TRIGGER_INSPIRATION,
 }
 
 

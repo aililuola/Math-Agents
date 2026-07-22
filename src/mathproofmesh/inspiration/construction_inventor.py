@@ -9,6 +9,7 @@ from ..schemas import (
     ProofObligation,
     stable_hash,
 )
+from .domain_operators import DomainOperatorRegistry
 
 
 DOMAIN_CONSTRUCTIONS: dict[str, tuple[str, ...]] = {
@@ -48,6 +49,9 @@ DOMAIN_CONSTRUCTIONS: dict[str, tuple[str, ...]] = {
 class AuxiliaryConstructionInventor:
     """Generate explicit, obligation-bound, quickly falsifiable constructions."""
 
+    def __init__(self, registry: DomainOperatorRegistry | None = None) -> None:
+        self.registry = registry or DomainOperatorRegistry()
+
     def propose(
         self,
         problem: ProblemContract,
@@ -55,6 +59,7 @@ class AuxiliaryConstructionInventor:
         *,
         domain: str = "unknown",
         max_proposals: int = 3,
+        use_domain_operators: bool = True,
     ) -> list[ConstructionProposal]:
         targets = [
             item
@@ -63,14 +68,47 @@ class AuxiliaryConstructionInventor:
         ]
         if not targets:
             return []
-        types = DOMAIN_CONSTRUCTIONS.get(
-            domain.casefold(),
-            ("auxiliary_sequence", "extremal_object", "potential_function"),
+        inferred_domain = self.registry.infer_domain(problem, domain)
+        fallback_types = list(
+            DOMAIN_CONSTRUCTIONS.get(
+                domain.casefold(),
+                ("auxiliary_sequence", "extremal_object", "potential_function"),
+            )
         )
+        plugin_types = (
+            [
+                item.operator_id
+                for item in self.registry.select(
+                    problem,
+                    domain=inferred_domain,
+                    families=("construction",),
+                    limit=max_proposals * 2,
+                )
+            ]
+            if use_domain_operators
+            else []
+        )
+        # Local fallback must exercise the same auditable operator contracts as
+        # Active prompts. Generic templates remain available after every
+        # applicable domain operator rather than hiding all plugins beyond K.
+        types = list(dict.fromkeys([*plugin_types, *fallback_types]))
         proposals: list[ConstructionProposal] = []
         target_ids = [item.obligation_id for item in targets]
         for construction_type in types[:max_proposals]:
-            constructed = self._objects(construction_type)
+            operator = (
+                self.registry.match(
+                    construction_type,
+                    domain=inferred_domain,
+                    family="construction",
+                )
+                if use_domain_operators
+                else None
+            )
+            constructed = (
+                list(operator.object_tags)
+                if operator is not None and operator.object_tags
+                else self._objects(construction_type)
+            )
             signature = NoveltySignature(
                 representation_tags=[],
                 mechanism_tags=["auxiliary_construction", construction_type],
@@ -88,8 +126,12 @@ class AuxiliaryConstructionInventor:
                     construction_type=construction_type,
                     constructed_objects=constructed,
                     definition=(
-                        f"Define the {construction_type} solely from the original "
-                        "objects and record every well-definedness condition."
+                        operator.transformation
+                        if operator is not None
+                        else (
+                            f"Define the {construction_type} solely from the original "
+                            "objects and record every well-definedness condition."
+                        )
                     ),
                     intended_obligations=target_ids,
                     expected_invariant_or_relation=(
@@ -100,14 +142,39 @@ class AuxiliaryConstructionInventor:
                         "It targets the currently open high-priority obligations "
                         "rather than extending an already closed derivation."
                     ),
-                    falsification_tests=[
-                        "instantiate the smallest nontrivial admissible case",
-                        "test well-definedness under every allowed representation choice",
-                    ],
-                    failure_conditions=[
-                        "the construction depends on an arbitrary choice",
-                        "the claimed relation is equivalent to the original unresolved goal",
-                    ],
+                    falsification_tests=(
+                        list(operator.fast_failure_tests)
+                        if operator is not None
+                        else [
+                            "instantiate the smallest nontrivial admissible case",
+                            "test well-definedness under every allowed representation choice",
+                        ]
+                    ),
+                    failure_conditions=(
+                        list(operator.known_failure_modes)
+                        if operator is not None
+                        else [
+                            "the construction depends on an arbitrary choice",
+                            "the claimed relation is equivalent to the original unresolved goal",
+                        ]
+                    ),
+                    operator_id=operator.operator_id if operator is not None else None,
+                    operator_preconditions=(
+                        list(operator.preconditions) if operator is not None else []
+                    ),
+                    generated_obligations=(
+                        list(operator.generated_obligations)
+                        if operator is not None
+                        else []
+                    ),
+                    reversibility_requirements=(
+                        list(operator.reversibility_requirements)
+                        if operator is not None
+                        else []
+                    ),
+                    suggested_tools=(
+                        list(operator.suggested_tools) if operator is not None else []
+                    ),
                     novelty_signature=signature,
                 )
             )

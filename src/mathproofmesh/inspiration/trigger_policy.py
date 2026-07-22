@@ -17,6 +17,7 @@ from ..schemas import (
 
 class InspirationSnapshot(StrictModel):
     round_index: int = Field(ge=0)
+    problem_hash: str = ""
     domain: str = "unknown"
     active_route_ids: list[str] = Field(default_factory=list)
     failed_route_ids: list[str] = Field(default_factory=list)
@@ -252,6 +253,10 @@ class TriggerPolicy:
             InspirationMechanism.BRIDGE_LEMMA: self.config.bridge_lemma_generator,
             InspirationMechanism.SURPRISE_EXPLORATION: self.config.surprise_exploration,
             InspirationMechanism.META_REPLAN: self.config.persistent_meta_strategist,
+            # Compositions are created from reviewed proposals and re-enter through
+            # pending_directive_tasks. They must never appear as an ordinary
+            # fair-rotation mechanism without concrete source proposals.
+            InspirationMechanism.INSPIRATION_COMPOSITION: False,
         }
         if not triggers:
             return []

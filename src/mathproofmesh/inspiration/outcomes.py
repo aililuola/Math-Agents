@@ -21,6 +21,7 @@ class InspirationOutcomeLedger:
     def __init__(self, config: InspirationConfig) -> None:
         self.config = config
         self.outcomes: dict[str, InspirationOutcome] = {}
+        self.historical_outcomes: dict[str, InspirationOutcome] = {}
 
     def register(
         self,
@@ -36,6 +37,7 @@ class InspirationOutcomeLedger:
             return existing
         outcome = InspirationOutcome(
             proposal_id=proposal.proposal_id,
+            problem_hash=snapshot.problem_hash,
             task_id=proposal.task_id,
             mechanism=proposal.mechanism,
             domain=snapshot.domain,
@@ -135,7 +137,10 @@ class InspirationOutcomeLedger:
         for trigger in triggers:
             matching = [
                 item
-                for item in self.outcomes.values()
+                for item in [
+                    *self.historical_outcomes.values(),
+                    *self.outcomes.values(),
+                ]
                 if item.domain in {snapshot.domain, "unknown"}
                 and item.trigger_type == trigger.trigger_type
                 and self._obligation_context_matches(item, snapshot)
@@ -193,6 +198,11 @@ class InspirationOutcomeLedger:
             str(key): InspirationOutcome.model_validate(value)
             for key, value in state.items()
         }
+
+    def load_historical(self, outcomes: Iterable[InspirationOutcome]) -> None:
+        for outcome in outcomes:
+            key = f"{outcome.problem_hash}:{outcome.proposal_id}"
+            self.historical_outcomes[key] = outcome
 
     def _recompute(self, proposal_id: str) -> None:
         outcome = self.outcomes[proposal_id]

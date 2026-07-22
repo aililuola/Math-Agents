@@ -2,7 +2,12 @@
 
 from ..schemas import (
     AnalogyMapping,
+    BidirectionalFrontierState,
+    ComposedInspiration,
     ConstructionProposal,
+    DomainOperatorSpec,
+    FrontierBridge,
+    FrontierClaim,
     InspirationCallReservation,
     InspirationCandidateDecision,
     InspirationContextMode,
@@ -25,12 +30,18 @@ from ..schemas import (
     RepresentationCandidate,
     ReverseGoalPlan,
     SurpriseBudgetState,
+    SurpriseMutationDirective,
     VerifiedExperienceRecord,
 )
 
 __all__ = [
     "AnalogyMapping",
+    "BidirectionalFrontierState",
+    "ComposedInspiration",
     "ConstructionProposal",
+    "DomainOperatorSpec",
+    "FrontierBridge",
+    "FrontierClaim",
     "InspirationCallReservation",
     "InspirationCandidateDecision",
     "InspirationContextMode",
@@ -53,5 +64,6 @@ __all__ = [
     "RepresentationCandidate",
     "ReverseGoalPlan",
     "SurpriseBudgetState",
+    "SurpriseMutationDirective",
     "VerifiedExperienceRecord",
 ]

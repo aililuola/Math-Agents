@@ -35,6 +35,10 @@ def test_construction_has_definition_target_and_falsification_test() -> None:
         assert inventor.validate(proposal, [obligation.obligation_id]) == []
         assert proposal.expected_proof_debt_reduction
         assert proposal.failure_conditions
+        assert proposal.operator_id
+        assert proposal.operator_preconditions
+        assert proposal.generated_obligations
+        assert proposal.reversibility_requirements
 
 
 def test_invariant_remains_a_falsifiable_hypothesis() -> None:

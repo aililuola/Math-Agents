@@ -32,6 +32,10 @@ def test_geometry_switchboard_generates_auditable_nonmechanical_candidates() -> 
         assert candidate.object_mapping
         assert candidate.failure_risks
         assert candidate.fast_failure_tests
+        assert candidate.operator_id
+        assert candidate.operator_preconditions
+        assert candidate.generated_obligations
+        assert candidate.reversibility_requirements
         assert candidate.novelty_signature.targeted_obligation_ids == [
             obligation.obligation_id
         ]

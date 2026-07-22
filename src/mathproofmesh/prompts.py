@@ -1251,7 +1251,7 @@ JSON SCHEMA:
     ) -> PromptBundle:
         return self._typed_stage(
             "representation_switchboard",
-            "Select an applicable alternative representation, not every representation. Give a reversible object mapping, preserved properties, lost conditions, novelty source, targeted open obligations, and fast failure tests.",
+            "Select an applicable alternative representation, not every representation. Prefer a supplied domain operator whose preconditions hold; copy its operator_id and preserve its obligations, reversibility requirements, fast failure tests, and known failure modes. Give a reversible object mapping, preserved properties, lost conditions, novelty source, and targeted open obligations.",
             RepresentationCandidate,
             {"problem": problem, **context},
             temperature=0.35,
@@ -1269,7 +1269,7 @@ JSON SCHEMA:
     def invent_auxiliary_construction(self, **context: Any) -> PromptBundle:
         return self._typed_stage(
             "invent_auxiliary_construction",
-            "Define a new auxiliary object bound to open obligations. State expected relations, proof-debt benefit, minimal falsification tests, and failure conditions.",
+            "Define a new auxiliary object bound to open obligations. Prefer an applicable supplied domain construction operator and retain its explicit preconditions, generated obligations, reversibility requirements, suggested tools, falsification tests, and known failure modes. State the expected relation and proof-debt benefit.",
             ConstructionProposal,
             context,
             temperature=0.4,
@@ -1287,7 +1287,7 @@ JSON SCHEMA:
     def reverse_goal_analysis(self, **context: Any) -> PromptBundle:
         return self._typed_stage(
             "reverse_goal_analysis",
-            "Work backward from the goal to sufficient intermediate claims, mark those supported by existing Facts, and isolate the smallest unsupported bridge gaps.",
+            "Maintain two bounded frontiers. The forward frontier may contain only supplied Broker-admitted Typed Facts; never infer Fact support from route prose. Build a backward frontier of sufficient claims from the target, then identify explicit forward-to-backward meeting pairs and the smallest missing implications as FrontierBridge objects. Do not label an unsupported claim as fact-supported.",
             ReverseGoalPlan,
             context,
             temperature=0.2,
@@ -1305,7 +1305,7 @@ JSON SCHEMA:
     def surprise_exploration(self, **context: Any) -> PromptBundle:
         return self._typed_stage(
             "surprise_exploration",
-            "Propose a high-novelty mechanism under the protected surprise budget. It must differ structurally, target an open obligation, and remain quickly falsifiable; changed notation or wording is invalid.",
+            "Execute the supplied seeded SurpriseMutationDirective rather than merely choosing a lower-ranked representation. Copy the directive into the mutation field without changing its seed or operator_id, then instantiate a structurally different, obligation-targeted and quickly falsifiable proposal. Changed notation, wording, or an unrelated mutation is invalid.",
             InspirationProposal,
             context,
             temperature=0.5,

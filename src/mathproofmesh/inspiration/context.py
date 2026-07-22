@@ -44,6 +44,9 @@ _PROFILES: dict[InspirationMechanism, _MechanismContextProfile] = {
     InspirationMechanism.SURPRISE_EXPLORATION: _MechanismContextProfile(
         2, 2, False, True
     ),
+    InspirationMechanism.INSPIRATION_COMPOSITION: _MechanismContextProfile(
+        2, 2, True, True
+    ),
 }
 
 
@@ -164,6 +167,7 @@ def _enforce_context_budget(
         return context
     context["context_truncated"] = True
     for key in (
+        "domain_operator_catalog",
         "route_novelty_signatures",
         "negative_memory",
         "verified_facts",
@@ -308,7 +312,25 @@ def build_inspiration_prompt_context(
         "verified_facts": [],
         "negative_memory": [],
         "route_novelty_signatures": [],
+        "domain_operator_catalog": [],
+        "surprise_mutation_directive": None,
     }
+    operator_catalog = engine.domain_operator_catalog(task, snapshot)
+    if context_mode == InspirationContextMode.COLD and operator_catalog:
+        base["domain_operator_catalog"] = [
+            operator_catalog[proposal_slot % len(operator_catalog)]
+        ]
+    else:
+        base["domain_operator_catalog"] = operator_catalog
+    if task.mechanism == InspirationMechanism.SURPRISE_EXPLORATION:
+        directive = engine.surprise_mutation_directive(
+            task,
+            snapshot,
+            proposal_slot=proposal_slot,
+        )
+        base["surprise_mutation_directive"] = (
+            directive.model_dump(mode="json") if directive is not None else None
+        )
     if context_mode == InspirationContextMode.COLD:
         base["cold_context_notice"] = (
             "Existing route proof prose is intentionally withheld to reduce anchoring. "

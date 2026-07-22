@@ -110,6 +110,19 @@ async def test_active_inspiration_builds_llm_prompts_and_materializes_proposals(
     assert checkpoint["proposals"]
     assert checkpoint["reviews"]
     assert checkpoint["materializations"]
+    assert checkpoint["compositions"]
+    composed_proposals = {
+        proposal_id: proposal
+        for proposal_id, proposal in checkpoint["proposals"].items()
+        if proposal["mechanism"] == "inspiration_composition"
+    }
+    assert composed_proposals
+    assert set(composed_proposals) <= set(checkpoint["reviews"])
+    assert set(composed_proposals) <= set(checkpoint["materializations"])
+    for proposal in composed_proposals.values():
+        reservation = checkpoint["call_reservations"][proposal["task_id"]]
+        assert reservation["proposer_calls"] == 0
+        assert reservation["referee_calls"] >= 1
     decisions = list(checkpoint["candidate_decisions"].values())
     assert decisions
     selected_by_task: dict[str, int] = {}
@@ -140,3 +153,4 @@ async def test_active_inspiration_builds_llm_prompts_and_materializes_proposals(
     assert metrics["inspiration_candidates_selected_for_review"] >= 1
     assert metrics["inspiration_call_budget_reserved"] >= 10
     assert metrics["inspiration_call_budget_consumed"] >= 1
+    assert metrics["inspiration_composition_count"] >= 1

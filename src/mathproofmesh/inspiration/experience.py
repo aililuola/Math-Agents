@@ -54,6 +54,14 @@ class VerifiedExperienceDistiller:
             construction = proposal.representation.rewritten_problem_view
         elif proposal.invariant is not None:
             construction = proposal.invariant.state_definition
+        elif proposal.mutation is not None:
+            construction = proposal.mutation.transformation
+        elif proposal.composition is not None:
+            construction = proposal.composition.first_executable_step
+        elif (
+            proposal.reverse_goal is not None and proposal.reverse_goal.frontier_bridges
+        ):
+            construction = proposal.reverse_goal.frontier_bridges[0].missing_implication
         graph_motif = [
             f"{item.kind.value}:{item.status}:deps={len(item.dependency_ids)}"
             for item in obligations
@@ -62,6 +70,16 @@ class VerifiedExperienceDistiller:
             dict.fromkeys(
                 [
                     proposal.mechanism.value,
+                    *(
+                        proposal.composition.combined_mechanism
+                        if proposal.composition is not None
+                        else []
+                    ),
+                    *(
+                        [proposal.mutation.operator_id]
+                        if proposal.mutation is not None
+                        else []
+                    ),
                     *signature.representation_tags,
                     *signature.mechanism_tags,
                     *signature.key_transformations,
@@ -77,7 +95,19 @@ class VerifiedExperienceDistiller:
         )
         limitations = list(
             dict.fromkeys(
-                fact.scope_limitations
+                [
+                    *fact.scope_limitations,
+                    *(
+                        proposal.mutation.known_failure_modes
+                        if proposal.mutation is not None
+                        else []
+                    ),
+                    *(
+                        proposal.composition.compatibility_conditions
+                        if proposal.composition is not None
+                        else []
+                    ),
+                ]
                 or ["transfer requires independent verification in the target problem"]
             )
         )

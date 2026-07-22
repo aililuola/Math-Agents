@@ -86,6 +86,11 @@
     "ucb_with_minimum_exploration": true,
     "verified_experience_distiller": true,
     "negative_analogy_library": true,
+    "typed_domain_operator_plugins": true,
+    "controlled_seeded_surprise_mutation": true,
+    "bidirectional_fact_goal_frontiers": true,
+    "independently_reviewed_inspiration_composer": true,
+    "project_local_cross_run_learning": true,
     "scheduler_admission_before_model_calls": true,
     "per_trigger_route_cap_enforced": true,
     "required_referee_switch_enforced": true,
@@ -97,25 +102,25 @@
     "compileall": "PASS",
     "ruff_check": "PASS",
     "ruff_format_check": "PASS",
-    "pytest": "226 passed with dev and server extras including z3-solver",
+    "pytest": "239 passed with dev and server extras including z3-solver",
     "offline_topology_benchmark": {
       "status": "PASS",
       "provider_calls": 0,
       "cases": 6,
       "variants": 11,
-      "component_contracts_passed": 15
+      "component_contracts_passed": 20
     },
     "reasoning_first_computation_regression": "PASS",
     "configuration_parse": "PASS",
     "real_provider_calls": "NOT RUN; credentials intentionally unused"
   },
   "counts": {
-    "source_python_files": 86,
-    "test_python_files": 76,
+    "source_python_files": 90,
+    "test_python_files": 78,
     "documentation_files": 25,
-    "source_lines": 36157,
-    "test_lines": 10702,
-    "docs_directory_lines": 3556
+    "source_lines": 38836,
+    "test_lines": 11310,
+    "docs_directory_lines": 3392
   },
   "artifacts": {
     "status": "SOURCE RELEASE; DISTRIBUTION ARTIFACTS NOT COMMITTED",

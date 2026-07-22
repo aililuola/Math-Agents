@@ -9,6 +9,7 @@ from ..schemas import (
     RepresentationCandidate,
     stable_hash,
 )
+from .domain_operators import DomainOperatorRegistry
 
 
 REPRESENTATION_RULES: dict[str, tuple[str, ...]] = {
@@ -59,12 +60,16 @@ REPRESENTATION_RULES: dict[str, tuple[str, ...]] = {
 class RepresentationSwitchboard:
     """Select applicable mathematical representations and expose their losses."""
 
+    def __init__(self, registry: DomainOperatorRegistry | None = None) -> None:
+        self.registry = registry or DomainOperatorRegistry()
+
     def applicable_representations(
         self,
         problem: ProblemContract,
         *,
         domain: str = "unknown",
         existing_signatures: Iterable[NoveltySignature] = (),
+        use_domain_operators: bool = True,
     ) -> list[str]:
         text = f"{problem.normalized_statement} {problem.exact_statement}".casefold()
         inferred = domain.casefold()
@@ -89,7 +94,22 @@ class RepresentationSwitchboard:
         available = [
             item for item in REPRESENTATION_RULES[inferred] if item not in used
         ]
-        return available or list(REPRESENTATION_RULES[inferred])
+        plugins = (
+            [
+                item.operator_id
+                for item in self.registry.select(
+                    problem,
+                    domain=inferred,
+                    families=("representation",),
+                    forbidden=used,
+                    limit=32,
+                )
+                if item.operator_id not in available and item.operator_id not in used
+            ]
+            if use_domain_operators
+            else []
+        )
+        return [*available, *plugins] or list(REPRESENTATION_RULES[inferred])
 
     def generate(
         self,
@@ -99,6 +119,7 @@ class RepresentationSwitchboard:
         domain: str = "unknown",
         existing_signatures: Iterable[NoveltySignature] = (),
         max_candidates: int = 3,
+        use_domain_operators: bool = True,
     ) -> list[RepresentationCandidate]:
         targets = [
             item
@@ -108,10 +129,23 @@ class RepresentationSwitchboard:
         if not targets:
             return []
         names = self.applicable_representations(
-            problem, domain=domain, existing_signatures=existing_signatures
+            problem,
+            domain=domain,
+            existing_signatures=existing_signatures,
+            use_domain_operators=use_domain_operators,
         )[:max_candidates]
+        inferred_domain = self.registry.infer_domain(problem, domain)
         candidates: list[RepresentationCandidate] = []
         for name in names:
+            operator = (
+                self.registry.match(
+                    name,
+                    domain=inferred_domain,
+                    family="representation",
+                )
+                if use_domain_operators
+                else None
+            )
             signature = NoveltySignature(
                 representation_tags=[name],
                 mechanism_tags=["representation_switch"],
@@ -140,21 +174,59 @@ class RepresentationSwitchboard:
                         "original quantifier order",
                         "truth of the target under a proved reversible encoding",
                     ],
-                    lost_conditions=[
-                        "none assumed; reversibility remains an explicit obligation"
-                    ],
-                    new_candidate_tools=self._tools(name),
+                    lost_conditions=(
+                        list(operator.known_failure_modes)
+                        if operator is not None
+                        else [
+                            "none assumed; reversibility remains an explicit obligation"
+                        ]
+                    ),
+                    new_candidate_tools=list(
+                        dict.fromkeys(
+                            [
+                                *self._tools(name),
+                                *(operator.suggested_tools if operator else []),
+                            ]
+                        )
+                    ),
                     expected_advantage=(
                         f"{name} exposes a different mechanism for the shared gap"
                     ),
-                    failure_risks=[
-                        "encoding may be one-way rather than equivalent",
-                        "boundary or degeneracy cases may be lost",
-                    ],
-                    fast_failure_tests=[
-                        "check the inverse mapping on a nontrivial boundary case",
-                        "try to construct two source objects with the same encoding",
-                    ],
+                    failure_risks=(
+                        list(operator.known_failure_modes)
+                        if operator is not None
+                        else [
+                            "encoding may be one-way rather than equivalent",
+                            "boundary or degeneracy cases may be lost",
+                        ]
+                    ),
+                    fast_failure_tests=(
+                        list(operator.fast_failure_tests)
+                        if operator is not None
+                        else [
+                            "check the inverse mapping on a nontrivial boundary case",
+                            "try to construct two source objects with the same encoding",
+                        ]
+                    ),
+                    operator_id=operator.operator_id if operator is not None else None,
+                    operator_preconditions=(
+                        list(operator.preconditions) if operator is not None else []
+                    ),
+                    generated_obligations=(
+                        list(operator.generated_obligations)
+                        if operator is not None
+                        else []
+                    ),
+                    reversibility_requirements=(
+                        list(operator.reversibility_requirements)
+                        if operator is not None
+                        else []
+                    ),
+                    known_failure_modes=(
+                        list(operator.known_failure_modes)
+                        if operator is not None
+                        else []
+                    ),
                     novelty_signature=signature,
                 )
             )

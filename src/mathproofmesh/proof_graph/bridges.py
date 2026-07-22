@@ -37,6 +37,10 @@ class BridgeBroker:
         )
         for group in groups:
             obligation_ids = tuple(sorted(item.obligation_id for item in group))
+            if len(obligation_ids) < 2:
+                # One obligation shared by several routes is a common target,
+                # not a bridge between distinct graph nodes.
+                continue
             if obligation_ids in self._created_keys:
                 continue
             route_ids = sorted(

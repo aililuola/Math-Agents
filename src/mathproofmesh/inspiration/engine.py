@@ -9,7 +9,9 @@ from ..config import SystemConfig
 from ..memory import TypedMemory
 from ..proof_graph.store import ProofGraphStore
 from ..schemas import (
+    BidirectionalFrontierState,
     ClaimStatus,
+    ComposedInspiration,
     ConstructionProposal,
     EvidenceType,
     InspirationCallReservation,
@@ -32,17 +34,22 @@ from ..schemas import (
     NoveltySignature,
     ObligationKind,
     ProblemContract,
+    ProofObligation,
     RepresentationCandidate,
     ReverseGoalPlan,
     RouteRole,
     StrategyCard,
+    SurpriseMutationDirective,
     VerifiedExperienceRecord,
     NegativeAnalogyRecord,
     stable_hash,
 )
 from ..store import ArtifactStore
 from .analogy_agent import AnalogyAgent
+from .composer import InspirationComposer
 from .construction_inventor import AuxiliaryConstructionInventor
+from .cross_run_learning import CrossRunLearningStore
+from .domain_operators import DomainOperatorRegistry
 from .invariant_hypothesis import InvariantHypothesisAgent
 from .local_library import LocalAnalogyLibrary
 from .experience import VerifiedExperienceDistiller
@@ -54,6 +61,7 @@ from .outcomes import InspirationOutcomeLedger
 from .representation_switchboard import RepresentationSwitchboard
 from .reverse_goal import ReverseGoalAnalyzer
 from .surprise_budget import SurpriseBudgetExplorer
+from .surprise_mutation import ControlledMutationPlanner
 from .trigger_policy import InspirationSnapshot, TriggerPolicy
 
 if TYPE_CHECKING:
@@ -101,9 +109,13 @@ class InspirationEngine:
         self.broker = broker
         self.store = store
         self.activity = activity
+        self.project_root = (
+            Path(project_root) if project_root is not None else Path.cwd()
+        )
         self.trigger_policy = TriggerPolicy(self.inspiration_config)
-        self.switchboard = RepresentationSwitchboard()
-        root = Path(project_root) if project_root is not None else Path.cwd()
+        self.domain_operator_registry = DomainOperatorRegistry()
+        self.switchboard = RepresentationSwitchboard(self.domain_operator_registry)
+        root = self.project_root
         library_path = Path(self.inspiration_config.analogy_library_path)
         if not library_path.is_absolute():
             library_path = root / library_path
@@ -114,15 +126,23 @@ class InspirationEngine:
         self.analogy_agent = AnalogyAgent(
             self.analogy_library, top_k=self.inspiration_config.analogy_top_k
         )
-        self.construction_inventor = AuxiliaryConstructionInventor()
+        self.construction_inventor = AuxiliaryConstructionInventor(
+            self.domain_operator_registry
+        )
         self.invariant_agent = InvariantHypothesisAgent()
-        self.reverse_goal_analyzer = ReverseGoalAnalyzer()
+        self.reverse_goal_analyzer = ReverseGoalAnalyzer(self.inspiration_config)
+        self.mutation_planner = ControlledMutationPlanner(self.domain_operator_registry)
+        self.composer = InspirationComposer(self.inspiration_config)
         self.meta_strategist = PersistentMetaStrategist(self.inspiration_config)
         self.meta_controller = MetaDirectiveController(
             self.inspiration_config, self.route_registry
         )
         self.outcome_ledger = InspirationOutcomeLedger(self.inspiration_config)
         self.experience_distiller = VerifiedExperienceDistiller(self.inspiration_config)
+        self.cross_run_store = CrossRunLearningStore(
+            self.inspiration_config,
+            project_root=root,
+        )
         final_reserve = _protected_finalization_calls(config)
         self.surprise_explorer = SurpriseBudgetExplorer(
             self.inspiration_config,
@@ -147,6 +167,14 @@ class InspirationEngine:
         self.pending_directive_tasks: dict[str, InspirationTask] = {}
         self.verified_experiences: dict[str, VerifiedExperienceRecord] = {}
         self.negative_analogy_records: dict[str, NegativeAnalogyRecord] = {}
+        self.domain_operator_selections: dict[str, list[str]] = {}
+        self.mutation_directives: dict[str, SurpriseMutationDirective] = {}
+        self.frontier_states: dict[str, BidirectionalFrontierState] = {}
+        self.compositions: dict[str, ComposedInspiration] = {}
+        self.pending_composed_proposals: dict[str, InspirationProposal] = {}
+        self.quick_falsification_passed: set[str] = set()
+        self.cross_run_loaded_experience_ids: set[str] = set()
+        self.cross_run_loaded_negative_ids: set[str] = set()
         self.mechanism_stats: dict[str, dict[str, int]] = {
             mechanism.value: {
                 "selected_count": 0,
@@ -159,6 +187,7 @@ class InspirationEngine:
             for mechanism in InspirationMechanism
         }
         self._last_snapshot: InspirationSnapshot | None = None
+        self._load_cross_run_learning()
         if self.enabled:
             self._event(
                 "surprise_budget_reserved",
@@ -170,6 +199,64 @@ class InspirationEngine:
     @property
     def enabled(self) -> bool:
         return self.inspiration_config.enabled and self.inspiration_config.mode != "off"
+
+    def _load_cross_run_learning(self) -> None:
+        if not self.cross_run_store.enabled:
+            return
+        try:
+            experiences = self.cross_run_store.load_experiences()
+            negatives = self.cross_run_store.load_negatives()
+            historical_outcomes = self.cross_run_store.load_outcomes()
+        except (OSError, ValueError, TypeError) as exc:
+            self.cross_run_store.diagnostics.append(
+                f"cross-run learning load rejected: {exc}"
+            )
+            return
+        for experience in experiences:
+            self.analogy_library.add_verified_record(experience.model_dump(mode="json"))
+            self.cross_run_loaded_experience_ids.add(experience.record_id)
+        for negative in negatives:
+            self.analogy_library.add_negative_record(negative.model_dump(mode="json"))
+            self.cross_run_loaded_negative_ids.add(negative.record_id)
+        self.outcome_ledger.load_historical(historical_outcomes)
+        self._event(
+            "cross_run_learning_loaded",
+            "Approved cross-run learning loaded",
+            "Historical records affect retrieval and scheduling only, never proof status.",
+            {
+                "experience_count": len(experiences),
+                "negative_count": len(negatives),
+                "outcome_count": len(historical_outcomes),
+                "diagnostics": list(self.cross_run_store.diagnostics),
+            },
+        )
+
+    def persist_cross_run_learning(self, *, run_verified: bool) -> dict[str, int]:
+        """Persist only typed public outcomes; no prompt or private reasoning is stored."""
+
+        try:
+            result = self.cross_run_store.persist(
+                experiences=self.verified_experiences.values(),
+                negatives=self.negative_analogy_records.values(),
+                outcomes=self.outcome_ledger.outcomes.values(),
+                run_verified=run_verified,
+            )
+        except (OSError, TimeoutError, ValueError, TypeError) as exc:
+            self._event(
+                "cross_run_learning_failed",
+                "Cross-run learning persistence failed",
+                str(exc),
+                {"run_verified": run_verified},
+            )
+            return {"experiences": 0, "negatives": 0, "outcomes": 0}
+        if self.cross_run_store.enabled:
+            self._event(
+                "cross_run_learning_persisted",
+                "Approved cross-run learning persisted",
+                "Only verified experiences, scoped negative transfers, and public outcome metrics were stored.",
+                {"run_verified": run_verified, **result},
+            )
+        return result
 
     def detect_triggers(
         self, state: InspirationSnapshot | dict[str, Any]
@@ -309,12 +396,31 @@ class InspirationEngine:
             self.register_meta_decision(task, artifact, state=snapshot)
             return None
         if isinstance(artifact, RepresentationCandidate):
+            if task.mechanism == InspirationMechanism.REPRESENTATION_SWITCH:
+                artifact = self._normalize_domain_operator_artifact(
+                    task,
+                    artifact,
+                    snapshot,
+                    proposal_slot=proposal_slot,
+                )
             proposal = (
-                self._from_surprise(task, artifact, snapshot)
+                self._from_surprise(
+                    task,
+                    artifact,
+                    snapshot,
+                    proposal_slot=proposal_slot,
+                )
                 if task.mechanism == InspirationMechanism.SURPRISE_EXPLORATION
                 else self._from_representation(task, artifact, snapshot)
             )
         elif isinstance(artifact, ConstructionProposal):
+            if task.mechanism == InspirationMechanism.AUXILIARY_CONSTRUCTION:
+                artifact = self._normalize_domain_operator_artifact(
+                    task,
+                    artifact,
+                    snapshot,
+                    proposal_slot=proposal_slot,
+                )
             proposal = self._from_construction(task, artifact, snapshot)
         elif isinstance(artifact, InvariantHypothesis):
             proposal = self._from_invariant(task, artifact, snapshot)
@@ -347,6 +453,51 @@ class InspirationEngine:
                 f"unsupported inspiration artifact for {task.mechanism.value}: "
                 f"{type(artifact).__name__}"
             )
+        if task.mechanism == InspirationMechanism.SURPRISE_EXPLORATION:
+            mutation = self.surprise_mutation_directive(
+                task,
+                snapshot,
+                proposal_slot=proposal_slot,
+            )
+            if mutation is not None:
+                if proposal.mutation is not None and proposal.mutation != mutation:
+                    self._event(
+                        "surprise_mutation_normalized",
+                        "Surprise mutation restored to admitted directive",
+                        "The model-returned mutation differed from the seeded control artifact.",
+                        {
+                            "proposal_id": proposal.proposal_id,
+                            "expected_directive_id": mutation.directive_id,
+                            "returned_directive_id": proposal.mutation.directive_id,
+                        },
+                    )
+                signature_payload = proposal.novelty_signature.model_dump(mode="json")
+                signature_payload["mechanism_tags"] = list(
+                    dict.fromkeys(
+                        [
+                            *signature_payload["mechanism_tags"],
+                            "surprise_exploration",
+                            mutation.operator_id,
+                        ]
+                    )
+                )
+                signature_payload["key_transformations"] = list(
+                    dict.fromkeys(
+                        [
+                            *signature_payload["key_transformations"],
+                            mutation.operator_id,
+                        ]
+                    )
+                )
+                signature_payload["normalized_hash"] = ""
+                proposal = proposal.model_copy(
+                    update={
+                        "mutation": mutation,
+                        "novelty_signature": NoveltySignature.model_validate(
+                            signature_payload
+                        ),
+                    }
+                )
         payload = proposal.model_dump(mode="json")
         normalized_signature = self.mechanism_normalizer.normalize_signature(
             proposal.novelty_signature
@@ -481,6 +632,10 @@ class InspirationEngine:
     def _register_outcome(
         self, proposal: InspirationProposal, snapshot: InspirationSnapshot
     ) -> None:
+        if not snapshot.problem_hash:
+            snapshot = snapshot.model_copy(
+                update={"problem_hash": self.problem.integrity_hash}
+            )
         trigger = self.triggers.get(proposal.trigger_id)
         if trigger is None:
             return
@@ -740,6 +895,193 @@ class InspirationEngine:
         reservation = self.call_reservations.get(task_id)
         return reservation.reservation_id if reservation is not None else None
 
+    def domain_operator_catalog(
+        self,
+        task: InspirationTask,
+        snapshot: InspirationSnapshot,
+    ) -> list[dict[str, object]]:
+        if not self.inspiration_config.domain_operator_plugins_enabled:
+            return []
+        families = {
+            InspirationMechanism.REPRESENTATION_SWITCH: ("representation",),
+            InspirationMechanism.AUXILIARY_CONSTRUCTION: ("construction",),
+            InspirationMechanism.SURPRISE_EXPLORATION: ("mutation",),
+        }.get(task.mechanism, ())
+        if not families:
+            return []
+        forbidden = [
+            tag
+            for signature in snapshot.route_signatures
+            for tag in (
+                *signature.representation_tags,
+                *signature.mechanism_tags,
+                *signature.key_transformations,
+            )
+        ]
+        operators = self.domain_operator_registry.select(
+            self.problem,
+            domain=snapshot.domain,
+            families=families,
+            forbidden=forbidden,
+            limit=self.inspiration_config.domain_operator_max_prompt_items,
+        )
+        if task.task_id not in self.domain_operator_selections:
+            operator_ids = [item.operator_id for item in operators]
+            self.domain_operator_selections[task.task_id] = operator_ids
+            self._event(
+                "domain_operator_catalog_selected",
+                "Domain operator catalog selected",
+                task.reason,
+                {
+                    "task_id": task.task_id,
+                    "mechanism": task.mechanism.value,
+                    "operator_ids": operator_ids,
+                },
+            )
+            self._checkpoint()
+        return self.domain_operator_registry.prompt_payload(operators)
+
+    def _normalize_domain_operator_artifact(
+        self,
+        task: InspirationTask,
+        artifact: RepresentationCandidate | ConstructionProposal,
+        snapshot: InspirationSnapshot,
+        *,
+        proposal_slot: int,
+    ) -> RepresentationCandidate | ConstructionProposal:
+        if not self.inspiration_config.domain_operator_plugins_enabled:
+            return artifact
+        catalog = self.domain_operator_catalog(task, snapshot)
+        allowed_ids = [str(item["operator_id"]) for item in catalog]
+        if not allowed_ids:
+            return artifact
+        requested = artifact.operator_id
+        selected_id = requested if requested in allowed_ids else None
+        if selected_id is None:
+            selected_id = allowed_ids[proposal_slot % len(allowed_ids)]
+        operator = self.domain_operator_registry.get(selected_id)
+        if operator is None:
+            raise ValueError(f"admitted domain operator is unavailable: {selected_id}")
+
+        signature = artifact.novelty_signature.model_dump(mode="json")
+        signature["representation_tags"] = list(
+            dict.fromkeys(
+                [
+                    *signature["representation_tags"],
+                    *operator.representation_tags,
+                ]
+            )
+        )
+        signature["mechanism_tags"] = list(
+            dict.fromkeys(
+                [
+                    *signature["mechanism_tags"],
+                    operator.operator_id,
+                    *operator.mechanism_tags,
+                ]
+            )
+        )
+        signature["core_objects"] = list(
+            dict.fromkeys([*signature["core_objects"], *operator.object_tags])
+        )
+        signature["key_transformations"] = list(
+            dict.fromkeys(
+                [
+                    *signature["key_transformations"],
+                    operator.operator_id,
+                ]
+            )
+        )
+        signature["normalized_hash"] = ""
+        payload = artifact.model_dump(mode="json")
+        payload.update(
+            {
+                "operator_id": operator.operator_id,
+                "operator_preconditions": list(operator.preconditions),
+                "generated_obligations": list(operator.generated_obligations),
+                "reversibility_requirements": list(operator.reversibility_requirements),
+                "novelty_signature": NoveltySignature.model_validate(
+                    signature
+                ).model_dump(mode="json"),
+            }
+        )
+        if isinstance(artifact, RepresentationCandidate):
+            payload["new_candidate_tools"] = list(
+                dict.fromkeys(
+                    [*artifact.new_candidate_tools, *operator.suggested_tools]
+                )
+            )
+            payload["fast_failure_tests"] = list(
+                dict.fromkeys(
+                    [*artifact.fast_failure_tests, *operator.fast_failure_tests]
+                )
+            )
+            payload["failure_risks"] = list(
+                dict.fromkeys([*artifact.failure_risks, *operator.known_failure_modes])
+            )
+            payload["known_failure_modes"] = list(operator.known_failure_modes)
+            normalized: RepresentationCandidate | ConstructionProposal = (
+                RepresentationCandidate.model_validate(payload)
+            )
+        else:
+            payload["suggested_tools"] = list(
+                dict.fromkeys([*artifact.suggested_tools, *operator.suggested_tools])
+            )
+            payload["falsification_tests"] = list(
+                dict.fromkeys(
+                    [*artifact.falsification_tests, *operator.fast_failure_tests]
+                )
+            )
+            payload["failure_conditions"] = list(
+                dict.fromkeys(
+                    [*artifact.failure_conditions, *operator.known_failure_modes]
+                )
+            )
+            normalized = ConstructionProposal.model_validate(payload)
+        if requested != selected_id:
+            self._event(
+                "domain_operator_normalized",
+                "Domain operator restored to admitted catalog",
+                "A missing or unrecognized operator was replaced deterministically.",
+                {
+                    "task_id": task.task_id,
+                    "proposal_slot": proposal_slot,
+                    "requested_operator_id": requested,
+                    "selected_operator_id": selected_id,
+                },
+            )
+        return normalized
+
+    def surprise_mutation_directive(
+        self,
+        task: InspirationTask,
+        snapshot: InspirationSnapshot,
+        *,
+        proposal_slot: int,
+    ) -> SurpriseMutationDirective | None:
+        if not self.inspiration_config.controlled_surprise_mutation_enabled:
+            return None
+        directive = self.mutation_planner.plan(
+            self.problem,
+            task_id=task.task_id,
+            proposal_slot=proposal_slot,
+            target_obligation_ids=(
+                task.target_obligation_ids or snapshot.open_obligation_ids
+            ),
+            domain=snapshot.domain,
+            existing_signatures=snapshot.route_signatures,
+        )
+        if directive.directive_id not in self.mutation_directives:
+            self.mutation_directives[directive.directive_id] = directive
+            self._event(
+                "surprise_mutation_directive_created",
+                "Controlled surprise mutation admitted",
+                directive.transformation,
+                directive.model_dump(mode="json"),
+            )
+            self._checkpoint()
+        return directive
+
     async def review(
         self,
         proposals: Iterable[InspirationProposal],
@@ -823,6 +1165,136 @@ class InspirationEngine:
         self._checkpoint()
         return reviews
 
+    def record_quick_falsification(
+        self,
+        proposal_id: str,
+        *,
+        passed: bool,
+        reason: str,
+    ) -> None:
+        if proposal_id not in self.proposals:
+            return
+        if passed:
+            self.quick_falsification_passed.add(proposal_id)
+        else:
+            self.quick_falsification_passed.discard(proposal_id)
+        self._event(
+            "inspiration_quick_falsification_passed"
+            if passed
+            else "inspiration_quick_falsification_failed",
+            "Inspiration quick falsification recorded",
+            reason,
+            {"proposal_id": proposal_id, "passed": passed},
+        )
+        self._checkpoint()
+
+    def queue_compositions(
+        self,
+        proposals: Iterable[InspirationProposal],
+        reviews: Iterable[InspirationReview],
+        state: InspirationSnapshot | dict[str, Any] | None = None,
+    ) -> list[ComposedInspiration]:
+        snapshot = self._coerce_snapshot(state)
+        existing_sources = {
+            tuple(sorted(item.source_proposal_ids))
+            for item in self.compositions.values()
+        }
+        composed = self.composer.compose(
+            proposals,
+            reviews,
+            quick_falsification_passed=self.quick_falsification_passed,
+            proof_graph=self.proof_graph,
+            existing_composition_sources=existing_sources,
+        )
+        for item in composed:
+            source_proposals = [
+                self.proposals[source_id] for source_id in item.source_proposal_ids
+            ]
+            trigger_id = source_proposals[0].trigger_id
+            target_routes = list(
+                dict.fromkeys(
+                    route_id
+                    for proposal in source_proposals
+                    for route_id in proposal.target_route_ids
+                )
+            )
+            task = InspirationTask(
+                task_id=f"inspiration_task_{item.composition_id}",
+                trigger_id=trigger_id,
+                mechanism=InspirationMechanism.INSPIRATION_COMPOSITION,
+                target_route_ids=target_routes,
+                target_obligation_ids=item.target_obligation_ids,
+                reason=(
+                    "Combine complementary independently reviewed mechanisms: "
+                    + ", ".join(item.combined_mechanism)
+                ),
+                max_proposals=1,
+            )
+            proposal = self._proposal(
+                task,
+                item.novelty_signature,
+                snapshot,
+                statement=item.first_executable_step,
+                rationale=(
+                    "Bridge interfaces compose complementary inspiration mechanisms."
+                ),
+                composition=item,
+                target_routes=target_routes,
+                estimated_cost=item.estimated_cost,
+            ).model_copy(
+                update={
+                    "source_agent_id": "inspiration_composer",
+                    "proposal_id": f"inspiration_{item.composition_id}",
+                }
+            )
+            self.compositions[item.composition_id] = item
+            self.proposals[proposal.proposal_id] = proposal
+            self.pending_composed_proposals[task.task_id] = proposal
+            if self.inspiration_config.mode == "active":
+                self.pending_directive_tasks[task.task_id] = task
+            self._register_outcome(proposal, snapshot)
+            self.mechanism_stats[InspirationMechanism.INSPIRATION_COMPOSITION.value][
+                "proposal_count"
+            ] += 1
+            self._event(
+                "inspiration_composition_queued",
+                "Complementary inspiration composition queued",
+                item.first_executable_step,
+                {
+                    "composition": item.model_dump(mode="json"),
+                    "task_id": task.task_id,
+                    "proposal_id": proposal.proposal_id,
+                    "requires_independent_review": True,
+                },
+            )
+        if composed:
+            self._checkpoint()
+        return composed
+
+    def defer_composed_sources(
+        self,
+        reviews: Iterable[InspirationReview],
+        compositions: Iterable[ComposedInspiration],
+    ) -> list[InspirationReview]:
+        source_ids = {
+            source_id
+            for composition in compositions
+            for source_id in composition.source_proposal_ids
+        }
+        updated: list[InspirationReview] = []
+        for review in reviews:
+            if review.proposal_id in source_ids and review.recommendation in {
+                "create_new_route",
+                "attach_to_existing_route",
+            }:
+                review = review.model_copy(update={"recommendation": "store_insight"})
+                self.reviews[review.proposal_id] = review
+            updated.append(review)
+        return updated
+
+    def pending_composition_for_task(self, task_id: str) -> InspirationProposal | None:
+        return self.pending_composed_proposals.get(task_id)
+
     def materialize(
         self,
         reviews: Iterable[InspirationReview],
@@ -888,6 +1360,8 @@ class InspirationEngine:
             else:
                 decision = self._materialize_active(proposal, review, snapshot)
             self.materializations[proposal.proposal_id] = decision
+            if proposal.task_id is not None:
+                self.pending_composed_proposals.pop(proposal.task_id, None)
             self.outcome_ledger.record_materialization(
                 proposal.proposal_id,
                 action=decision.action,
@@ -930,6 +1404,9 @@ class InspirationEngine:
     def _generate_task(
         self, task: InspirationTask, snapshot: InspirationSnapshot
     ) -> list[InspirationProposal]:
+        if task.mechanism == InspirationMechanism.INSPIRATION_COMPOSITION:
+            pending = self.pending_composed_proposals.get(task.task_id)
+            return [pending] if pending is not None else []
         obligations = [
             item
             for item in self.proof_graph.obligations
@@ -943,6 +1420,9 @@ class InspirationEngine:
                 domain=snapshot.domain,
                 existing_signatures=snapshot.route_signatures,
                 max_candidates=task.max_proposals,
+                use_domain_operators=(
+                    self.inspiration_config.domain_operator_plugins_enabled
+                ),
             )
             return [
                 self._from_representation(task, item, snapshot) for item in candidates
@@ -984,6 +1464,9 @@ class InspirationEngine:
                 obligations,
                 domain=snapshot.domain,
                 max_proposals=task.max_proposals,
+                use_domain_operators=(
+                    self.inspiration_config.domain_operator_plugins_enabled
+                ),
             )
             return [
                 self._from_construction(task, item, snapshot) for item in constructions
@@ -1005,9 +1488,8 @@ class InspirationEngine:
                     task,
                     self.reverse_goal_analyzer.analyze(
                         item,
-                        fact_statements=[
-                            fact.statement for fact in self.typed_memory.facts
-                        ],
+                        facts=self._admitted_inspiration_facts(),
+                        round_index=snapshot.round_index,
                     ),
                     snapshot,
                 )
@@ -1024,13 +1506,28 @@ class InspirationEngine:
                 domain=snapshot.domain,
                 existing_signatures=snapshot.route_signatures,
                 max_candidates=max(task.max_proposals, 4),
+                use_domain_operators=(
+                    self.inspiration_config.domain_operator_plugins_enabled
+                ),
             )
             candidates.reverse()
             return [
-                self._from_surprise(task, item, snapshot)
-                for item in candidates[: task.max_proposals]
+                self._from_surprise(
+                    task,
+                    item,
+                    snapshot,
+                    proposal_slot=index,
+                )
+                for index, item in enumerate(candidates[: task.max_proposals])
             ]
         return []
+
+    def _admitted_inspiration_facts(self) -> list[MessageEnvelope]:
+        if self.broker is not None:
+            return list(self.broker.admitted_facts())
+        if self.config.topology.mode == "hierarchical_sparse":
+            return []
+        return list(self.typed_memory.facts)
 
     def _proposal(
         self,
@@ -1045,6 +1542,8 @@ class InspirationEngine:
         construction: ConstructionProposal | None = None,
         invariant: InvariantHypothesis | None = None,
         reverse_goal: ReverseGoalPlan | None = None,
+        mutation: SurpriseMutationDirective | None = None,
+        composition: ComposedInspiration | None = None,
         target_routes: list[str] | None = None,
         estimated_cost: int = 1,
     ) -> InspirationProposal:
@@ -1074,6 +1573,8 @@ class InspirationEngine:
             construction=construction,
             invariant=invariant,
             reverse_goal=reverse_goal,
+            mutation=mutation,
+            composition=composition,
             novelty_signature=signature,
             novelty_score=novelty.novelty_score,
             expected_information_gain=max(0.1, novelty.novelty_score),
@@ -1143,6 +1644,32 @@ class InspirationEngine:
         item: ReverseGoalPlan,
         snapshot: InspirationSnapshot,
     ) -> InspirationProposal:
+        if self.inspiration_config.bidirectional_frontier_enabled:
+            try:
+                target = self.proof_graph.get_obligation(item.target_obligation_id)
+            except KeyError:
+                target = None
+            if target is not None:
+                item = self.reverse_goal_analyzer.enrich_agent_plan(
+                    item,
+                    target,
+                    facts=self._admitted_inspiration_facts(),
+                    round_index=snapshot.round_index,
+                )
+                self.frontier_states[item.target_obligation_id] = (
+                    self.reverse_goal_analyzer.state(
+                        item,
+                        round_index=snapshot.round_index,
+                    )
+                )
+                self._event(
+                    "bidirectional_frontier_updated",
+                    "Forward and backward proof frontiers updated",
+                    item.goal,
+                    self.frontier_states[item.target_obligation_id].model_dump(
+                        mode="json"
+                    ),
+                )
         return self._proposal(
             task,
             item.novelty_signature,
@@ -1176,20 +1703,51 @@ class InspirationEngine:
         task: InspirationTask,
         item: RepresentationCandidate,
         snapshot: InspirationSnapshot,
+        *,
+        proposal_slot: int = 0,
     ) -> InspirationProposal:
+        mutation = self.surprise_mutation_directive(
+            task,
+            snapshot,
+            proposal_slot=proposal_slot,
+        )
         payload = item.novelty_signature.model_dump(mode="json")
         payload["mechanism_tags"] = list(
-            dict.fromkeys([*payload["mechanism_tags"], "surprise_exploration"])
+            dict.fromkeys(
+                [
+                    *payload["mechanism_tags"],
+                    "surprise_exploration",
+                    *([mutation.operator_id] if mutation is not None else []),
+                ]
+            )
         )
+        if mutation is not None:
+            payload["key_transformations"] = list(
+                dict.fromkeys(
+                    [
+                        *payload["key_transformations"],
+                        mutation.operator_id,
+                    ]
+                )
+            )
         payload["normalized_hash"] = ""
         signature = NoveltySignature.model_validate(payload)
         return self._proposal(
             task,
             signature,
             snapshot,
-            statement=item.rewritten_problem_view,
-            rationale="Protected surprise budget tests a mechanism outside current routes",
+            statement=(
+                f"{mutation.transformation}. {item.rewritten_problem_view}"
+                if mutation is not None
+                else item.rewritten_problem_view
+            ),
+            rationale=(
+                "Protected surprise budget applies a replayable controlled mutation"
+                if mutation is not None
+                else "Protected surprise budget tests a mechanism outside current routes"
+            ),
             representation=item,
+            mutation=mutation,
             target_routes=[],
         )
 
@@ -1219,14 +1777,13 @@ class InspirationEngine:
                     action="stored_insight",
                     reason=reason,
                 )
-        obligation_ids = self._attach_obligations(proposal)
         if review.recommendation == "store_insight":
             return InspirationMaterialization(
                 proposal_id=proposal.proposal_id,
                 action="stored_insight",
-                obligation_ids=obligation_ids,
                 reason="the independently reviewed proposal remains an Insight",
             )
+        obligation_ids = self._attach_obligations(proposal)
         if review.recommendation == "create_new_route" or (
             proposal.mechanism == InspirationMechanism.SURPRISE_EXPLORATION
             and not proposal.target_route_ids
@@ -1350,6 +1907,44 @@ class InspirationEngine:
         )
 
     def _attach_obligations(self, proposal: InspirationProposal) -> list[str]:
+        if proposal.composition is not None:
+            targets = [
+                self.proof_graph.get_obligation(item_id)
+                for item_id in proposal.composition.target_obligation_ids
+                if item_id
+                in {item.obligation_id for item in self.proof_graph.obligations}
+            ]
+            if not targets:
+                return []
+            anchor = targets[0]
+            created: list[str] = []
+            for statement in proposal.composition.new_obligations:
+                identifier = (
+                    "obl_composed_"
+                    + stable_hash((proposal.composition.composition_id, statement))[:12]
+                )
+                obligation = ProofObligation(
+                    obligation_id=identifier,
+                    problem_hash=anchor.problem_hash,
+                    route_ids=list(
+                        dict.fromkeys(
+                            route_id for item in targets for route_id in item.route_ids
+                        )
+                    ),
+                    kind=ObligationKind.LEMMA,
+                    statement=statement,
+                    normalized_statement=" ".join(statement.casefold().split()),
+                    assumptions=list(anchor.assumptions),
+                    quantifiers=list(anchor.quantifiers),
+                    dependency_ids=[],
+                    status="open",
+                    priority=min(1.0, anchor.priority + 0.1),
+                    centrality=anchor.centrality,
+                )
+                created.append(
+                    self.proof_graph.add_obligation(obligation).obligation_id
+                )
+            return created
         if proposal.reverse_goal is not None:
             return [
                 item.obligation_id
@@ -1579,6 +2174,30 @@ class InspirationEngine:
                     for item in self.negative_analogy_records.values()
                 ],
             )
+            self.store.write_json(
+                "inspiration",
+                "bidirectional_frontiers",
+                {
+                    key: value.model_dump(mode="json")
+                    for key, value in self.frontier_states.items()
+                },
+            )
+            self.store.write_json(
+                "inspiration",
+                "surprise_mutation_directives",
+                {
+                    key: value.model_dump(mode="json")
+                    for key, value in self.mutation_directives.items()
+                },
+            )
+            self.store.write_json(
+                "inspiration",
+                "compositions",
+                {
+                    key: value.model_dump(mode="json")
+                    for key, value in self.compositions.items()
+                },
+            )
 
     def export_state(self) -> dict[str, Any]:
         return {
@@ -1631,6 +2250,27 @@ class InspirationEngine:
                 key: value.model_dump(mode="json")
                 for key, value in self.pending_directive_tasks.items()
             },
+            "domain_operator_selections": {
+                key: list(value)
+                for key, value in self.domain_operator_selections.items()
+            },
+            "mutation_directives": {
+                key: value.model_dump(mode="json")
+                for key, value in self.mutation_directives.items()
+            },
+            "frontier_states": {
+                key: value.model_dump(mode="json")
+                for key, value in self.frontier_states.items()
+            },
+            "compositions": {
+                key: value.model_dump(mode="json")
+                for key, value in self.compositions.items()
+            },
+            "pending_composed_proposals": {
+                key: value.model_dump(mode="json")
+                for key, value in self.pending_composed_proposals.items()
+            },
+            "quick_falsification_passed": sorted(self.quick_falsification_passed),
             "outcomes": self.outcome_ledger.export_state(),
             "verified_experiences": {
                 key: value.model_dump(mode="json")
@@ -1649,6 +2289,13 @@ class InspirationEngine:
                 else None
             ),
             "analogy_diagnostics": list(self.analogy_library.diagnostics),
+            "cross_run_learning": {
+                "enabled": self.cross_run_store.enabled,
+                "path": str(self.cross_run_store.root),
+                "loaded_experience_ids": sorted(self.cross_run_loaded_experience_ids),
+                "loaded_negative_ids": sorted(self.cross_run_loaded_negative_ids),
+                "diagnostics": list(self.cross_run_store.diagnostics),
+            },
         }
 
     def restore_state(self, state: dict[str, Any]) -> None:
@@ -1704,6 +2351,29 @@ class InspirationEngine:
             str(key): InspirationTask.model_validate(value)
             for key, value in dict(state.get("pending_directive_tasks", {})).items()
         }
+        self.domain_operator_selections = {
+            str(key): [str(item) for item in value]
+            for key, value in dict(state.get("domain_operator_selections", {})).items()
+        }
+        self.mutation_directives = {
+            str(key): SurpriseMutationDirective.model_validate(value)
+            for key, value in dict(state.get("mutation_directives", {})).items()
+        }
+        self.frontier_states = {
+            str(key): BidirectionalFrontierState.model_validate(value)
+            for key, value in dict(state.get("frontier_states", {})).items()
+        }
+        self.compositions = {
+            str(key): ComposedInspiration.model_validate(value)
+            for key, value in dict(state.get("compositions", {})).items()
+        }
+        self.pending_composed_proposals = {
+            str(key): InspirationProposal.model_validate(value)
+            for key, value in dict(state.get("pending_composed_proposals", {})).items()
+        }
+        self.quick_falsification_passed = {
+            str(value) for value in state.get("quick_falsification_passed", [])
+        }
         self.outcome_ledger.restore_state(dict(state.get("outcomes", {})))
         self.verified_experiences = {
             str(key): VerifiedExperienceRecord.model_validate(value)
@@ -1738,4 +2408,11 @@ class InspirationEngine:
         snapshot = state.get("last_snapshot")
         self._last_snapshot = (
             InspirationSnapshot.model_validate(snapshot) if snapshot else None
+        )
+        cross_run = dict(state.get("cross_run_learning", {}))
+        self.cross_run_loaded_experience_ids.update(
+            str(value) for value in cross_run.get("loaded_experience_ids", [])
+        )
+        self.cross_run_loaded_negative_ids.update(
+            str(value) for value in cross_run.get("loaded_negative_ids", [])
         )

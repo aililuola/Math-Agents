@@ -330,6 +330,10 @@ class InspirationConfig(ConfigModel):
     bridge_lemma_generator: bool = True
     persistent_meta_strategist: bool = True
     surprise_exploration: bool = True
+    domain_operator_plugins_enabled: bool = True
+    bidirectional_frontier_enabled: bool = True
+    inspiration_composer_enabled: bool = True
+    controlled_surprise_mutation_enabled: bool = True
 
     surprise_budget_fraction: float = Field(default=0.08, ge=0.0, le=0.50)
     surprise_budget_min_calls: int = Field(default=10, ge=0, le=64)
@@ -347,6 +351,14 @@ class InspirationConfig(ConfigModel):
     protect_finalization_reserve: bool = True
     max_consecutive_surprise_rejections: int = Field(default=2, ge=1, le=32)
     surprise_cooldown_rounds: int = Field(default=2, ge=0, le=32)
+    domain_operator_max_prompt_items: int = Field(default=8, ge=1, le=64)
+    frontier_max_forward_claims: int = Field(default=8, ge=1, le=64)
+    frontier_max_backward_claims: int = Field(default=8, ge=1, le=64)
+    frontier_max_bridge_candidates: int = Field(default=3, ge=1, le=32)
+    composer_max_candidates_per_round: int = Field(default=2, ge=0, le=16)
+    composer_max_sources: int = Field(default=2, ge=2, le=4)
+    composer_max_combined_cost: int = Field(default=4, ge=1, le=32)
+    composer_require_quick_falsification: bool = True
 
     novelty_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
     mechanism_duplicate_threshold: float = Field(default=0.86, ge=0.0, le=1.0)
@@ -386,6 +398,12 @@ class InspirationConfig(ConfigModel):
     negative_analogy_library_enabled: bool = True
     max_distilled_experiences: int = Field(default=256, ge=0, le=10000)
     max_negative_analogy_records: int = Field(default=256, ge=0, le=10000)
+    cross_run_learning_enabled: bool = False
+    cross_run_learning_path: str = ".mathproofmesh/learning"
+    cross_run_require_final_citation: bool = True
+    cross_run_max_experiences: int = Field(default=2000, ge=0, le=100000)
+    cross_run_max_negative_analogies: int = Field(default=2000, ge=0, le=100000)
+    cross_run_max_outcomes: int = Field(default=10000, ge=0, le=500000)
 
     @model_validator(mode="after")
     def validate_inspiration(self) -> "InspirationConfig":
@@ -402,6 +420,10 @@ class InspirationConfig(ConfigModel):
             raise ValueError(
                 "cold_context_proposals_per_task cannot exceed "
                 "active_proposals_per_task"
+            )
+        if self.composer_max_sources > self.max_reviewed_proposals_per_task:
+            raise ValueError(
+                "composer_max_sources cannot exceed max_reviewed_proposals_per_task"
             )
         if self.proposals_enter_fact_memory:
             raise ValueError("inspiration proposals must enter InsightMemory first")

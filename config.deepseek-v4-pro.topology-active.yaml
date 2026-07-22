@@ -204,6 +204,26 @@ topology:
     bridge_lemma_generator: true
     persistent_meta_strategist: true
     surprise_exploration: true
+    # Domain operators carry explicit preconditions, generated obligations,
+    # reversibility checks, fast falsification tests, and known failure modes.
+    domain_operator_plugins_enabled: true
+    domain_operator_max_prompt_items: 8
+    # Reverse-goal analysis meets Broker-admitted forward facts with a bounded
+    # backward frontier and emits only the missing bridge implications.
+    bidirectional_frontier_enabled: true
+    frontier_max_forward_claims: 8
+    frontier_max_backward_claims: 8
+    frontier_max_bridge_candidates: 3
+    # Complementary reviewed proposals may be composed, but the composition is
+    # independently reviewed on a later scheduler turn before materialization.
+    inspiration_composer_enabled: true
+    composer_max_candidates_per_round: 2
+    composer_max_sources: 2
+    composer_max_combined_cost: 4
+    composer_require_quick_falsification: true
+    # Surprise exploration uses a seeded, replayable structural mutation rather
+    # than merely selecting a lower-ranked representation.
+    controlled_surprise_mutation_enabled: true
     # Meta-Strategist outputs are audited control directives, not Insights or Facts.
     meta_directives_enabled: true
     meta_directive_expiry_rounds: 2
@@ -222,6 +242,15 @@ topology:
     negative_analogy_library_enabled: true
     max_distilled_experiences: 256
     max_negative_analogy_records: 256
+    # Store only approved structured experience/outcome records. The directory
+    # is local and git-ignored; prompts, chain-of-thought, API output, and keys
+    # are never written to this learning store.
+    cross_run_learning_enabled: true
+    cross_run_learning_path: .mathproofmesh/learning
+    cross_run_require_final_citation: true
+    cross_run_max_experiences: 2000
+    cross_run_max_negative_analogies: 2000
+    cross_run_max_outcomes: 10000
   validation_escalation:
     enabled: true
   agent_capability:

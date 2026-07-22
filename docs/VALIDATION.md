@@ -29,7 +29,7 @@ compileall(src + tests)
 | `python -m compileall -q src tests` | PASS |
 | `ruff check .` | PASS |
 | `ruff format --check .` | PASS |
-| `python -m pytest -q` | **226 passed**（安装 `.[dev,server]`，包含 `z3-solver`） |
+| `python -m pytest -q` | **239 passed**（安装 `.[dev,server]`，包含 `z3-solver`） |
 | deterministic demo | `verified`，23 calls，30,540 tokens |
 | continuation deterministic demo | `verified`，25 calls，32,920 tokens |
 | demo 证明检查点 | 3 条路径，共 6 个 checkpoint（3 个 genesis + 3 个已验证完成段） |
@@ -52,7 +52,7 @@ P0 Inspiration Engine 的每个要求均有确定性覆盖：触发策略、Repr
 ```text
 6 contract cases
 11 required variants/ablations
-15/15 local component contracts passed
+20/20 local component contracts passed
 0 provider calls
 ```
 
@@ -149,7 +149,7 @@ primary key 正常调用级重试耗尽
 - 最终预算储备根据 `reserve_revision_cycles` 与 `max_revisions` 计算；
 - 调度产物记录每个候选动作的排名、分数、预计成本、未选原因和预算阻断原因。
 
-当前包含上述历史回归在内的完整自动化结果为 `226 passed`。分段确定性完整演示结果仍为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
+当前包含上述历史回归在内的完整自动化结果为 `239 passed`。分段确定性完整演示结果仍为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
 
 ## 6. 终审边界与修订回归验证
 
@@ -265,3 +265,28 @@ Python 3.11
 - Blind packet 仅保留 artifact 文件内容 SHA-256、证书类型和 replay 状态，不包含原始路径、Agent 或 Route 名称。
 
 离线 topology benchmark 的调用数、token、成功率和消融指标均为 component-contract Mock 数据，用于确定性回归，不是实际 IMO 题集的性能测量。
+
+## 13. 高级灵感机制补全验证
+
+本轮把此前尚未形成完整运行闭环的四类能力接入 Active Inspiration：
+
+- 领域算子插件：数论、组合、不等式与几何算子携带前置条件、变换、派生义务、可逆性、快速失败检查和已知失败模式；
+- 受控 Surprise Mutation：使用固定种子生成可复现的 `dualize`、`quotient`、`lift`、`encode_as_graph` 等变异指令，模型返回不得暗中替换已准入指令；
+- 双向前沿：前向前沿只读取 Broker admitted Typed Facts，后向前沿从目标义务展开，仅在两者之间生成可审计的 Bridge Lemma；
+- Inspiration Composer：只组合指向相同或相邻义务、签名互补且至少一项通过快速反驳检查的提案，组合结果单独接受 Referee/Skeptic 审查，并受每次触发的路线物化上限约束。
+
+同时加入项目本地跨运行学习。只有最终 `verified` 且被最终证明引用的正面经验可以进入经验库；失败迁移和机制结果以结构化记录保存，不保存私有推理、API 输出或原始 prompt。学习目录固定在项目内 `.mathproofmesh/learning`，已由 `.gitignore` 排除，并通过路径越界拒绝、原子写入、损坏记录跳过和 checkpoint 恢复测试。
+
+最终离线验收结果：
+
+```text
+pytest: 239 passed
+ruff check: PASS
+ruff format --check: PASS (173 files)
+compileall: PASS
+topology mock benchmark: PASS
+component contracts: 20/20
+provider calls: 0
+```
+
+这些结果验证的是确定性协议、门控、恢复和组件闭环，不宣称真实 IMO 正确率提升；真实 DeepSeek API 仍未调用。

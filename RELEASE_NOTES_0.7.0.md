@@ -160,3 +160,27 @@ validation.
   problem.
 - Directives, audits, executions, outcomes and both experience libraries are
   included in checkpoints, Activity, run artifacts and hierarchical metrics.
+
+## Advanced Inspiration Completion
+
+- Added a typed domain-operator registry for number theory, combinatorics,
+  inequalities and geometry. Every operator carries preconditions, generated
+  obligations, reversibility requirements, fast falsification tests, known
+  failure modes and suggested tools.
+- Surprise exploration now uses deterministic, replayable structural mutation
+  directives. Active model output cannot replace the scheduler-admitted seed or
+  operator with an unrelated mutation.
+- Reverse-goal analysis now maintains Broker-Fact-only forward frontiers and
+  sufficient-condition backward frontiers, materializing only explicit missing
+  implications where those frontiers nearly meet.
+- Added `InspirationComposer` for complementary, independently reviewed ideas.
+  A composition requires a passed quick falsification, is queued for a later
+  scheduler turn, and must pass its own Referee and Skeptic before route
+  materialization. It never enters FactMemory directly.
+- Added optional project-local cross-run learning. Only final-cited verified
+  positive experiences, failed analogy records and public outcome metrics are
+  persisted under the git-ignored `.mathproofmesh/learning` directory. Prompts,
+  private reasoning, raw provider output and secrets are excluded.
+- Checkpoint, Activity, hierarchical metrics, Mock benchmark and regression
+  coverage now include operators, mutations, frontiers, compositions and
+  cross-run learning. The benchmark continues to make zero provider calls.

@@ -39,5 +39,9 @@ def test_stagnation_rotates_through_every_enabled_inspiration_mechanism(
             stat["consecutive_no_verified_gain"] += 1
             stat["last_selected_round"] = snapshot.round_index
 
-    assert set(selected) == set(InspirationMechanism)
+    independently_generatable = set(InspirationMechanism) - {
+        InspirationMechanism.INSPIRATION_COMPOSITION
+    }
+    assert set(selected) == independently_generatable
+    assert InspirationMechanism.INSPIRATION_COMPOSITION not in selected
     assert len(selected) == len(set(selected))

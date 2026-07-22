@@ -175,6 +175,9 @@ def write_hierarchical_reports(
     inspiration_outcomes = dict(inspiration_engine.get("outcomes", {}))
     meta_directives = dict(inspiration_engine.get("meta_directives", {}))
     meta_executions = dict(inspiration_engine.get("meta_directive_executions", {}))
+    frontier_states = dict(inspiration_engine.get("frontier_states", {}))
+    compositions = dict(inspiration_engine.get("compositions", {}))
+    cross_run_learning = dict(inspiration_engine.get("cross_run_learning", {}))
     context_mode_counts = Counter(
         str(item.get("context_mode", "local")) for item in proposals.values()
     )
@@ -266,6 +269,41 @@ def write_hierarchical_reports(
         ),
         "negative_analogy_record_count": len(
             inspiration_engine.get("negative_analogy_records", {})
+        ),
+        "bidirectional_frontier_count": len(frontier_states),
+        "frontier_bridge_candidate_count": sum(
+            len(item.get("bridge_candidates", [])) for item in frontier_states.values()
+        ),
+        "inspiration_composition_count": len(compositions),
+        "pending_inspiration_composition_count": len(
+            inspiration_engine.get("pending_composed_proposals", {})
+        ),
+        "quick_falsification_pass_count": len(
+            inspiration_engine.get("quick_falsification_passed", [])
+        ),
+        "controlled_mutation_proposal_count": sum(
+            item.get("mutation") is not None for item in proposals.values()
+        ),
+        "controlled_mutation_directive_count": len(
+            inspiration_engine.get("mutation_directives", {})
+        ),
+        "domain_operator_catalog_selection_count": len(
+            inspiration_engine.get("domain_operator_selections", {})
+        ),
+        "domain_operator_proposal_count": sum(
+            bool(
+                (item.get("representation") or {}).get("operator_id")
+                or (item.get("construction") or {}).get("operator_id")
+                or (item.get("mutation") or {}).get("operator_id")
+            )
+            for item in proposals.values()
+        ),
+        "cross_run_learning_enabled": bool(cross_run_learning.get("enabled")),
+        "cross_run_loaded_experience_count": len(
+            cross_run_learning.get("loaded_experience_ids", [])
+        ),
+        "cross_run_loaded_negative_count": len(
+            cross_run_learning.get("loaded_negative_ids", [])
         ),
         "inspiration_materialization_actions": dict(materialization_counts),
         "surprise_budget": inspiration_engine.get("surprise_budget", {}),

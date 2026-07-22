@@ -265,6 +265,7 @@ class InspirationMechanism(StrEnum):
     BRIDGE_LEMMA = "bridge_lemma"
     SURPRISE_EXPLORATION = "surprise_exploration"
     META_REPLAN = "meta_replan"
+    INSPIRATION_COMPOSITION = "inspiration_composition"
 
 
 class InspirationContextMode(StrEnum):
@@ -645,6 +646,114 @@ class InspirationTrigger(StrictModel):
     reason: str
 
 
+class DomainOperatorSpec(StrictModel):
+    """Auditable domain heuristic; it proposes work but proves nothing."""
+
+    operator_id: str
+    domain: str
+    family: Literal["representation", "construction", "mutation"]
+    title: str
+    applicability_tokens: list[str] = Field(default_factory=list)
+    preconditions: list[str]
+    transformation: str
+    generated_obligations: list[str]
+    reversibility_requirements: list[str]
+    fast_failure_tests: list[str]
+    known_failure_modes: list[str]
+    suggested_tools: list[str] = Field(default_factory=list)
+    representation_tags: list[str] = Field(default_factory=list)
+    mechanism_tags: list[str] = Field(default_factory=list)
+    object_tags: list[str] = Field(default_factory=list)
+    operation_tags: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def require_operator_contract(self) -> "DomainOperatorSpec":
+        if not self.preconditions or not self.generated_obligations:
+            raise ValueError("domain operator requires preconditions and obligations")
+        if not self.fast_failure_tests or not self.known_failure_modes:
+            raise ValueError("domain operator requires falsification and failure data")
+        return self
+
+
+class SurpriseMutationDirective(StrictModel):
+    """A deterministic, replayable creative mutation contract."""
+
+    directive_id: str
+    operator_id: str
+    seed: int = Field(ge=0)
+    target_obligation_ids: list[str]
+    transformation: str
+    preconditions: list[str]
+    generated_obligations: list[str]
+    reversibility_requirements: list[str]
+    fast_failure_tests: list[str]
+    known_failure_modes: list[str]
+    suggested_tools: list[str] = Field(default_factory=list)
+    deterministic: Literal[True] = True
+
+    @model_validator(mode="after")
+    def require_mutation_contract(self) -> "SurpriseMutationDirective":
+        if not self.target_obligation_ids or not self.preconditions:
+            raise ValueError("mutation requires targets and preconditions")
+        if not self.generated_obligations or not self.reversibility_requirements:
+            raise ValueError("mutation requires obligations and reversibility checks")
+        if not self.fast_failure_tests or not self.known_failure_modes:
+            raise ValueError("mutation requires falsification and failure data")
+        return self
+
+
+class FrontierClaim(StrictModel):
+    frontier_id: str
+    direction: Literal["forward", "backward"]
+    statement: str = Field(min_length=1)
+    source_ref: str | None = None
+    assumptions: list[str] = Field(default_factory=list)
+    supported: bool = False
+
+
+class FrontierBridge(StrictModel):
+    bridge_id: str
+    forward_frontier_id: str
+    backward_frontier_id: str
+    missing_implication: str = Field(min_length=1)
+    compatibility_conditions: list[str]
+    lexical_overlap: float = Field(default=0.0, ge=0.0, le=1.0)
+    status: Literal["open", "refuted", "closed"] = "open"
+
+
+class BidirectionalFrontierState(StrictModel):
+    target_obligation_id: str
+    forward_frontier: list[FrontierClaim]
+    backward_frontier: list[FrontierClaim]
+    bridge_candidates: list[FrontierBridge]
+    round_index: int = Field(default=0, ge=0)
+
+
+class ComposedInspiration(StrictModel):
+    composition_id: str
+    source_proposal_ids: list[str]
+    target_obligation_ids: list[str]
+    compatibility_conditions: list[str]
+    combined_mechanism: list[str]
+    first_executable_step: str = Field(min_length=1)
+    new_obligations: list[str]
+    fast_failure_tests: list[str]
+    estimated_cost: int = Field(default=1, ge=0)
+    novelty_signature: NoveltySignature
+
+    @model_validator(mode="after")
+    def require_complementary_sources(self) -> "ComposedInspiration":
+        if len(set(self.source_proposal_ids)) < 2:
+            raise ValueError("composition requires two distinct source proposals")
+        if not self.target_obligation_ids or not self.fast_failure_tests:
+            raise ValueError("composition requires a target and fast failure test")
+        if not self.compatibility_conditions or not self.combined_mechanism:
+            raise ValueError("composition requires compatibility and mechanisms")
+        if not self.new_obligations:
+            raise ValueError("composition requires an executable new obligation")
+        return self
+
+
 class RepresentationCandidate(StrictModel):
     candidate_id: str = Field(default_factory=lambda: new_id("representation"))
     source_problem_hash: str
@@ -657,6 +766,11 @@ class RepresentationCandidate(StrictModel):
     expected_advantage: str
     failure_risks: list[str]
     fast_failure_tests: list[str] = Field(default_factory=list)
+    operator_id: str | None = None
+    operator_preconditions: list[str] = Field(default_factory=list)
+    generated_obligations: list[str] = Field(default_factory=list)
+    reversibility_requirements: list[str] = Field(default_factory=list)
+    known_failure_modes: list[str] = Field(default_factory=list)
     novelty_signature: NoveltySignature
 
     @model_validator(mode="after")
@@ -702,6 +816,11 @@ class ConstructionProposal(StrictModel):
     expected_proof_debt_reduction: str = ""
     falsification_tests: list[str]
     failure_conditions: list[str] = Field(default_factory=list)
+    operator_id: str | None = None
+    operator_preconditions: list[str] = Field(default_factory=list)
+    generated_obligations: list[str] = Field(default_factory=list)
+    reversibility_requirements: list[str] = Field(default_factory=list)
+    suggested_tools: list[str] = Field(default_factory=list)
     novelty_signature: NoveltySignature
 
     @model_validator(mode="after")
@@ -742,6 +861,9 @@ class ReverseGoalPlan(StrictModel):
     fact_supported_claims: list[str] = Field(default_factory=list)
     minimal_gaps: list[str]
     bridge_requests: list[str]
+    forward_frontier: list[FrontierClaim] = Field(default_factory=list)
+    backward_frontier: list[FrontierClaim] = Field(default_factory=list)
+    frontier_bridges: list[FrontierBridge] = Field(default_factory=list)
     novelty_signature: NoveltySignature
 
     @model_validator(mode="after")
@@ -842,6 +964,8 @@ class InspirationProposal(StrictModel):
     construction: ConstructionProposal | None = None
     invariant: InvariantHypothesis | None = None
     reverse_goal: ReverseGoalPlan | None = None
+    mutation: SurpriseMutationDirective | None = None
+    composition: ComposedInspiration | None = None
     novelty_signature: NoveltySignature
     novelty_score: float = Field(ge=0.0, le=1.0)
     expected_information_gain: float = Field(ge=0.0, le=1.0)
@@ -937,6 +1061,7 @@ class InspirationOutcome(StrictModel):
     """Observed downstream value of one proposal, not a proof certificate."""
 
     proposal_id: str
+    problem_hash: str = ""
     task_id: str | None = None
     mechanism: InspirationMechanism
     domain: str = "unknown"

@@ -69,6 +69,24 @@ failure risks, fast failure tests and a targeted novelty signature. Geometry
 representations are tags and extension points, not a claim of a complete
 geometry solver.
 
+## Domain Operator Plugins
+
+The switchboard, construction inventor and Surprise planner share a typed
+`DomainOperatorRegistry`. The initial registry covers number theory,
+combinatorics, inequalities and geometry. Every `DomainOperatorSpec` declares
+preconditions, the transformation, generated obligations, reversibility
+requirements, fast failure tests, known failure modes and suggested typed
+tools. Active prompts receive only a bounded domain-relevant catalog. Local
+fallbacks use the same records, so Mock and resume behavior exercise the same
+contracts as Active mode. An Active artifact may only select an operator from
+that admitted catalog; a missing or invented identifier is replaced by a
+deterministic catalog entry for its proposal slot, and the canonical contract
+is restored before novelty review.
+
+An operator is still a heuristic. Selecting `p_adic_valuation`, inversion or
+shifting does not establish that its preconditions hold; the proposal must
+survive ordinary Referee, Skeptic, route and Fact gates.
+
 ## Analogy Agent
 
 The first implementation searches verified local JSONL records using
@@ -101,11 +119,15 @@ close an obligation.
 
 ## Reverse Goal Analyzer
 
-`ReverseGoalAnalyzer` asks which intermediate claims would imply the selected
-goal, which are already supported by facts, and what smallest gaps remain. It
-creates `ReverseGoalPlan` bridge requests and attaches those requests to the
-Proof Obligation Graph. It receives a minimal graph slice, not route
-transcripts.
+`ReverseGoalAnalyzer` maintains two bounded frontiers. The forward frontier is
+rebuilt from Broker-admitted Typed Facts (or original scoped assumptions when
+none exist); model prose cannot declare a forward claim supported. The backward
+frontier contains sufficient intermediate claims leading to the selected goal.
+Exact matches close a meeting point, while the closest remaining pairs produce
+typed `FrontierBridge` objects of the form `forward_claim implies
+backward_claim`. Only these missing implications may be attached to the Proof
+Obligation Graph. The frontier state is checkpointed and receives a minimal
+graph slice, not route transcripts.
 
 ## Persistent Meta-Strategist
 
@@ -155,6 +177,14 @@ artifacts are written to `inspiration/verified_experiences.json` and
 `inspiration/negative_analogy_library.json`; neither library bypasses the
 ordinary Referee or Fact gates.
 
+With `cross_run_learning_enabled`, approved records are merged atomically into
+the project-local, git-ignored `.mathproofmesh/learning` directory. Positive
+experience requires a verified run and, by default, actual citation by the
+final proof. Negative analogies and observable outcome records may be retained
+from unsuccessful runs to avoid repeating known failures. Stored records never
+contain prompts, private reasoning, raw provider responses, environment
+variables or API keys. Historical outcomes affect only UCB scheduling.
+
 ## Surprise Budget Explorer
 
 Surprise calls are reserved separately from synthesis, high-risk final audit,
@@ -163,6 +193,31 @@ route is created only in active mode, below `max_paths`, above the novelty
 threshold and within `max_new_routes_per_trigger`. Consecutive rejected
 proposals enter cooldown. Shadow mode records the same decision without
 spending calls or changing routes.
+
+Surprise mode now executes a replayable `SurpriseMutationDirective` rather than
+reusing representation switching with a different instruction. Operators
+include dualization, complement, quotient, lift, projection, extremalization,
+seeded auxiliary objects, inverse operations, local-to-global decomposition,
+relax-then-round and graph/polynomial/state-machine encodings. The seed,
+operator, obligations, reversibility checks and failure tests are recorded. If
+an Active model returns a different mutation, the engine restores the admitted
+directive before review.
+
+## Inspiration Composer
+
+`InspirationComposer` considers bounded groups of two through
+`composer_max_sources` independently reviewed proposals. Their obligation
+targets must form one connected dependency neighborhood, their novelty
+signatures must contribute complementary mechanisms, their combined cost must
+fit the configured limit, and at least one source must pass quick
+falsification. It emits a typed `ComposedInspiration` with compatibility
+conditions, a first executable bridge, new obligations and fast failure tests.
+
+The result is queued as a new task for a later scheduler turn. It consumes no
+proposer call, but it must pass scheduler admission, an independent Inspiration
+Referee and a quick Skeptic before it can attach or create a route. Source ideas
+remain Insights, and neither the sources nor their composition can directly
+become a Fact or close a proof checkpoint.
 
 ## Novelty And Referee
 
@@ -199,12 +254,15 @@ State is stored in the stage checkpoint and
 materializations, derived strategies, verified outcomes, strategist cooldowns,
 surprise budget, candidate-selection decisions, call reservations, Meta
 Directives, adaptive outcome records, verified experiences, negative analogy
-records and the last observable snapshot. A reservation records proposer,
+records, bidirectional frontier states, controlled mutations, compositions,
+pending composed proposals, quick-falsification results and the last observable
+snapshot. A reservation records proposer,
 Referee, Skeptic and first route-attempt capacity. Used calls are charged,
 unused calls are released, and an interrupted reservation is reconciled on
 resume. Activity and hierarchical metrics include warm/cold proposal counts,
 pre-review filtering, directive execution, outcome rewards, experience counts
-and reservation consumption without private reasoning.
+frontier bridges, mutations, compositions, cross-run loads and reservation
+consumption without private reasoning.
 
 ## Benchmark
 
@@ -216,4 +274,6 @@ python -m benchmarks.topology.run_mock_benchmark
 
 It covers active/shadow graph and inspiration, plus ablations without analogy,
 representation switching, surprise budget and the persistent strategist. It
-makes no provider calls.
+makes no provider calls. Component contracts also exercise domain operators,
+deterministic controlled mutation, forward/backward frontier meeting,
+composition admission and project-local cross-run persistence.

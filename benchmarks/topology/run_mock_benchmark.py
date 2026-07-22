@@ -15,6 +15,9 @@ from mathproofmesh.inspiration.analogy_agent import AnalogyAgent
 from mathproofmesh.inspiration.construction_inventor import (
     AuxiliaryConstructionInventor,
 )
+from mathproofmesh.inspiration.composer import InspirationComposer
+from mathproofmesh.inspiration.cross_run_learning import CrossRunLearningStore
+from mathproofmesh.inspiration.domain_operators import DomainOperatorRegistry
 from mathproofmesh.inspiration.experience import VerifiedExperienceDistiller
 from mathproofmesh.inspiration.invariant_hypothesis import InvariantHypothesisAgent
 from mathproofmesh.inspiration.local_library import LocalAnalogyLibrary
@@ -26,6 +29,8 @@ from mathproofmesh.inspiration.outcomes import InspirationOutcomeLedger
 from mathproofmesh.inspiration.representation_switchboard import (
     RepresentationSwitchboard,
 )
+from mathproofmesh.inspiration.reverse_goal import ReverseGoalAnalyzer
+from mathproofmesh.inspiration.surprise_mutation import ControlledMutationPlanner
 from mathproofmesh.inspiration.trigger_policy import InspirationSnapshot, TriggerPolicy
 from mathproofmesh.memory import TypedMemory
 from mathproofmesh.mock_demo import build_demo_config
@@ -39,6 +44,7 @@ from mathproofmesh.schemas import (
     InspirationContextMode,
     InspirationMechanism,
     InspirationProposal,
+    InspirationReview,
     MemoryTier,
     MessageEnvelope,
     MessageType,
@@ -452,6 +458,11 @@ def _run_component_contracts(
         obligation_kinds=[ObligationKind.MAIN_GOAL],
         proof_debt_before=4.0,
     )
+    outcome_ledger.record_materialization(
+        learning_proposal.proposal_id,
+        action="route_created",
+        refuted=False,
+    )
     outcome_ledger.record_usage(
         learning_proposal.proposal_id, phase="proposer", tokens=1000
     )
@@ -499,6 +510,90 @@ def _run_component_contracts(
         and learned_library.add_verified_record(distilled.model_dump(mode="json"))
     )
 
+    operator_registry = DomainOperatorRegistry()
+    domain_operators = operator_registry.select(
+        problem,
+        domain="number_theory",
+        families=("representation", "construction", "mutation"),
+        limit=16,
+    )
+    mutation_planner = ControlledMutationPlanner(operator_registry)
+    first_mutation = mutation_planner.plan(
+        problem,
+        task_id="benchmark-surprise",
+        proposal_slot=0,
+        target_obligation_ids=[inspiration_obligation.obligation_id],
+        domain="number_theory",
+    )
+    replayed_mutation = mutation_planner.plan(
+        problem,
+        task_id="benchmark-surprise",
+        proposal_slot=0,
+        target_obligation_ids=[inspiration_obligation.obligation_id],
+        domain="number_theory",
+    )
+    second_mutation = mutation_planner.plan(
+        problem,
+        task_id="benchmark-surprise",
+        proposal_slot=1,
+        target_obligation_ids=[inspiration_obligation.obligation_id],
+        domain="number_theory",
+    )
+    reverse_plan = ReverseGoalAnalyzer(config.topology.inspiration).analyze(
+        inspiration_obligation,
+        facts=[experience_fact],
+        proposed_backward_claims=["the finite sum telescopes"],
+        round_index=3,
+    )
+    companion = learning_proposal.model_copy(
+        update={
+            "proposal_id": "benchmark-composition-companion",
+            "mechanism": InspirationMechanism.AUXILIARY_CONSTRUCTION,
+            "source_agent_id": "benchmark-construction-agent",
+            "statement": "construct consecutive partial differences",
+            "novelty_signature": NoveltySignature(
+                mechanism_tags=["auxiliary_construction"],
+                core_objects=["partial_difference"],
+                key_transformations=["construct_difference_sequence"],
+                targeted_obligation_ids=[inspiration_obligation.obligation_id],
+            ),
+        }
+    )
+    composition_reviews = [
+        InspirationReview(
+            proposal_id=item.proposal_id,
+            reviewer_agent_id=f"reviewer-{index}",
+            semantically_distinct=True,
+            relevant_to_open_obligation=True,
+            internally_coherent=True,
+            recommendation="create_new_route",
+            confidence=0.9,
+        )
+        for index, item in enumerate((learning_proposal, companion))
+    ]
+    compositions = InspirationComposer(config.topology.inspiration).compose(
+        [learning_proposal, companion],
+        composition_reviews,
+        quick_falsification_passed={learning_proposal.proposal_id},
+        proof_graph=experience_graph,
+    )
+    config.topology.inspiration.cross_run_learning_enabled = True
+    config.topology.inspiration.cross_run_learning_path = ".benchmark-learning"
+    cross_run_store = CrossRunLearningStore(
+        config.topology.inspiration,
+        project_root=root,
+    )
+    cross_run_counts = cross_run_store.persist(
+        experiences=(
+            [distilled.model_copy(update={"cited_by_final_proof": True})]
+            if distilled is not None
+            else []
+        ),
+        negatives=[],
+        outcomes=outcome_ledger.outcomes.values(),
+        run_verified=True,
+    )
+
     return {
         "shared_bridge": len(bridge_tasks) == 1
         and set(bridge_closed) == {"bridge-a", "bridge-b"},
@@ -539,6 +634,27 @@ def _run_component_contracts(
             and bool(adaptive_profiles)
         ),
         "verified_experience_distillation": learned_added,
+        "domain_operator_plugins": (
+            {item.family for item in domain_operators}
+            == {"representation", "construction", "mutation"}
+            and all(item.fast_failure_tests for item in domain_operators)
+            and all(item.known_failure_modes for item in domain_operators)
+        ),
+        "controlled_surprise_mutation": (
+            first_mutation == replayed_mutation
+            and first_mutation.directive_id != second_mutation.directive_id
+            and bool(first_mutation.reversibility_requirements)
+        ),
+        "bidirectional_frontier": (
+            [item.source_ref for item in reverse_plan.forward_frontier]
+            == [experience_fact.message_id]
+            and bool(reverse_plan.frontier_bridges)
+        ),
+        "inspiration_composer": bool(compositions)
+        and len(compositions[0].source_proposal_ids) == 2
+        and bool(compositions[0].fast_failure_tests),
+        "cross_run_learning": cross_run_counts["experiences"] == 1
+        and bool(cross_run_store.load_experiences()),
     }
 
 

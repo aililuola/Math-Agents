@@ -3439,6 +3439,7 @@ class ProofMeshOrchestrator:
             }
         return InspirationSnapshot(
             round_index=state.current_round,
+            problem_hash=state.inspiration_engine.problem.integrity_hash,
             domain=(state.triage.problem_kind.value if state.triage else "unknown"),
             active_route_ids=[item.route_id for item in routes],
             failed_route_ids=failed_routes,
@@ -3539,9 +3540,14 @@ class ProofMeshOrchestrator:
         if not tasks:
             return
         if engine.inspiration_config.mode == "active":
-            breakdown = allocator.inspiration_call_breakdown()
             reserved_tasks = []
             for task in tasks:
+                breakdown = allocator.inspiration_call_breakdown()
+                if task.mechanism == InspirationMechanism.INSPIRATION_COMPOSITION:
+                    # The composer has already produced a deterministic typed
+                    # proposal. Reserve only its independent review, skeptic,
+                    # and first route-attempt costs.
+                    breakdown = {**breakdown, "proposer_calls": 0}
                 reservation, reason = engine.reserve_task_calls(
                     task,
                     snapshot=snapshot,
@@ -3634,6 +3640,17 @@ class ProofMeshOrchestrator:
                 immediate_counterexamples=counterexamples,
                 hidden_assumptions=hidden_assumptions,
             )
+            compositions = engine.queue_compositions(
+                proposals,
+                reviews,
+                snapshot,
+            )
+            if compositions:
+                # A composed idea is reviewed as its own proposal on the next
+                # scheduler turn. Its source ideas remain route-local insights
+                # so that one trigger cannot materialize all of them and bypass
+                # the configured route-creation cap.
+                reviews = engine.defer_composed_sources(reviews, compositions)
             materializations = engine.materialize(reviews, snapshot)
         except Exception:
             self._finish_inspiration_reservations(engine, tasks, interrupted=True)
@@ -3737,6 +3754,7 @@ class ProofMeshOrchestrator:
                 "tasks": tasks,
                 "proposals": proposals,
                 "reviews": reviews,
+                "compositions_queued": compositions,
                 "materializations": materializations,
             },
         )
@@ -3827,7 +3845,13 @@ class ProofMeshOrchestrator:
                 return None
 
         pending: list[Any] = []
+        deterministic_proposals: list[InspirationProposal] = []
         for task in tasks:
+            if task.mechanism == InspirationMechanism.INSPIRATION_COMPOSITION:
+                proposal = engine.pending_composition_for_task(task.task_id)
+                if proposal is not None:
+                    deterministic_proposals.append(proposal)
+                continue
             calls_per_task = (
                 1
                 if task.mechanism == InspirationMechanism.META_REPLAN
@@ -3893,9 +3917,12 @@ class ProofMeshOrchestrator:
                     },
                 )
         if not pending:
-            return []
+            return deterministic_proposals
         results = await asyncio.gather(*pending)
-        return [proposal for proposal in results if proposal is not None]
+        return [
+            *deterministic_proposals,
+            *(proposal for proposal in results if proposal is not None),
+        ]
 
     @staticmethod
     def _inspiration_role_for_mechanism(
@@ -3910,6 +3937,9 @@ class ProofMeshOrchestrator:
             InspirationMechanism.BRIDGE_LEMMA: "reverse_goal_analyzer",
             InspirationMechanism.META_REPLAN: "meta_strategist",
             InspirationMechanism.SURPRISE_EXPLORATION: "representation_switchboard",
+            # Composition proposals are deterministic control artifacts and do
+            # not invoke a proposer role. This mapping is defensive only.
+            InspirationMechanism.INSPIRATION_COMPOSITION: "inspiration_referee",
         }[mechanism]
 
     def _inspiration_agent_prompt(
@@ -4128,6 +4158,11 @@ class ProofMeshOrchestrator:
             )
             report = skeptic_result.value
             if report.verdict == VerificationVerdict.FAIL:
+                engine.record_quick_falsification(
+                    proposal.proposal_id,
+                    passed=False,
+                    reason="quick skeptic found a blocking issue",
+                )
                 descriptions = [item.description for item in report.issues]
                 immediate = [
                     item for item in descriptions if "counterexample" in item.casefold()
@@ -4140,6 +4175,12 @@ class ProofMeshOrchestrator:
                     precomputed[proposal.proposal_id] = review.model_copy(
                         update={"recommendation": "store_insight"}
                     )
+            elif report.verdict == VerificationVerdict.PASS:
+                engine.record_quick_falsification(
+                    proposal.proposal_id,
+                    passed=True,
+                    reason="quick skeptic found no blocking counterexample",
+                )
         return precomputed, counterexamples, hidden
 
     async def _execute_hierarchical_action(
@@ -9794,6 +9835,10 @@ class ProofMeshOrchestrator:
                     state.inspiration_engine.mark_proposal_cited(
                         strategy.inspiration_proposal_id
                     )
+        if state.inspiration_engine is not None:
+            state.inspiration_engine.persist_cross_run_learning(
+                run_verified=status == RunStatus.VERIFIED
+            )
         return RunResult(
             run_id=run_id,
             status=status,
