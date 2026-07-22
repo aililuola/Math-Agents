@@ -33,6 +33,8 @@ class InspirationSnapshot(StrictModel):
     unresolved_conflict_ids: list[str] = Field(default_factory=list)
     final_repair_failed: bool = False
     manual_trigger: bool = False
+    manual_trigger_route_ids: list[str] = Field(default_factory=list)
+    manual_evidence_refs: list[str] = Field(default_factory=list)
     remaining_calls: int = Field(default=0, ge=0)
     finalization_reserve_calls: int = Field(default=0, ge=0)
     current_path_count: int = Field(default=0, ge=0)
@@ -158,8 +160,9 @@ class TriggerPolicy:
                 self._trigger(
                     InspirationTriggerType.MANUAL,
                     snapshot,
-                    snapshot.active_route_ids,
-                    "manual inspiration request",
+                    snapshot.manual_trigger_route_ids or snapshot.active_route_ids,
+                    "an explicit route-local bottleneck requires a mechanism change",
+                    evidence_refs=snapshot.manual_evidence_refs,
                 )
             )
         return triggers

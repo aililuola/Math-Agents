@@ -470,8 +470,18 @@ def test_smoke_and_formal_output_limits() -> None:
     assert all(agent.max_output_tokens == 100000 for agent in formal.agents)
     assert formal.continuation.max_output_tokens_per_segment == 100000
     assert all(agent.provider_max_output_tokens == 384000 for agent in active.agents)
-    assert all(agent.max_output_tokens == 96000 for agent in active.agents)
-    assert active.continuation.max_output_tokens_per_segment == 96000
+    assert all(agent.max_output_tokens == 128000 for agent in active.agents)
+    assert active.continuation.max_output_tokens_per_segment == 128000
+    assert [item.output_tokens for item in active.deep_exploration_policy.tiers] == [
+        32000,
+        64000,
+        96000,
+        128000,
+    ]
+    assert [
+        item.no_content_token_cutoff for item in active.deep_exploration_policy.tiers
+    ] == [24000, 56000, 84000, 112000]
+    assert active.deep_exploration_policy.allow_parallel_distinct_signatures is True
     assert active.budget.max_total_tokens == 10000000
     assert active.budget.max_total_calls == 150
     assert active.budget.max_rounds == 8
@@ -479,6 +489,11 @@ def test_smoke_and_formal_output_limits() -> None:
     assert active.budget.max_paths == 12
     assert active.continuation.max_new_steps_per_call == 20
     assert active.continuation.max_segments_per_path == 20
+    assert active.continuation.post_failure_bottleneck_enabled is True
+    assert active.continuation.post_failure_bottleneck_max_output_tokens == 12000
+    assert active.continuation.post_failure_bottleneck_once_per_checkpoint is True
+    assert active.continuation.post_failure_trigger_inspiration is True
+    assert active.runtime.stage_output_token_limits["post_failure_bottleneck"] == 12000
     assert active.computation.sandboxed_python_enabled is True
     assert smoke.continuation.segments_per_explore_call == 1
     assert formal.continuation.segments_per_explore_call == 1

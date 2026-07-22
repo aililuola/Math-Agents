@@ -40,6 +40,13 @@ from .continuation import (
     merge_verified_delta,
     normalize_delta_claims,
 )
+from .deep_exploration import (
+    DeepExplorationRegistry,
+    ExplorationAdmission,
+    ExplorationEvidence,
+    ExplorationOutcome,
+    ExplorationSignature,
+)
 from .llm.mock import MockResponder
 from .llm.pool import AgentPool, AgentRuntime, ProviderCircuitOpenError
 from .inspiration.engine import InspirationEngine
@@ -47,6 +54,10 @@ from .inspiration.trigger_policy import InspirationSnapshot
 from .memory import LemmaMemory, TypedMemory
 from .prompts import PromptBundle, PromptFactory
 from .report import write_hierarchical_reports, write_run_report
+from .stall_recovery import (
+    PostFailureBottleneckExtractor,
+    classify_no_artifact_failure,
+)
 from .proof_graph.bridges import BridgeBroker
 from .proof_graph.contradictions import ContradictionBroker
 from .proof_graph.matching import DuplicateRouteDetector
@@ -92,11 +103,14 @@ from .schemas import (
     MessageType,
     MathStatus,
     NoveltySignature,
+    ObligationKind,
+    PostFailureBottleneckDiagnostic,
     ProblemContract,
     ProblemKind,
     ProofAttempt,
     ProofCheckpoint,
     ProofDelta,
+    ProofObligation,
     ReceiptStatus,
     ResearchProgressReport,
     RunResult,
@@ -183,6 +197,7 @@ class SolveState:
     math_status: MathStatus = MathStatus.INCONCLUSIVE
     execution_status: ExecutionStatus = ExecutionStatus.COMPLETED
     research_progress_report: ResearchProgressReport | None = None
+    deep_exploration_registry: DeepExplorationRegistry | None = None
 
 
 class ProofMeshOrchestrator:
@@ -2149,6 +2164,37 @@ class ProofMeshOrchestrator:
             if isinstance(registry_state, dict)
             else RouteRegistry(self.config, problem_hash=problem.integrity_hash)
         )
+        deep_state = payload.get("deep_exploration_registry")
+        if store.has_named_json("structured", "deep_exploration_registry"):
+            try:
+                deep_state = store.read_named_json(
+                    "structured", "deep_exploration_registry"
+                )
+            except (OSError, ValueError):
+                pass
+        state.deep_exploration_registry = (
+            DeepExplorationRegistry.from_state(
+                deep_state,
+                self.config.deep_exploration_policy,
+                problem_hash=problem.integrity_hash,
+            )
+            if self.config.deep_exploration_policy.enabled
+            and isinstance(deep_state, dict)
+            else (
+                DeepExplorationRegistry(
+                    self.config.deep_exploration_policy,
+                    problem_hash=problem.integrity_hash,
+                )
+                if self.config.deep_exploration_policy.enabled
+                else None
+            )
+        )
+        if state.deep_exploration_registry is not None:
+            store.write_json(
+                "structured",
+                "deep_exploration_registry",
+                state.deep_exploration_registry.export_state(),
+            )
         memory_state = payload.get("typed_memory")
         state.typed_memory = (
             TypedMemory.from_state(
@@ -2607,6 +2653,362 @@ class ProofMeshOrchestrator:
         if state.contradiction_broker is not None:
             state.contradiction_broker.detect(current_round=current_round)
 
+    def _materialize_post_failure_bottleneck(
+        self,
+        state: SolveState | None,
+        diagnostic: PostFailureBottleneckDiagnostic,
+    ) -> ProofObligation | None:
+        """Keep a no-artifact diagnosis route-local and outside the Fact gate."""
+
+        if (
+            state is None
+            or state.proof_graph is None
+            or state.proof_graph.frozen
+            or diagnostic.route_id is None
+        ):
+            return None
+        obligation = ProofObligation(
+            obligation_id=f"obl_stall_{diagnostic.failure_fingerprint[:12]}",
+            problem_hash=diagnostic.problem_hash,
+            route_ids=[diagnostic.route_id],
+            kind=ObligationKind.SUBGOAL,
+            statement=diagnostic.smallest_blocked_claim,
+            normalized_statement=self._normalize_statement(
+                diagnostic.smallest_blocked_claim
+            ),
+            status="blocked",
+            priority=0.95,
+            centrality=0.75,
+            first_error_fingerprint=(
+                f"post_failure:{diagnostic.failure_fingerprint[:24]}"
+            ),
+        )
+        materialized = state.proof_graph.add_obligation(obligation)
+        if state.route_registry is not None:
+            try:
+                route = state.route_registry.get(diagnostic.route_id)
+            except KeyError:
+                route = None
+            if route is not None:
+                route.requires_revision = True
+                route.revision_summary = (
+                    "A no-artifact route failure was reduced to the explicit "
+                    f"obligation {materialized.obligation_id}."
+                )
+                if (
+                    self.config.continuation.post_failure_trigger_inspiration
+                    and diagnostic.requires_inspiration
+                ):
+                    route.stagnation_rounds = max(
+                        route.stagnation_rounds,
+                        self.config.topology.inspiration.stagnation_rounds,
+                    )
+        return materialized
+
+    def _admit_deep_exploration(
+        self,
+        state: SolveState | None,
+        *,
+        problem: ProblemContract,
+        strategy: StrategyCard,
+        checkpoint: ProofCheckpoint,
+        route_id: str | None,
+        round_index: int,
+        meta_approved: bool,
+        remaining_calls: int,
+        remaining_tokens: int | None,
+        store: ArtifactStore,
+    ) -> tuple[ExplorationAdmission | None, ExplorationSignature | None]:
+        if (
+            state is None
+            or state.deep_exploration_registry is None
+            or route_id is None
+            or not self.config.deep_exploration_policy.enabled
+        ):
+            return None, None
+
+        obligations = (
+            [
+                item
+                for item in state.proof_graph.obligations
+                if item.status not in {"closed", "refuted"}
+                and (not item.route_ids or route_id in item.route_ids)
+            ]
+            if state.proof_graph is not None
+            else []
+        )
+        obligations.sort(
+            key=lambda item: (
+                not str(item.first_error_fingerprint or "").startswith("post_failure:"),
+                -item.priority,
+                -item.centrality,
+                item.obligation_id,
+            )
+        )
+        bottleneck_obligation = obligations[0] if obligations else None
+        if bottleneck_obligation is not None and str(
+            bottleneck_obligation.first_error_fingerprint or ""
+        ).startswith("post_failure:"):
+            target_statement = bottleneck_obligation.statement
+            target_obligation_id = bottleneck_obligation.obligation_id
+        elif checkpoint.current_goal:
+            target_statement = checkpoint.current_goal
+            target_obligation_id = (
+                bottleneck_obligation.obligation_id
+                if bottleneck_obligation is not None
+                and self._normalize_statement(bottleneck_obligation.statement)
+                == self._normalize_statement(checkpoint.current_goal)
+                else None
+            )
+        elif checkpoint.remaining_subgoals:
+            target_statement = checkpoint.remaining_subgoals[0]
+            target_obligation_id = None
+        elif bottleneck_obligation is not None:
+            target_statement = bottleneck_obligation.statement
+            target_obligation_id = bottleneck_obligation.obligation_id
+        else:
+            target_statement = strategy.bottleneck
+            target_obligation_id = None
+
+        route = state.route_registry.get(route_id) if state.route_registry else None
+        mechanism_tags = [
+            strategy.title,
+            strategy.core_idea,
+            strategy.bottleneck,
+            *strategy.tags,
+            *strategy.expected_lemmas,
+            *(route.mechanism_signature if route is not None else []),
+        ]
+        representation_tags: list[str] = []
+        construction_tags: list[str] = []
+        invariant_tags: list[str] = []
+        transformation_tags: list[str] = []
+        proposal = None
+        review = None
+        if strategy.inspiration_proposal_id and state.inspiration_engine is not None:
+            proposal = state.inspiration_engine.proposals.get(
+                strategy.inspiration_proposal_id
+            )
+            review = state.inspiration_engine.reviews.get(
+                strategy.inspiration_proposal_id
+            )
+        if proposal is not None:
+            novelty = proposal.novelty_signature
+            representation_tags.extend(novelty.representation_tags)
+            mechanism_tags.extend(novelty.mechanism_tags)
+            transformation_tags.extend(novelty.key_transformations)
+            transformation_tags.extend(novelty.proof_principles)
+            if proposal.representation is not None:
+                representation_tags.extend(
+                    [
+                        proposal.representation.representation_name,
+                        *proposal.representation.preserved_invariants,
+                    ]
+                )
+            if proposal.construction is not None:
+                construction_tags.extend(proposal.construction.constructed_objects)
+            if proposal.invariant is not None:
+                invariant_tags.extend(
+                    [
+                        proposal.invariant.state_definition,
+                        proposal.invariant.candidate_expression,
+                        proposal.invariant.behavior,
+                    ]
+                )
+            if proposal.reverse_goal is not None:
+                transformation_tags.extend(
+                    proposal.reverse_goal.sufficient_intermediate_claims
+                )
+
+        signature = ExplorationSignature(
+            problem_hash=problem.integrity_hash,
+            verified_checkpoint_id=checkpoint.checkpoint_id,
+            verified_checkpoint_hash=checkpoint.content_hash,
+            target_obligation_id=target_obligation_id,
+            target_statement=target_statement,
+            mechanism_tags=mechanism_tags,
+            representation_tags=representation_tags,
+            construction_tags=construction_tags,
+            invariant_tags=invariant_tags,
+            transformation_tags=transformation_tags,
+            assumptions=[
+                *checkpoint.active_assumptions,
+                *strategy.prerequisites,
+            ],
+            route_id=route_id,
+        )
+        referee_confirmed = bool(
+            review is not None
+            and review.semantically_distinct
+            and review.recommendation != "reject"
+        )
+        evidence = ExplorationEvidence(
+            has_verified_checkpoint=bool(
+                checkpoint.verified_steps or checkpoint.verified_claim_ids
+            ),
+            explicit_critical_target=bool(
+                checkpoint.current_goal
+                or checkpoint.remaining_subgoals
+                or bottleneck_obligation is not None
+            ),
+            meta_approved=(
+                meta_approved
+                or bool(
+                    proposal is not None
+                    and proposal.mechanism == InspirationMechanism.META_REPLAN
+                    and referee_confirmed
+                )
+            ),
+            final_reserve_available=(
+                remaining_calls
+                >= self.config.deep_exploration_policy.min_remaining_calls_for_128k
+                and (
+                    remaining_tokens is None
+                    or remaining_tokens
+                    >= self.config.deep_exploration_policy.min_remaining_tokens_for_128k
+                )
+            ),
+            novelty_review_passed=referee_confirmed,
+            referee_confirmed_mechanism_change=referee_confirmed,
+        )
+
+        if referee_confirmed:
+            for parent_hash in list(state.deep_exploration_registry.locked_signatures):
+                parent = state.deep_exploration_registry._latest_by_signature(
+                    parent_hash
+                )
+                if (
+                    parent is None
+                    or parent.route_id != route_id
+                    or parent.signature.verified_checkpoint_hash
+                    != signature.verified_checkpoint_hash
+                ):
+                    continue
+                pivot = state.deep_exploration_registry.register_pivot(
+                    route_id=route_id,
+                    parent_signature_hash=parent_hash,
+                    new_signature=signature,
+                    referee_confirmed=True,
+                )
+                if pivot is not None:
+                    store.append_event(
+                        "local_bottleneck_pivot_registered",
+                        pivot.model_dump(mode="json"),
+                    )
+                    break
+
+        admission = state.deep_exploration_registry.admit(
+            signature,
+            route_id=route_id,
+            round_index=round_index,
+            evidence=evidence,
+        )
+        store.write_json(
+            "structured",
+            "deep_exploration_registry",
+            state.deep_exploration_registry.export_state(),
+        )
+        return admission, signature
+
+    def _finish_deep_exploration(
+        self,
+        state: SolveState | None,
+        admission: ExplorationAdmission | None,
+        *,
+        outcome: ExplorationOutcome,
+        usage: UsageRecord,
+        checkpoint_after: ProofCheckpoint,
+        proof_debt_before: float | None,
+        current_goal_before: str | None,
+        reason: str,
+        store: ArtifactStore,
+        current_goal_override: str | None = None,
+    ) -> None:
+        if (
+            state is None
+            or state.deep_exploration_registry is None
+            or admission is None
+            or admission.lease_id is None
+        ):
+            return
+        record = state.deep_exploration_registry.attempts.get(admission.lease_id)
+        if record is None or record.outcome != ExplorationOutcome.RUNNING:
+            return
+        proof_debt_after = (
+            state.proof_graph.proof_debt(record.route_id)
+            if state.proof_graph is not None
+            else None
+        )
+        current_goal_after = (
+            current_goal_override
+            if current_goal_override is not None
+            else checkpoint_after.current_goal
+        )
+        finished = state.deep_exploration_registry.finish(
+            admission.lease_id,
+            outcome,
+            usage=usage,
+            checkpoint_after_hash=checkpoint_after.content_hash,
+            proof_debt_changed=(
+                proof_debt_before is not None
+                and proof_debt_after is not None
+                and abs(proof_debt_before - proof_debt_after) > 1e-9
+            ),
+            current_goal_changed=(
+                self._normalize_statement(current_goal_before or "")
+                != self._normalize_statement(current_goal_after or "")
+            ),
+            reason=reason,
+        )
+        event = {
+            "lease_id": finished.lease_id,
+            "route_id": finished.route_id,
+            "signature_hash": finished.signature.signature_hash,
+            "granted_tier": finished.granted_tier,
+            "max_output_tokens": finished.max_output_tokens,
+            "outcome": finished.outcome.value,
+            "usage": finished.usage.model_dump(mode="json"),
+            "proof_debt_changed": finished.proof_debt_changed,
+            "current_goal_changed": finished.current_goal_changed,
+            "reason": reason,
+        }
+        store.append_event("deep_exploration_finished", event)
+        store.write_json(
+            "structured",
+            "deep_exploration_registry",
+            state.deep_exploration_registry.export_state(),
+        )
+        if state.deep_exploration_registry.locked_signatures.get(
+            finished.signature.signature_hash
+        ):
+            store.append_event(
+                "deep_exploration_signature_locked",
+                {
+                    **event,
+                    "next_action": (
+                        "use the verified parent checkpoint and request a "
+                        "referee-confirmed mechanism pivot"
+                    ),
+                },
+            )
+
+    @staticmethod
+    def _is_referee_confirmed_inspiration(
+        state: SolveState | None, strategy: StrategyCard
+    ) -> bool:
+        if (
+            state is None
+            or state.inspiration_engine is None
+            or not strategy.inspiration_proposal_id
+        ):
+            return False
+        review = state.inspiration_engine.reviews.get(strategy.inspiration_proposal_id)
+        return bool(
+            review is not None
+            and review.semantically_distinct
+            and review.recommendation != "reject"
+        )
+
     def _update_route_progress_state(
         self, state: SolveState, *, current_round: int
     ) -> None:
@@ -2651,6 +3053,20 @@ class ProofMeshOrchestrator:
             else:
                 route.stagnation_rounds = max(
                     0, current_round - attempts[0].round_index + 1
+                )
+            if (
+                self.config.continuation.post_failure_trigger_inspiration
+                and state.proof_graph is not None
+                and any(
+                    item.status == "blocked"
+                    and (item.first_error_fingerprint or "").startswith("post_failure:")
+                    and route.route_id in item.route_ids
+                    for item in state.proof_graph.obligations
+                )
+            ):
+                route.stagnation_rounds = max(
+                    route.stagnation_rounds,
+                    self.config.topology.inspiration.stagnation_rounds,
                 )
 
     def _hierarchical_graph_signals(
@@ -2770,6 +3186,24 @@ class ProofMeshOrchestrator:
         ):
             return None
         routes = state.route_registry.active_routes(state.current_round)
+        post_failure_obligations = (
+            [
+                item
+                for item in state.proof_graph.obligations
+                if item.status == "blocked"
+                and (item.first_error_fingerprint or "").startswith("post_failure:")
+            ]
+            if self.config.continuation.post_failure_trigger_inspiration
+            else []
+        )
+        post_failure_route_ids = self._deduplicate_strings(
+            [
+                route_id
+                for item in post_failure_obligations
+                for route_id in item.route_ids
+                if any(route.route_id == route_id for route in routes)
+            ]
+        )
         attempt_by_strategy = {
             item.strategy_id: item
             for item in sorted(state.attempts, key=lambda item: item.round_index)
@@ -2787,6 +3221,11 @@ class ProofMeshOrchestrator:
             stagnation[route.route_id] = route.stagnation_rounds
             if report is not None and report.first_error_step:
                 first_errors.append(report.first_error_step)
+        first_errors.extend(
+            item.first_error_fingerprint
+            for item in post_failure_obligations
+            if item.first_error_fingerprint
+        )
         shared = state.proof_graph.find_shared_bottlenecks()
         signatures = [
             NoveltySignature(
@@ -2867,6 +3306,11 @@ class ProofMeshOrchestrator:
                 else []
             ),
             final_repair_failed=state.final_repair_failed,
+            manual_trigger=bool(post_failure_route_ids),
+            manual_trigger_route_ids=post_failure_route_ids,
+            manual_evidence_refs=[
+                item.obligation_id for item in post_failure_obligations
+            ],
             remaining_calls=remaining_calls,
             finalization_reserve_calls=(
                 state.inspiration_engine.surprise_explorer.state.finalization_reserve_calls
@@ -2928,6 +3372,35 @@ class ProofMeshOrchestrator:
             runner=runner,
             prompts=prompts,
         )
+        manual_trigger_ids = {
+            trigger.trigger_id
+            for trigger in triggers
+            if trigger.trigger_type.value == "manual"
+        }
+        if (
+            any(proposal.trigger_id in manual_trigger_ids for proposal in proposals)
+            and state.proof_graph is not None
+        ):
+            consumed: list[str] = []
+            for obligation_id in snapshot.manual_evidence_refs:
+                try:
+                    obligation = state.proof_graph.get_obligation(obligation_id)
+                except KeyError:
+                    continue
+                if obligation.status == "blocked" and (
+                    obligation.first_error_fingerprint or ""
+                ).startswith("post_failure:"):
+                    obligation.status = "open"
+                    consumed.append(obligation_id)
+            if consumed:
+                store.append_event(
+                    "post_failure_inspiration_trigger_consumed",
+                    {
+                        "round_index": state.current_round,
+                        "obligation_ids": consumed,
+                        "trigger_ids": sorted(manual_trigger_ids),
+                    },
+                )
         (
             precomputed,
             counterexamples,
@@ -4696,6 +5169,7 @@ class ProofMeshOrchestrator:
         previous_attempt: ProofAttempt | None,
         budget_bucket: str,
         computation_meta_approved: bool = False,
+        deep_exploration_meta_approved: bool = False,
         max_segments_this_call: int | None = None,
     ) -> ProofAttempt:
         if self.config.continuation.enabled:
@@ -4715,6 +5189,7 @@ class ProofMeshOrchestrator:
                 previous_attempt=previous_attempt,
                 budget_bucket=budget_bucket,
                 computation_meta_approved=computation_meta_approved,
+                deep_exploration_meta_approved=deep_exploration_meta_approved,
                 max_segments_this_call=max_segments_this_call,
             )
         return await self._explore_path_legacy(
@@ -4752,6 +5227,7 @@ class ProofMeshOrchestrator:
         previous_attempt: ProofAttempt | None,
         budget_bucket: str,
         computation_meta_approved: bool,
+        deep_exploration_meta_approved: bool = False,
         max_segments_this_call: int | None,
     ) -> ProofAttempt:
         cfg = self.config.continuation
@@ -4838,13 +5314,12 @@ class ProofMeshOrchestrator:
             relevant = router.relevant_claims(
                 memory.claims, strategy, targeted_feedback
             )
-            route_id, delivered_messages, route_context = (
-                self._hierarchical_route_prompt_context(
-                    state,
-                    strategy_id=strategy.strategy_id,
-                    current_round=round_index,
-                )
+            route = (
+                state.route_registry.route_for_strategy(strategy.strategy_id)
+                if state is not None and state.route_registry is not None
+                else None
             )
+            route_id = route.route_id if route is not None else None
             proof_debt_before = (
                 state.proof_graph.proof_debt(route_id)
                 if state is not None
@@ -4853,6 +5328,7 @@ class ProofMeshOrchestrator:
                 else None
             )
             next_segment = checkpoint.segment_index + 1
+            current_goal_before_segment = checkpoint.current_goal
             prior_working = store.load_latest_working_checkpoint(path_id)
             if (
                 prior_working is not None
@@ -4860,6 +5336,105 @@ class ProofMeshOrchestrator:
                 != checkpoint.checkpoint_id
             ):
                 prior_working = None
+            deep_admission, deep_signature = self._admit_deep_exploration(
+                state,
+                problem=problem,
+                strategy=strategy,
+                checkpoint=checkpoint,
+                route_id=route_id,
+                round_index=round_index,
+                meta_approved=deep_exploration_meta_approved,
+                remaining_calls=runner.ledger.remaining_calls,
+                remaining_tokens=(
+                    None
+                    if self.config.budget.max_total_tokens is None
+                    else max(
+                        0,
+                        self.config.budget.max_total_tokens
+                        - runner.pool.total_tokens(),
+                    )
+                ),
+                store=store,
+            )
+            if deep_admission is not None and not deep_admission.allowed:
+                feedback = (
+                    "Deep exploration admission deferred this exact mathematical "
+                    f"state: {deep_admission.reason}. Use a verified checkpoint or a "
+                    "referee-confirmed different mechanism before requesting another "
+                    "high-token attempt."
+                )
+                targeted_feedback = [*targeted_feedback, feedback]
+                store.append_event(
+                    "deep_exploration_admission_deferred",
+                    {
+                        **deep_admission.model_dump(mode="json"),
+                        "route_id": route_id,
+                        "checkpoint_id": checkpoint.checkpoint_id,
+                    },
+                )
+                if route is not None:
+                    route.stagnation_rounds = max(
+                        route.stagnation_rounds,
+                        self.config.topology.inspiration.stagnation_rounds,
+                    )
+                break
+            if deep_admission is not None:
+                store.append_event(
+                    "deep_exploration_admitted",
+                    {
+                        **deep_admission.model_dump(mode="json"),
+                        "route_id": route_id,
+                        "checkpoint_id": checkpoint.checkpoint_id,
+                        "target_statement": (
+                            deep_signature.target_statement
+                            if deep_signature is not None
+                            else ""
+                        ),
+                    },
+                )
+                if runner.activity is not None:
+                    runner.activity.info(
+                        "deep_exploration_admitted",
+                        title="Deep exploration tier admitted",
+                        detail=(
+                            f"{strategy.title}: {deep_admission.max_output_tokens:,} "
+                            f"tokens; {deep_admission.reason}"
+                        ),
+                        stage="route_prove",
+                        agent_id=agent.id,
+                        importance=ActivityImportance.NORMAL,
+                        metrics={
+                            "route_id": route_id,
+                            "signature_hash": deep_admission.signature_hash,
+                            "requested_tier": deep_admission.requested_tier,
+                            "granted_tier": deep_admission.granted_tier,
+                            "max_output_tokens": deep_admission.max_output_tokens,
+                            "parallel_distinct_signatures_allowed": True,
+                        },
+                    )
+                if deep_admission.novelty_review_required and route is not None:
+                    route.stagnation_rounds = max(
+                        route.stagnation_rounds,
+                        self.config.topology.inspiration.stagnation_rounds,
+                    )
+                    store.append_event(
+                        "deep_exploration_novelty_review_requested",
+                        {
+                            "route_id": route.route_id,
+                            "signature_hash": deep_admission.signature_hash,
+                            "temporary_max_output_tokens": (
+                                deep_admission.max_output_tokens
+                            ),
+                            "reason": deep_admission.reason,
+                        },
+                    )
+            route_id, delivered_messages, route_context = (
+                self._hierarchical_route_prompt_context(
+                    state,
+                    strategy_id=strategy.strategy_id,
+                    current_round=round_index,
+                )
+            )
             experiment_results: list[dict[str, Any]] = []
             computation_feedback: list[dict[str, Any]] = []
             compute_cycles = 0
@@ -4869,6 +5444,9 @@ class ProofMeshOrchestrator:
             tried_agents: list[str] = []
             receipts_processed = False
             acknowledged_receipts: list[MessageReceipt] = []
+            segment_usage = UsageRecord()
+            deep_outcome: ExplorationOutcome | None = None
+            deep_outcome_reason = ""
 
             while True:
 
@@ -4876,6 +5454,12 @@ class ProofMeshOrchestrator:
                     if route_id is not None:
                         bundle = prompts.route_prove(
                             problem,
+                            authorized_output_tier=(
+                                deep_admission.granted_tier
+                                if deep_admission is not None
+                                and deep_admission.granted_tier is not None
+                                else 0
+                            ),
                             strategy=strategy,
                             checkpoint=checkpoint,
                             previous_working_checkpoint=prior_working,
@@ -4931,6 +5515,12 @@ class ProofMeshOrchestrator:
                         max_output_tokens=min(
                             cfg.max_output_tokens_per_segment,
                             current_agent.config.max_output_tokens,
+                            (
+                                deep_admission.max_output_tokens
+                                if deep_admission is not None
+                                and deep_admission.max_output_tokens is not None
+                                else cfg.max_output_tokens_per_segment
+                            ),
                         ),
                         output_tier=bundle.output_tier,
                     )
@@ -4947,9 +5537,34 @@ class ProofMeshOrchestrator:
                         and cfg.allow_cross_agent_failover,
                         failover_only_on_retryable=True,
                     )
-                except (BudgetExhaustedError, ProviderCircuitOpenError):
+                except (BudgetExhaustedError, ProviderCircuitOpenError) as exc:
+                    self._finish_deep_exploration(
+                        state,
+                        deep_admission,
+                        outcome=ExplorationOutcome.EXTERNAL_FAILURE,
+                        usage=segment_usage,
+                        checkpoint_after=checkpoint,
+                        proof_debt_before=proof_debt_before,
+                        current_goal_before=current_goal_before_segment,
+                        reason=type(exc).__name__,
+                        store=store,
+                    )
                     raise
                 except Exception as exc:
+                    failed_usage = getattr(exc, "usage", None)
+                    if isinstance(failed_usage, UsageRecord):
+                        cumulative_usage = self._sum_usage(
+                            [cumulative_usage, failed_usage]
+                        )
+                        segment_usage = self._sum_usage([segment_usage, failed_usage])
+                    if classify_no_artifact_failure(exc) is not None:
+                        deep_outcome = ExplorationOutcome.NO_ARTIFACT
+                        deep_outcome_reason = (
+                            "the route call returned no usable structured artifact"
+                        )
+                    else:
+                        deep_outcome = ExplorationOutcome.EXTERNAL_FAILURE
+                        deep_outcome_reason = type(exc).__name__
                     store.append_event(
                         "proof_continuation_failed",
                         {
@@ -4960,14 +5575,59 @@ class ProofMeshOrchestrator:
                             "error": str(exc),
                         },
                     )
-                    targeted_feedback = [
-                        *targeted_feedback,
-                        f"Continuation call failed after retry/failover: {type(exc).__name__}. Resume from checkpoint {checkpoint.checkpoint_id}.",
-                    ]
+                    failed_agents = list(getattr(exc, "tried_agents", []) or [])
+                    failover_chain = self._deduplicate_strings(
+                        [*failover_chain, *failed_agents]
+                    )
+                    bottleneck = await PostFailureBottleneckExtractor(
+                        self.config,
+                        runner,
+                        prompts,
+                        store,
+                    ).extract(
+                        exc,
+                        problem=problem,
+                        strategy=strategy,
+                        checkpoint=checkpoint,
+                        route_id=route_id,
+                        previous_working_checkpoint=prior_working,
+                        typed_public_context=route_context,
+                        has_candidate=bool(
+                            checkpoint.verified_steps
+                            or checkpoint.final_answer
+                            or (state is not None and state.attempts)
+                        ),
+                    )
+                    if bottleneck is not None:
+                        cumulative_usage = self._sum_usage(
+                            [cumulative_usage, bottleneck.diagnostic.usage]
+                        )
+                        self._materialize_post_failure_bottleneck(
+                            state, bottleneck.diagnostic
+                        )
+                        alternatives = ", ".join(
+                            bottleneck.diagnostic.alternative_mechanism_tags
+                        )
+                        targeted_feedback = [
+                            *targeted_feedback,
+                            (
+                                "Route-local post-failure bottleneck, diagnosed only "
+                                "from public checkpoint state: "
+                                f"{bottleneck.diagnostic.smallest_blocked_claim}. "
+                                "The failed call's private reasoning was not recovered. "
+                                f"Alternative mechanisms: {alternatives}."
+                            ),
+                        ]
+                    else:
+                        targeted_feedback = [
+                            *targeted_feedback,
+                            f"Continuation call failed after retry/failover: {type(exc).__name__}. Resume from checkpoint {checkpoint.checkpoint_id}.",
+                        ]
                     break
 
                 latest_raw_ref = result.raw_ref
                 cumulative_usage = self._sum_usage([cumulative_usage, result.usage])
+                segment_usage = self._sum_usage([segment_usage, result.usage])
                 tried_agents = self._deduplicate_strings([*tried_agents, *just_tried])
                 failover_chain = self._deduplicate_strings(
                     [*failover_chain, *just_tried]
@@ -5036,6 +5696,8 @@ class ProofMeshOrchestrator:
                     delta = turn.delta
                     break
                 if turn.action == ContinuationAction.ABANDON:
+                    deep_outcome = ExplorationOutcome.NO_VERIFIED_PROGRESS
+                    deep_outcome_reason = turn.reason or "route abandoned"
                     targeted_feedback = [
                         *targeted_feedback,
                         turn.reason or "Explorer abandoned this continuation segment.",
@@ -5077,8 +5739,32 @@ class ProofMeshOrchestrator:
                             and experiment.independently_verified
                         )
                     )
+                    if confirmed_counterexample_pending:
+                        deep_outcome = ExplorationOutcome.USEFUL_COUNTEREXAMPLE
+                        deep_outcome_reason = (
+                            "an independently checked counterexample changed the route"
+                        )
 
             if delta is None or result is None:
+                self._finish_deep_exploration(
+                    state,
+                    deep_admission,
+                    outcome=(
+                        deep_outcome
+                        or (
+                            ExplorationOutcome.USEFUL_COUNTEREXAMPLE
+                            if confirmed_counterexample_pending
+                            else ExplorationOutcome.NO_VERIFIED_PROGRESS
+                        )
+                    ),
+                    usage=segment_usage,
+                    checkpoint_after=checkpoint,
+                    proof_debt_before=proof_debt_before,
+                    current_goal_before=current_goal_before_segment,
+                    reason=deep_outcome_reason
+                    or "no checkpoint-eligible delta returned",
+                    store=store,
+                )
                 break
             delta.problem_hash = problem.integrity_hash
             delta.path_id = checkpoint.path_id
@@ -5268,6 +5954,47 @@ class ProofMeshOrchestrator:
                         },
                     )
                 targeted_feedback = [*targeted_feedback, feedback]
+                current_goal_changed = bool(
+                    delta.current_goal
+                    and delta.current_goal.strip()
+                    and delta.current_goal.strip()
+                    != (checkpoint.current_goal or "").strip()
+                )
+                proof_debt_after_candidate = (
+                    state.proof_graph.proof_debt(route_id)
+                    if state is not None
+                    and state.proof_graph is not None
+                    and route_id is not None
+                    else None
+                )
+                proof_debt_changed = bool(
+                    proof_debt_before is not None
+                    and proof_debt_after_candidate is not None
+                    and abs(proof_debt_before - proof_debt_after_candidate) > 1e-9
+                )
+                partial_is_usable = (
+                    current_goal_changed
+                    or proof_debt_changed
+                    or bool(delta.detected_conflicts)
+                ) and all(
+                    report.verdict != VerificationVerdict.FAIL for report in reports
+                )
+                self._finish_deep_exploration(
+                    state,
+                    deep_admission,
+                    outcome=(
+                        ExplorationOutcome.USABLE_PARTIAL
+                        if partial_is_usable
+                        else ExplorationOutcome.NO_VERIFIED_PROGRESS
+                    ),
+                    usage=segment_usage,
+                    checkpoint_after=checkpoint,
+                    proof_debt_before=proof_debt_before,
+                    current_goal_before=current_goal_before_segment,
+                    current_goal_override=delta.current_goal,
+                    reason=feedback,
+                    store=store,
+                )
                 break
 
             claims = normalize_delta_claims(
@@ -5289,6 +6016,22 @@ class ProofMeshOrchestrator:
                 failover_chain=tried_agents,
             )
             store.commit_proof_checkpoint(checkpoint)
+            self._finish_deep_exploration(
+                state,
+                deep_admission,
+                outcome=(
+                    ExplorationOutcome.VERIFIED_MECHANISM_CHANGE
+                    if deep_signature is not None
+                    and self._is_referee_confirmed_inspiration(state, strategy)
+                    else ExplorationOutcome.VERIFIED_PROGRESS
+                ),
+                usage=segment_usage,
+                checkpoint_after=checkpoint,
+                proof_debt_before=proof_debt_before,
+                current_goal_before=current_goal_before_segment,
+                reason="the proof delta passed checkpoint verification",
+                store=store,
+            )
             if (
                 route_id is not None
                 and state is not None
@@ -6577,6 +7320,7 @@ class ProofMeshOrchestrator:
             previous_attempt=previous,
             budget_bucket="depth",
             computation_meta_approved=computation_meta_approved,
+            deep_exploration_meta_approved=True,
         )
 
     async def _widen(
@@ -8702,6 +9446,7 @@ class ProofMeshOrchestrator:
                     contradiction_broker=state.contradiction_broker,
                     inspiration_engine=state.inspiration_engine,
                     capability_profile=state.capability_profile,
+                    deep_exploration_registry=state.deep_exploration_registry,
                 ),
                 "claims": memory.claims,
                 "calls_started": runner.ledger.calls_started,
@@ -8762,6 +9507,12 @@ class ProofMeshOrchestrator:
                 "message_receipts",
                 broker_state.get("receipts", {}),
             )
+            if state.deep_exploration_registry is not None:
+                store.write_json(
+                    "structured",
+                    "deep_exploration_registry",
+                    state.deep_exploration_registry.export_state(),
+                )
             write_hierarchical_reports(
                 store,
                 route_registry=route_registry_state,
@@ -8771,6 +9522,11 @@ class ProofMeshOrchestrator:
                 bridge_broker=bridge_state,
                 contradiction_broker=contradiction_state,
                 inspiration_engine=inspiration_state,
+                deep_exploration=(
+                    state.deep_exploration_registry.export_state()
+                    if state.deep_exploration_registry is not None
+                    else {}
+                ),
             )
         runner.persist_runtime_state()
 

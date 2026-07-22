@@ -22,6 +22,7 @@ def write_hierarchical_reports(
     bridge_broker: dict[str, Any],
     contradiction_broker: dict[str, Any],
     inspiration_engine: dict[str, Any],
+    deep_exploration: dict[str, Any] | None = None,
 ) -> None:
     """Write the stable v0.7 topology, graph, diagnostics, and metric artifacts."""
     routes = list(route_registry.get("routes", []))
@@ -33,6 +34,7 @@ def write_hierarchical_reports(
     obligations = dict(proof_graph.get("obligations", {}))
     edges = dict(proof_graph.get("edges", {}))
     tiers = dict(typed_memory.get("tiers", {}))
+    deep_exploration = deep_exploration or {}
 
     topology = {
         "routes": routes,
@@ -62,6 +64,7 @@ def write_hierarchical_reports(
     )
 
     store.write_json("reports", "proof_graph", proof_graph)
+    store.write_json("reports", "deep_exploration", deep_exploration)
     graph_mmd = ["flowchart TD"]
     for obligation_id, obligation in obligations.items():
         label = str(obligation.get("status", "open"))
@@ -143,6 +146,12 @@ def write_hierarchical_reports(
         ),
         "inspiration_materialization_actions": dict(materialization_counts),
         "surprise_budget": inspiration_engine.get("surprise_budget", {}),
+        "deep_exploration_attempt_count": len(deep_exploration.get("attempts", {})),
+        "deep_exploration_locked_signature_count": len(
+            deep_exploration.get("locked_signatures", {})
+        ),
+        "deep_exploration_pivot_count": len(deep_exploration.get("pivots", {})),
+        "parallel_distinct_deep_signatures_allowed": True,
     }
     store.write_json("reports", "hierarchical_metrics", metrics)
 

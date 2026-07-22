@@ -28,6 +28,7 @@ from .schemas import (
     MessageReceipt,
     MetaReview,
     MetaStrategyDecision,
+    PostFailureBottleneckDiagnostic,
     ProblemContract,
     ProofAttempt,
     ProofCheckpoint,
@@ -1087,6 +1088,7 @@ JSON SCHEMA:
         *,
         temperature: float = 0.0,
         output_tier: int | None = None,
+        max_output_tokens: int | None = None,
     ) -> PromptBundle:
         user = f"""
 [STAGE:{stage}]
@@ -1109,21 +1111,17 @@ JSON SCHEMA:
             user,
             response_model,
             temperature=temperature,
+            max_output_tokens=max_output_tokens,
             output_tier=output_tier,
         )
 
     def route_prove(
         self,
         problem: ProblemContract,
+        *,
+        authorized_output_tier: int = 0,
         **context: Any,
     ) -> PromptBundle:
-        checkpoint = context.get("checkpoint")
-        if isinstance(checkpoint, ProofCheckpoint):
-            output_tier = checkpoint.segment_index
-        elif isinstance(checkpoint, Mapping):
-            output_tier = int(checkpoint.get("segment_index", 0) or 0)
-        else:
-            output_tier = 0
         return self._typed_stage(
             "route_prove",
             (
@@ -1151,7 +1149,9 @@ JSON SCHEMA:
             ContinuationTurn,
             {"problem": problem, **context},
             temperature=0.25,
-            output_tier=max(0, output_tier),
+            # This is server-owned admission state. Checkpoint depth alone may not
+            # escalate a route into a larger reasoning budget.
+            output_tier=max(0, authorized_output_tier),
         )
 
     def route_skeptic(self, **context: Any) -> PromptBundle:
@@ -1176,6 +1176,39 @@ JSON SCHEMA:
             "Independently audit the supplied deterministic replay records and the mathematical mapping from each experiment to the candidate proof delta. Do not rerun arbitrary generated code, infer an unbounded theorem from bounded evidence, or pass a missing/invalid replay. Return pass only when every proof-relevant result was replayed and its scope is used correctly.",
             ToolAuditReport,
             context,
+        )
+
+    def post_failure_bottleneck(
+        self,
+        problem: ProblemContract,
+        *,
+        max_output_tokens: int,
+        **context: Any,
+    ) -> PromptBundle:
+        return self._typed_stage(
+            "post_failure_bottleneck",
+            (
+                "The previous route call returned no usable structured artifact. "
+                "Diagnose only from the verified checkpoint, admitted typed public "
+                "context, and the explicitly labeled non-authoritative working "
+                "checkpoint. You cannot see, recover, summarize, or continue the "
+                "failed call's private reasoning. Identify the smallest explicit "
+                "mathematical claim now blocking progress. Prefer current_goal, then "
+                "one remaining_subgoal; use a working-checkpoint gap only when clearly "
+                "marked unverified. State the attempted public mechanism, why the "
+                "public state does not close the claim, preserved verified IDs, and "
+                "structurally different mechanisms for Inspiration to try. If the exact "
+                "hidden failure point is unknowable, lower confidence rather than "
+                "inventing hidden progress. This is a route-local diagnosis, not a "
+                "proof, Claim, Fact, or verification result. Set "
+                "exact_failed_internal_step_known=false and "
+                "private_reasoning_recovered=false."
+            ),
+            PostFailureBottleneckDiagnostic,
+            {"problem": problem, **context},
+            temperature=0.0,
+            output_tier=0,
+            max_output_tokens=max_output_tokens,
         )
 
     def bridge_lemma(self, **context: Any) -> PromptBundle:

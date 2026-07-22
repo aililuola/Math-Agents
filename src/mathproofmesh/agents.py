@@ -12,7 +12,7 @@ from typing import Any, Generic, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from .activity import ActivityImportance, ActivityStatus, ActivityStream, stage_label
-from .config import SystemConfig
+from .config import ExplorationTierPolicyConfig, SystemConfig
 from .llm.pool import (
     AgentCallFailure,
     AgentPool,
@@ -36,23 +36,44 @@ class StructuredOutputError(RuntimeError):
     pass
 
 
-class AgentCallWallTimeoutError(RuntimeError):
+class AgentProgressError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        usage: UsageRecord | None = None,
+        progress: dict[str, Any] | None = None,
+    ) -> None:
+        self.usage = usage or UsageRecord()
+        self.progress = dict(progress or {})
+        super().__init__(message)
+
+
+class AgentCallWallTimeoutError(AgentProgressError):
     pass
 
 
-class ReasoningOnlyStallError(RuntimeError):
+class ReasoningOnlyStallError(AgentProgressError):
     pass
 
 
-class ReasoningBudgetExhaustedError(RuntimeError):
+class ReasoningBudgetExhaustedError(AgentProgressError):
     pass
 
 
 class AgentFailoverExhausted(RuntimeError):
-    def __init__(self, role: str, tried_agents: list[str], errors: list[str]) -> None:
+    def __init__(
+        self,
+        role: str,
+        tried_agents: list[str],
+        errors: list[str],
+        *,
+        usage: UsageRecord | None = None,
+    ) -> None:
         self.role = role
         self.tried_agents = tried_agents
         self.errors = errors
+        self.usage = usage or UsageRecord()
         super().__init__(
             f"all agents failed for role={role}; tried={tried_agents}; errors={errors}"
         )
@@ -258,6 +279,15 @@ class StructuredAgentRunner:
                     schema=schema,
                     activity_task=activity_task,
                     stage=bundle.stage,
+                    tier_policy=(
+                        self.config.deep_exploration_policy.tier_for_limit(
+                            effective_max_output_tokens
+                        )
+                        if self.config.deep_exploration_policy.enabled
+                        and bundle.stage in {"route_prove", "proof_continuation"}
+                        and parse_attempt == 0
+                        else None
+                    ),
                 )
                 response_text = response.text
                 raw_evidence = self.store.write_content_addressed(
@@ -313,7 +343,13 @@ class StructuredAgentRunner:
                     )
                     raise ReasoningBudgetExhaustedError(
                         f"{agent.id} exhausted {effective_max_output_tokens} output "
-                        "tokens without returning a structured artifact"
+                        "tokens without returning a structured artifact",
+                        usage=self._copy_usage(total_usage),
+                        progress={
+                            "approx_output_tokens": response.output_tokens,
+                            "content_characters": 0,
+                            "finish_reason": finish_reason,
+                        },
                     )
                 try:
                     payload = extract_json_object(response.text)
@@ -408,6 +444,17 @@ class StructuredAgentRunner:
                 f"{bundle.response_model.__name__}: {last_error}"
             ) from last_error
         except Exception as exc:
+            failure_usage = getattr(exc, "usage", None)
+            if isinstance(failure_usage, UsageRecord):
+                # Streaming failures carry only the interrupted request. A failure
+                # after a complete provider response already carries total_usage.
+                progress = getattr(exc, "progress", {})
+                if total_usage.total_tokens and not progress.get("finish_reason"):
+                    setattr(
+                        exc,
+                        "usage",
+                        self._sum_usage(total_usage, failure_usage),
+                    )
             self.persist_runtime_state()
             if activity_task and self.activity is not None:
                 self.activity.fail_task(
@@ -444,7 +491,9 @@ class StructuredAgentRunner:
         """Try one key with its normal retries, then move the same task to backup keys."""
         tried: list[str] = []
         errors: list[str] = []
-        last_exception: Exception | None = None
+        failed_usage = UsageRecord()
+        reasoning_recovery_mode = False
+        reasoning_recovery_cause: Exception | None = None
         excluded = set(exclude_agent_ids or set())
         if primary_agent.id in excluded:
             raise ValueError(
@@ -492,11 +541,8 @@ class StructuredAgentRunner:
                     )
             try:
                 bundle = bundle_factory(agent)
-                if isinstance(
-                    last_exception,
-                    (ReasoningBudgetExhaustedError, ReasoningOnlyStallError),
-                ):
-                    bundle = self._recovery_bundle(bundle, last_exception)
+                if reasoning_recovery_mode and reasoning_recovery_cause is not None:
+                    bundle = self._recovery_bundle(bundle, reasoning_recovery_cause)
                 result = await self.call(
                     role,
                     bundle,
@@ -512,6 +558,10 @@ class StructuredAgentRunner:
                             "tried_agents": list(tried),
                         },
                     )
+                if failed_usage.total_tokens:
+                    result.usage = self._sum_usage(failed_usage, result.usage)
+                    if hasattr(result.value, "usage"):
+                        result.value.usage = self._copy_usage(result.usage)
                 return result, tried
             except (BudgetExhaustedError, ProviderCircuitOpenError):
                 raise
@@ -521,7 +571,9 @@ class StructuredAgentRunner:
                 RuntimeError,
                 ValueError,
             ) as exc:
-                last_exception = exc
+                exc_usage = getattr(exc, "usage", None)
+                if isinstance(exc_usage, UsageRecord):
+                    failed_usage = self._sum_usage(failed_usage, exc_usage)
                 errors.append(f"{agent.id}:{type(exc).__name__}:{exc}")
                 self.store.append_event(
                     "agent_failover_candidate_failed",
@@ -540,11 +592,22 @@ class StructuredAgentRunner:
                     and exc.status_code not in {401, 403}
                 ):
                     break
+                if isinstance(
+                    exc,
+                    (ReasoningBudgetExhaustedError, ReasoningOnlyStallError),
+                ):
+                    if reasoning_recovery_mode:
+                        # One bounded 32K artifact-producing restart is the entire
+                        # no-artifact recovery allowance. Transport-only failures may
+                        # still move that same bounded restart to another key.
+                        break
+                    reasoning_recovery_mode = True
+                    reasoning_recovery_cause = exc
                 # Authentication/authorization failures are not retried on the
                 # same key, but a different configured key may still be valid.
                 continue
 
-        raise AgentFailoverExhausted(role, tried, errors)
+        raise AgentFailoverExhausted(role, tried, errors, usage=failed_usage)
 
     def _effective_output_limit(
         self,
@@ -579,7 +642,7 @@ class StructuredAgentRunner:
             "this prompt. Address the smallest current obligation and emit a valid, "
             "bounded JSON artifact immediately; leave unresolved work explicit."
         )
-        first_tier = self.config.runtime.exploration_output_token_tiers[0]
+        first_tier = self.config.deep_exploration_policy.tiers[0].output_tokens
         explicit = (
             min(bundle.max_output_tokens, first_tier)
             if bundle.max_output_tokens is not None
@@ -632,13 +695,25 @@ class StructuredAgentRunner:
         schema: dict[str, Any],
         activity_task: str | None,
         stage: str,
+        tier_policy: ExplorationTierPolicyConfig | None = None,
     ):
         """Await one provider call while emitting low-frequency, content-free heartbeats."""
 
         interval = self.config.runtime.activity_heartbeat_seconds
         poll_interval = max(0.01, min(interval if interval > 0 else 5.0, 5.0))
-        wall_timeout = self.config.runtime.agent_call_wall_timeout_seconds
-        reasoning_timeout = self.config.runtime.reasoning_only_abort_seconds
+        wall_timeout = (
+            tier_policy.wall_timeout_seconds
+            if tier_policy is not None
+            else self.config.runtime.agent_call_wall_timeout_seconds
+        )
+        reasoning_timeout = (
+            tier_policy.no_content_timeout_seconds
+            if tier_policy is not None
+            else self.config.runtime.reasoning_only_abort_seconds
+        )
+        token_cutoff = (
+            tier_policy.no_content_token_cutoff if tier_policy is not None else None
+        )
         minimum_reasoning = self.config.runtime.reasoning_only_min_characters
         task = asyncio.create_task(
             agent.call(
@@ -666,7 +741,14 @@ class StructuredAgentRunner:
                     if client is not None and hasattr(client, "progress_snapshot")
                     else {}
                 )
+                approx_tokens = int(progress.get("approx_output_tokens", 0) or 0)
+                content_characters = int(progress.get("content_characters", 0) or 0)
                 if elapsed_float >= wall_timeout:
+                    usage = self._interrupted_usage(
+                        agent,
+                        output_tokens=approx_tokens,
+                        latency_seconds=elapsed_float,
+                    )
                     self._record_runner_failure(agent, "wall_timeout")
                     self.store.append_event(
                         "agent_call_wall_timeout",
@@ -675,17 +757,61 @@ class StructuredAgentRunner:
                             "agent_id": agent.id,
                             "elapsed_seconds": elapsed_float,
                             "progress": progress,
+                            "tier_output_tokens": (
+                                tier_policy.output_tokens if tier_policy else None
+                            ),
                         },
                     )
                     raise AgentCallWallTimeoutError(
-                        f"{agent.id} exceeded the {wall_timeout:.0f}s whole-call limit"
+                        f"{agent.id} exceeded the {wall_timeout:.0f}s whole-call limit",
+                        usage=usage,
+                        progress=progress,
+                    )
+                if (
+                    token_cutoff is not None
+                    and approx_tokens >= token_cutoff
+                    and content_characters == 0
+                ):
+                    usage = self._interrupted_usage(
+                        agent,
+                        output_tokens=approx_tokens,
+                        latency_seconds=elapsed_float,
+                    )
+                    self._record_runner_failure(agent, "reasoning_answer_reserve")
+                    self.store.append_event(
+                        "reasoning_answer_reserve_enforced",
+                        {
+                            "stage": stage,
+                            "agent_id": agent.id,
+                            "elapsed_seconds": elapsed_float,
+                            "progress": progress,
+                            "tier_output_tokens": tier_policy.output_tokens,
+                            "answer_reserve_tokens": tier_policy.answer_reserve_tokens,
+                            "no_content_token_cutoff": token_cutoff,
+                            "recovery": "restart_once_at_32k_from_external_checkpoint",
+                        },
+                    )
+                    raise ReasoningBudgetExhaustedError(
+                        f"{agent.id} reached the {token_cutoff} token no-content cutoff; "
+                        f"{tier_policy.answer_reserve_tokens} tokens were reserved for "
+                        "the structured artifact",
+                        usage=usage,
+                        progress=progress,
                     )
                 if (
                     elapsed_float >= reasoning_timeout
-                    and int(progress.get("reasoning_characters", 0) or 0)
-                    >= minimum_reasoning
-                    and int(progress.get("content_characters", 0) or 0) == 0
+                    and (
+                        int(progress.get("reasoning_characters", 0) or 0)
+                        >= minimum_reasoning
+                        or approx_tokens > 0
+                    )
+                    and content_characters == 0
                 ):
+                    usage = self._interrupted_usage(
+                        agent,
+                        output_tokens=approx_tokens,
+                        latency_seconds=elapsed_float,
+                    )
                     self._record_runner_failure(agent, "reasoning_only_stall")
                     self.store.append_event(
                         "reasoning_only_stream_aborted",
@@ -694,12 +820,22 @@ class StructuredAgentRunner:
                             "agent_id": agent.id,
                             "elapsed_seconds": elapsed_float,
                             "progress": progress,
-                            "recovery": "restart_from_external_checkpoint",
+                            "tier_output_tokens": (
+                                tier_policy.output_tokens if tier_policy else None
+                            ),
+                            "answer_reserve_tokens": (
+                                tier_policy.answer_reserve_tokens
+                                if tier_policy
+                                else None
+                            ),
+                            "recovery": "restart_once_at_32k_from_external_checkpoint",
                         },
                     )
                     raise ReasoningOnlyStallError(
                         f"{agent.id} streamed private reasoning for {elapsed_float:.0f}s "
-                        "without beginning the requested artifact"
+                        "without beginning the requested artifact",
+                        usage=usage,
+                        progress=progress,
                     )
                 if (
                     self.activity is None
@@ -712,7 +848,6 @@ class StructuredAgentRunner:
                 minutes, seconds = divmod(elapsed, 60)
                 elapsed_text = f"{minutes:02d}:{seconds:02d}"
                 chunks = int(progress.get("chunks", 0) or 0)
-                approx_tokens = int(progress.get("approx_output_tokens", 0) or 0)
                 last_data_age = float(progress.get("last_data_age_seconds", 0.0) or 0.0)
                 self.activity.update_task(
                     activity_task,
@@ -742,6 +877,12 @@ class StructuredAgentRunner:
                             progress.get("content_characters", 0) or 0
                         ),
                         "last_data_age_seconds": last_data_age,
+                        "tier_output_tokens": (
+                            tier_policy.output_tokens if tier_policy else None
+                        ),
+                        "answer_reserve_tokens": (
+                            tier_policy.answer_reserve_tokens if tier_policy else None
+                        ),
                     },
                 )
         except BaseException:
@@ -749,6 +890,42 @@ class StructuredAgentRunner:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
             raise
+
+    @staticmethod
+    def _copy_usage(usage: UsageRecord) -> UsageRecord:
+        return UsageRecord.model_validate(usage.model_dump(mode="json"))
+
+    @staticmethod
+    def _sum_usage(left: UsageRecord, right: UsageRecord) -> UsageRecord:
+        return UsageRecord(
+            input_tokens=left.input_tokens + right.input_tokens,
+            output_tokens=left.output_tokens + right.output_tokens,
+            total_tokens=left.total_tokens + right.total_tokens,
+            estimated_cost_usd=(left.estimated_cost_usd + right.estimated_cost_usd),
+            latency_ms=left.latency_ms + right.latency_ms,
+        )
+
+    @staticmethod
+    def _interrupted_usage(
+        agent: AgentRuntime,
+        *,
+        output_tokens: int,
+        latency_seconds: float,
+    ) -> UsageRecord:
+        tokens = max(0, int(output_tokens))
+        latency_ms = max(0.0, latency_seconds * 1000.0)
+        cost = tokens / 1_000_000 * agent.config.pricing.output_per_million
+        agent.output_tokens += tokens
+        agent.estimated_cost_usd += cost
+        agent.total_latency_ms += latency_ms
+        agent.failures += 1
+        agent.consecutive_failures += 1
+        return UsageRecord(
+            output_tokens=tokens,
+            total_tokens=tokens,
+            estimated_cost_usd=cost,
+            latency_ms=latency_ms,
+        )
 
     @staticmethod
     def _attach_metadata(value: BaseModel, raw_ref: str, usage: UsageRecord) -> None:

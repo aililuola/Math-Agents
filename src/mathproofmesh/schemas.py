@@ -1490,6 +1490,40 @@ class WorkingProofCheckpoint(StrictModel):
         return self
 
 
+class PostFailureBottleneckDiagnostic(StrictModel):
+    """Public-state diagnosis after a model call returns no usable artifact."""
+
+    diagnostic_id: str = Field(default_factory=lambda: new_id("bottleneck"))
+    problem_hash: str = ""
+    path_id: str = ""
+    route_id: str | None = None
+    strategy_id: str = ""
+    checkpoint_id: str = ""
+    failure_type: Literal["reasoning_budget_exhausted", "reasoning_only_stall"] = (
+        "reasoning_budget_exhausted"
+    )
+    failure_fingerprint: str = ""
+    smallest_blocked_claim: str = Field(min_length=1)
+    blocked_claim_source: Literal[
+        "checkpoint_current_goal",
+        "checkpoint_remaining_subgoal",
+        "working_checkpoint_gap",
+        "typed_public_context",
+    ]
+    attempted_mechanism: str = Field(min_length=1)
+    why_blocked_from_public_state: str = Field(min_length=1)
+    related_obligation_ids: list[str] = Field(default_factory=list)
+    preserved_verified_step_ids: list[str] = Field(default_factory=list)
+    preserved_fact_message_ids: list[str] = Field(default_factory=list)
+    alternative_mechanism_tags: list[str] = Field(min_length=1)
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    requires_inspiration: bool = True
+    exact_failed_internal_step_known: Literal[False] = False
+    private_reasoning_recovered: Literal[False] = False
+    raw_artifact_ref: str | None = None
+    usage: UsageRecord = Field(default_factory=UsageRecord)
+
+
 class ClaimBatch(StrictModel):
     attempt_id: str
     claims: list[ClaimCard] = Field(default_factory=list)

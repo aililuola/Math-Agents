@@ -19,6 +19,7 @@ def export_hierarchical_checkpoint(
     contradiction_broker: Any,
     inspiration_engine: Any,
     capability_profile: Any,
+    deep_exploration_registry: Any = None,
 ) -> dict[str, Any]:
     def state_of(component: Any) -> dict[str, Any] | None:
         return component.export_state() if component is not None else None
@@ -38,4 +39,5 @@ def export_hierarchical_checkpoint(
         "contradiction_broker": state_of(contradiction_broker),
         "inspiration_engine": state_of(inspiration_engine),
         "agent_capability": state_of(capability_profile),
+        "deep_exploration_registry": state_of(deep_exploration_registry),
     }

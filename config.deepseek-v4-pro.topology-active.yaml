@@ -17,8 +17,8 @@ agents:
     temperature: 0.0
     # Keep the provider ceiling separate from the normal per-call operating budget.
     provider_max_output_tokens: 384000
-    max_output_tokens: 96000
-    timeout_seconds: 900
+    max_output_tokens: 128000
+    timeout_seconds: 1920
     trust_prior: 0.55
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
 
@@ -36,8 +36,8 @@ agents:
     max_concurrency: 1
     temperature: 0.0
     provider_max_output_tokens: 384000
-    max_output_tokens: 96000
-    timeout_seconds: 900
+    max_output_tokens: 128000
+    timeout_seconds: 1920
     trust_prior: 0.52
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
 
@@ -55,8 +55,8 @@ agents:
     max_concurrency: 1
     temperature: 0.0
     provider_max_output_tokens: 384000
-    max_output_tokens: 96000
-    timeout_seconds: 900
+    max_output_tokens: 128000
+    timeout_seconds: 1920
     trust_prior: 0.52
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
 
@@ -74,8 +74,8 @@ agents:
     max_concurrency: 1
     temperature: 0.0
     provider_max_output_tokens: 384000
-    max_output_tokens: 96000
-    timeout_seconds: 900
+    max_output_tokens: 128000
+    timeout_seconds: 1920
     trust_prior: 0.54
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
 
@@ -93,8 +93,8 @@ agents:
     max_concurrency: 1
     temperature: 0.0
     provider_max_output_tokens: 384000
-    max_output_tokens: 96000
-    timeout_seconds: 900
+    max_output_tokens: 128000
+    timeout_seconds: 1920
     trust_prior: 0.56
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
 
@@ -214,7 +214,7 @@ continuation:
   checkpoint_policy: verified_subgoal
   max_new_steps_per_call: 20
   max_new_claims_per_call: 3
-  max_output_tokens_per_segment: 96000
+  max_output_tokens_per_segment: 128000
   # Keep each scheduler action small enough to preserve breadth and final-audit calls.
   segments_per_explore_call: 1
   max_segments_per_path: 20
@@ -226,6 +226,49 @@ continuation:
   max_failover_agents: 2
   process_resume_enabled: true
   retain_rejected_deltas: true
+  # One small public-state diagnosis is allowed after a reasoning-only failure.
+  post_failure_bottleneck_enabled: true
+  post_failure_bottleneck_max_output_tokens: 12000
+  post_failure_bottleneck_once_per_checkpoint: true
+  post_failure_trigger_inspiration: true
+
+deep_exploration_policy:
+  enabled: true
+  # Distinct mathematical signatures may use 96K/128K concurrently. There is no
+  # global high-tier semaphore beyond runtime.max_parallel_calls and agent limits.
+  tiers:
+    - output_tokens: 32000
+      no_content_timeout_seconds: 480
+      wall_timeout_seconds: 720
+      answer_reserve_tokens: 8000
+    - output_tokens: 64000
+      no_content_timeout_seconds: 720
+      wall_timeout_seconds: 1080
+      answer_reserve_tokens: 8000
+    - output_tokens: 96000
+      no_content_timeout_seconds: 1080
+      wall_timeout_seconds: 1500
+      answer_reserve_tokens: 12000
+    - output_tokens: 128000
+      no_content_timeout_seconds: 1500
+      wall_timeout_seconds: 1920
+      answer_reserve_tokens: 16000
+  high_tier_threshold_tokens: 96000
+  partial_repair_max_output_tokens: 64000
+  max_partial_repairs_per_signature: 1
+  max_running_per_signature: 1
+  no_progress_high_tier_limit_per_signature: 1
+  semantic_duplicate_threshold: 0.86
+  allow_parallel_distinct_signatures: true
+  allow_local_bottleneck_pivot: true
+  require_novelty_review_for_pivot: true
+  require_meta_approval_for_128k: true
+  min_remaining_calls_for_128k: 8
+  min_remaining_tokens_for_128k: 256000
+  preserve_parent_verified_checkpoint: true
+  reset_on_verified_checkpoint: true
+  reset_on_referee_confirmed_mechanism_change: true
+  persist_across_resume: true
 
 computation:
   enabled: true
@@ -271,8 +314,8 @@ runtime:
   reasoning_only_abort_seconds: 720
   reasoning_only_min_characters: 4096
   json_repair_max_output_tokens: 8192
-  # Deep route work escalates only after earlier verified segments need more room.
-  exploration_output_token_tiers: [32000, 64000, 96000]
+  # Compatibility mirror; admission is controlled by deep_exploration_policy.
+  exploration_output_token_tiers: [32000, 64000, 96000, 128000]
   stage_output_token_limits:
     triage: 12000
     strategy_generation: 24000
@@ -295,6 +338,7 @@ runtime:
     persistent_meta_strategy: 24000
     surprise_exploration: 24000
     inspiration_referee: 16000
+    post_failure_bottleneck: 12000
     synthesis: 64000
     final_revision: 64000
     experiment_codegen: 12000

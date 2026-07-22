@@ -454,6 +454,25 @@ def demo_responder(
             "reason": "The observable verified-gain signal is flat, so test a distinct representation.",
             "estimated_calls": 1,
         }
+    if schema_name == "PostFailureBottleneckDiagnostic":
+        return {
+            "smallest_blocked_claim": (
+                "Resolve the current goal recorded in the latest verified checkpoint."
+            ),
+            "blocked_claim_source": "checkpoint_current_goal",
+            "attempted_mechanism": "Continue the assigned route mechanism.",
+            "why_blocked_from_public_state": (
+                "The public checkpoint contains the goal but no verified closing step."
+            ),
+            "alternative_mechanism_tags": [
+                "reverse_goal_analysis",
+                "representation_switch",
+            ],
+            "confidence": 0.55,
+            "requires_inspiration": True,
+            "exact_failed_internal_step_known": False,
+            "private_reasoning_recovered": False,
+        }
     if schema_name == "InspirationReview":
         proposal_ids = re.findall(r'"proposal_id"\s*:\s*"([^"]+)"', text)
         return {

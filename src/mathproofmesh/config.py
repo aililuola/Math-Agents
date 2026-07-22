@@ -493,6 +493,115 @@ class ContinuationConfig(ConfigModel):
     max_failover_agents: int = Field(default=2, ge=0, le=16)
     process_resume_enabled: bool = True
     retain_rejected_deltas: bool = True
+    post_failure_bottleneck_enabled: bool = True
+    post_failure_bottleneck_max_output_tokens: int = Field(
+        default=12000, ge=512, le=32000
+    )
+    post_failure_bottleneck_once_per_checkpoint: bool = True
+    post_failure_trigger_inspiration: bool = True
+
+
+class ExplorationTierPolicyConfig(ConfigModel):
+    """One server-owned deep-exploration operating tier."""
+
+    output_tokens: int = Field(ge=512, le=384000)
+    no_content_timeout_seconds: float = Field(ge=5.0, le=3600.0)
+    wall_timeout_seconds: float = Field(ge=5.0, le=7200.0)
+    answer_reserve_tokens: int = Field(ge=256, le=128000)
+
+    @model_validator(mode="after")
+    def validate_tier(self) -> "ExplorationTierPolicyConfig":
+        if self.no_content_timeout_seconds >= self.wall_timeout_seconds:
+            raise ValueError(
+                "no_content_timeout_seconds must be lower than wall_timeout_seconds"
+            )
+        if self.answer_reserve_tokens >= self.output_tokens:
+            raise ValueError("answer_reserve_tokens must be lower than output_tokens")
+        return self
+
+    @property
+    def no_content_token_cutoff(self) -> int:
+        return self.output_tokens - self.answer_reserve_tokens
+
+
+class DeepExplorationPolicyConfig(ConfigModel):
+    """Evidence-gated long reasoning without a global high-tier concurrency cap."""
+
+    enabled: bool = True
+    tiers: list[ExplorationTierPolicyConfig] = Field(
+        default_factory=lambda: [
+            ExplorationTierPolicyConfig(
+                output_tokens=32000,
+                no_content_timeout_seconds=480,
+                wall_timeout_seconds=720,
+                answer_reserve_tokens=8000,
+            ),
+            ExplorationTierPolicyConfig(
+                output_tokens=64000,
+                no_content_timeout_seconds=720,
+                wall_timeout_seconds=1080,
+                answer_reserve_tokens=8000,
+            ),
+            ExplorationTierPolicyConfig(
+                output_tokens=96000,
+                no_content_timeout_seconds=1080,
+                wall_timeout_seconds=1500,
+                answer_reserve_tokens=12000,
+            ),
+            ExplorationTierPolicyConfig(
+                output_tokens=128000,
+                no_content_timeout_seconds=1500,
+                wall_timeout_seconds=1920,
+                answer_reserve_tokens=16000,
+            ),
+        ],
+        min_length=1,
+        max_length=8,
+    )
+    high_tier_threshold_tokens: int = Field(default=96000, ge=512, le=384000)
+    partial_repair_max_output_tokens: int = Field(default=64000, ge=512, le=384000)
+    max_partial_repairs_per_signature: int = Field(default=1, ge=0, le=4)
+    max_running_per_signature: int = Field(default=1, ge=1, le=4)
+    no_progress_high_tier_limit_per_signature: int = Field(default=1, ge=1, le=8)
+    semantic_duplicate_threshold: float = Field(default=0.86, ge=0.5, le=1.0)
+    allow_parallel_distinct_signatures: bool = True
+    allow_local_bottleneck_pivot: bool = True
+    require_novelty_review_for_pivot: bool = True
+    require_meta_approval_for_128k: bool = True
+    min_remaining_calls_for_128k: int = Field(default=8, ge=1, le=1000)
+    min_remaining_tokens_for_128k: int = Field(default=256000, ge=128000, le=1000000000)
+    preserve_parent_verified_checkpoint: bool = True
+    reset_on_verified_checkpoint: bool = True
+    reset_on_referee_confirmed_mechanism_change: bool = True
+    persist_across_resume: bool = True
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> "DeepExplorationPolicyConfig":
+        values = [item.output_tokens for item in self.tiers]
+        if values != sorted(set(values)):
+            raise ValueError("deep exploration tiers must be strictly increasing")
+        if self.partial_repair_max_output_tokens > values[-1]:
+            raise ValueError(
+                "partial_repair_max_output_tokens cannot exceed the highest tier"
+            )
+        if not self.allow_parallel_distinct_signatures:
+            raise ValueError(
+                "distinct deep-exploration signatures must remain parallelizable"
+            )
+        return self
+
+    def tier_for_limit(self, output_tokens: int | None) -> ExplorationTierPolicyConfig:
+        requested = output_tokens or self.tiers[0].output_tokens
+        eligible = [item for item in self.tiers if item.output_tokens <= requested]
+        return eligible[-1] if eligible else self.tiers[0]
+
+    def tier_index_for_limit(self, output_tokens: int | None) -> int:
+        selected = self.tier_for_limit(output_tokens)
+        return next(
+            index
+            for index, item in enumerate(self.tiers)
+            if item.output_tokens == selected.output_tokens
+        )
 
 
 class ComputationConfig(ConfigModel):
@@ -560,7 +669,7 @@ class RuntimeConfig(ConfigModel):
     reasoning_only_min_characters: int = Field(default=4096, ge=0, le=10_000_000)
     json_repair_max_output_tokens: int = Field(default=8192, ge=256, le=384000)
     # The configured agent limit remains the hard ceiling. Routine stages get a
-    # smaller soft ceiling so 96K is reserved for genuinely deep route work.
+    # smaller soft ceiling so 96K/128K are reserved for admitted deep route work.
     stage_output_token_limits: dict[str, int] = Field(
         default_factory=lambda: {
             "triage": 12000,
@@ -584,13 +693,16 @@ class RuntimeConfig(ConfigModel):
             "persistent_meta_strategy": 24000,
             "surprise_exploration": 24000,
             "inspiration_referee": 16000,
+            "post_failure_bottleneck": 12000,
             "synthesis": 64000,
             "final_revision": 64000,
             "experiment_codegen": 12000,
         }
     )
     exploration_output_token_tiers: list[int] = Field(
-        default_factory=lambda: [32000, 64000, 96000], min_length=1, max_length=8
+        default_factory=lambda: [32000, 64000, 96000, 128000],
+        min_length=1,
+        max_length=8,
     )
     provider_circuit_breaker_enabled: bool = True
     provider_circuit_failure_threshold: int = Field(default=2, ge=2, le=32)
@@ -632,6 +744,9 @@ class SystemConfig(ConfigModel):
     topology: TopologyConfig = Field(default_factory=TopologyConfig)
     verification: VerificationConfig = Field(default_factory=VerificationConfig)
     continuation: ContinuationConfig = Field(default_factory=ContinuationConfig)
+    deep_exploration_policy: DeepExplorationPolicyConfig = Field(
+        default_factory=DeepExplorationPolicyConfig
+    )
     computation: ComputationConfig = Field(default_factory=ComputationConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
 

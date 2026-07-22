@@ -22,6 +22,7 @@ from mathproofmesh.schemas import (
     MessageReceipt,
     MetaReview,
     MetaStrategyDecision,
+    PostFailureBottleneckDiagnostic,
     ProblemContract,
     ProofAttempt,
     ProofDelta,
@@ -80,6 +81,9 @@ def test_every_v07_typed_prompt_constructs_with_nested_models() -> None:
         prompts.route_prove(problem, nested=nested),
         prompts.route_skeptic(problem=problem, nested=nested),
         prompts.route_referee(problem=problem, nested=nested),
+        prompts.post_failure_bottleneck(
+            problem, max_output_tokens=12000, nested=nested
+        ),
         prompts.bridge_lemma(problem=problem, nested=nested),
         prompts.resolve_contradiction(problem=problem, nested=nested),
         prompts.acknowledge_message(problem=problem, nested=nested),
@@ -121,6 +125,7 @@ def test_cross_field_prompt_examples_are_actually_schema_valid() -> None:
         InvariantHypothesis,
         ReverseGoalPlan,
         MetaStrategyDecision,
+        PostFailureBottleneckDiagnostic,
         InspirationProposal,
         InspirationReview,
         BrokerDecision,
