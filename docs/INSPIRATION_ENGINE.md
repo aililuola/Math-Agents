@@ -22,13 +22,37 @@ progress, failed final repair and manual requests. It selects at most
 
 Trigger detection and task construction are deterministic and cheap. Before
 any generator, referee or quick-skeptic model call, every task is converted to
-a typed scheduler action with a three-call cost estimate and passed through
-`SoftBudgetAllocator.admit_decision()`. Rejected tasks emit an admission record
-and make no provider call.
+a typed scheduler action and passed through `SoftBudgetAllocator.admit_decision()`.
+The default active estimate reserves 3 proposer calls, up to 2 Referee calls,
+up to 2 quick-Skeptic calls and the first real route attempt as one auditable
+cycle. Rejected tasks emit an admission record and make no provider call.
 
 A cheap exact falsification is still allowed early. Reasoning-first forbids
 computation as the default route generator, not inexpensive rejection of a
 precise false premise.
+
+## Active Candidate Population And Context
+
+Active mode generates `active_proposals_per_task` independent candidates for
+each admitted task. The default is three. Candidates are generated concurrently
+and may rotate across eligible Agents; there is no new global semaphore across
+different domains, subdirections or local proof obligations.
+
+The default population has two context modes:
+
+- `warm`: a mechanism-specific, bounded selection of Broker-admitted Facts,
+  relevant NegativeMemory, the minimal target obligation graph and compact
+  novelty signatures. It never receives every historical Fact or full route
+  transcript.
+- `cold`: the problem, target obligation, observable progress metrics and a
+  forbidden-existing-mechanism list. Existing route proof prose, Facts,
+  negatives and graph history are withheld to reduce anchoring.
+
+Each slot also receives a distinct generation contract. The Novelty Gate then
+removes mechanism duplicates before model review, keeps at most
+`max_reviewed_proposals_per_task`, and preserves context-mode diversity when it
+adds structural value. `max_materialized_proposals_per_trigger` independently
+caps route creation, so a larger candidate population does not multiply paths.
 
 ## Representation Switchboard
 
@@ -105,8 +129,11 @@ spending calls or changing routes.
 
 `NoveltySignature` combines representation tags, mechanism tags, core objects,
 key transformations, proof principles and targeted obligations with configured
-weights. Reworded prose with the same mechanism is a duplicate. Novelty means
-different, not correct.
+weights. A conservative `MechanismNormalizer` maps free labels into a versioned
+ontology while retaining raw and unknown extension labels for audit. Unknown
+labels carry only weak similarity weight and cannot independently declare a
+duplicate. Reworded prose with the same recognized mechanism is a duplicate.
+Novelty means different, not correct.
 
 `InspirationReferee` must differ from the proposal author. It checks semantic
 distinctness, relevance, coherence, hidden assumptions and immediate
@@ -131,10 +158,12 @@ the same proposal twice.
 State is stored in the stage checkpoint and
 `inspiration/inspiration_checkpoint.json`: triggers, tasks, proposals, reviews,
 materializations, derived strategies, verified outcomes, strategist cooldowns,
-surprise budget and the last observable snapshot. Activity includes all
-required trigger, representation, analogy, construction, invariant, meta,
-surprise, rejection, materialization and verification events without private
-reasoning.
+surprise budget, candidate-selection decisions, call reservations and the last
+observable snapshot. A reservation records proposer, Referee, Skeptic and first
+route-attempt capacity. Used calls are charged, unused calls are released, and
+an interrupted reservation is reconciled on resume. Activity and hierarchical
+metrics include warm/cold proposal counts, pre-review filtering and reservation
+consumption without private reasoning.
 
 ## Benchmark
 

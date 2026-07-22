@@ -3,6 +3,9 @@
 from ..schemas import (
     AnalogyMapping,
     ConstructionProposal,
+    InspirationCallReservation,
+    InspirationCandidateDecision,
+    InspirationContextMode,
     InspirationMaterialization,
     InspirationMechanism,
     InspirationProposal,
@@ -21,6 +24,9 @@ from ..schemas import (
 __all__ = [
     "AnalogyMapping",
     "ConstructionProposal",
+    "InspirationCallReservation",
+    "InspirationCandidateDecision",
+    "InspirationContextMode",
     "InspirationMaterialization",
     "InspirationMechanism",
     "InspirationProposal",

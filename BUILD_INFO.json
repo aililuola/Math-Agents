@@ -73,6 +73,14 @@
     "persistent_meta_strategist": true,
     "surprise_budget_explorer": true,
     "novelty_signature_and_referee": true,
+    "versioned_mechanism_ontology": true,
+    "active_proposals_per_task": 3,
+    "warm_and_cold_candidate_contexts": true,
+    "pre_review_candidate_deduplication": true,
+    "max_reviewed_proposals_per_task": 2,
+    "max_materialized_proposals_per_trigger": 1,
+    "atomic_inspiration_call_reservations": true,
+    "parallel_candidate_generation_without_global_lock": true,
     "scheduler_admission_before_model_calls": true,
     "per_trigger_route_cap_enforced": true,
     "required_referee_switch_enforced": true,
@@ -84,25 +92,25 @@
     "compileall": "PASS",
     "ruff_check": "PASS",
     "ruff_format_check": "PASS",
-    "pytest": "209 passed with dev and server extras including z3-solver",
+    "pytest": "219 passed with dev and server extras including z3-solver",
     "offline_topology_benchmark": {
       "status": "PASS",
       "provider_calls": 0,
       "cases": 6,
       "variants": 11,
-      "component_contracts_passed": 10
+      "component_contracts_passed": 12
     },
     "reasoning_first_computation_regression": "PASS",
     "configuration_parse": "PASS",
     "real_provider_calls": "NOT RUN; credentials intentionally unused"
   },
   "counts": {
-    "source_python_files": 81,
-    "test_python_files": 70,
-    "documentation_files": 24,
-    "source_lines": 33525,
-    "test_lines": 9665,
-    "docs_directory_lines": 3237
+    "source_python_files": 83,
+    "test_python_files": 73,
+    "documentation_files": 25,
+    "source_lines": 34785,
+    "test_lines": 10199,
+    "docs_directory_lines": 4103
   },
   "artifacts": {
     "status": "SOURCE RELEASE; DISTRIBUTION ARTIFACTS NOT COMMITTED",

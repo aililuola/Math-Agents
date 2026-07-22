@@ -101,6 +101,7 @@ class CallLedger:
             "synthesis": 0,
             "other": 0,
         }
+        self.reservation_calls: dict[str, int] = {}
 
     def can_start(self, stage: str) -> bool:
         budget = self.config.budget
@@ -118,7 +119,12 @@ class CallLedger:
             return False
         return True
 
-    def start(self, stage: str, bucket: str = "other") -> None:
+    def start(
+        self,
+        stage: str,
+        bucket: str = "other",
+        reservation_id: str | None = None,
+    ) -> None:
         if not self.can_start(stage):
             raise BudgetExhaustedError(
                 f"budget exhausted before stage={stage}: calls={self.calls_started}, "
@@ -128,6 +134,10 @@ class CallLedger:
         self.stage_calls[stage] = self.stage_calls.get(stage, 0) + 1
         normalized_bucket = bucket if bucket in self.bucket_calls else "other"
         self.bucket_calls[normalized_bucket] += 1
+        if reservation_id:
+            self.reservation_calls[reservation_id] = (
+                self.reservation_calls.get(reservation_id, 0) + 1
+            )
 
     @property
     def remaining_calls(self) -> int:
@@ -158,6 +168,7 @@ class StructuredAgentRunner:
                 "calls_started": self.ledger.calls_started,
                 "stage_calls": self.ledger.stage_calls,
                 "bucket_calls": self.ledger.bucket_calls,
+                "reservation_calls": self.ledger.reservation_calls,
                 "agent_metrics": self.pool.metrics(),
                 "provider_circuit": self.pool.provider_circuit_state(),
             },
@@ -173,6 +184,7 @@ class StructuredAgentRunner:
         specialty_hints: list[str] | None = None,
         prefer_provider_not: str | None = None,
         budget_bucket: str = "other",
+        budget_reservation_id: str | None = None,
     ) -> StructuredCallResult[Any]:
         assert_blind_prompt_safe(bundle)
         agent = fixed_agent or self.pool.select(
@@ -220,7 +232,11 @@ class StructuredAgentRunner:
         total_usage = UsageRecord()
         try:
             for parse_attempt in range(self.config.runtime.parse_retries + 1):
-                self.ledger.start(bundle.stage, budget_bucket)
+                self.ledger.start(
+                    bundle.stage,
+                    budget_bucket,
+                    reservation_id=budget_reservation_id,
+                )
                 self.persist_runtime_state()
                 effective_max_output_tokens = self._effective_output_limit(
                     bundle,

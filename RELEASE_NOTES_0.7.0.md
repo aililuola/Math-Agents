@@ -113,6 +113,31 @@ validation.
 - Hierarchical reports distinguish Broker-admitted global Facts from legacy
   ClaimMemory history. `reports/global_fact_inventory.json` records both sets
   and the qualification policy.
-- The complete offline suite passes 205 tests with `.[dev,server]` installed,
+- The complete offline suite passes 219 tests with `.[dev,server]` installed,
   including `z3-solver`. The topology benchmark is a deterministic component
   contract Mock with zero provider calls, not a real IMO performance claim.
+
+## Diverse Inspiration Candidate Population
+
+- An admitted active Inspiration task now generates three independent typed
+  candidates concurrently instead of treating one model sample as the whole
+  mechanism search. The default population contains two bounded warm-context
+  candidates and one de-anchored cold-context candidate.
+- Warm context is mechanism-specific and includes only a small relevant set of
+  Broker-admitted Facts, bounded NegativeMemory and the minimal target graph.
+  Cold context excludes route proof prose, Facts and negatives while retaining
+  the problem, target obligation and a forbidden-mechanism list.
+- A canonical mechanism ontology separates representations, principles,
+  transformations and mathematical objects. Raw and unknown extension labels
+  remain auditable, but unknown labels cannot independently trigger duplicate
+  rejection.
+- The Novelty Gate deduplicates the candidate population before expensive
+  review. At most two candidates per task reach independent Referee/Skeptic
+  calls, and at most one proposal per trigger creates a new route.
+- Scheduler admission atomically reserves proposer, Referee, Skeptic and first
+  route-attempt calls. Checkpoint resume reconciles charged calls and releases
+  unused or interrupted reservations. Activity and hierarchical metrics expose
+  every selection and budget transition.
+- No global Inspiration or high-tier semaphore was added. Distinct domains,
+  subdirections, local obligations and mechanism pivots may continue in
+  parallel subject to existing Agent concurrency and total run budgets.

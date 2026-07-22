@@ -30,6 +30,7 @@ async def test_active_inspiration_builds_llm_prompts_and_materializes_proposals(
     config.budget.max_rounds = 3
     config.topology.inspiration.stagnation_rounds = 1
     typed_inspiration_outputs: list[str] = []
+    generation_contracts: list[dict[str, Any]] = []
 
     def responder(
         schema_name: str | None,
@@ -48,6 +49,18 @@ async def test_active_inspiration_builds_llm_prompts_and_materializes_proposals(
             "InspirationReview",
         }:
             typed_inspiration_outputs.append(str(schema_name))
+        if schema_name in {
+            "RepresentationCandidate",
+            "AnalogyMapping",
+            "ConstructionProposal",
+            "InvariantHypothesis",
+            "ReverseGoalPlan",
+            "MetaStrategyDecision",
+            "InspirationProposal",
+        }:
+            contract = _context(messages).get("generation_contract")
+            if isinstance(contract, dict):
+                generation_contracts.append(contract)
         if schema_name == "ContinuationTurn":
             context = _context(messages)
             segment = int(context.get("authoritative_ids", {}).get("segment_index", 1))
@@ -84,6 +97,12 @@ async def test_active_inspiration_builds_llm_prompts_and_materializes_proposals(
     assert any(payload["triggers"] for payload in payloads)
     assert any(payload["proposals"] for payload in payloads)
     assert typed_inspiration_outputs
+    assert len(generation_contracts) >= 3
+    assert {item["proposal_slot"] for item in generation_contracts} >= {0, 1, 2}
+    assert {item["context_mode"] for item in generation_contracts} >= {
+        "warm",
+        "cold",
+    }
 
     checkpoint = json.loads(
         (root / "structured" / "inspiration_engine.json").read_text(encoding="utf-8")
@@ -91,3 +110,33 @@ async def test_active_inspiration_builds_llm_prompts_and_materializes_proposals(
     assert checkpoint["proposals"]
     assert checkpoint["reviews"]
     assert checkpoint["materializations"]
+    decisions = list(checkpoint["candidate_decisions"].values())
+    assert decisions
+    selected_by_task: dict[str, int] = {}
+    for decision in decisions:
+        if decision["selected_for_review"]:
+            task_id = str(decision["task_id"])
+            selected_by_task[task_id] = selected_by_task.get(task_id, 0) + 1
+    assert selected_by_task
+    assert max(selected_by_task.values()) <= 2
+    assert all(
+        item["status"] in {"completed", "interrupted"}
+        for item in checkpoint["call_reservations"].values()
+    )
+    route_creations_by_trigger: dict[str, int] = {}
+    for proposal_id, materialization in checkpoint["materializations"].items():
+        if materialization["action"] != "route_created":
+            continue
+        trigger_id = checkpoint["proposals"][proposal_id]["trigger_id"]
+        route_creations_by_trigger[trigger_id] = (
+            route_creations_by_trigger.get(trigger_id, 0) + 1
+        )
+    assert all(value <= 1 for value in route_creations_by_trigger.values())
+    metrics = json.loads(
+        (root / "reports" / "hierarchical_metrics.json").read_text(encoding="utf-8")
+    )
+    assert metrics["inspiration_proposal_context_modes"]["warm"] >= 1
+    assert metrics["inspiration_proposal_context_modes"]["cold"] >= 1
+    assert metrics["inspiration_candidates_selected_for_review"] >= 1
+    assert metrics["inspiration_call_budget_reserved"] >= 10
+    assert metrics["inspiration_call_budget_consumed"] >= 1

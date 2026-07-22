@@ -169,6 +169,12 @@ def write_hierarchical_reports(
         str(item.get("action", "unknown"))
         for item in dict(inspiration_engine.get("materializations", {})).values()
     )
+    proposals = dict(inspiration_engine.get("proposals", {}))
+    candidate_decisions = dict(inspiration_engine.get("candidate_decisions", {}))
+    call_reservations = dict(inspiration_engine.get("call_reservations", {}))
+    context_mode_counts = Counter(
+        str(item.get("context_mode", "local")) for item in proposals.values()
+    )
     cross_route_chars = sum(
         len(str(messages.get(str(item.get("message_id")), {})))
         for item in deliveries.values()
@@ -215,7 +221,28 @@ def write_hierarchical_reports(
         "graph_mode": proof_graph.get("mode", "off"),
         "inspiration_mode": inspiration_engine.get("mode", "off"),
         "inspiration_trigger_count": len(inspiration_engine.get("triggers", {})),
-        "inspiration_proposal_count": len(inspiration_engine.get("proposals", {})),
+        "inspiration_proposal_count": len(proposals),
+        "inspiration_proposal_context_modes": dict(context_mode_counts),
+        "inspiration_candidates_selected_for_review": sum(
+            bool(item.get("selected_for_review"))
+            for item in candidate_decisions.values()
+        ),
+        "inspiration_candidates_filtered_before_review": sum(
+            not bool(item.get("selected_for_review"))
+            for item in candidate_decisions.values()
+        ),
+        "inspiration_call_budget_reserved": sum(
+            int(item.get("reserved_calls", 0)) for item in call_reservations.values()
+        ),
+        "inspiration_call_budget_consumed": sum(
+            int(item.get("consumed_calls", 0)) for item in call_reservations.values()
+        ),
+        "inspiration_call_budget_released": sum(
+            int(item.get("released_calls", 0)) for item in call_reservations.values()
+        ),
+        "inspiration_call_budget_overrun": sum(
+            int(item.get("overrun_calls", 0)) for item in call_reservations.values()
+        ),
         "inspiration_verified_count": len(
             inspiration_engine.get("verified_proposals", {})
         ),

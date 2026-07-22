@@ -18,6 +18,7 @@ from mathproofmesh.inspiration.construction_inventor import (
 from mathproofmesh.inspiration.invariant_hypothesis import InvariantHypothesisAgent
 from mathproofmesh.inspiration.local_library import LocalAnalogyLibrary
 from mathproofmesh.inspiration.novelty import NoveltyGate
+from mathproofmesh.inspiration.ontology import MechanismNormalizer
 from mathproofmesh.inspiration.representation_switchboard import (
     RepresentationSwitchboard,
 )
@@ -351,6 +352,11 @@ def _run_component_contracts(
     novelty_duplicate = NoveltyGate(config.topology.inspiration).assess(
         signature, [signature]
     )
+    normalizer = MechanismNormalizer()
+    normalized_route = normalizer.signature_from_route_tags(
+        ["p-adic valuation", "minimal counterexample", "quotient"],
+        targeted_obligation_ids=["inspiration-goal"],
+    )
 
     problem = ProblemContract(
         exact_statement="Prove a finite sum identity by differences.",
@@ -411,6 +417,18 @@ def _run_component_contracts(
         "invariant_hypothesis_agent": bool(invariants)
         and all(item.falsification_request for item in invariants),
         "inspiration_triggers": bool(triggers),
+        "mechanism_ontology": (
+            normalized_route.representation_tags == ["valuation"]
+            and "descent" in normalized_route.proof_principles
+            and "quotient" in normalized_route.key_transformations
+            and normalized_route.core_objects == []
+        ),
+        "active_candidate_population": (
+            config.topology.inspiration.active_proposals_per_task == 3
+            and config.topology.inspiration.max_reviewed_proposals_per_task == 2
+            and config.topology.inspiration.max_materialized_proposals_per_trigger == 1
+            and config.topology.inspiration.cold_context_proposals_per_task == 1
+        ),
     }
 
 
@@ -553,6 +571,7 @@ def run_mock_benchmark(run_root: str | Path | None = None) -> dict[str, Any]:
                 "All mathematical and routing checks are deterministic and offline.",
                 "Calls, tokens, and cost are explicit mock estimates, not provider telemetry.",
                 "Shadow variants record recommendations but do not materialize graph or inspiration actions.",
+                "Active inspiration uses a bounded warm/cold candidate population; all performance figures remain mock estimates.",
             ],
         }
     finally:

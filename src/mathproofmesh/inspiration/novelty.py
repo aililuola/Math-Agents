@@ -5,13 +5,14 @@ from typing import Iterable
 
 from ..config import InspirationConfig
 from ..schemas import InspirationProposal, InspirationReview, NoveltySignature
+from .ontology import MechanismNormalizer
 
 
 def _jaccard(left: Iterable[str], right: Iterable[str]) -> float:
     a = {item.casefold().strip() for item in left if item.strip()}
     b = {item.casefold().strip() for item in right if item.strip()}
     if not a and not b:
-        return 1.0
+        return 0.0
     if not a or not b:
         return 0.0
     return len(a & b) / len(a | b)
@@ -31,10 +32,13 @@ class NoveltyGate:
 
     def __init__(self, config: InspirationConfig) -> None:
         self.config = config
+        self.normalizer = MechanismNormalizer()
 
     def similarity(
         self, left: NoveltySignature, right: NoveltySignature
     ) -> tuple[float, dict[str, float]]:
+        left = self.normalizer.normalize_signature(left)
+        right = self.normalizer.normalize_signature(right)
         dimensions = {
             "representation": _jaccard(
                 left.representation_tags, right.representation_tags
@@ -48,6 +52,7 @@ class NoveltyGate:
             "obligation": _jaccard(
                 left.targeted_obligation_ids, right.targeted_obligation_ids
             ),
+            "extension": _jaccard(left.extension_tags, right.extension_tags),
         }
         weights = {
             "representation": self.config.novelty_representation_weight,
@@ -56,11 +61,41 @@ class NoveltyGate:
             "transformation": self.config.novelty_transformation_weight,
             "principle": self.config.novelty_principle_weight,
             "obligation": self.config.novelty_obligation_weight,
+            # Unrecognized extension tags are retained for audit and weak
+            # similarity hints, but may not independently declare a duplicate.
+            "extension": 0.05,
         }
-        total = sum(weights.values())
+        values = {
+            "representation": (left.representation_tags, right.representation_tags),
+            "mechanism": (left.mechanism_tags, right.mechanism_tags),
+            "object": (left.core_objects, right.core_objects),
+            "transformation": (
+                left.key_transformations,
+                right.key_transformations,
+            ),
+            "principle": (left.proof_principles, right.proof_principles),
+            "obligation": (
+                left.targeted_obligation_ids,
+                right.targeted_obligation_ids,
+            ),
+            "extension": (left.extension_tags, right.extension_tags),
+        }
+        active = [name for name, pair in values.items() if pair[0] or pair[1]]
+        total = sum(weights[name] for name in active)
         similarity = (
-            sum(dimensions[name] * weights[name] for name in dimensions) / total
+            sum(dimensions[name] * weights[name] for name in active) / total
+            if total
+            else 0.0
         )
+        structural = {
+            "representation",
+            "mechanism",
+            "object",
+            "transformation",
+            "principle",
+        }
+        if not structural.intersection(active):
+            similarity = min(similarity, 0.5)
         return similarity, dimensions
 
     def assess(
@@ -72,10 +107,14 @@ class NoveltyGate:
         maximum = 0.0
         nearest_dimensions: dict[str, float] = {}
         for other in existing:
-            similarity, dimensions = self.similarity(candidate, other)
+            normalized_candidate = self.normalizer.normalize_signature(candidate)
+            normalized_other = self.normalizer.normalize_signature(other)
+            similarity, dimensions = self.similarity(
+                normalized_candidate, normalized_other
+            )
             if similarity >= maximum:
                 maximum = similarity
-                nearest_hash = other.normalized_hash
+                nearest_hash = normalized_other.normalized_hash
                 nearest_dimensions = dimensions
         novelty = 1.0 - maximum if nearest_hash is not None else 1.0
         return NoveltyAssessment(

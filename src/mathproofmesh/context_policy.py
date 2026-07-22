@@ -15,6 +15,7 @@ from .topology import jaccard_similarity
 
 
 class ContextPurpose(StrEnum):
+    INSPIRATION = "inspiration"
     DELTA_VERIFICATION = "delta_verification"
     ATTEMPT_VERIFICATION = "attempt_verification"
     FINAL_VERIFICATION = "final_verification"
@@ -50,6 +51,9 @@ class FactContextSelection:
 
 
 _PURPOSE_POLICIES: dict[ContextPurpose, ContextPurposePolicy] = {
+    ContextPurpose.INSPIRATION: ContextPurposePolicy(
+        0.20, 0.55, 0.20, 0.15, 0.10, False, False, False
+    ),
     ContextPurpose.DELTA_VERIFICATION: ContextPurposePolicy(
         0.25, 0.45, 0.25, 0.20, 0.10, True, True, True
     ),

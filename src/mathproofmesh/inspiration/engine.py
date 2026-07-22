@@ -12,6 +12,9 @@ from ..schemas import (
     ClaimStatus,
     ConstructionProposal,
     EvidenceType,
+    InspirationCallReservation,
+    InspirationCandidateDecision,
+    InspirationContextMode,
     InspirationMaterialization,
     InspirationMechanism,
     InspirationProposal,
@@ -38,6 +41,7 @@ from .invariant_hypothesis import InvariantHypothesisAgent
 from .local_library import LocalAnalogyLibrary
 from .meta_strategist import PersistentMetaStrategist
 from .novelty import InspirationReferee, NoveltyGate
+from .ontology import MechanismNormalizer
 from .representation_switchboard import RepresentationSwitchboard
 from .reverse_goal import ReverseGoalAnalyzer
 from .surprise_budget import SurpriseBudgetExplorer
@@ -113,6 +117,7 @@ class InspirationEngine:
         )
         self.novelty_gate = NoveltyGate(self.inspiration_config)
         self.referee = InspirationReferee(self.inspiration_config)
+        self.mechanism_normalizer = MechanismNormalizer()
         self.triggers: dict[str, InspirationTrigger] = {}
         self.tasks: dict[str, InspirationTask] = {}
         self.proposals: dict[str, InspirationProposal] = {}
@@ -120,6 +125,8 @@ class InspirationEngine:
         self.materializations: dict[str, InspirationMaterialization] = {}
         self.materialized_strategies: dict[str, StrategyCard] = {}
         self.verified_proposals: dict[str, str] = {}
+        self.candidate_decisions: dict[str, InspirationCandidateDecision] = {}
+        self.call_reservations: dict[str, InspirationCallReservation] = {}
         self.mechanism_stats: dict[str, dict[str, int]] = {
             mechanism.value: {
                 "selected_count": 0,
@@ -255,6 +262,8 @@ class InspirationEngine:
         artifact: Any,
         *,
         source_agent_id: str,
+        proposal_slot: int = 0,
+        context_mode: InspirationContextMode = InspirationContextMode.WARM,
         state: InspirationSnapshot | dict[str, Any] | None = None,
     ) -> InspirationProposal:
         """Normalize one independently generated typed artifact into a proposal."""
@@ -301,12 +310,19 @@ class InspirationEngine:
                 f"{type(artifact).__name__}"
             )
         payload = proposal.model_dump(mode="json")
+        normalized_signature = self.mechanism_normalizer.normalize_signature(
+            proposal.novelty_signature
+        )
         payload["source_agent_id"] = source_agent_id
+        payload["task_id"] = task.task_id
+        payload["proposal_slot"] = proposal_slot
+        payload["context_mode"] = context_mode.value
+        payload["novelty_signature"] = normalized_signature.model_dump(mode="json")
         payload["proposal_id"] = (
-            f"inspiration_{stable_hash((task.task_id, source_agent_id, proposal.novelty_signature.normalized_hash, proposal.statement))[:12]}"
+            f"inspiration_{stable_hash((task.task_id, proposal_slot, context_mode.value, source_agent_id, normalized_signature.normalized_hash, proposal.statement))[:12]}"
         )
         payload["novelty_score"] = self.novelty_gate.assess(
-            proposal.novelty_signature, snapshot.route_signatures
+            normalized_signature, snapshot.route_signatures
         ).novelty_score
         normalized = InspirationProposal.model_validate(payload)
         existing = self.proposals.get(normalized.proposal_id)
@@ -329,10 +345,246 @@ class InspirationEngine:
                 "source_agent_id": source_agent_id,
                 "mechanism": normalized.mechanism.value,
                 "novelty_score": normalized.novelty_score,
+                "proposal_slot": normalized.proposal_slot,
+                "context_mode": normalized.context_mode.value,
             },
         )
         self._checkpoint()
         return normalized
+
+    def select_proposals_for_review(
+        self,
+        proposals: Iterable[InspirationProposal],
+        *,
+        existing_signatures: Iterable[NoveltySignature],
+    ) -> list[InspirationProposal]:
+        """Greedily retain a small, mechanism-diverse population per task."""
+
+        grouped: dict[str, list[InspirationProposal]] = {}
+        for proposal in proposals:
+            task_id = proposal.task_id or f"legacy:{proposal.trigger_id}"
+            grouped.setdefault(task_id, []).append(proposal)
+        selected_all: list[InspirationProposal] = []
+        normalized_existing = [
+            self.mechanism_normalizer.normalize_signature(item)
+            for item in existing_signatures
+        ]
+        limit = self.inspiration_config.max_reviewed_proposals_per_task
+        for task_id, candidates in grouped.items():
+            remaining = list(candidates)
+            selected: list[InspirationProposal] = []
+            selected_modes: set[InspirationContextMode] = set()
+            rank = 0
+            while remaining:
+                scored: list[
+                    tuple[
+                        float,
+                        float,
+                        int,
+                        InspirationProposal,
+                        Any,
+                    ]
+                ] = []
+                comparison = [
+                    *normalized_existing,
+                    *(item.novelty_signature for item in selected),
+                ]
+                for proposal in remaining:
+                    assessment = self.novelty_gate.assess(
+                        proposal.novelty_signature, comparison
+                    )
+                    mode_bonus = (
+                        0.05 if proposal.context_mode not in selected_modes else 0.0
+                    )
+                    scored.append(
+                        (
+                            assessment.novelty_score + mode_bonus,
+                            proposal.expected_information_gain,
+                            -proposal.proposal_slot,
+                            proposal,
+                            assessment,
+                        )
+                    )
+                _score, _information, _slot, proposal, assessment = max(
+                    scored,
+                    key=lambda item: (item[0], item[1], item[2], item[3].proposal_id),
+                )
+                remaining.remove(proposal)
+                rank += 1
+                nearest_proposal = next(
+                    (
+                        item.proposal_id
+                        for item in selected
+                        if item.novelty_signature.normalized_hash
+                        == assessment.nearest_hash
+                    ),
+                    None,
+                )
+                if assessment.duplicate:
+                    accepted = False
+                    reason = "mechanism duplicate removed before model review"
+                elif proposal.novelty_score < self.inspiration_config.novelty_threshold:
+                    accepted = False
+                    reason = "proposal is below the configured novelty threshold"
+                elif len(selected) >= limit:
+                    accepted = False
+                    reason = "proposal ranked below max_reviewed_proposals_per_task"
+                else:
+                    accepted = True
+                    reason = "proposal admitted to independent review"
+                    selected.append(proposal)
+                    selected_modes.add(proposal.context_mode)
+                    selected_all.append(proposal)
+                decision = InspirationCandidateDecision(
+                    proposal_id=proposal.proposal_id,
+                    task_id=task_id,
+                    selected_for_review=accepted,
+                    rank=rank,
+                    reason=reason,
+                    nearest_proposal_id=nearest_proposal,
+                    maximum_similarity=assessment.maximum_similarity,
+                )
+                self.candidate_decisions[proposal.proposal_id] = decision
+                self._event(
+                    "inspiration_candidate_selected"
+                    if accepted
+                    else "inspiration_candidate_not_selected",
+                    "Inspiration candidate population filtered",
+                    reason,
+                    decision.model_dump(mode="json"),
+                )
+        self._checkpoint()
+        return selected_all
+
+    def reserve_task_calls(
+        self,
+        task: InspirationTask,
+        *,
+        snapshot: InspirationSnapshot,
+        proposer_calls: int,
+        referee_calls: int,
+        skeptic_calls: int,
+        route_attempt_calls: int,
+    ) -> tuple[InspirationCallReservation | None, str]:
+        existing = self.call_reservations.get(task.task_id)
+        if existing is not None and existing.status == "active":
+            return existing, "existing active reservation reused"
+        reserved = proposer_calls + referee_calls + skeptic_calls + route_attempt_calls
+        if task.mechanism == InspirationMechanism.SURPRISE_EXPLORATION:
+            allowed, reason = self.surprise_explorer.reserve(
+                current_round=snapshot.round_index,
+                remaining_calls=snapshot.remaining_calls,
+                current_path_count=snapshot.current_path_count,
+                max_paths=snapshot.max_paths,
+                estimated_calls=reserved,
+            )
+            if not allowed:
+                return None, reason
+        identifier = f"inspiration_budget_{stable_hash((task.task_id, snapshot.round_index))[:12]}"
+        reservation = InspirationCallReservation(
+            reservation_id=identifier,
+            task_id=task.task_id,
+            trigger_id=task.trigger_id,
+            round_index=snapshot.round_index,
+            proposer_calls=proposer_calls,
+            referee_calls=referee_calls,
+            skeptic_calls=skeptic_calls,
+            route_attempt_calls=route_attempt_calls,
+            reserved_calls=reserved,
+        )
+        self.call_reservations[task.task_id] = reservation
+        self._event(
+            "inspiration_call_budget_reserved",
+            "Inspiration call budget reserved",
+            "Proposer, referee, skeptic, and first route attempt were admitted atomically.",
+            reservation.model_dump(mode="json"),
+        )
+        self._checkpoint()
+        return reservation, "reserved"
+
+    def record_reserved_calls(self, task_id: str, calls: int, *, phase: str) -> None:
+        if calls <= 0:
+            return
+        reservation = self.call_reservations.get(task_id)
+        if reservation is None:
+            return
+        phase_calls = dict(reservation.phase_calls)
+        phase_calls[phase] = phase_calls.get(phase, 0) + calls
+        consumed = reservation.consumed_calls + calls
+        overrun = max(0, consumed - reservation.reserved_calls)
+        updated = reservation.model_copy(
+            update={
+                "consumed_calls": consumed,
+                "overrun_calls": overrun,
+                "phase_calls": phase_calls,
+            }
+        )
+        self.call_reservations[task_id] = updated
+        task = self.tasks.get(task_id)
+        if (
+            task is not None
+            and task.mechanism == InspirationMechanism.SURPRISE_EXPLORATION
+        ):
+            self.surprise_explorer.consume(calls)
+        self._event(
+            "inspiration_call_budget_consumed",
+            "Inspiration reserved calls consumed",
+            phase,
+            {
+                "reservation_id": updated.reservation_id,
+                "task_id": task_id,
+                "calls": calls,
+                "consumed_calls": consumed,
+                "overrun_calls": overrun,
+            },
+        )
+        self._checkpoint()
+
+    def finish_task_reservation(
+        self, task_id: str, *, interrupted: bool = False
+    ) -> None:
+        reservation = self.call_reservations.get(task_id)
+        if reservation is None or reservation.status != "active":
+            return
+        released = reservation.remaining_reserved_calls
+        status = "interrupted" if interrupted else "completed"
+        updated = reservation.model_copy(
+            update={"released_calls": released, "status": status}
+        )
+        self.call_reservations[task_id] = updated
+        task = self.tasks.get(task_id)
+        if (
+            task is not None
+            and task.mechanism == InspirationMechanism.SURPRISE_EXPLORATION
+        ):
+            self.surprise_explorer.release(released)
+        self._event(
+            "inspiration_call_budget_released",
+            "Unused inspiration call budget released",
+            status,
+            updated.model_dump(mode="json"),
+        )
+        self._checkpoint()
+
+    def reconcile_call_reservations(
+        self, ledger_reservation_calls: dict[str, int]
+    ) -> None:
+        """Charge calls persisted before a crash, then release orphaned capacity."""
+
+        for task_id, reservation in list(self.call_reservations.items()):
+            if reservation.status != "active":
+                continue
+            actual = int(ledger_reservation_calls.get(reservation.reservation_id, 0))
+            missing = max(0, actual - reservation.consumed_calls)
+            if missing:
+                self.record_reserved_calls(task_id, missing, phase="resume_reconcile")
+            self.finish_task_reservation(task_id, interrupted=True)
+
+    def reservation_id_for_task(self, task_id: str | None) -> str | None:
+        if not task_id:
+            return None
+        reservation = self.call_reservations.get(task_id)
+        return reservation.reservation_id if reservation is not None else None
 
     async def review(
         self,
@@ -600,10 +852,12 @@ class InspirationEngine:
         target_routes: list[str] | None = None,
         estimated_cost: int = 1,
     ) -> InspirationProposal:
+        signature = self.mechanism_normalizer.normalize_signature(signature)
         novelty = self.novelty_gate.assess(signature, snapshot.route_signatures)
         digest = stable_hash((task.task_id, signature.normalized_hash, statement))
         return InspirationProposal(
             proposal_id=f"inspiration_{digest[:12]}",
+            task_id=task.task_id,
             trigger_id=task.trigger_id,
             mechanism=task.mechanism,
             source_agent_id="inspiration_engine",
@@ -757,6 +1011,11 @@ class InspirationEngine:
                 remaining_calls=snapshot.remaining_calls,
                 current_path_count=snapshot.current_path_count,
                 max_paths=snapshot.max_paths,
+                pre_reserved=(
+                    proposal.task_id in self.call_reservations
+                    if proposal.task_id is not None
+                    else False
+                ),
             )
             if not allowed:
                 return InspirationMaterialization(
@@ -783,10 +1042,11 @@ class InspirationEngine:
                 and self.proposals.get(proposal_id) is not None
                 and self.proposals[proposal_id].trigger_id == proposal.trigger_id
             )
-            if (
-                routes_from_trigger
-                >= self.inspiration_config.max_new_routes_per_trigger
-            ):
+            route_cap = min(
+                self.inspiration_config.max_new_routes_per_trigger,
+                self.inspiration_config.max_materialized_proposals_per_trigger,
+            )
+            if routes_from_trigger >= route_cap:
                 return InspirationMaterialization(
                     proposal_id=proposal.proposal_id,
                     action="stored_insight",
@@ -1042,6 +1302,14 @@ class InspirationEngine:
                 for key, value in self.materialized_strategies.items()
             },
             "verified_proposals": dict(self.verified_proposals),
+            "candidate_decisions": {
+                key: value.model_dump(mode="json")
+                for key, value in self.candidate_decisions.items()
+            },
+            "call_reservations": {
+                key: value.model_dump(mode="json")
+                for key, value in self.call_reservations.items()
+            },
             "mechanism_stats": self.mechanism_stats,
             "meta_strategist": self.meta_strategist.export_state(),
             "surprise_budget": self.surprise_explorer.export_state(),
@@ -1081,6 +1349,14 @@ class InspirationEngine:
         self.verified_proposals = {
             str(key): str(value)
             for key, value in dict(state.get("verified_proposals", {})).items()
+        }
+        self.candidate_decisions = {
+            str(key): InspirationCandidateDecision.model_validate(value)
+            for key, value in dict(state.get("candidate_decisions", {})).items()
+        }
+        self.call_reservations = {
+            str(key): InspirationCallReservation.model_validate(value)
+            for key, value in dict(state.get("call_reservations", {})).items()
         }
         restored_stats = dict(state.get("mechanism_stats", {}))
         for mechanism in InspirationMechanism:

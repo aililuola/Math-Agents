@@ -267,6 +267,12 @@ class InspirationMechanism(StrEnum):
     META_REPLAN = "meta_replan"
 
 
+class InspirationContextMode(StrEnum):
+    LOCAL = "local"
+    WARM = "warm"
+    COLD = "cold"
+
+
 class ExperimentOutcome(StrEnum):
     NOT_REFUTED = "not_refuted"
     COUNTEREXAMPLE_FOUND = "counterexample_found"
@@ -588,10 +594,14 @@ class NoveltySignature(StrictModel):
     key_transformations: list[str] = Field(default_factory=list)
     proof_principles: list[str] = Field(default_factory=list)
     targeted_obligation_ids: list[str] = Field(default_factory=list)
+    extension_tags: list[str] = Field(default_factory=list)
+    raw_tags: dict[str, list[str]] = Field(default_factory=dict)
+    normalizer_version: str | None = None
+    normalization_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     normalized_hash: str = ""
 
     def normalized_payload(self) -> dict[str, list[str]]:
-        return {
+        payload = {
             "representation_tags": sorted(set(self.representation_tags)),
             "mechanism_tags": sorted(set(self.mechanism_tags)),
             "core_objects": sorted(set(self.core_objects)),
@@ -599,6 +609,9 @@ class NoveltySignature(StrictModel):
             "proof_principles": sorted(set(self.proof_principles)),
             "targeted_obligation_ids": sorted(set(self.targeted_obligation_ids)),
         }
+        if self.extension_tags:
+            payload["extension_tags"] = sorted(set(self.extension_tags))
+        return payload
 
     @model_validator(mode="after")
     def set_normalized_hash(self) -> "NoveltySignature":
@@ -757,17 +770,19 @@ class MetaStrategyDecision(StrictModel):
 class SurpriseBudgetState(StrictModel):
     total_calls: int = Field(default=0, ge=0)
     used_calls: int = Field(default=0, ge=0)
+    reserved_calls: int = Field(default=0, ge=0)
     finalization_reserve_calls: int = Field(default=0, ge=0)
     rejection_streak: int = Field(default=0, ge=0)
     cooldown_until_round: int | None = Field(default=None, ge=0)
 
     @property
     def remaining_calls(self) -> int:
-        return max(0, self.total_calls - self.used_calls)
+        return max(0, self.total_calls - self.used_calls - self.reserved_calls)
 
 
 class InspirationProposal(StrictModel):
     proposal_id: str = Field(default_factory=lambda: new_id("inspiration"))
+    task_id: str | None = None
     trigger_id: str
     mechanism: InspirationMechanism
     source_agent_id: str
@@ -784,6 +799,8 @@ class InspirationProposal(StrictModel):
     novelty_score: float = Field(ge=0.0, le=1.0)
     expected_information_gain: float = Field(ge=0.0, le=1.0)
     estimated_cost: int = Field(ge=0)
+    proposal_slot: int = Field(default=0, ge=0)
+    context_mode: InspirationContextMode = InspirationContextMode.LOCAL
     evidence_type: EvidenceType = EvidenceType.UNVERIFIED_IDEA
 
     @model_validator(mode="after")
@@ -822,6 +839,51 @@ class InspirationTask(StrictModel):
     target_obligation_ids: list[str] = Field(default_factory=list)
     reason: str
     max_proposals: int = Field(default=1, ge=1)
+
+
+class InspirationCandidateDecision(StrictModel):
+    proposal_id: str
+    task_id: str
+    selected_for_review: bool
+    rank: int = Field(ge=1)
+    reason: str
+    nearest_proposal_id: str | None = None
+    maximum_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class InspirationCallReservation(StrictModel):
+    reservation_id: str = Field(default_factory=lambda: new_id("inspiration_budget"))
+    task_id: str
+    trigger_id: str
+    round_index: int = Field(ge=0)
+    proposer_calls: int = Field(default=0, ge=0)
+    referee_calls: int = Field(default=0, ge=0)
+    skeptic_calls: int = Field(default=0, ge=0)
+    route_attempt_calls: int = Field(default=0, ge=0)
+    reserved_calls: int = Field(ge=0)
+    consumed_calls: int = Field(default=0, ge=0)
+    released_calls: int = Field(default=0, ge=0)
+    overrun_calls: int = Field(default=0, ge=0)
+    phase_calls: dict[str, int] = Field(default_factory=dict)
+    status: Literal["active", "completed", "interrupted"] = "active"
+
+    @model_validator(mode="after")
+    def validate_reservation(self) -> "InspirationCallReservation":
+        planned = (
+            self.proposer_calls
+            + self.referee_calls
+            + self.skeptic_calls
+            + self.route_attempt_calls
+        )
+        if planned != self.reserved_calls:
+            raise ValueError(
+                "inspiration reservation breakdown must match reserved_calls"
+            )
+        return self
+
+    @property
+    def remaining_reserved_calls(self) -> int:
+        return max(0, self.reserved_calls - self.consumed_calls)
 
 
 class InspirationMaterialization(StrictModel):

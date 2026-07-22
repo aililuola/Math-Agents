@@ -183,6 +183,19 @@ topology:
   inspiration:
     enabled: true
     mode: active
+    # Generate a small independent population per admitted inspiration task:
+    # two bounded warm-context candidates plus one de-anchored cold candidate.
+    active_proposals_per_task: 3
+    max_reviewed_proposals_per_task: 2
+    max_materialized_proposals_per_trigger: 1
+    cold_context_proposals_per_task: 1
+    warm_context_max_facts: 5
+    warm_context_max_negatives: 5
+    inspiration_context_max_chars: 24000
+    # Covers proposer population, independent reviews, skeptics, and the first
+    # real route attempt; unused reserved calls are released after the task.
+    surprise_budget_min_calls: 10
+    surprise_budget_max_calls: 32
     representation_switchboard: true
     analogy_agent: true
     auxiliary_construction_inventor: true

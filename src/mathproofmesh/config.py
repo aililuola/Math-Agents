@@ -332,10 +332,17 @@ class InspirationConfig(ConfigModel):
     surprise_exploration: bool = True
 
     surprise_budget_fraction: float = Field(default=0.08, ge=0.0, le=0.50)
-    surprise_budget_min_calls: int = Field(default=1, ge=0, le=64)
-    surprise_budget_max_calls: int = Field(default=4, ge=0, le=128)
+    surprise_budget_min_calls: int = Field(default=10, ge=0, le=64)
+    surprise_budget_max_calls: int = Field(default=32, ge=0, le=128)
     max_inspiration_tasks_per_round: int = Field(default=2, ge=0, le=32)
     max_proposals_per_task: int = Field(default=3, ge=1, le=16)
+    active_proposals_per_task: int = Field(default=3, ge=1, le=16)
+    max_reviewed_proposals_per_task: int = Field(default=2, ge=1, le=16)
+    max_materialized_proposals_per_trigger: int = Field(default=1, ge=0, le=16)
+    cold_context_proposals_per_task: int = Field(default=1, ge=0, le=16)
+    warm_context_max_facts: int = Field(default=5, ge=0, le=64)
+    warm_context_max_negatives: int = Field(default=5, ge=0, le=64)
+    inspiration_context_max_chars: int = Field(default=24000, ge=1000, le=500000)
     max_new_routes_per_trigger: int = Field(default=2, ge=0, le=16)
     protect_finalization_reserve: bool = True
     max_consecutive_surprise_rejections: int = Field(default=2, ge=1, le=32)
@@ -362,6 +369,16 @@ class InspirationConfig(ConfigModel):
         if self.surprise_budget_min_calls > self.surprise_budget_max_calls:
             raise ValueError(
                 "surprise_budget_min_calls cannot exceed surprise_budget_max_calls"
+            )
+        if self.max_reviewed_proposals_per_task > self.active_proposals_per_task:
+            raise ValueError(
+                "max_reviewed_proposals_per_task cannot exceed "
+                "active_proposals_per_task"
+            )
+        if self.cold_context_proposals_per_task > self.active_proposals_per_task:
+            raise ValueError(
+                "cold_context_proposals_per_task cannot exceed "
+                "active_proposals_per_task"
             )
         if self.proposals_enter_fact_memory:
             raise ValueError("inspiration proposals must enter InsightMemory first")

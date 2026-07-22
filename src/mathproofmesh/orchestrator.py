@@ -51,6 +51,7 @@ from .deep_exploration import (
 from .llm.mock import MockResponder
 from .llm.pool import AgentPool, AgentRuntime, ProviderCircuitOpenError
 from .inspiration.engine import InspirationEngine
+from .inspiration.context import build_inspiration_prompt_context
 from .inspiration.trigger_policy import InspirationSnapshot
 from .memory import LemmaMemory, TypedMemory
 from .prompts import PromptBundle, PromptFactory
@@ -95,6 +96,7 @@ from .schemas import (
     InitialExplorationAction,
     InitialExplorationTurn,
     InspirationMechanism,
+    InspirationContextMode,
     InspirationProposal,
     InspirationReview,
     MetaReview,
@@ -103,7 +105,6 @@ from .schemas import (
     MessageReceipt,
     MessageType,
     MathStatus,
-    NoveltySignature,
     ObligationKind,
     PostFailureBottleneckDiagnostic,
     ProblemContract,
@@ -1664,6 +1665,16 @@ class ProofMeshOrchestrator:
         for key in runner.ledger.bucket_calls:
             if key in bucket_calls:
                 runner.ledger.bucket_calls[key] = int(bucket_calls[key] or 0)
+        runner.ledger.reservation_calls = {
+            str(key): int(value or 0)
+            for key, value in dict(
+                runtime_payload.get("reservation_calls") or {}
+            ).items()
+        }
+        if state.inspiration_engine is not None:
+            state.inspiration_engine.reconcile_call_reservations(
+                runner.ledger.reservation_calls
+            )
         pool.restore_metrics(
             runtime_payload.get("agent_metrics") or payload.get("agent_metrics") or []
         )
@@ -3387,9 +3398,8 @@ class ProofMeshOrchestrator:
         )
         shared = state.proof_graph.find_shared_bottlenecks()
         signatures = [
-            NoveltySignature(
-                mechanism_tags=route.mechanism_signature,
-                core_objects=route.mechanism_signature,
+            state.inspiration_engine.mechanism_normalizer.signature_from_route_tags(
+                route.mechanism_signature,
                 targeted_obligation_ids=[
                     item.obligation_id
                     for item in state.proof_graph.obligations
@@ -3523,13 +3533,40 @@ class ProofMeshOrchestrator:
         tasks = admission.admitted_tasks
         if not tasks:
             return
-        proposals = await self._generate_inspiration_proposals(
-            engine,
-            tasks,
-            snapshot=snapshot,
-            problem=problem,
-            runner=runner,
-            prompts=prompts,
+        if engine.inspiration_config.mode == "active":
+            breakdown = allocator.inspiration_call_breakdown()
+            reserved_tasks = []
+            for task in tasks:
+                reservation, reason = engine.reserve_task_calls(
+                    task,
+                    snapshot=snapshot,
+                    **breakdown,
+                )
+                if reservation is None:
+                    store.append_event(
+                        "inspiration_task_reservation_rejected",
+                        {"task_id": task.task_id, "reason": reason},
+                    )
+                    continue
+                reserved_tasks.append(task)
+            tasks = reserved_tasks
+            if not tasks:
+                return
+        try:
+            proposals = await self._generate_inspiration_proposals(
+                engine,
+                tasks,
+                snapshot=snapshot,
+                problem=problem,
+                runner=runner,
+                prompts=prompts,
+            )
+        except Exception:
+            self._finish_inspiration_reservations(engine, tasks, interrupted=True)
+            raise
+        proposals = engine.select_proposals_for_review(
+            proposals,
+            existing_signatures=snapshot.route_signatures,
         )
         manual_trigger_ids = {
             trigger.trigger_id
@@ -3560,25 +3597,42 @@ class ProofMeshOrchestrator:
                         "trigger_ids": sorted(manual_trigger_ids),
                     },
                 )
-        (
-            precomputed,
-            counterexamples,
-            hidden_assumptions,
-        ) = await self._review_inspiration_proposals(
-            engine,
-            proposals,
-            snapshot=snapshot,
-            problem=problem,
-            runner=runner,
-            prompts=prompts,
-        )
-        reviews = await engine.review(
-            proposals,
-            precomputed_reviews=precomputed,
-            immediate_counterexamples=counterexamples,
-            hidden_assumptions=hidden_assumptions,
-        )
-        materializations = engine.materialize(reviews, snapshot)
+        try:
+            (
+                precomputed,
+                counterexamples,
+                hidden_assumptions,
+            ) = await self._review_inspiration_proposals(
+                engine,
+                proposals,
+                snapshot=snapshot,
+                problem=problem,
+                runner=runner,
+                prompts=prompts,
+            )
+        except Exception:
+            self._finish_inspiration_reservations(engine, tasks, interrupted=True)
+            raise
+        for task in tasks:
+            reservation_id = engine.reservation_id_for_task(task.task_id)
+            if reservation_id is None:
+                continue
+            engine.record_reserved_calls(
+                task.task_id,
+                runner.ledger.reservation_calls.get(reservation_id, 0),
+                phase="proposal_review_pipeline",
+            )
+        try:
+            reviews = await engine.review(
+                proposals,
+                precomputed_reviews=precomputed,
+                immediate_counterexamples=counterexamples,
+                hidden_assumptions=hidden_assumptions,
+            )
+            materializations = engine.materialize(reviews, snapshot)
+        except Exception:
+            self._finish_inspiration_reservations(engine, tasks, interrupted=True)
+            raise
         newly_created_ids = {
             item.proposal_id
             for item in materializations
@@ -3604,19 +3658,46 @@ class ProofMeshOrchestrator:
                         state.current_round,
                     )
                 state.route_registry.recompute_neighbors()
-            attempts = await self._parallel_round_exploration(
-                problem,
-                state,
-                assignments,
-                state.current_round,
-                runner,
-                prompts,
-                router,
-                memory,
-                store,
-                tools,
-                max_segments_this_call=1,
+            calls_before_routes = runner.ledger.calls_started
+            try:
+                attempts = await self._parallel_round_exploration(
+                    problem,
+                    state,
+                    assignments,
+                    state.current_round,
+                    runner,
+                    prompts,
+                    router,
+                    memory,
+                    store,
+                    tools,
+                    max_segments_this_call=1,
+                )
+            except Exception:
+                self._finish_inspiration_reservations(engine, tasks, interrupted=True)
+                raise
+            route_calls = max(0, runner.ledger.calls_started - calls_before_routes)
+            route_task_ids = list(
+                dict.fromkeys(
+                    proposal.task_id
+                    for strategy in new_strategies
+                    if (
+                        proposal := engine.proposals.get(
+                            strategy.inspiration_proposal_id or ""
+                        )
+                    )
+                    is not None
+                    and proposal.task_id is not None
+                )
             )
+            if route_task_ids and route_calls:
+                base, extra = divmod(route_calls, len(route_task_ids))
+                for index, task_id in enumerate(route_task_ids):
+                    engine.record_reserved_calls(
+                        task_id,
+                        base + int(index < extra),
+                        phase="first_route_attempt",
+                    )
             state.attempts.extend(attempts)
             store.append_event(
                 "inspiration_route_attempted",
@@ -3639,6 +3720,20 @@ class ProofMeshOrchestrator:
                 "materializations": materializations,
             },
         )
+        self._finish_inspiration_reservations(engine, tasks)
+
+    @staticmethod
+    def _finish_inspiration_reservations(
+        engine: InspirationEngine,
+        tasks: Sequence[Any],
+        *,
+        interrupted: bool = False,
+    ) -> None:
+        for task in tasks:
+            engine.finish_task_reservation(
+                task.task_id,
+                interrupted=interrupted,
+            )
 
     async def _generate_inspiration_proposals(
         self,
@@ -3652,23 +3747,73 @@ class ProofMeshOrchestrator:
     ) -> list[InspirationProposal]:
         if engine.inspiration_config.mode != "active":
             return await engine.generate(tasks)
-        proposals: list[InspirationProposal] = []
         final_reserve = snapshot.finalization_reserve_calls
-        for task in tasks:
-            if (
-                task.mechanism == InspirationMechanism.STRUCTURAL_ANALOGY
-                and not engine.analogy_library.records
-            ):
-                continue
-            if runner.ledger.remaining_calls <= final_reserve:
-                continue
+        configured_calls = engine.inspiration_config.active_proposals_per_task
+
+        async def generate_one(
+            task: Any,
+            *,
+            proposal_slot: int,
+            context_mode: InspirationContextMode,
+            agent: AgentRuntime,
+        ) -> InspirationProposal | None:
             role, bundle = self._inspiration_agent_prompt(
                 engine,
                 task,
                 snapshot=snapshot,
                 problem=problem,
                 prompts=prompts,
+                context_mode=context_mode,
+                proposal_slot=proposal_slot,
             )
+            result = await self._safe_call(
+                runner,
+                role,
+                bundle,
+                fixed_agent=agent,
+                budget_bucket="breadth",
+                budget_reservation_id=engine.reservation_id_for_task(task.task_id),
+            )
+            if result is None:
+                return None
+            try:
+                return engine.register_agent_artifact(
+                    task,
+                    result.value,
+                    source_agent_id=agent.id,
+                    state=snapshot,
+                    proposal_slot=proposal_slot,
+                    context_mode=context_mode,
+                )
+            except (TypeError, ValueError) as exc:
+                if engine.store is not None:
+                    engine.store.append_event(
+                        "inspiration_agent_artifact_rejected",
+                        {
+                            "task_id": task.task_id,
+                            "agent_id": agent.id,
+                            "proposal_slot": proposal_slot,
+                            "context_mode": context_mode.value,
+                            "reason": str(exc),
+                        },
+                    )
+                return None
+
+        pending: list[Any] = []
+        for task in tasks:
+            calls_per_task = min(configured_calls, task.max_proposals)
+            cold_calls = min(
+                engine.inspiration_config.cold_context_proposals_per_task,
+                calls_per_task,
+            )
+            if (
+                task.mechanism == InspirationMechanism.STRUCTURAL_ANALOGY
+                and not engine.analogy_library.records
+            ):
+                continue
+            if runner.ledger.remaining_calls - final_reserve < calls_per_task:
+                continue
+            role = self._inspiration_role_for_mechanism(task.mechanism)
             candidates = [
                 agent
                 for agent in runner.pool.agents
@@ -3676,37 +3821,65 @@ class ProofMeshOrchestrator:
             ]
             if not candidates:
                 continue
-            agent = runner.pool.select(role)
-            result = await self._safe_call(
-                runner,
-                role,
-                bundle,
-                fixed_agent=agent,
-                budget_bucket="breadth",
-            )
-            if result is None:
-                continue
-            try:
-                proposals.append(
-                    engine.register_agent_artifact(
+            selected_agents: list[AgentRuntime] = []
+            excluded: set[str] = set()
+            for _index in range(min(calls_per_task, len(candidates))):
+                selected = runner.pool.select(role, exclude=excluded)
+                selected_agents.append(selected)
+                excluded.add(selected.id)
+            cold_start = calls_per_task - cold_calls
+            population = []
+            for proposal_slot in range(calls_per_task):
+                context_mode = (
+                    InspirationContextMode.COLD
+                    if proposal_slot >= cold_start
+                    else InspirationContextMode.WARM
+                )
+                agent = selected_agents[proposal_slot % len(selected_agents)]
+                population.append(
+                    {
+                        "proposal_slot": proposal_slot,
+                        "context_mode": context_mode.value,
+                        "agent_id": agent.id,
+                    }
+                )
+                pending.append(
+                    generate_one(
                         task,
-                        result.value,
-                        source_agent_id=agent.id,
-                        state=snapshot,
+                        proposal_slot=proposal_slot,
+                        context_mode=context_mode,
+                        agent=agent,
                     )
                 )
-            except (TypeError, ValueError) as exc:
-                store = engine.store
-                if store is not None:
-                    store.append_event(
-                        "inspiration_agent_artifact_rejected",
-                        {
-                            "task_id": task.task_id,
-                            "agent_id": agent.id,
-                            "reason": str(exc),
-                        },
-                    )
-        return proposals
+            if engine.store is not None:
+                engine.store.append_event(
+                    "inspiration_candidate_population_started",
+                    {
+                        "task_id": task.task_id,
+                        "mechanism": task.mechanism.value,
+                        "population": population,
+                        "parallel_generation": True,
+                    },
+                )
+        if not pending:
+            return []
+        results = await asyncio.gather(*pending)
+        return [proposal for proposal in results if proposal is not None]
+
+    @staticmethod
+    def _inspiration_role_for_mechanism(
+        mechanism: InspirationMechanism,
+    ) -> str:
+        return {
+            InspirationMechanism.REPRESENTATION_SWITCH: "representation_switchboard",
+            InspirationMechanism.STRUCTURAL_ANALOGY: "analogy_agent",
+            InspirationMechanism.AUXILIARY_CONSTRUCTION: "construction_inventor",
+            InspirationMechanism.INVARIANT_HYPOTHESIS: "invariant_hypothesis_agent",
+            InspirationMechanism.REVERSE_GOAL_ANALYSIS: "reverse_goal_analyzer",
+            InspirationMechanism.BRIDGE_LEMMA: "reverse_goal_analyzer",
+            InspirationMechanism.META_REPLAN: "meta_strategist",
+            InspirationMechanism.SURPRISE_EXPLORATION: "representation_switchboard",
+        }[mechanism]
 
     def _inspiration_agent_prompt(
         self,
@@ -3716,22 +3889,16 @@ class ProofMeshOrchestrator:
         snapshot: InspirationSnapshot,
         problem: ProblemContract,
         prompts: PromptFactory,
+        context_mode: InspirationContextMode,
+        proposal_slot: int,
     ) -> tuple[str, PromptBundle]:
-        graph_context = engine.proof_graph.minimal_subgraph(task.target_obligation_ids)
-        context = {
-            "proof_graph": graph_context,
-            "verified_facts": [
-                item.model_dump(mode="json") for item in engine.typed_memory.facts
-            ],
-            "negative_memory": [
-                item.model_dump(mode="json") for item in engine.typed_memory.negatives
-            ],
-            "route_novelty_signatures": [
-                item.model_dump(mode="json") for item in snapshot.route_signatures
-            ],
-            "failure_diagnostics": snapshot.model_dump(mode="json"),
-            "target_obligation_ids": task.target_obligation_ids,
-        }
+        context = build_inspiration_prompt_context(
+            engine,
+            task,
+            snapshot=snapshot,
+            context_mode=context_mode,
+            proposal_slot=proposal_slot,
+        )
         mechanism = task.mechanism
         if mechanism == InspirationMechanism.REPRESENTATION_SWITCH:
             return (
@@ -3845,6 +4012,7 @@ class ProofMeshOrchestrator:
                 ),
                 fixed_agent=reviewer,
                 budget_bucket="verification",
+                budget_reservation_id=engine.reservation_id_for_task(proposal.task_id),
             )
             if result is None:
                 local = engine.referee.review(
@@ -3891,6 +4059,7 @@ class ProofMeshOrchestrator:
                 ),
                 fixed_agent=skeptic,
                 budget_bucket="verification",
+                budget_reservation_id=engine.reservation_id_for_task(proposal.task_id),
             )
             if skeptic_result is None:
                 continue
@@ -8328,6 +8497,7 @@ class ProofMeshOrchestrator:
         specialty_hints: list[str] | None = None,
         prefer_provider_not: str | None = None,
         budget_bucket: str,
+        budget_reservation_id: str | None = None,
     ) -> StructuredCallResult[Any] | None:
         try:
             return await runner.call(
@@ -8338,6 +8508,7 @@ class ProofMeshOrchestrator:
                 specialty_hints=specialty_hints,
                 prefer_provider_not=prefer_provider_not,
                 budget_bucket=budget_bucket,
+                budget_reservation_id=budget_reservation_id,
             )
         except (BudgetExhaustedError, ProviderCircuitOpenError):
             raise
@@ -9656,6 +9827,7 @@ class ProofMeshOrchestrator:
                 "calls_started": runner.ledger.calls_started,
                 "stage_calls": runner.ledger.stage_calls,
                 "bucket_calls": runner.ledger.bucket_calls,
+                "reservation_calls": runner.ledger.reservation_calls,
                 "agent_metrics": runner.pool.metrics(),
                 "provider_circuit": runner.pool.provider_circuit_state(),
             },

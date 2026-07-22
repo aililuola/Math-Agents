@@ -20,6 +20,10 @@ MathProofMesh 是面向高难度数学证明、逻辑推演和研究型推理任
 - `Surprise Budget Explorer` 保留少量高新颖性预算，但绝不侵占最终综合、审计和修订储备；
 - `Novelty Signature` 识别“换措辞但同机制”，`Inspiration Referee` 独立门控所有提案。
 
+Active 灵感任务现在不是“一种机制只问一次模型”。每个获准任务默认并行生成 3 个独立候选：2 个只读取少量相关 Broker Fact、NegativeMemory 和目标子图的 `warm` 候选，以及 1 个隐藏旧路线证明文本、只保留原题、目标义务和禁止重复机制列表的 `cold` 候选。系统先用规范化数学机制本体和 Novelty Gate 去重，再最多独立审查 2 个候选、最多物化 1 条路线。不同任务和不同数学方向没有新增全局串行锁；限制针对的是同一任务内的候选数量、重复机制和总预算。
+
+候选生成、Referee、快速 Skeptic 与首次真实路线尝试在调用前作为一个完整周期预留预算；被拒绝或未使用的调用额度会释放。Checkpoint、Activity 和 `reports/hierarchical_metrics.json` 会记录 warm/cold 数量、候选筛选结果以及预留、消耗、释放和超额调用数。Novelty 标签同时保存模型原始标签、规范化标签与未知扩展标签，未知标签只能提供弱相似度提示，不能单独把新路线判成重复。
+
 通用配置仍默认 `legacy_sparse`。DeepSeek 正式版和冒烟版先以 `proof_graph: shadow`、`inspiration: shadow` 观察诊断；实验配置 `config.deepseek-v4-pro.topology-active.yaml` 才会正式让图和灵感提案改变调度。
 
 二次符合性审计指出的运行闭环现已收口：`hierarchical_sparse` 的 Route Prover 不再读取旧 `LemmaMemory` 的跨路线 Claim；Receipt 会独立回传并校验有序量词与变量绑定；Prover、Skeptic、Tool Specialist、Referee 强制相互独立；Active 拓扑强制启用 continuation；Validation Escalation 会执行而不只生成计划；domain-role Capability 参与派工；盲终审包含匿名化的 Typed Fact/Negative provenance；灵感任务在模型调用前经过统一预算准入；消息只有被已验证 Delta 实际引用后才获得 utility；计算证据由真实 Tool Specialist Agent 审计。上述阶段逻辑已分别下沉到 `route_pipeline.py`、`broker_phase.py`、`inspiration_phase.py`、`cross_route_phase.py`、`synthesis_phase.py` 和 `resume_phase.py`。

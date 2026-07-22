@@ -1248,16 +1248,32 @@ class SoftBudgetAllocator:
             ActionKind.TRIGGER_INSPIRATION,
             ActionKind.SURPRISE_WIDEN,
         }:
-            # Inspiration is admitted atomically: proposal generation,
-            # independent referee, quick skeptic, and one route attempt.
-            local_validation = (
-                self.config.continuation.delta_verifier_replicas
-                if self.config.continuation.enabled
-                and self.config.continuation.verify_each_delta
-                else 0
-            )
-            return 4 + local_validation
+            return sum(self.inspiration_call_breakdown().values())
         return 0
+
+    def inspiration_call_breakdown(self) -> dict[str, int]:
+        """Conservative atomic cost for one admitted inspiration task."""
+
+        inspiration = self.config.topology.inspiration
+        if inspiration.mode != "active":
+            return {
+                "proposer_calls": 0,
+                "referee_calls": 0,
+                "skeptic_calls": 0,
+                "route_attempt_calls": 0,
+            }
+        proposer_calls = min(
+            inspiration.active_proposals_per_task,
+            inspiration.max_proposals_per_task,
+        )
+        reviewed = min(proposer_calls, inspiration.max_reviewed_proposals_per_task)
+        route_attempts = min(1, inspiration.max_materialized_proposals_per_trigger)
+        return {
+            "proposer_calls": proposer_calls,
+            "referee_calls": reviewed,
+            "skeptic_calls": reviewed,
+            "route_attempt_calls": route_attempts * self._calls_per_explored_path(),
+        }
 
     def _calls_per_explored_path(self) -> int:
         if not self.config.continuation.enabled:

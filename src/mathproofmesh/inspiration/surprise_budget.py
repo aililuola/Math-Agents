@@ -64,6 +64,7 @@ class SurpriseBudgetExplorer:
         remaining_calls: int,
         current_path_count: int,
         max_paths: int,
+        pre_reserved: bool = False,
     ) -> tuple[bool, str]:
         if proposal.novelty_score < self.config.novelty_threshold:
             self.reject(current_round=current_round)
@@ -73,13 +74,47 @@ class SurpriseBudgetExplorer:
             remaining_calls=remaining_calls,
             current_path_count=current_path_count,
             max_paths=max_paths,
-            estimated_calls=max(1, proposal.estimated_cost),
+            estimated_calls=0 if pre_reserved else max(1, proposal.estimated_cost),
         )
         if not allowed:
             return False, reason
-        self.state.used_calls += max(1, proposal.estimated_cost)
+        if not pre_reserved:
+            self.state.used_calls += max(1, proposal.estimated_cost)
         self.state.rejection_streak = 0
         return True, "admitted"
+
+    def reserve(
+        self,
+        *,
+        current_round: int,
+        remaining_calls: int,
+        current_path_count: int,
+        max_paths: int,
+        estimated_calls: int,
+    ) -> tuple[bool, str]:
+        allowed, reason = self.can_explore(
+            current_round=current_round,
+            remaining_calls=remaining_calls,
+            current_path_count=current_path_count,
+            max_paths=max_paths,
+            estimated_calls=estimated_calls,
+        )
+        if not allowed:
+            return False, reason
+        self.state.reserved_calls += estimated_calls
+        return True, "reserved"
+
+    def consume(self, calls: int) -> None:
+        if calls <= 0:
+            return
+        from_reserved = min(calls, self.state.reserved_calls)
+        self.state.reserved_calls -= from_reserved
+        self.state.used_calls += calls
+
+    def release(self, calls: int) -> None:
+        if calls <= 0:
+            return
+        self.state.reserved_calls = max(0, self.state.reserved_calls - calls)
 
     def reject(self, *, current_round: int) -> None:
         self.state.rejection_streak += 1
