@@ -22,16 +22,22 @@ from ..schemas import (
     InspirationTask,
     InspirationTrigger,
     InvariantHypothesis,
+    MetaDirective,
+    MetaDirectiveAudit,
+    MetaDirectiveExecution,
     MetaStrategyDecision,
     MemoryTier,
     MessageEnvelope,
     MessageType,
     NoveltySignature,
+    ObligationKind,
     ProblemContract,
     RepresentationCandidate,
     ReverseGoalPlan,
     RouteRole,
     StrategyCard,
+    VerifiedExperienceRecord,
+    NegativeAnalogyRecord,
     stable_hash,
 )
 from ..store import ArtifactStore
@@ -39,9 +45,12 @@ from .analogy_agent import AnalogyAgent
 from .construction_inventor import AuxiliaryConstructionInventor
 from .invariant_hypothesis import InvariantHypothesisAgent
 from .local_library import LocalAnalogyLibrary
+from .experience import VerifiedExperienceDistiller
+from .meta_control import MetaDirectiveController
 from .meta_strategist import PersistentMetaStrategist
 from .novelty import InspirationReferee, NoveltyGate
 from .ontology import MechanismNormalizer
+from .outcomes import InspirationOutcomeLedger
 from .representation_switchboard import RepresentationSwitchboard
 from .reverse_goal import ReverseGoalAnalyzer
 from .surprise_budget import SurpriseBudgetExplorer
@@ -109,6 +118,11 @@ class InspirationEngine:
         self.invariant_agent = InvariantHypothesisAgent()
         self.reverse_goal_analyzer = ReverseGoalAnalyzer()
         self.meta_strategist = PersistentMetaStrategist(self.inspiration_config)
+        self.meta_controller = MetaDirectiveController(
+            self.inspiration_config, self.route_registry
+        )
+        self.outcome_ledger = InspirationOutcomeLedger(self.inspiration_config)
+        self.experience_distiller = VerifiedExperienceDistiller(self.inspiration_config)
         final_reserve = _protected_finalization_calls(config)
         self.surprise_explorer = SurpriseBudgetExplorer(
             self.inspiration_config,
@@ -127,6 +141,12 @@ class InspirationEngine:
         self.verified_proposals: dict[str, str] = {}
         self.candidate_decisions: dict[str, InspirationCandidateDecision] = {}
         self.call_reservations: dict[str, InspirationCallReservation] = {}
+        self.meta_directives: dict[str, MetaDirective] = {}
+        self.meta_directive_audits: dict[str, MetaDirectiveAudit] = {}
+        self.meta_directive_executions: dict[str, MetaDirectiveExecution] = {}
+        self.pending_directive_tasks: dict[str, InspirationTask] = {}
+        self.verified_experiences: dict[str, VerifiedExperienceRecord] = {}
+        self.negative_analogy_records: dict[str, NegativeAnalogyRecord] = {}
         self.mechanism_stats: dict[str, dict[str, int]] = {
             mechanism.value: {
                 "selected_count": 0,
@@ -186,14 +206,23 @@ class InspirationEngine:
     ) -> list[InspirationTask]:
         del budget
         snapshot = self._coerce_snapshot(state)
+        adaptive_profiles = self.outcome_ledger.selection_profiles(triggers, snapshot)
         selected = self.trigger_policy.select_tasks(
-            triggers, snapshot, self.mechanism_stats
+            triggers,
+            snapshot,
+            self.mechanism_stats,
+            adaptive_profiles,
         )
+        combined = [*self.pending_directive_tasks.values(), *selected]
+        selected = list({task.task_id: task for task in combined}.values())[
+            : self.inspiration_config.max_inspiration_tasks_per_round
+        ]
         fresh: list[InspirationTask] = []
         for task in selected:
             if task.task_id in self.tasks:
                 continue
             self.tasks[task.task_id] = task
+            self.pending_directive_tasks.pop(task.task_id, None)
             fresh.append(task)
             stats = self.mechanism_stats[task.mechanism.value]
             stats["selected_count"] += 1
@@ -229,11 +258,19 @@ class InspirationEngine:
                     task.reason,
                     task.model_dump(mode="json"),
                 )
+            if task.mechanism == InspirationMechanism.META_REPLAN:
+                self.register_meta_decision(
+                    task,
+                    self.meta_strategist.decide(snapshot),
+                    state=snapshot,
+                )
+                continue
             items = self._generate_task(task, snapshot)
             for proposal in items[: task.max_proposals]:
                 if proposal.proposal_id in self.proposals:
                     continue
                 self.proposals[proposal.proposal_id] = proposal
+                self._register_outcome(proposal, snapshot)
                 generated.append(proposal)
                 self.mechanism_stats[task.mechanism.value]["proposal_count"] += 1
                 generated_event = {
@@ -265,9 +302,12 @@ class InspirationEngine:
         proposal_slot: int = 0,
         context_mode: InspirationContextMode = InspirationContextMode.WARM,
         state: InspirationSnapshot | dict[str, Any] | None = None,
-    ) -> InspirationProposal:
-        """Normalize one independently generated typed artifact into a proposal."""
+    ) -> InspirationProposal | None:
+        """Normalize a typed artifact into a proposal or control directive."""
         snapshot = self._coerce_snapshot(state)
+        if isinstance(artifact, MetaStrategyDecision):
+            self.register_meta_decision(task, artifact, state=snapshot)
+            return None
         if isinstance(artifact, RepresentationCandidate):
             proposal = (
                 self._from_surprise(task, artifact, snapshot)
@@ -280,8 +320,6 @@ class InspirationEngine:
             proposal = self._from_invariant(task, artifact, snapshot)
         elif isinstance(artifact, ReverseGoalPlan):
             proposal = self._from_reverse(task, artifact, snapshot)
-        elif isinstance(artifact, MetaStrategyDecision):
-            proposal = self._from_meta(task, artifact, snapshot)
         elif hasattr(artifact, "source_record_id") and hasattr(
             artifact, "object_correspondence"
         ):
@@ -329,6 +367,7 @@ class InspirationEngine:
         if existing is not None:
             return existing
         self.proposals[normalized.proposal_id] = normalized
+        self._register_outcome(normalized, snapshot)
         self.mechanism_stats[task.mechanism.value]["proposal_count"] += 1
         generated_event = {
             InspirationMechanism.REPRESENTATION_SWITCH: "representation_candidate_generated",
@@ -351,6 +390,121 @@ class InspirationEngine:
         )
         self._checkpoint()
         return normalized
+
+    def register_meta_decision(
+        self,
+        task: InspirationTask,
+        decision: MetaStrategyDecision,
+        *,
+        state: InspirationSnapshot | dict[str, Any] | None = None,
+    ) -> MetaDirectiveExecution | None:
+        """Move a Meta-Strategist result through the audited control plane."""
+
+        if not self.inspiration_config.meta_directives_enabled:
+            return None
+        snapshot = self._coerce_snapshot(state)
+        allowed_routes = set(task.target_route_ids or snapshot.active_route_ids)
+        proposed_routes = [
+            route_id
+            for route_id in decision.affected_route_ids
+            if route_id in allowed_routes
+        ]
+        normalized = decision.model_copy(
+            update={
+                "round_index": snapshot.round_index,
+                "affected_route_ids": proposed_routes
+                or list(task.target_route_ids)
+                or list(snapshot.active_route_ids),
+                "observable_metrics": self.meta_strategist.observable_metrics(snapshot),
+            }
+        )
+        self.meta_strategist.record(normalized)
+        directive = self.meta_controller.from_decision(normalized, snapshot)
+        existing = self.meta_directive_executions.get(directive.directive_id)
+        if existing is not None:
+            return existing
+        audit = self.meta_controller.audit(directive, snapshot)
+        if self.inspiration_config.mode == "shadow":
+            execution = MetaDirectiveExecution(
+                directive_id=directive.directive_id,
+                status="noop",
+                reason="shadow mode records the directive without control mutation",
+            )
+            generated_tasks: list[InspirationTask] = []
+        else:
+            execution, generated_tasks = self.meta_controller.execute(
+                directive,
+                audit,
+                snapshot,
+                trigger_id=task.trigger_id,
+            )
+        self.meta_directives[directive.directive_id] = directive
+        self.meta_directive_audits[directive.directive_id] = audit
+        self.meta_directive_executions[directive.directive_id] = execution
+        for generated_task in generated_tasks:
+            if generated_task.task_id not in self.tasks:
+                self.pending_directive_tasks[generated_task.task_id] = generated_task
+        self._event(
+            "meta_directive_audited",
+            "Meta directive audited",
+            audit.reason,
+            {
+                "directive": directive.model_dump(mode="json"),
+                "audit": audit.model_dump(mode="json"),
+            },
+        )
+        self._event(
+            "meta_directive_executed",
+            "Meta directive execution recorded",
+            execution.reason,
+            execution.model_dump(mode="json"),
+        )
+        self._checkpoint()
+        return execution
+
+    def record_outcome_usage(
+        self,
+        proposal_id: str,
+        *,
+        phase: str,
+        calls: int = 1,
+        tokens: int = 0,
+    ) -> None:
+        self.outcome_ledger.record_usage(
+            proposal_id,
+            phase=phase,
+            calls=calls,
+            tokens=tokens,
+        )
+        self._checkpoint()
+
+    def _register_outcome(
+        self, proposal: InspirationProposal, snapshot: InspirationSnapshot
+    ) -> None:
+        trigger = self.triggers.get(proposal.trigger_id)
+        if trigger is None:
+            return
+        kinds: list[ObligationKind] = []
+        for obligation_id in proposal.generated_obligations:
+            raw = snapshot.obligation_kinds.get(obligation_id)
+            if raw is None:
+                continue
+            try:
+                kinds.append(ObligationKind(raw))
+            except ValueError:
+                continue
+        target_routes = proposal.target_route_ids or trigger.affected_route_ids
+        debt_before = sum(
+            snapshot.proof_debt_by_route.get(route_id, 0.0)
+            for route_id in target_routes
+        )
+        self.outcome_ledger.register(
+            proposal,
+            snapshot=snapshot,
+            trigger=trigger,
+            obligation_kinds=kinds,
+            proof_debt_before=debt_before,
+        )
 
     def select_proposals_for_review(
         self,
@@ -734,6 +888,31 @@ class InspirationEngine:
             else:
                 decision = self._materialize_active(proposal, review, snapshot)
             self.materializations[proposal.proposal_id] = decision
+            self.outcome_ledger.record_materialization(
+                proposal.proposal_id,
+                action=decision.action,
+                refuted=(decision.action == "rejected"),
+            )
+            negative_analogy = self.experience_distiller.distill_negative_analogy(
+                problem=self.problem,
+                proposal=proposal,
+                review=review,
+                round_index=snapshot.round_index,
+            )
+            if negative_analogy is not None:
+                self.negative_analogy_records[negative_analogy.record_id] = (
+                    negative_analogy
+                )
+                self.analogy_library.add_negative_record(
+                    negative_analogy.model_dump(mode="json")
+                )
+                self._trim_experiences()
+                self._event(
+                    "negative_analogy_recorded",
+                    "Failed analogy transfer recorded",
+                    negative_analogy.failure_reason,
+                    negative_analogy.model_dump(mode="json"),
+                )
             if decision.action == "route_created":
                 self.mechanism_stats[proposal.mechanism.value][
                     "route_created_count"
@@ -778,6 +957,23 @@ class InspirationEngine:
                     for tag in sig.mechanism_tags
                 ],
                 graph_tags=["shared_bottleneck"]
+                if snapshot.shared_bottleneck_ids
+                else [],
+                obligation_kinds=[
+                    snapshot.obligation_kinds[item]
+                    for item in task.target_obligation_ids
+                    if item in snapshot.obligation_kinds
+                ],
+                mechanism_chain=[
+                    tag
+                    for sig in snapshot.route_signatures
+                    for tag in [
+                        *sig.representation_tags,
+                        *sig.mechanism_tags,
+                        *sig.key_transformations,
+                    ]
+                ],
+                graph_motif_tags=["shared_bottleneck"]
                 if snapshot.shared_bottleneck_ids
                 else [],
             )
@@ -1185,10 +1381,56 @@ class InspirationEngine:
         if self.verified_proposals.get(proposal_id) == evidence_message_id:
             return
         self.verified_proposals[proposal_id] = evidence_message_id
-        mechanism = self.proposals[proposal_id].mechanism.value
+        proposal = self.proposals[proposal_id]
+        mechanism = proposal.mechanism.value
         stats = self.mechanism_stats[mechanism]
         stats["verified_count"] += 1
         stats["consecutive_no_verified_gain"] = 0
+        snapshot = self._last_snapshot
+        target_routes = proposal.target_route_ids
+        proof_debt_after = sum(
+            self.proof_graph.proof_debt(route_id)
+            for route_id in target_routes
+            if any(route.route_id == route_id for route in self.route_registry.routes)
+        )
+        closed_obligations = [
+            item.obligation_id
+            for item in self.proof_graph.obligations
+            if item.obligation_id in proposal.generated_obligations
+            and item.status == "closed"
+        ]
+        round_index = (
+            snapshot.round_index
+            if snapshot is not None
+            else self.triggers[proposal.trigger_id].round_index
+        )
+        outcome = self.outcome_ledger.record_verified_gain(
+            proposal_id,
+            round_index=round_index,
+            proof_debt_after=proof_debt_after,
+            obligations_closed=closed_obligations,
+        )
+        experience = (
+            self.experience_distiller.distill_verified(
+                problem=self.problem,
+                proposal=proposal,
+                fact=evidence,
+                outcome=outcome,
+                proof_graph=self.proof_graph,
+            )
+            if outcome is not None
+            else None
+        )
+        if experience is not None:
+            self.verified_experiences[experience.record_id] = experience
+            self.analogy_library.add_verified_record(experience.model_dump(mode="json"))
+            self._trim_experiences()
+            self._event(
+                "verified_experience_distilled",
+                "Verified proof experience distilled",
+                proposal.statement,
+                experience.model_dump(mode="json"),
+            )
         self._event(
             "inspiration_proposal_verified",
             "Inspiration proposal produced a verified fact",
@@ -1196,9 +1438,56 @@ class InspirationEngine:
             {
                 "proposal_id": proposal_id,
                 "evidence_message_id": evidence_message_id,
+                "reward": outcome.reward if outcome is not None else 0.0,
+                "experience_record_id": (
+                    experience.record_id if experience is not None else None
+                ),
             },
         )
         self._checkpoint()
+
+    def mark_proposal_cited(self, proposal_id: str) -> None:
+        if proposal_id not in self.verified_proposals:
+            return
+        self.outcome_ledger.mark_final_citation(proposal_id)
+        for record_id, record in list(self.verified_experiences.items()):
+            if record.source_proposal_id != proposal_id:
+                continue
+            updated = record.model_copy(update={"cited_by_final_proof": True})
+            self.verified_experiences[record_id] = updated
+            for index, payload in enumerate(self.analogy_library.records):
+                if payload.get("record_id") == record_id:
+                    self.analogy_library.records[index] = updated.model_dump(
+                        mode="json"
+                    )
+                    break
+        self._event(
+            "inspiration_cited_by_final_proof",
+            "Verified inspiration cited by final proof",
+            proposal_id,
+            {"proposal_id": proposal_id},
+        )
+        self._checkpoint()
+
+    def _trim_experiences(self) -> None:
+        positive_limit = self.inspiration_config.max_distilled_experiences
+        while len(self.verified_experiences) > positive_limit:
+            oldest = next(iter(self.verified_experiences))
+            self.verified_experiences.pop(oldest, None)
+            self.analogy_library.records = [
+                item
+                for item in self.analogy_library.records
+                if item.get("record_id") != oldest
+            ]
+        negative_limit = self.inspiration_config.max_negative_analogy_records
+        while len(self.negative_analogy_records) > negative_limit:
+            oldest = next(iter(self.negative_analogy_records))
+            self.negative_analogy_records.pop(oldest, None)
+            self.analogy_library.negative_records = [
+                item
+                for item in self.analogy_library.negative_records
+                if item.get("record_id") != oldest
+            ]
 
     def _publish_typed(
         self, proposal: InspirationProposal, route_id: str, current_round: int
@@ -1274,6 +1563,22 @@ class InspirationEngine:
             self.store.write_json(
                 "inspiration", "inspiration_checkpoint", self.export_state()
             )
+            self.store.write_json(
+                "inspiration",
+                "verified_experiences",
+                [
+                    item.model_dump(mode="json")
+                    for item in self.verified_experiences.values()
+                ],
+            )
+            self.store.write_json(
+                "inspiration",
+                "negative_analogy_library",
+                [
+                    item.model_dump(mode="json")
+                    for item in self.negative_analogy_records.values()
+                ],
+            )
 
     def export_state(self) -> dict[str, Any]:
         return {
@@ -1309,6 +1614,31 @@ class InspirationEngine:
             "call_reservations": {
                 key: value.model_dump(mode="json")
                 for key, value in self.call_reservations.items()
+            },
+            "meta_directives": {
+                key: value.model_dump(mode="json")
+                for key, value in self.meta_directives.items()
+            },
+            "meta_directive_audits": {
+                key: value.model_dump(mode="json")
+                for key, value in self.meta_directive_audits.items()
+            },
+            "meta_directive_executions": {
+                key: value.model_dump(mode="json")
+                for key, value in self.meta_directive_executions.items()
+            },
+            "pending_directive_tasks": {
+                key: value.model_dump(mode="json")
+                for key, value in self.pending_directive_tasks.items()
+            },
+            "outcomes": self.outcome_ledger.export_state(),
+            "verified_experiences": {
+                key: value.model_dump(mode="json")
+                for key, value in self.verified_experiences.items()
+            },
+            "negative_analogy_records": {
+                key: value.model_dump(mode="json")
+                for key, value in self.negative_analogy_records.items()
             },
             "mechanism_stats": self.mechanism_stats,
             "meta_strategist": self.meta_strategist.export_state(),
@@ -1358,6 +1688,35 @@ class InspirationEngine:
             str(key): InspirationCallReservation.model_validate(value)
             for key, value in dict(state.get("call_reservations", {})).items()
         }
+        self.meta_directives = {
+            str(key): MetaDirective.model_validate(value)
+            for key, value in dict(state.get("meta_directives", {})).items()
+        }
+        self.meta_directive_audits = {
+            str(key): MetaDirectiveAudit.model_validate(value)
+            for key, value in dict(state.get("meta_directive_audits", {})).items()
+        }
+        self.meta_directive_executions = {
+            str(key): MetaDirectiveExecution.model_validate(value)
+            for key, value in dict(state.get("meta_directive_executions", {})).items()
+        }
+        self.pending_directive_tasks = {
+            str(key): InspirationTask.model_validate(value)
+            for key, value in dict(state.get("pending_directive_tasks", {})).items()
+        }
+        self.outcome_ledger.restore_state(dict(state.get("outcomes", {})))
+        self.verified_experiences = {
+            str(key): VerifiedExperienceRecord.model_validate(value)
+            for key, value in dict(state.get("verified_experiences", {})).items()
+        }
+        self.negative_analogy_records = {
+            str(key): NegativeAnalogyRecord.model_validate(value)
+            for key, value in dict(state.get("negative_analogy_records", {})).items()
+        }
+        for experience in self.verified_experiences.values():
+            self.analogy_library.add_verified_record(experience.model_dump(mode="json"))
+        for negative in self.negative_analogy_records.values():
+            self.analogy_library.add_negative_record(negative.model_dump(mode="json"))
         restored_stats = dict(state.get("mechanism_stats", {}))
         for mechanism in InspirationMechanism:
             if mechanism.value in restored_stats:

@@ -116,6 +116,45 @@ rewrite, switch representation, search analogies, invent a construction,
 launch surprise search or recommend route merge/cooldown. Per-mechanism
 cooldowns prevent repeated bets on the same failed mechanism.
 
+Meta output is no longer wrapped as an ordinary `InspirationProposal`.
+`MetaStrategyDecision` is normalized against the authoritative snapshot and
+converted to a `MetaDirective`. A deterministic auditor checks route ownership,
+observable evidence, expiry and protected budget. Accepted directives either
+mutate route control state (merge, cooldown or audited abandonment) or create a
+new typed mechanism task that must pass ordinary scheduler admission. The
+directive, audit and execution result are checkpointed, but never enter
+FactMemory or InsightMemory. Shadow mode records the same objects without
+mutating routes.
+
+## Outcome Learning
+
+Every proposal receives an `InspirationOutcome` ledger entry recording its
+domain, trigger, obligation kinds, calls, tokens, materialization, verified Fact
+gain, proof-debt change, closed obligations, refutation, time to first gain and
+final-proof citation. A configurable reward combines only these observable
+downstream outcomes.
+
+Mechanism selection uses deterministic UCB scores conditioned on domain,
+trigger, mechanism and obligation kind. A fixed minimum exploration rate keeps
+untried mechanisms eligible. These scores affect task ordering only: they are
+not mathematical evidence and cannot promote a Claim, close an obligation or
+change a verification verdict.
+
+## Verified Experience Distillation
+
+Only a proposal that later produces a Broker-admitted, independently verified
+Fact can become a positive analogy experience. The distiller stores the problem
+skeleton, obligation-graph motif, mechanism chain, key construction,
+transferable lemma, non-transferable conditions and transfer risks. These
+records become available to later Analogy searches in the same persistent run.
+
+Rejected structural analogies enter a separate Negative Analogy Library with
+the failed source record and distinguishing condition. A source that already
+failed transfer for the same problem is suppressed from later retrieval. Run
+artifacts are written to `inspiration/verified_experiences.json` and
+`inspiration/negative_analogy_library.json`; neither library bypasses the
+ordinary Referee or Fact gates.
+
 ## Surprise Budget Explorer
 
 Surprise calls are reserved separately from synthesis, high-risk final audit,
@@ -158,12 +197,14 @@ the same proposal twice.
 State is stored in the stage checkpoint and
 `inspiration/inspiration_checkpoint.json`: triggers, tasks, proposals, reviews,
 materializations, derived strategies, verified outcomes, strategist cooldowns,
-surprise budget, candidate-selection decisions, call reservations and the last
-observable snapshot. A reservation records proposer, Referee, Skeptic and first
-route-attempt capacity. Used calls are charged, unused calls are released, and
-an interrupted reservation is reconciled on resume. Activity and hierarchical
-metrics include warm/cold proposal counts, pre-review filtering and reservation
-consumption without private reasoning.
+surprise budget, candidate-selection decisions, call reservations, Meta
+Directives, adaptive outcome records, verified experiences, negative analogy
+records and the last observable snapshot. A reservation records proposer,
+Referee, Skeptic and first route-attempt capacity. Used calls are charged,
+unused calls are released, and an interrupted reservation is reconciled on
+resume. Activity and hierarchical metrics include warm/cold proposal counts,
+pre-review filtering, directive execution, outcome rewards, experience counts
+and reservation consumption without private reasoning.
 
 ## Benchmark
 

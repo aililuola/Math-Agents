@@ -113,7 +113,7 @@ validation.
 - Hierarchical reports distinguish Broker-admitted global Facts from legacy
   ClaimMemory history. `reports/global_fact_inventory.json` records both sets
   and the qualification policy.
-- The complete offline suite passes 219 tests with `.[dev,server]` installed,
+- The complete offline suite passes 226 tests with `.[dev,server]` installed,
   including `z3-solver`. The topology benchmark is a deterministic component
   contract Mock with zero provider calls, not a real IMO performance claim.
 
@@ -141,3 +141,22 @@ validation.
 - No global Inspiration or high-tier semaphore was added. Distinct domains,
   subdirections, local obligations and mechanism pivots may continue in
   parallel subject to existing Agent concurrency and total run budgets.
+
+## Persistent Strategy Control And Learning
+
+- Persistent Meta-Strategist output now becomes an audited `MetaDirective`,
+  never a normal Insight. Accepted directives deterministically merge, cool or
+  abandon eligible routes, or enqueue a typed mechanism task for ordinary
+  scheduler admission. Shadow mode remains mutation-free.
+- A checkpointed `InspirationOutcome` ledger attributes proposal, review and
+  route calls; token cost; verified Fact gain; proof-debt change; closed
+  obligations; refutation; time to first gain; and final-proof use.
+- Mechanism ordering uses deterministic UCB scores conditioned on domain,
+  trigger and obligation kind, with a configured minimum exploration floor.
+  Learned scores cannot enter FactMemory or influence mathematical verdicts.
+- A Verified Experience Distiller admits positive analogy records only after an
+  independently reviewed Fact passes the Broker gate. Failed transfers enter a
+  separate Negative Analogy Library and suppress the same source for the same
+  problem.
+- Directives, audits, executions, outcomes and both experience libraries are
+  included in checkpoints, Activity, run artifacts and hierarchical metrics.

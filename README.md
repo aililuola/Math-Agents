@@ -28,6 +28,10 @@ Active 灵感任务现在不是“一种机制只问一次模型”。每个获�
 
 二次符合性审计指出的运行闭环现已收口：`hierarchical_sparse` 的 Route Prover 不再读取旧 `LemmaMemory` 的跨路线 Claim；Receipt 会独立回传并校验有序量词与变量绑定；Prover、Skeptic、Tool Specialist、Referee 强制相互独立；Active 拓扑强制启用 continuation；Validation Escalation 会执行而不只生成计划；domain-role Capability 参与派工；盲终审包含匿名化的 Typed Fact/Negative provenance；灵感任务在模型调用前经过统一预算准入；消息只有被已验证 Delta 实际引用后才获得 utility；计算证据由真实 Tool Specialist Agent 审计。上述阶段逻辑已分别下沉到 `route_pipeline.py`、`broker_phase.py`、`inspiration_phase.py`、`cross_route_phase.py`、`synthesis_phase.py` 和 `resume_phase.py`。
 
+第二批灵感升级把 `Persistent Meta-Strategist` 从普通建议生成器改为真实控制面：模型输出先转换为 `MetaDirective`，经过路线、可观测证据、有效期和收尾预算审计后，才能执行路线合并、降温、放弃，或生成一个仍需普通调度准入的机制任务。Directive、审计和执行结果不会进入 InsightMemory 或 FactMemory；shadow 模式只记录而不修改路线。
+
+系统同时维护 `InspirationOutcome` 结果账本，记录每个提案的调用与 token 成本、物化结果、verified Fact 增益、proof debt 变化、关闭义务、反驳和最终证明引用。机制调度使用带最低探索率的确定性 UCB，在相同领域、触发类型和义务类型下学习哪些机制更有效，但奖励只能改变任务排序，不能成为数学证据。只有后来通过 Broker Fact Gate 的提案才会被 `Verified Experience Distiller` 提炼进正面类比经验；失败类比进入独立 Negative Analogy Library，防止同一题反复进行已知失败的迁移。
+
 ## 0.6.0 推理优先计算基础
 
 0.6.0 在 0.5.1 的验证式多 Agent 工作流上增加了“推理优先计算协议”。目标不是让系统优先穷举，而是把必要的数值检查从长篇推理文本中抽离出来，用可审计、受预算约束的工具完成。
@@ -247,7 +251,7 @@ hierarchical 报告把 `Broker-admitted global Fact` 与 `Legacy ClaimMemory his
 
 Blind packet 不再暴露 `artifact://` 原始路径，只携带实际文件内容的 SHA-256、证书类型和 replay 状态。这样不会通过文件名泄漏 Agent/Route，同时保留可审计证据身份。
 
-本轮离线验收基线为：安装 `.[dev,server]`（包含 `z3-solver`）后 `209 passed`、Ruff check 通过、Ruff format check 通过、`compileall` 通过、topology component-contract Mock benchmark 通过且真实 provider 调用数为 0。该 Mock benchmark 验证组件契约和消融开关，不代表真实 IMO 求解性能。
+本轮离线验收基线为：安装 `.[dev,server]`（包含 `z3-solver`）后 `226 passed`、Ruff check 通过、Ruff format check 通过、`compileall` 通过、topology component-contract Mock benchmark 通过且真实 provider 调用数为 0。该 Mock benchmark 验证组件契约和消融开关，不代表真实 IMO 求解性能。
 
 ## 推理优先计算流程
 

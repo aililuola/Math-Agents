@@ -41,6 +41,7 @@ class InspirationSnapshot(StrictModel):
     max_paths: int = Field(default=0, ge=0)
     route_signatures: list[NoveltySignature] = Field(default_factory=list)
     open_obligation_ids: list[str] = Field(default_factory=list)
+    obligation_kinds: dict[str, str] = Field(default_factory=dict)
 
 
 class TriggerPolicy:
@@ -203,6 +204,7 @@ class TriggerPolicy:
         triggers: list[InspirationTrigger],
         snapshot: InspirationSnapshot,
         mechanism_history: dict[str, dict[str, int | float | str]] | None = None,
+        adaptive_profiles: dict[str, dict[str, float | int | bool]] | None = None,
     ) -> list[InspirationTask]:
         mapping = {
             InspirationTriggerType.SHARED_BOTTLENECK: (
@@ -254,6 +256,7 @@ class TriggerPolicy:
         if not triggers:
             return []
         history = mechanism_history or {}
+        profiles = adaptive_profiles or {}
         candidates: list[tuple[int, InspirationTrigger, InspirationMechanism]] = []
         seen: set[InspirationMechanism] = set()
         for trigger in triggers:
@@ -274,14 +277,21 @@ class TriggerPolicy:
 
         def priority(
             item: tuple[int, InspirationTrigger, InspirationMechanism],
-        ) -> tuple[int, int, int, int]:
-            source_rank, _trigger, mechanism = item
+        ) -> tuple[int, float, int, int, int, int]:
+            source_rank, trigger, mechanism = item
             stat = history.get(mechanism.value, {})
             selected = int(stat.get("selected_count", 0) or 0)
             no_gain = int(stat.get("consecutive_no_verified_gain", 0) or 0)
             raw_last_round = stat.get("last_selected_round", -1)
             last_round = -1 if raw_last_round is None else int(raw_last_round)
+            profile = profiles.get(
+                f"{trigger.trigger_type.value}:{mechanism.value}", {}
+            )
+            force_exploration = bool(profile.get("force_exploration", False))
+            ucb_score = float(profile.get("ucb_score", 0.0) or 0.0)
             return (
+                0 if force_exploration else 1,
+                -ucb_score,
                 0 if selected == 0 else 1,
                 1 if no_gain >= 2 else 0,
                 last_round,

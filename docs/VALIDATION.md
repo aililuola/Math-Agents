@@ -29,7 +29,7 @@ compileall(src + tests)
 | `python -m compileall -q src tests` | PASS |
 | `ruff check .` | PASS |
 | `ruff format --check .` | PASS |
-| `python -m pytest -q` | **209 passed**（安装 `.[dev,server]`，包含 `z3-solver`） |
+| `python -m pytest -q` | **226 passed**（安装 `.[dev,server]`，包含 `z3-solver`） |
 | deterministic demo | `verified`，23 calls，30,540 tokens |
 | continuation deterministic demo | `verified`，25 calls，32,920 tokens |
 | demo 证明检查点 | 3 条路径，共 6 个 checkpoint（3 个 genesis + 3 个已验证完成段） |
@@ -52,7 +52,7 @@ P0 Inspiration Engine 的每个要求均有确定性覆盖：触发策略、Repr
 ```text
 6 contract cases
 11 required variants/ablations
-10/10 local component contracts passed
+15/15 local component contracts passed
 0 provider calls
 ```
 
@@ -149,7 +149,7 @@ primary key 正常调用级重试耗尽
 - 最终预算储备根据 `reserve_revision_cycles` 与 `max_revisions` 计算；
 - 调度产物记录每个候选动作的排名、分数、预计成本、未选原因和预算阻断原因。
 
-当前包含上述历史回归在内的完整自动化结果为 `209 passed`。分段确定性完整演示结果仍为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
+当前包含上述历史回归在内的完整自动化结果为 `226 passed`。分段确定性完整演示结果仍为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
 
 ## 6. 终审边界与修订回归验证
 

@@ -15,10 +15,14 @@ from mathproofmesh.inspiration.analogy_agent import AnalogyAgent
 from mathproofmesh.inspiration.construction_inventor import (
     AuxiliaryConstructionInventor,
 )
+from mathproofmesh.inspiration.experience import VerifiedExperienceDistiller
 from mathproofmesh.inspiration.invariant_hypothesis import InvariantHypothesisAgent
 from mathproofmesh.inspiration.local_library import LocalAnalogyLibrary
+from mathproofmesh.inspiration.meta_control import MetaDirectiveController
+from mathproofmesh.inspiration.meta_strategist import PersistentMetaStrategist
 from mathproofmesh.inspiration.novelty import NoveltyGate
 from mathproofmesh.inspiration.ontology import MechanismNormalizer
+from mathproofmesh.inspiration.outcomes import InspirationOutcomeLedger
 from mathproofmesh.inspiration.representation_switchboard import (
     RepresentationSwitchboard,
 )
@@ -32,6 +36,9 @@ from mathproofmesh.proof_graph.store import ProofGraphStore
 from mathproofmesh.schemas import (
     ClaimStatus,
     EvidenceType,
+    InspirationContextMode,
+    InspirationMechanism,
+    InspirationProposal,
     MemoryTier,
     MessageEnvelope,
     MessageType,
@@ -387,17 +394,109 @@ def _run_component_contracts(
     invariants = InvariantHypothesisAgent().propose(
         problem, [inspiration_obligation], domain="algebra"
     )
-    triggers = TriggerPolicy(config.topology.inspiration).detect(
-        InspirationSnapshot(
-            round_index=3,
-            active_route_ids=["route-a", "route-b"],
-            stagnation_rounds_by_route={"route-a": 3, "route-b": 3},
-            shared_bottleneck_ids=[inspiration_obligation.obligation_id],
-            route_redundancy=0.95,
-            remaining_calls=20,
-            current_path_count=2,
-            max_paths=8,
-        )
+    inspiration_snapshot = InspirationSnapshot(
+        round_index=3,
+        domain="algebra",
+        active_route_ids=["route-a", "route-b"],
+        stagnation_rounds_by_route={"route-a": 3, "route-b": 3},
+        shared_bottleneck_ids=[inspiration_obligation.obligation_id],
+        route_redundancy=0.95,
+        remaining_calls=20,
+        current_path_count=2,
+        max_paths=8,
+        open_obligation_ids=[inspiration_obligation.obligation_id],
+        obligation_kinds={
+            inspiration_obligation.obligation_id: ObligationKind.MAIN_GOAL.value
+        },
+    )
+    triggers = TriggerPolicy(config.topology.inspiration).detect(inspiration_snapshot)
+
+    meta_decision = PersistentMetaStrategist(config.topology.inspiration).decide(
+        inspiration_snapshot
+    )
+    meta_controller = MetaDirectiveController(config.topology.inspiration, registry)
+    meta_directive = meta_controller.from_decision(meta_decision, inspiration_snapshot)
+    meta_audit = meta_controller.audit(meta_directive, inspiration_snapshot)
+    meta_execution, meta_tasks = meta_controller.execute(
+        meta_directive,
+        meta_audit,
+        inspiration_snapshot,
+        trigger_id=triggers[0].trigger_id,
+    )
+
+    learning_proposal = InspirationProposal(
+        proposal_id="benchmark-learning-proposal",
+        task_id="benchmark-learning-task",
+        trigger_id=triggers[0].trigger_id,
+        mechanism=InspirationMechanism.REPRESENTATION_SWITCH,
+        source_agent_id="benchmark-inspiration-agent",
+        target_route_ids=["route-a"],
+        statement="rewrite the finite sum as consecutive differences",
+        rationale_summary="the representation exposes telescoping",
+        generated_obligations=[inspiration_obligation.obligation_id],
+        novelty_signature=NoveltySignature(
+            representation_tags=["finite_state"],
+            mechanism_tags=["representation_switch"],
+            targeted_obligation_ids=[inspiration_obligation.obligation_id],
+        ),
+        novelty_score=1.0,
+        expected_information_gain=0.8,
+        estimated_cost=1,
+        context_mode=InspirationContextMode.WARM,
+    )
+    outcome_ledger = InspirationOutcomeLedger(config.topology.inspiration)
+    learning_outcome = outcome_ledger.register(
+        learning_proposal,
+        snapshot=inspiration_snapshot,
+        trigger=triggers[0],
+        obligation_kinds=[ObligationKind.MAIN_GOAL],
+        proof_debt_before=4.0,
+    )
+    outcome_ledger.record_usage(
+        learning_proposal.proposal_id, phase="proposer", tokens=1000
+    )
+    outcome_ledger.record_verified_gain(
+        learning_proposal.proposal_id,
+        round_index=4,
+        proof_debt_after=1.0,
+        obligations_closed=[inspiration_obligation.obligation_id],
+    )
+    adaptive_profiles = outcome_ledger.selection_profiles(
+        [triggers[0]], inspiration_snapshot
+    )
+
+    experience_graph = ProofGraphStore(config, problem_hash=problem.integrity_hash)
+    experience_graph.add_obligation(inspiration_obligation)
+    experience_fact = MessageEnvelope(
+        message_id="benchmark-experience-fact",
+        problem_hash=problem.integrity_hash,
+        source_agent_id="benchmark-prover",
+        source_route_id="route-a",
+        source_role=RouteRole.PROVER,
+        message_type=MessageType.VERIFIED_LEMMA,
+        statement="consecutive differences telescope",
+        normalized_statement="consecutive differences telescope",
+        conclusion="consecutive differences telescope",
+        evidence_type=EvidenceType.NATURAL_PROOF_AUDITED,
+        memory_tier=MemoryTier.FACT,
+        verification_status=ClaimStatus.VERIFIED,
+        verification_confidence=0.95,
+        normalization_confidence=1.0,
+        round_created=4,
+    )
+    distilled = VerifiedExperienceDistiller(
+        config.topology.inspiration
+    ).distill_verified(
+        problem=problem,
+        proposal=learning_proposal,
+        fact=experience_fact,
+        outcome=outcome_ledger.outcomes[learning_proposal.proposal_id],
+        proof_graph=experience_graph,
+    )
+    learned_library = LocalAnalogyLibrary(root / "learned-experiences.jsonl")
+    learned_added = bool(
+        distilled
+        and learned_library.add_verified_record(distilled.model_dump(mode="json"))
     )
 
     return {
@@ -429,6 +528,17 @@ def _run_component_contracts(
             and config.topology.inspiration.max_materialized_proposals_per_trigger == 1
             and config.topology.inspiration.cold_context_proposals_per_task == 1
         ),
+        "meta_directive_control": (
+            meta_audit.accepted
+            and meta_execution.status == "executed"
+            and bool(meta_tasks)
+        ),
+        "adaptive_outcome_learning": (
+            learning_outcome.proposal_id in outcome_ledger.outcomes
+            and outcome_ledger.outcomes[learning_outcome.proposal_id].reward > 0
+            and bool(adaptive_profiles)
+        ),
+        "verified_experience_distillation": learned_added,
     }
 
 

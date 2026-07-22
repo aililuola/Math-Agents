@@ -22,11 +22,13 @@ class LocalAnalogyLibrary:
         self.path = Path(path)
         self.enabled = enabled
         self.records: list[dict[str, Any]] = []
+        self.negative_records: list[dict[str, Any]] = []
         self.diagnostics: list[str] = []
         self.reload()
 
     def reload(self) -> None:
         self.records = []
+        self.negative_records = []
         self.diagnostics = []
         if not self.enabled:
             return
@@ -41,13 +43,40 @@ class LocalAnalogyLibrary:
                     payload = json.loads(line)
                     if not isinstance(payload, dict):
                         continue
+                    if payload.get("negative") is True:
+                        payload.setdefault("record_id", f"negative_local_{line_number}")
+                        self.negative_records.append(payload)
+                        continue
                     if payload.get("verified") is not True:
                         continue
                     payload.setdefault("record_id", f"local_{line_number}")
                     self.records.append(payload)
         except (OSError, json.JSONDecodeError) as exc:
             self.records = []
+            self.negative_records = []
             self.diagnostics.append(f"analogy library unavailable: {exc}")
+
+    def add_verified_record(self, record: dict[str, Any]) -> bool:
+        if record.get("verified") is not True:
+            raise ValueError("only verified experiences may enter the analogy library")
+        record_id = str(record.get("record_id", ""))
+        if not record_id or any(
+            str(item.get("record_id")) == record_id for item in self.records
+        ):
+            return False
+        self.records.append(dict(record))
+        return True
+
+    def add_negative_record(self, record: dict[str, Any]) -> bool:
+        if record.get("negative") is not True:
+            raise ValueError("negative analogy records require negative=true")
+        record_id = str(record.get("record_id", ""))
+        if not record_id or any(
+            str(item.get("record_id")) == record_id for item in self.negative_records
+        ):
+            return False
+        self.negative_records.append(dict(record))
+        return True
 
     def search(
         self,
@@ -57,6 +86,10 @@ class LocalAnalogyLibrary:
         operation_tags: Iterable[str] = (),
         mechanism_tags: Iterable[str] = (),
         graph_tags: Iterable[str] = (),
+        obligation_kinds: Iterable[str] = (),
+        mechanism_chain: Iterable[str] = (),
+        graph_motif_tags: Iterable[str] = (),
+        problem_hash: str | None = None,
         top_k: int = 6,
     ) -> list[dict[str, Any]]:
         if not self.records:
@@ -70,6 +103,9 @@ class LocalAnalogyLibrary:
                         *operation_tags,
                         *mechanism_tags,
                         *graph_tags,
+                        *obligation_kinds,
+                        *mechanism_chain,
+                        *graph_motif_tags,
                     ]
                 )
             )
@@ -80,7 +116,15 @@ class LocalAnalogyLibrary:
             document_frequency.update(set(tokens))
         avg_length = sum(map(len, document_tokens)) / max(1, len(document_tokens))
         ranked: list[tuple[float, dict[str, Any]]] = []
+        blocked_source_ids = {
+            str(item.get("source_record_id"))
+            for item in self.negative_records
+            if item.get("source_record_id")
+            and (problem_hash is None or item.get("problem_hash") == problem_hash)
+        }
         for record, tokens in zip(self.records, document_tokens, strict=True):
+            if str(record.get("record_id")) in blocked_source_ids:
+                continue
             counts = Counter(tokens)
             score = 0.0
             for term in set(query):
@@ -105,6 +149,15 @@ class LocalAnalogyLibrary:
                 set(mechanism_tags) & set(record.get("mechanism_tags", []))
             )
             score += 1.5 * len(set(graph_tags) & set(record.get("graph_tags", [])))
+            score += 3.0 * len(
+                set(obligation_kinds) & set(record.get("obligation_kinds", []))
+            )
+            score += 2.5 * len(
+                set(mechanism_chain) & set(record.get("mechanism_chain", []))
+            )
+            score += 3.0 * len(
+                set(graph_motif_tags) & set(record.get("obligation_graph_motif", []))
+            )
             if score > 0:
                 ranked.append((score, record))
         ranked.sort(key=lambda item: (-item[0], str(item[1].get("record_id", ""))))
@@ -119,5 +172,8 @@ class LocalAnalogyLibrary:
             " ".join(map(str, record.get("operation_tags", []))),
             " ".join(map(str, record.get("mechanism_tags", []))),
             " ".join(map(str, record.get("graph_tags", []))),
+            " ".join(map(str, record.get("obligation_kinds", []))),
+            " ".join(map(str, record.get("mechanism_chain", []))),
+            " ".join(map(str, record.get("obligation_graph_motif", []))),
         ]
         return _tokens(" ".join(values))

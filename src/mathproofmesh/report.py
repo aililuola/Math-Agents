@@ -172,6 +172,9 @@ def write_hierarchical_reports(
     proposals = dict(inspiration_engine.get("proposals", {}))
     candidate_decisions = dict(inspiration_engine.get("candidate_decisions", {}))
     call_reservations = dict(inspiration_engine.get("call_reservations", {}))
+    inspiration_outcomes = dict(inspiration_engine.get("outcomes", {}))
+    meta_directives = dict(inspiration_engine.get("meta_directives", {}))
+    meta_executions = dict(inspiration_engine.get("meta_directive_executions", {}))
     context_mode_counts = Counter(
         str(item.get("context_mode", "local")) for item in proposals.values()
     )
@@ -245,6 +248,24 @@ def write_hierarchical_reports(
         ),
         "inspiration_verified_count": len(
             inspiration_engine.get("verified_proposals", {})
+        ),
+        "inspiration_outcome_count": len(inspiration_outcomes),
+        "inspiration_outcome_reward_total": sum(
+            float(item.get("reward", 0.0)) for item in inspiration_outcomes.values()
+        ),
+        "inspiration_outcome_final_citations": sum(
+            bool(item.get("cited_by_final_proof"))
+            for item in inspiration_outcomes.values()
+        ),
+        "meta_directive_count": len(meta_directives),
+        "meta_directive_executed_count": sum(
+            item.get("status") == "executed" for item in meta_executions.values()
+        ),
+        "verified_experience_count": len(
+            inspiration_engine.get("verified_experiences", {})
+        ),
+        "negative_analogy_record_count": len(
+            inspiration_engine.get("negative_analogy_records", {})
         ),
         "inspiration_materialization_actions": dict(materialization_counts),
         "surprise_budget": inspiration_engine.get("surprise_budget", {}),

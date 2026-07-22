@@ -273,6 +273,17 @@ class InspirationContextMode(StrEnum):
     COLD = "cold"
 
 
+class MetaDirectiveAction(StrEnum):
+    CONTINUE = "continue"
+    REPAIR = "repair"
+    REWRITE_PLAN = "rewrite_plan"
+    SWITCH_REPRESENTATION = "switch_representation"
+    COOLDOWN_ROUTE = "cooldown_route"
+    ABANDON_ROUTE = "abandon_route"
+    MERGE_ROUTES = "merge_routes"
+    ALLOCATE_SURPRISE_BUDGET = "allocate_surprise_budget"
+
+
 class ExperimentOutcome(StrEnum):
     NOT_REFUTED = "not_refuted"
     COUNTEREXAMPLE_FOUND = "counterexample_found"
@@ -767,6 +778,42 @@ class MetaStrategyDecision(StrictModel):
     estimated_calls: int = Field(default=0, ge=0)
 
 
+class MetaDirective(StrictModel):
+    """Auditable control-plane instruction; never mathematical evidence."""
+
+    directive_id: str = Field(default_factory=lambda: new_id("meta_directive"))
+    source_decision_id: str
+    round_index: int = Field(ge=0)
+    action: MetaDirectiveAction
+    route_ids: list[str] = Field(default_factory=list)
+    selected_mechanism: InspirationMechanism | None = None
+    observable_evidence: dict[str, float | int | str | bool] = Field(
+        default_factory=dict
+    )
+    reason: str
+    mandatory: bool = False
+    estimated_calls: int = Field(default=0, ge=0)
+    expires_round: int = Field(ge=0)
+
+
+class MetaDirectiveAudit(StrictModel):
+    directive_id: str
+    accepted: bool
+    auditor_id: str = "deterministic_meta_directive_auditor"
+    evidence_complete: bool
+    targets_valid: bool
+    budget_safe: bool
+    reason: str
+
+
+class MetaDirectiveExecution(StrictModel):
+    directive_id: str
+    status: Literal["executed", "rejected", "deferred", "noop"]
+    affected_route_ids: list[str] = Field(default_factory=list)
+    generated_task_ids: list[str] = Field(default_factory=list)
+    reason: str
+
+
 class SurpriseBudgetState(StrictModel):
     total_calls: int = Field(default=0, ge=0)
     used_calls: int = Field(default=0, ge=0)
@@ -884,6 +931,73 @@ class InspirationCallReservation(StrictModel):
     @property
     def remaining_reserved_calls(self) -> int:
         return max(0, self.reserved_calls - self.consumed_calls)
+
+
+class InspirationOutcome(StrictModel):
+    """Observed downstream value of one proposal, not a proof certificate."""
+
+    proposal_id: str
+    task_id: str | None = None
+    mechanism: InspirationMechanism
+    domain: str = "unknown"
+    trigger_type: InspirationTriggerType
+    obligation_kinds: list[ObligationKind] = Field(default_factory=list)
+    round_created: int = Field(ge=0)
+    proposer_calls: int = Field(default=0, ge=0)
+    review_calls: int = Field(default=0, ge=0)
+    route_calls: int = Field(default=0, ge=0)
+    tokens: int = Field(default=0, ge=0)
+    materialized: bool = False
+    materialization_action: str | None = None
+    verified_fact_gain: int = Field(default=0, ge=0)
+    proof_debt_before: float = Field(default=0.0, ge=0.0)
+    proof_debt_after: float | None = Field(default=None, ge=0.0)
+    proof_debt_delta: float = 0.0
+    obligations_closed: list[str] = Field(default_factory=list)
+    cited_by_final_proof: bool = False
+    refuted: bool = False
+    rounds_to_first_gain: int | None = Field(default=None, ge=0)
+    reward: float = 0.0
+
+
+class VerifiedExperienceRecord(StrictModel):
+    record_id: str
+    source_proposal_id: str
+    problem_hash: str
+    problem_skeleton: str
+    obligation_graph_motif: list[str] = Field(default_factory=list)
+    obligation_kinds: list[str] = Field(default_factory=list)
+    mechanism_chain: list[str] = Field(default_factory=list)
+    key_construction: str = ""
+    transferable_lemmas: list[str] = Field(default_factory=list)
+    non_transferable_conditions: list[str] = Field(default_factory=list)
+    negative_transfer_examples: list[str] = Field(default_factory=list)
+    object_correspondence: dict[str, str] = Field(default_factory=dict)
+    operation_correspondence: dict[str, str] = Field(default_factory=dict)
+    required_bridge_lemmas: list[str] = Field(default_factory=list)
+    representation_tags: list[str] = Field(default_factory=list)
+    mechanism_tags: list[str] = Field(default_factory=list)
+    object_tags: list[str] = Field(default_factory=list)
+    operation_tags: list[str] = Field(default_factory=list)
+    graph_tags: list[str] = Field(default_factory=list)
+    proof_principles: list[str] = Field(default_factory=list)
+    proof_summary: str = ""
+    problem_summary: str = ""
+    transfer_risks: list[str] = Field(default_factory=list)
+    verified: Literal[True] = True
+    cited_by_final_proof: bool = False
+
+
+class NegativeAnalogyRecord(StrictModel):
+    record_id: str
+    proposal_id: str
+    source_record_id: str | None = None
+    problem_hash: str
+    mechanism: InspirationMechanism
+    failure_reason: str
+    distinguishing_conditions: list[str] = Field(default_factory=list)
+    round_index: int = Field(ge=0)
+    negative: Literal[True] = True
 
 
 class InspirationMaterialization(StrictModel):

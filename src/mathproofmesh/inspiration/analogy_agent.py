@@ -22,6 +22,9 @@ class AnalogyAgent:
         operation_tags: Iterable[str] = (),
         mechanism_tags: Iterable[str] = (),
         graph_tags: Iterable[str] = (),
+        obligation_kinds: Iterable[str] = (),
+        mechanism_chain: Iterable[str] = (),
+        graph_motif_tags: Iterable[str] = (),
     ) -> list[AnalogyMapping]:
         records = self.library.search(
             query_text=problem.normalized_statement,
@@ -29,6 +32,10 @@ class AnalogyAgent:
             operation_tags=operation_tags,
             mechanism_tags=mechanism_tags,
             graph_tags=graph_tags,
+            obligation_kinds=obligation_kinds,
+            mechanism_chain=mechanism_chain,
+            graph_motif_tags=graph_motif_tags,
+            problem_hash=problem.integrity_hash,
             top_k=self.top_k,
         )
         results: list[AnalogyMapping] = []

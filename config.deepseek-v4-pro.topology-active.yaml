@@ -204,6 +204,24 @@ topology:
     bridge_lemma_generator: true
     persistent_meta_strategist: true
     surprise_exploration: true
+    # Meta-Strategist outputs are audited control directives, not Insights or Facts.
+    meta_directives_enabled: true
+    meta_directive_expiry_rounds: 2
+    meta_directive_cooldown_rounds: 2
+    meta_directive_max_estimated_calls: 8
+    meta_allow_route_abandon: true
+    # Learn scheduling value from verified downstream outcomes while retaining
+    # a fixed exploration floor. These scores can never pass a proof gate.
+    adaptive_mechanism_selection: true
+    adaptive_min_observations: 1
+    adaptive_min_exploration_rate: 0.15
+    adaptive_ucb_weight: 0.75
+    # Only Broker-admitted, independently verified Facts can seed positive
+    # experiences. Failed analogy transfers enter a separate negative library.
+    experience_distillation_enabled: true
+    negative_analogy_library_enabled: true
+    max_distilled_experiences: 256
+    max_negative_analogy_records: 256
   validation_escalation:
     enabled: true
   agent_capability:

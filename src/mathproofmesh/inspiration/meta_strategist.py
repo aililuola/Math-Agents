@@ -21,17 +21,7 @@ class PersistentMetaStrategist:
         self.cooldowns: dict[InspirationMechanism, int] = {}
 
     def decide(self, snapshot: InspirationSnapshot) -> MetaStrategyDecision:
-        metrics: dict[str, float | int | str | bool] = {
-            "verified_fact_gain_recent": snapshot.verified_fact_gain_recent,
-            "proof_debt_reduction_recent": snapshot.proof_debt_reduction_recent,
-            "route_redundancy": snapshot.route_redundancy,
-            "failed_route_count": len(snapshot.failed_route_ids),
-            "active_route_count": len(snapshot.active_route_ids),
-            "shared_bottleneck_count": len(snapshot.shared_bottleneck_ids),
-            "unresolved_conflict_count": len(snapshot.unresolved_conflict_ids),
-            "remaining_calls": snapshot.remaining_calls,
-            "finalization_reserve_calls": snapshot.finalization_reserve_calls,
-        }
+        metrics = self.observable_metrics(snapshot)
         repeated_errors = Counter(snapshot.first_error_fingerprints)
         mechanism: InspirationMechanism | None = None
         action = "continue_current_mechanism"
@@ -110,8 +100,29 @@ class PersistentMetaStrategist:
             reason=reason,
             estimated_calls=0 if mechanism is None else 1,
         )
-        self.history.append(decision)
+        self.record(decision)
         return decision
+
+    @staticmethod
+    def observable_metrics(
+        snapshot: InspirationSnapshot,
+    ) -> dict[str, float | int | str | bool]:
+        return {
+            "verified_fact_gain_recent": snapshot.verified_fact_gain_recent,
+            "proof_debt_reduction_recent": snapshot.proof_debt_reduction_recent,
+            "route_redundancy": snapshot.route_redundancy,
+            "failed_route_count": len(snapshot.failed_route_ids),
+            "active_route_count": len(snapshot.active_route_ids),
+            "shared_bottleneck_count": len(snapshot.shared_bottleneck_ids),
+            "unresolved_conflict_count": len(snapshot.unresolved_conflict_ids),
+            "remaining_calls": snapshot.remaining_calls,
+            "finalization_reserve_calls": snapshot.finalization_reserve_calls,
+        }
+
+    def record(self, decision: MetaStrategyDecision) -> None:
+        if any(item.decision_id == decision.decision_id for item in self.history):
+            return
+        self.history.append(decision)
 
     def cool(
         self,

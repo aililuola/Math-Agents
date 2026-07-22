@@ -364,6 +364,29 @@ class InspirationConfig(ConfigModel):
     analogy_top_k: int = Field(default=6, ge=1, le=64)
     allow_external_retrieval: bool = False
 
+    meta_directives_enabled: bool = True
+    meta_directive_expiry_rounds: int = Field(default=2, ge=0, le=32)
+    meta_directive_cooldown_rounds: int = Field(default=2, ge=1, le=32)
+    meta_directive_max_estimated_calls: int = Field(default=8, ge=0, le=64)
+    meta_allow_route_abandon: bool = True
+
+    adaptive_mechanism_selection: bool = True
+    adaptive_min_observations: int = Field(default=1, ge=0, le=64)
+    adaptive_min_exploration_rate: float = Field(default=0.15, ge=0.0, le=1.0)
+    adaptive_ucb_weight: float = Field(default=0.75, ge=0.0, le=8.0)
+    adaptive_reward_fact_weight: float = Field(default=4.0, ge=0.0, le=32.0)
+    adaptive_reward_debt_weight: float = Field(default=1.0, ge=0.0, le=32.0)
+    adaptive_reward_obligation_weight: float = Field(default=1.0, ge=0.0, le=32.0)
+    adaptive_reward_final_citation_weight: float = Field(default=3.0, ge=0.0, le=32.0)
+    adaptive_reward_call_cost: float = Field(default=0.10, ge=0.0, le=8.0)
+    adaptive_reward_token_cost_per_100k: float = Field(default=0.10, ge=0.0, le=8.0)
+    adaptive_reward_refutation_cost: float = Field(default=1.0, ge=0.0, le=32.0)
+
+    experience_distillation_enabled: bool = True
+    negative_analogy_library_enabled: bool = True
+    max_distilled_experiences: int = Field(default=256, ge=0, le=10000)
+    max_negative_analogy_records: int = Field(default=256, ge=0, le=10000)
+
     @model_validator(mode="after")
     def validate_inspiration(self) -> "InspirationConfig":
         if self.surprise_budget_min_calls > self.surprise_budget_max_calls:

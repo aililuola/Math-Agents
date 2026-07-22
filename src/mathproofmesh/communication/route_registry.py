@@ -271,6 +271,15 @@ class RouteRegistry:
         route.revision_summary = revision_summary.strip()
         self.recompute_neighbors()
 
+    def mark_abandoned(self, route_id: str, reason: str) -> None:
+        route = self.get(route_id)
+        route.status = RouteStatus.ABANDONED
+        route.cooldown_until_round = None
+        route.requires_revision = False
+        route.revision_summary = reason.strip() or "abandoned by audited meta directive"
+        self.cooling_reasons.pop(route_id, None)
+        self.recompute_neighbors()
+
     def merge_routes(self, source_route_id: str, target_route_id: str) -> None:
         if source_route_id == target_route_id:
             raise ValueError("a route cannot be merged into itself")

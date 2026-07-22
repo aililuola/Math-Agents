@@ -3492,6 +3492,11 @@ class ProofMeshOrchestrator:
                 for item in state.proof_graph.obligations
                 if item.status != "closed"
             ],
+            obligation_kinds={
+                item.obligation_id: item.kind.value
+                for item in state.proof_graph.obligations
+                if item.status != "closed"
+            },
         )
 
     async def _run_inspiration_round(
@@ -3698,6 +3703,21 @@ class ProofMeshOrchestrator:
                         base + int(index < extra),
                         phase="first_route_attempt",
                     )
+            proposal_by_strategy = {
+                strategy.strategy_id: strategy.inspiration_proposal_id
+                for strategy in new_strategies
+                if strategy.inspiration_proposal_id
+            }
+            for attempt in attempts:
+                proposal_id = proposal_by_strategy.get(attempt.strategy_id)
+                if proposal_id is None:
+                    continue
+                engine.record_outcome_usage(
+                    proposal_id,
+                    phase="route",
+                    calls=1,
+                    tokens=attempt.usage.total_tokens,
+                )
             state.attempts.extend(attempts)
             store.append_event(
                 "inspiration_route_attempted",
@@ -3777,7 +3797,7 @@ class ProofMeshOrchestrator:
             if result is None:
                 return None
             try:
-                return engine.register_agent_artifact(
+                proposal = engine.register_agent_artifact(
                     task,
                     result.value,
                     source_agent_id=agent.id,
@@ -3785,6 +3805,13 @@ class ProofMeshOrchestrator:
                     proposal_slot=proposal_slot,
                     context_mode=context_mode,
                 )
+                if proposal is not None:
+                    engine.record_outcome_usage(
+                        proposal.proposal_id,
+                        phase="proposer",
+                        tokens=result.usage.total_tokens,
+                    )
+                return proposal
             except (TypeError, ValueError) as exc:
                 if engine.store is not None:
                     engine.store.append_event(
@@ -3801,7 +3828,11 @@ class ProofMeshOrchestrator:
 
         pending: list[Any] = []
         for task in tasks:
-            calls_per_task = min(configured_calls, task.max_proposals)
+            calls_per_task = (
+                1
+                if task.mechanism == InspirationMechanism.META_REPLAN
+                else min(configured_calls, task.max_proposals)
+            )
             cold_calls = min(
                 engine.inspiration_config.cold_context_proposals_per_task,
                 calls_per_task,
@@ -3914,6 +3945,24 @@ class ProofMeshOrchestrator:
                     for item in snapshot.route_signatures
                     for tag in item.mechanism_tags
                 ],
+                obligation_kinds=[
+                    snapshot.obligation_kinds[item]
+                    for item in task.target_obligation_ids
+                    if item in snapshot.obligation_kinds
+                ],
+                mechanism_chain=[
+                    tag
+                    for item in snapshot.route_signatures
+                    for tag in [
+                        *item.representation_tags,
+                        *item.mechanism_tags,
+                        *item.key_transformations,
+                    ]
+                ],
+                graph_motif_tags=(
+                    ["shared_bottleneck"] if snapshot.shared_bottleneck_ids else []
+                ),
+                problem_hash=problem.integrity_hash,
                 top_k=engine.inspiration_config.analogy_top_k,
             )
             return (
@@ -3921,6 +3970,10 @@ class ProofMeshOrchestrator:
                 prompts.structural_analogy_search(
                     problem=problem,
                     verified_local_records=records,
+                    negative_transfer_records=[
+                        item.model_dump(mode="json")
+                        for item in engine.negative_analogy_records.values()
+                    ],
                     **context,
                 ),
             )
@@ -4031,6 +4084,11 @@ class ProofMeshOrchestrator:
             review.proposal_id = proposal.proposal_id
             review.reviewer_agent_id = reviewer.id
             precomputed[proposal.proposal_id] = review
+            engine.record_outcome_usage(
+                proposal.proposal_id,
+                phase="referee",
+                tokens=result.usage.total_tokens,
+            )
 
             skeptic_candidates = [
                 agent
@@ -4063,6 +4121,11 @@ class ProofMeshOrchestrator:
             )
             if skeptic_result is None:
                 continue
+            engine.record_outcome_usage(
+                proposal.proposal_id,
+                phase="skeptic",
+                tokens=skeptic_result.usage.total_tokens,
+            )
             report = skeptic_result.value
             if report.verdict == VerificationVerdict.FAIL:
                 descriptions = [item.description for item in report.issues]
@@ -9712,6 +9775,25 @@ class ProofMeshOrchestrator:
             execution_status = ExecutionStatus.BUDGET_EXHAUSTED
         elif status == RunStatus.FAILED:
             execution_status = ExecutionStatus.FAILED
+        if (
+            status == RunStatus.VERIFIED
+            and state.final_proof is not None
+            and state.inspiration_engine is not None
+        ):
+            source_ids = set(state.final_proof.source_attempt_ids)
+            strategy_ids = {
+                attempt.strategy_id
+                for attempt in state.attempts
+                if attempt.attempt_id in source_ids
+            }
+            for strategy in state.strategies:
+                if (
+                    strategy.strategy_id in strategy_ids
+                    and strategy.inspiration_proposal_id is not None
+                ):
+                    state.inspiration_engine.mark_proposal_cited(
+                        strategy.inspiration_proposal_id
+                    )
         return RunResult(
             run_id=run_id,
             status=status,
