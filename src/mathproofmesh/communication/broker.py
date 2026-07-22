@@ -646,6 +646,9 @@ class MessageBroker:
                 key: value.model_dump(mode="json")
                 for key, value in self._messages.items()
             },
+            "admitted_fact_ids": [
+                message.message_id for message in self.admitted_facts()
+            ],
             "dedup": dict(self._dedup),
             "decisions": [item.model_dump(mode="json") for item in self._decisions],
             "deliveries": dict(self._deliveries),

@@ -1,7 +1,7 @@
 {
   "project": "MathProofMesh",
   "version": "0.7.0",
-  "validated_on": "2026-07-20",
+  "validated_on": "2026-07-22",
   "python_requirement": ">=3.11",
   "base_branch": "feature/mathproofmesh-v0.6.0-reasoning-first-computation",
   "base_commit": "5a77fffb0758240e021c86545fe6165fac52585a",
@@ -17,8 +17,8 @@
     "smoke_max_output_tokens": 50000,
     "formal_max_output_tokens": 100000,
     "active_provider_max_output_tokens": 384000,
-    "active_operating_max_output_tokens": 96000,
-    "active_segment_max_output_tokens": 96000,
+    "active_operating_max_output_tokens": 128000,
+    "active_segment_max_output_tokens": 128000,
     "active_max_total_tokens": 10000000,
     "active_max_total_calls": 150,
     "smoke_max_new_steps_per_segment": 8,
@@ -39,6 +39,15 @@
     "legacy_claim_bypass_closed": true,
     "broker_admitted_global_fact_context": true,
     "legacy_checkpoint_claim_quarantine": true,
+    "legacy_pre_strategy_resume_route_rebuild": true,
+    "hierarchical_prompt_fallback_fails_closed": true,
+    "selected_prover_membership_synchronized": true,
+    "global_fact_report_gate": true,
+    "explicit_fact_dependency_priority": true,
+    "purpose_differentiated_fact_context": true,
+    "bounded_blind_negative_context": true,
+    "mandatory_negative_context_fails_closed": true,
+    "blind_artifact_paths_redacted": true,
     "pairwise_distinct_route_roles": true,
     "continuation_required_for_active_topology": true,
     "validation_escalation_executor": true,
@@ -75,7 +84,7 @@
     "compileall": "PASS",
     "ruff_check": "PASS",
     "ruff_format_check": "PASS",
-    "pytest": "169 passed",
+    "pytest": "209 passed with dev and server extras including z3-solver",
     "offline_topology_benchmark": {
       "status": "PASS",
       "provider_calls": 0,
@@ -88,12 +97,12 @@
     "real_provider_calls": "NOT RUN; credentials intentionally unused"
   },
   "counts": {
-    "source_python_files": 78,
-    "test_python_files": 61,
-    "documentation_files": 25,
-    "source_lines": 26163,
-    "test_lines": 6661,
-    "docs_directory_lines": 2144
+    "source_python_files": 81,
+    "test_python_files": 70,
+    "documentation_files": 24,
+    "source_lines": 33525,
+    "test_lines": 9665,
+    "docs_directory_lines": 3237
   },
   "artifacts": {
     "status": "SOURCE RELEASE; DISTRIBUTION ARTIFACTS NOT COMMITTED",

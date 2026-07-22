@@ -49,16 +49,24 @@ path rather than only recording post-hoc topology metadata:
 - Validation escalation has an executor for deterministic, blind,
   adversarial, cross-provider and tool/formal evidence. Agent capability
   scores now participate in domain-role dispatch.
-- Blind final packets include Typed Fact scope/evidence/artifact metadata,
-  anonymized referee provenance and Typed NegativeMemory.
+- Global Fact selection is purpose-aware. Explicit `message_id` or
+  `content_hash` dependencies and their admitted dependency closure precede
+  lexical similarity; missing required Facts fail closed.
+- Blind final packets bound NegativeMemory by item and character budgets while
+  preserving exact counterexamples and explicit conflicts first. Omitted
+  mandatory negative evidence prevents final PASS.
+- Blind artifact evidence contains only the file-content SHA-256, certificate
+  type and replay status. Raw run paths are never exposed to Blind Judges.
 - Inspiration tasks pass unified scheduler admission before model calls;
   `require_inspiration_referee` and `max_new_routes_per_trigger` are enforced.
 - Message utility is credited only after a committed, verified delta cites the
   message or closes a claimed obligation. Receipt acceptance alone is zero.
 - Computation-backed route artifacts invoke a real independent Tool Specialist
   typed prompt in addition to deterministic replay.
-- Active output uses a 384K provider ceiling with a 96K operating limit per
-  Agent and continuation segment.
+- Active output keeps a 384K provider ceiling and uses evidence-gated 32K,
+  64K, 96K and 128K operating tiers. Distinct mathematical signatures may run
+  high tiers concurrently; repeated high-cost work on the same checkpoint,
+  target and mechanism is suppressed.
 
 ## Compatibility
 
@@ -91,3 +99,20 @@ validation.
 - Dynamic and AST regressions cover rejected active Inspiration, rejected
   route-local claims, verifier tool follow-ups, synthesis, blind packets,
   revision, dependency gates and old-checkpoint resume.
+
+## Legacy Checkpoint Resume Closure
+
+- A checkpoint saved after triage but before Strategy generation now rebuilds
+  every missing Route, Prover membership and sparse neighborhood before any
+  resumed proof call.
+- The actually selected Prover is synchronized into RouteRegistry. Route
+  repair is idempotent and persisted before the resumed exploration round.
+- `hierarchical_sparse` fails closed when Route, Broker or TypedMemory context
+  is missing and can no longer fall back to the legacy `proof_continuation`
+  prompt or LemmaMemory inbox.
+- Hierarchical reports distinguish Broker-admitted global Facts from legacy
+  ClaimMemory history. `reports/global_fact_inventory.json` records both sets
+  and the qualification policy.
+- The complete offline suite passes 205 tests with `.[dev,server]` installed,
+  including `z3-solver`. The topology benchmark is a deterministic component
+  contract Mock with zero provider calls, not a real IMO performance claim.

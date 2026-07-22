@@ -1,6 +1,6 @@
 # 可复现验证记录
 
-**验证日期：2026 年 7 月 20 日。** 本记录严格区分源码静态质量、确定性 Mock/HTTP Mock 行为、Docker 沙箱探针和真实供应商联调。0.7 源码、Mock、拓扑 benchmark 与 Docker 固定镜像隔离探针已执行；整个 0.7 自动化过程没有读取 API key，也没有发起真实供应商请求。
+**验证日期：2026 年 7 月 22 日。** 本记录严格区分源码静态质量、确定性 Mock/HTTP Mock 行为、Docker 沙箱探针和真实供应商联调。0.7 源码、Mock、拓扑 benchmark 与 Docker 固定镜像隔离探针已执行；整个 0.7 自动化过程没有读取 API key，也没有发起真实供应商请求。
 
 ## 1. 一键复验
 
@@ -29,7 +29,7 @@ compileall(src + tests)
 | `python -m compileall -q src tests` | PASS |
 | `ruff check .` | PASS |
 | `ruff format --check .` | PASS |
-| `PYTHONPATH=src pytest -q` | **149 passed** |
+| `python -m pytest -q` | **209 passed**（安装 `.[dev,server]`，包含 `z3-solver`） |
 | deterministic demo | `verified`，23 calls，30,540 tokens |
 | continuation deterministic demo | `verified`，25 calls，32,920 tokens |
 | demo 证明检查点 | 3 条路径，共 6 个 checkpoint（3 个 genesis + 3 个已验证完成段） |
@@ -149,7 +149,7 @@ primary key 正常调用级重试耗尽
 - 最终预算储备根据 `reserve_revision_cycles` 与 `max_revisions` 计算；
 - 调度产物记录每个候选动作的排名、分数、预计成本、未选原因和预算阻断原因。
 
-当前包含上述历史回归在内的完整自动化结果为 `149 passed`。分段确定性完整演示结果仍为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
+当前包含上述历史回归在内的完整自动化结果为 `209 passed`。分段确定性完整演示结果仍为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
 
 ## 6. 终审边界与修订回归验证
 
@@ -241,3 +241,27 @@ Python 3.11
 - AST 回归测试禁止关键 hierarchical 全局路径重新直接调用 `memory.verified()`。
 
 最终完整验证结果记录在 `BUILD_INFO.json`。Pytest、Ruff check、Ruff format check、`compileall` 和离线 topology Mock benchmark 全部通过；真实 provider 调用保持 `NOT RUN`。
+
+## 12. 旧 checkpoint 路线重建与报告事实资格
+
+新增动态回归覆盖 triage 已保存、Strategy 尚未生成、且不存在 RouteRegistry、MessageBroker、TypedMemory 的早期 checkpoint。恢复后系统必须先生成 Strategy，再幂等重建 Route、Prover 成员和稀疏邻居，保存一致的 hierarchical checkpoint，最后才进入证明调用。
+
+回归测试明确断言：
+
+- 每个恢复后的 Strategy 都能解析到 Route；
+- 所有证明调用使用 `route_prove`，legacy `proof_continuation` 调用数为 0；
+- 被隔离的 legacy marker 不出现在任何 Route Prover prompt；
+- 实际选中的 Prover 已登记到 RouteRegistry；
+- Route Team、MessageBroker 和 TypedMemory 继续正常执行；
+- 缺失 Route 或 typed route context 时 fail closed，不允许静默绕回 LemmaMemory；
+- 运行报告只把 Broker admitted、独立审稿且仍在 TypedMemory 的交集称为全局 Fact；旧 Claim 只列入迁移历史。
+
+新增上下文策略回归还验证：
+
+- 显式 `message_id` 和 `content_hash` 引用及其完整依赖闭包优先于 Jaccard 词法相似度；
+- `ContextPurpose` 会改变 Fact 排序字段、字段投影和全局字符预算；
+- Blind NegativeMemory 受 `max_negative_context` 与字符预算约束，但精确反例和显式冲突强制优先；
+- 强制 Fact 或 Negative 证据缺失时，确定性 Blind Context Gate 覆盖模型 PASS；
+- Blind packet 仅保留 artifact 文件内容 SHA-256、证书类型和 replay 状态，不包含原始路径、Agent 或 Route 名称。
+
+离线 topology benchmark 的调用数、token、成功率和消融指标均为 component-contract Mock 数据，用于确定性回归，不是实际 IMO 题集的性能测量。

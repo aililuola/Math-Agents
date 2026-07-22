@@ -12,6 +12,53 @@ def _mermaid_id(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "_", value)
 
 
+def _broker_admitted_fact_payloads(
+    message_broker: dict[str, Any],
+    typed_memory: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Intersect Broker-authorized IDs with the persisted live TypedMemory facts."""
+
+    broker_messages = dict(message_broker.get("messages", {}))
+    typed_messages = dict(typed_memory.get("messages", {}))
+    tiers = dict(typed_memory.get("tiers", {}))
+    admitted_ids = set(message_broker.get("admitted_fact_ids", []))
+    admitted: list[dict[str, Any]] = []
+    for message_id, message in broker_messages.items():
+        if message_id not in admitted_ids:
+            continue
+        typed_message = typed_messages.get(message_id)
+        if not isinstance(message, dict) or not isinstance(typed_message, dict):
+            continue
+        if message.get("memory_tier") != "fact":
+            continue
+        if message.get("verification_status") != "verified":
+            continue
+        if tiers.get(message_id) != "fact":
+            continue
+        if typed_message.get("content_hash") != message.get("content_hash"):
+            continue
+        admitted.append(message)
+    return admitted
+
+
+def _report_component_state(
+    store: ArtifactStore,
+    checkpoint_state: dict[str, Any],
+    name: str,
+) -> dict[str, Any]:
+    value = checkpoint_state.get(name)
+    if isinstance(value, dict):
+        return value
+    if store.has_named_json("structured", name):
+        try:
+            persisted = store.read_named_json("structured", name)
+        except (OSError, ValueError):
+            return {}
+        if isinstance(persisted, dict):
+            return persisted
+    return {}
+
+
 def write_hierarchical_reports(
     store: ArtifactStore,
     *,
@@ -23,6 +70,7 @@ def write_hierarchical_reports(
     contradiction_broker: dict[str, Any],
     inspiration_engine: dict[str, Any],
     deep_exploration: dict[str, Any] | None = None,
+    legacy_claims: list[dict[str, Any]] | None = None,
 ) -> None:
     """Write the stable v0.7 topology, graph, diagnostics, and metric artifacts."""
     routes = list(route_registry.get("routes", []))
@@ -35,6 +83,25 @@ def write_hierarchical_reports(
     edges = dict(proof_graph.get("edges", {}))
     tiers = dict(typed_memory.get("tiers", {}))
     deep_exploration = deep_exploration or {}
+    legacy_claims = legacy_claims or []
+    admitted_facts = _broker_admitted_fact_payloads(message_broker, typed_memory)
+    typed_fact_candidates = [
+        message_id for message_id, tier in tiers.items() if tier == "fact"
+    ]
+
+    store.write_json(
+        "reports",
+        "global_fact_inventory",
+        {
+            "broker_admitted_global_facts": admitted_facts,
+            "typed_fact_candidate_ids": typed_fact_candidates,
+            "legacy_claim_history": legacy_claims,
+            "policy": (
+                "Only the Broker-admitted and independently reviewed TypedMemory "
+                "intersection is globally admissible in hierarchical_sparse."
+            ),
+        },
+    )
 
     topology = {
         "routes": routes,
@@ -110,7 +177,15 @@ def write_hierarchical_reports(
         "route_count": len(routes),
         "active_route_count": sum(item.get("status") == "active" for item in routes),
         "merged_route_count": sum(item.get("status") == "merged" for item in routes),
-        "fact_count": sum(value == "fact" for value in tiers.values()),
+        # Keep fact_count for metric compatibility, but make its semantics the
+        # v0.7 global Fact gate rather than a raw TypedMemory tier count.
+        "fact_count": len(admitted_facts),
+        "broker_admitted_global_fact_count": len(admitted_facts),
+        "typed_fact_candidate_count": len(typed_fact_candidates),
+        "legacy_claim_history_count": len(legacy_claims),
+        "legacy_verified_claim_history_count": sum(
+            item.get("status") == "verified" for item in legacy_claims
+        ),
         "insight_count": sum(value == "insight" for value in tiers.values()),
         "negative_count": sum(value == "negative" for value in tiers.values()),
         "open_obligation_count": sum(
@@ -257,7 +332,34 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
             )
         lines.append("")
 
-    lines.extend(["## 路径与引理", ""])
+    latest_checkpoint = store.latest_stage_checkpoint()
+    topology_state = latest_checkpoint[1] if latest_checkpoint is not None else {}
+    registry_state = _report_component_state(store, topology_state, "route_registry")
+    typed_memory_state = _report_component_state(store, topology_state, "typed_memory")
+    proof_graph_state = _report_component_state(store, topology_state, "proof_graph")
+    broker_state = _report_component_state(store, topology_state, "message_broker")
+    bridge_state = _report_component_state(store, topology_state, "bridge_broker")
+    conflict_state = _report_component_state(
+        store, topology_state, "contradiction_broker"
+    )
+    inspiration_state = _report_component_state(
+        store, topology_state, "inspiration_engine"
+    )
+    hierarchical_report = any(
+        (
+            registry_state,
+            typed_memory_state,
+            proof_graph_state,
+            broker_state,
+            inspiration_state,
+        )
+    )
+    admitted_facts = _broker_admitted_fact_payloads(
+        broker_state,
+        typed_memory_state,
+    )
+
+    lines.extend(["## 路径与事实资格", ""])
     for attempt in result.attempts:
         lines.append(
             f"- `{attempt.attempt_id}` / `{attempt.strategy_id}` / {attempt.agent_id}："
@@ -271,23 +373,32 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
                 f"  - API-key/Agent 接力链：{' → '.join(attempt.failover_chain)}"
             )
     lines.append("")
-    verified_claims = [
-        claim for claim in result.claims if claim.status.value == "verified"
-    ]
-    lines.append(f"已验证引理数：{len(verified_claims)}")
-    for claim in verified_claims:
-        lines.append(f"- `{claim.claim_id}`：{claim.statement}")
+    if hierarchical_report:
+        lines.append(f"Broker 准入的全局 Fact 数：{len(admitted_facts)}")
+        for fact in admitted_facts:
+            lines.append(
+                f"- `{fact.get('message_id', 'unknown')}`：{fact.get('statement', '')}"
+            )
+        lines.extend(
+            [
+                "",
+                f"Legacy ClaimMemory 历史记录数：{len(result.claims)}",
+                "以下记录仅用于迁移与审计；即使旧状态为 verified，也未自动获得 v0.7 全局事实资格，不得进入 hierarchical 证明提示词。",
+            ]
+        )
+        for claim in result.claims:
+            lines.append(
+                f"- `{claim.claim_id}` [{claim.status.value}]：{claim.statement}"
+            )
+    else:
+        verified_claims = [
+            claim for claim in result.claims if claim.status.value == "verified"
+        ]
+        lines.append(f"已验证引理数：{len(verified_claims)}")
+        for claim in verified_claims:
+            lines.append(f"- `{claim.claim_id}`：{claim.statement}")
     lines.append("")
 
-    latest_checkpoint = store.latest_stage_checkpoint()
-    topology_state = latest_checkpoint[1] if latest_checkpoint is not None else {}
-    registry_state = topology_state.get("route_registry") or {}
-    typed_memory_state = topology_state.get("typed_memory") or {}
-    proof_graph_state = topology_state.get("proof_graph") or {}
-    broker_state = topology_state.get("message_broker") or {}
-    bridge_state = topology_state.get("bridge_broker") or {}
-    conflict_state = topology_state.get("contradiction_broker") or {}
-    inspiration_state = topology_state.get("inspiration_engine") or {}
     if registry_state or proof_graph_state or inspiration_state:
         routes = list(registry_state.get("routes", []))
         tiers = dict(typed_memory_state.get("tiers", {}))
@@ -313,7 +424,8 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
                 "## v0.7 分层稀疏拓扑指标",
                 "",
                 f"- 路线：{len(routes)}（active {sum(item.get('status') == 'active' for item in routes)}；merged {sum(item.get('status') == 'merged' for item in routes)}）",
-                f"- Typed Memory：Fact {sum(value == 'fact' for value in tiers.values())}；Insight {sum(value == 'insight' for value in tiers.values())}；Negative {sum(value == 'negative' for value in tiers.values())}",
+                f"- 全局事实：Broker-admitted Fact {len(admitted_facts)}；Typed Fact candidates {sum(value == 'fact' for value in tiers.values())}；Legacy Claim history {len(result.claims)}",
+                f"- Typed Memory：Insight {sum(value == 'insight' for value in tiers.values())}；Negative {sum(value == 'negative' for value in tiers.values())}",
                 f"- Proof Obligation：open {sum(item.get('status') != 'closed' for item in obligations)}；closed {sum(item.get('status') == 'closed' for item in obligations)}",
                 f"- Bridge tasks：{len(bridge_state.get('tasks', []))}；Contradictions：{len(conflict_state.get('records', []))}",
                 f"- Typed messages：publication attempts {len(decisions)}；unique published {published}；delivery records {len(deliveries)}；consumed {consumed}；semantically accepted {semantic_accepts}；mathematically used {len(utility_records)}；rejected {rejected}；duplicate rate {(duplicates / max(1, len(decisions))):.3f}",

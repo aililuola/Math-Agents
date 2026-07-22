@@ -83,6 +83,7 @@ def test_only_broker_admitted_facts_are_global_context(tmp_path) -> None:
     admitted_ids = {item.message_id for item in broker.admitted_facts()}
     assert broker_fact.message_id in admitted_ids
     assert direct_fact.message_id not in admitted_ids
+    assert broker.export_state()["admitted_fact_ids"] == [broker_fact.message_id]
 
 
 def test_admitted_fact_context_includes_only_complete_dependency_closures(

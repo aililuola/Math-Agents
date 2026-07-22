@@ -118,3 +118,77 @@ def test_hierarchical_metrics_distinguish_delivery_consumption_and_use(
         "route_created": 1,
         "stored_insight": 2,
     }
+
+
+def test_hierarchical_report_counts_only_broker_admitted_typed_facts(
+    tmp_path: Path,
+) -> None:
+    store = ArtifactStore(tmp_path / "runs", "global-fact-report-gate")
+    broker_messages = {
+        "admitted": {
+            "message_id": "admitted",
+            "statement": "independently reviewed fact",
+            "memory_tier": "fact",
+            "verification_status": "verified",
+            "content_hash": "hash-admitted",
+        },
+        "typed-only": {
+            "message_id": "typed-only",
+            "statement": "missing broker referee provenance",
+            "memory_tier": "fact",
+            "verification_status": "verified",
+            "content_hash": "hash-typed-only",
+        },
+    }
+    typed_messages = {key: dict(value) for key, value in broker_messages.items()}
+    write_hierarchical_reports(
+        store,
+        route_registry={"routes": []},
+        message_broker={
+            "messages": broker_messages,
+            "admitted_fact_ids": ["admitted"],
+            "decisions": [],
+            "deliveries": {},
+            "receipts": {},
+            "review_provenance": {
+                "admitted": {
+                    "independent": True,
+                    "referee_agent_id": "referee-a",
+                }
+            },
+        },
+        proof_graph={"obligations": {}, "edges": {}},
+        typed_memory={
+            "messages": typed_messages,
+            "tiers": {"admitted": "fact", "typed-only": "fact"},
+        },
+        bridge_broker={"tasks": []},
+        contradiction_broker={"records": []},
+        inspiration_engine={},
+        legacy_claims=[
+            {
+                "claim_id": "legacy-verified",
+                "statement": "historical only",
+                "status": "verified",
+            }
+        ],
+    )
+
+    metrics = json.loads(
+        (store.root / "reports" / "hierarchical_metrics.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert metrics["fact_count"] == 1
+    assert metrics["broker_admitted_global_fact_count"] == 1
+    assert metrics["typed_fact_candidate_count"] == 2
+    assert metrics["legacy_claim_history_count"] == 1
+    assert metrics["legacy_verified_claim_history_count"] == 1
+    inventory = json.loads(
+        (store.root / "reports" / "global_fact_inventory.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [
+        item["message_id"] for item in inventory["broker_admitted_global_facts"]
+    ] == ["admitted"]

@@ -4,6 +4,8 @@
 
 分层模式的阶段 checkpoint 除旧 `ProofCheckpoint` 外，还保存 `route_registry`、`message_broker`、`message_receipts`、`typed_memory`、`proof_graph`、`bridge_broker`、`contradiction_broker`、`inspiration_engine` 和 domain-role capability 状态。旧 checkpoint 缺少这些字段时初始化为空，并记录 `checkpoint_migrated_to_v0_7`，不会丢弃原有已验证证明段。
 
+若旧 checkpoint 恰好停在 Triage 完成、Strategy 尚未生成的窗口，恢复流程会在重新生成 Strategy 后、任何证明调用前，幂等补齐 Route、Prover 成员和稀疏邻居，并立即保存 `resume_routes_ensured` checkpoint。实际选中的 Prover 也会同步到 RouteRegistry。`hierarchical_sparse` 缺 Route、MessageBroker 或 TypedMemory 时必须 fail closed，不允许回退到 legacy `proof_continuation` 或把旧 LemmaMemory Claim 当作路线收件箱。
+
 消息恢复使用 `(message_id, target_route_id)` 稳定 delivery key。已经进入 Agent prompt 但尚未回执的投递恢复为 pending receipt，`prompt_consumed=true`，不会再次放入 prompt。Inspiration proposal、review 和 materialization 也有稳定 ID；同一 proposal 恢复后不能重复创建路线或重复花费 Surprise Budget。
 
 Graph freeze、Meta-Strategist cooldown、最后可观测 Inspiration snapshot 和受保护预算都随 checkpoint 恢复。恢复的是可审计外部状态，不是模型私有解码状态。

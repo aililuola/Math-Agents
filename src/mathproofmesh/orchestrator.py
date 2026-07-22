@@ -30,6 +30,7 @@ from .computation.policy import ComputationContext
 from .context_policy import (
     ContextPurpose,
     build_admissible_fact_context,
+    explicit_dependency_refs,
     select_legacy_claim_context,
 )
 from .continuation import (
@@ -147,7 +148,10 @@ from .verification import (
     infer_capability_domain,
 )
 from .verification.escalation import ValidationLevel, ValidationStepResult
-from .synthesis_phase import build_blind_review_packet
+from .synthesis_phase import (
+    apply_blind_context_integrity_guard,
+    build_blind_review_packet,
+)
 from .broker_phase import record_verified_message_usage
 from .inspiration_phase import admit_inspiration_tasks
 from .cross_route_phase import team_reviews_allow_global_share
@@ -385,9 +389,10 @@ class ProofMeshOrchestrator:
                 store,
             )
             assignments = router.assign_explorers(state.strategies)
-            self._register_hierarchical_routes(
+            self._ensure_hierarchical_routes(
                 state,
-                assignments,
+                router,
+                assignments=assignments,
                 round_index=0,
                 activity=activity,
                 store=store,
@@ -1775,6 +1780,23 @@ class ProofMeshOrchestrator:
                     router,
                     store,
                 )
+            self._ensure_hierarchical_routes(
+                state,
+                router,
+                round_index=state.current_round,
+                activity=activity,
+                store=store,
+            )
+            # Persist the repaired topology before any resumed route can run. If the
+            # process stops again here, the next resume sees one coherent v0.7 state
+            # rather than repeating the legacy pre-strategy checkpoint.
+            self._checkpoint(
+                store,
+                "resume_routes_ensured",
+                state,
+                memory,
+                runner,
+            )
 
             max_resume_rounds = max(1, self.config.budget.max_rounds)
             for resume_round in range(max_resume_rounds):
@@ -2341,24 +2363,95 @@ class ProofMeshOrchestrator:
                 stage="run_resume",
             )
 
-    def _register_hierarchical_routes(
+    def _ensure_hierarchical_routes(
         self,
         state: SolveState,
-        assignments: list[tuple[StrategyCard, AgentRuntime]],
+        router: SparseTopologyRouter,
         *,
+        assignments: Sequence[tuple[StrategyCard, AgentRuntime]] | None = None,
         round_index: int,
-        activity: ActivityStream,
+        activity: ActivityStream | None,
         store: ArtifactStore,
     ) -> None:
+        if self.config.topology.mode != "hierarchical_sparse":
+            return
         registry = state.route_registry
         if registry is None:
-            return
-        for strategy, agent in assignments:
-            route = registry.register_route(strategy)
+            raise RuntimeError(
+                "hierarchical_sparse requires an initialized RouteRegistry"
+            )
+
+        assigned_by_strategy = {
+            strategy.strategy_id: agent for strategy, agent in (assignments or [])
+        }
+        for strategy in state.strategies:
+            existing = registry.route_for_strategy(strategy.strategy_id)
+            route = existing or registry.register_route(strategy)
+            if existing is None:
+                store.append_event("route_registered", route)
+                if activity is not None:
+                    activity.info(
+                        "route_registered",
+                        title="Hierarchical route registered",
+                        detail=strategy.title,
+                        stage="route_team",
+                        agent_id=(
+                            assigned_by_strategy[strategy.strategy_id].id
+                            if strategy.strategy_id in assigned_by_strategy
+                            else strategy.assigned_agent_id
+                        ),
+                        metrics={
+                            "route_id": route.route_id,
+                            "strategy_id": strategy.strategy_id,
+                            "recovered": state.resumed,
+                        },
+                    )
+
+        needs_assignment: list[StrategyCard] = []
+        for strategy in state.strategies:
+            route = registry.route_for_strategy(strategy.strategy_id)
+            if route is None:
+                raise RuntimeError(
+                    "hierarchical route registration failed for strategy "
+                    f"{strategy.strategy_id}"
+                )
+            if any(member.role == RouteRole.PROVER for member in route.members):
+                continue
+            if strategy.strategy_id in assigned_by_strategy:
+                continue
+            if strategy.assigned_agent_id:
+                try:
+                    assigned_by_strategy[strategy.strategy_id] = router.pool.get(
+                        strategy.assigned_agent_id
+                    )
+                    continue
+                except KeyError:
+                    pass
+            needs_assignment.append(strategy)
+
+        if needs_assignment:
+            assigned_by_strategy.update(
+                {
+                    strategy.strategy_id: agent
+                    for strategy, agent in router.assign_explorers(needs_assignment)
+                }
+            )
+
+        for strategy in state.strategies:
+            route = registry.route_for_strategy(strategy.strategy_id)
+            if route is None or any(
+                member.role == RouteRole.PROVER for member in route.members
+            ):
+                continue
+            agent = assigned_by_strategy.get(strategy.strategy_id)
+            if agent is None:
+                raise RuntimeError(
+                    "hierarchical route has no available Prover for strategy "
+                    f"{strategy.strategy_id}"
+                )
             registry.assign_member(
                 route.route_id, agent.id, RouteRole.PROVER, round_index
             )
-            store.append_event("route_registered", route)
             store.append_event(
                 "route_member_assigned",
                 {
@@ -2366,19 +2459,10 @@ class ProofMeshOrchestrator:
                     "agent_id": agent.id,
                     "role": RouteRole.PROVER.value,
                     "round_index": round_index,
+                    "recovered": state.resumed,
                 },
             )
-            activity.info(
-                "route_registered",
-                title="Hierarchical route registered",
-                detail=strategy.title,
-                stage="route_team",
-                agent_id=agent.id,
-                metrics={
-                    "route_id": route.route_id,
-                    "strategy_id": strategy.strategy_id,
-                },
-            )
+
         routes = registry.routes
         limit = self.config.topology.cross_route.max_neighbors_per_route
         strategies = {item.strategy_id: item for item in state.strategies}
@@ -2392,6 +2476,81 @@ class ProofMeshOrchestrator:
         )
         for route_id, neighbors in neighborhoods.items():
             registry.set_neighbors(route_id, neighbors)
+        self._persist_hierarchical_route_runtime(state, store)
+
+    def _ensure_hierarchical_prover(
+        self,
+        state: SolveState | None,
+        strategy: StrategyCard,
+        agent: AgentRuntime,
+        *,
+        round_index: int,
+        activity: ActivityStream | None,
+        store: ArtifactStore,
+    ) -> str | None:
+        if self.config.topology.mode != "hierarchical_sparse":
+            return None
+        if state is None or state.route_registry is None:
+            raise RuntimeError(
+                "hierarchical_sparse cannot explore without an initialized RouteRegistry"
+            )
+        registry = state.route_registry
+        changed = False
+        route = registry.route_for_strategy(strategy.strategy_id)
+        if route is None:
+            route = registry.register_route(strategy)
+            changed = True
+            store.append_event("route_registered", route)
+            if activity is not None:
+                activity.info(
+                    "route_registered",
+                    title="Missing hierarchical route repaired before exploration",
+                    detail=strategy.title,
+                    stage="route_team",
+                    agent_id=agent.id,
+                    metrics={
+                        "route_id": route.route_id,
+                        "strategy_id": strategy.strategy_id,
+                        "recovered": state.resumed,
+                    },
+                )
+            registry.recompute_neighbors()
+        if not registry.owns_agent(route.route_id, agent.id, RouteRole.PROVER):
+            registry.assign_member(
+                route.route_id,
+                agent.id,
+                RouteRole.PROVER,
+                round_index,
+            )
+            changed = True
+            store.append_event(
+                "route_member_assigned",
+                {
+                    "route_id": route.route_id,
+                    "agent_id": agent.id,
+                    "role": RouteRole.PROVER.value,
+                    "round_index": round_index,
+                    "actual_selected_prover": True,
+                },
+            )
+        if changed:
+            self._persist_hierarchical_route_runtime(state, store)
+        return route.route_id
+
+    @staticmethod
+    def _persist_hierarchical_route_runtime(
+        state: SolveState,
+        store: ArtifactStore,
+    ) -> None:
+        components = {
+            "route_registry": state.route_registry,
+            "message_broker": state.message_broker,
+            "typed_memory": state.typed_memory,
+            "proof_graph": state.proof_graph,
+        }
+        for name, component in components.items():
+            if component is not None:
+                store.write_json("structured", name, component.export_state())
 
     def _route_for_strategy(self, state: SolveState, strategy_id: str) -> str | None:
         if state.route_registry is None:
@@ -4669,18 +4828,26 @@ class ProofMeshOrchestrator:
         strategy_id: str,
         current_round: int,
     ) -> tuple[str | None, list[MessageEnvelope], dict[str, Any]]:
+        if self.config.topology.mode != "hierarchical_sparse":
+            return None, [], {}
+        if not self.config.topology.typed_communication.enabled:
+            raise RuntimeError(
+                "hierarchical_sparse route prompts require typed communication"
+            )
         if (
             state is None
             or state.route_registry is None
             or state.message_broker is None
             or state.typed_memory is None
-            or self.config.topology.mode != "hierarchical_sparse"
-            or not self.config.topology.typed_communication.enabled
         ):
-            return None, [], {}
+            raise RuntimeError(
+                "hierarchical_sparse route prompt context is not initialized"
+            )
         route_id = self._route_for_strategy(state, strategy_id)
         if route_id is None:
-            return None, [], {}
+            raise RuntimeError(
+                f"hierarchical_sparse route is missing for strategy {strategy_id}"
+            )
 
         delivered, context = build_route_prompt_context(
             self.config,
@@ -5231,6 +5398,14 @@ class ProofMeshOrchestrator:
         max_segments_this_call: int | None,
     ) -> ProofAttempt:
         cfg = self.config.continuation
+        self._ensure_hierarchical_prover(
+            state,
+            strategy,
+            agent,
+            round_index=round_index,
+            activity=runner.activity,
+            store=store,
+        )
         path_id = (
             previous_attempt.path_id
             if previous_attempt and previous_attempt.path_id
@@ -5311,8 +5486,10 @@ class ProofMeshOrchestrator:
                 or checkpoint.segment_index >= cfg.max_segments_per_path
             ):
                 break
-            relevant = router.relevant_claims(
-                memory.claims, strategy, targeted_feedback
+            relevant = (
+                []
+                if self.config.topology.mode == "hierarchical_sparse"
+                else router.relevant_claims(memory.claims, strategy, targeted_feedback)
             )
             route = (
                 state.route_registry.route_for_strategy(strategy.strategy_id)
@@ -5320,6 +5497,11 @@ class ProofMeshOrchestrator:
                 else None
             )
             route_id = route.route_id if route is not None else None
+            if self.config.topology.mode == "hierarchical_sparse" and route_id is None:
+                raise RuntimeError(
+                    "hierarchical_sparse route is missing for strategy "
+                    f"{strategy.strategy_id}"
+                )
             proof_debt_before = (
                 state.proof_graph.proof_debt(route_id)
                 if state is not None
@@ -5490,6 +5672,11 @@ class ProofMeshOrchestrator:
                             **route_context,
                         )
                     else:
+                        if self.config.topology.mode == "hierarchical_sparse":
+                            raise RuntimeError(
+                                "hierarchical_sparse cannot fall back to the legacy "
+                                "proof_continuation prompt"
+                            )
                         bundle = prompts.continue_proof(
                             problem,
                             strategy.model_dump(mode="json"),
@@ -6134,6 +6321,12 @@ class ProofMeshOrchestrator:
             query=verification_query,
             max_chars=max(2000, self.config.topology.max_context_chars // 4),
             purpose=ContextPurpose.DELTA_VERIFICATION,
+            required_refs=explicit_dependency_refs(
+                {
+                    "checkpoint": checkpoint.model_dump(mode="json"),
+                    "delta": delta.model_dump(mode="json"),
+                }
+            ),
         )
         excluded = {author.id}
         replicas = self.config.continuation.delta_verifier_replicas
@@ -6938,6 +7131,7 @@ class ProofMeshOrchestrator:
                 if stage.startswith("final")
                 else ContextPurpose.ATTEMPT_VERIFICATION
             ),
+            required_refs=explicit_dependency_refs(sanitized_target),
         )
         guard_experiments = (
             tools.results_for_path(target.path_id)
@@ -7512,6 +7706,9 @@ class ProofMeshOrchestrator:
             query=claim_query,
             max_chars=max(2000, int(self.config.topology.max_context_chars * 0.25)),
             purpose=ContextPurpose.SYNTHESIS,
+            required_refs=explicit_dependency_refs(
+                [attempt.model_dump(mode="json") for attempt in selected]
+            ),
         )
         open_obligations = (
             [
@@ -7603,6 +7800,7 @@ class ProofMeshOrchestrator:
         memory: LemmaMemory,
         typed_memory: TypedMemory | None = None,
         message_broker: MessageBroker | None = None,
+        artifact_store: ArtifactStore | None = None,
     ) -> BlindReviewPacket:
         return build_blind_review_packet(
             problem,
@@ -7611,6 +7809,7 @@ class ProofMeshOrchestrator:
             topology_mode=self.config.topology.mode,
             typed_memory=typed_memory,
             message_broker=message_broker,
+            artifact_store=artifact_store,
         )
 
     async def _verify_final(
@@ -7645,6 +7844,7 @@ class ProofMeshOrchestrator:
             memory,
             state.typed_memory if state is not None else None,
             state.message_broker if state is not None else None,
+            store,
         )
         blind_structural = (
             hierarchical and self.config.topology.final_stage.blind_structural_review
@@ -7736,6 +7936,7 @@ class ProofMeshOrchestrator:
                     usage=result.usage,
                 )
             self._apply_local_target_integrity_guard(problem, proof, structural_report)
+            apply_blind_context_integrity_guard(blind_packet, structural_report)
         if failed_experiment_audits:
             structural_report.issues.append(
                 VerificationIssue(
@@ -8100,6 +8301,7 @@ class ProofMeshOrchestrator:
                     query=proof.model_dump_json(),
                     max_chars=max(2000, self.config.topology.max_context_chars // 4),
                     purpose=ContextPurpose.FINAL_REVISION,
+                    required_refs=explicit_dependency_refs(proof),
                 ),
                 reviser.id,
             ),
@@ -9048,6 +9250,7 @@ class ProofMeshOrchestrator:
         query: str,
         max_chars: int,
         purpose: ContextPurpose,
+        required_refs: Sequence[str] = (),
     ) -> list[dict[str, Any]]:
         return build_admissible_fact_context(
             self.config,
@@ -9058,6 +9261,7 @@ class ProofMeshOrchestrator:
             max_chars=max_chars,
             max_items=self.config.topology.max_verified_claims_per_context,
             purpose=purpose,
+            required_refs=required_refs,
         )
 
     def _claim_dedup_index(self, claims: Sequence[ClaimCard]) -> list[dict[str, Any]]:
@@ -9527,6 +9731,9 @@ class ProofMeshOrchestrator:
                     if state.deep_exploration_registry is not None
                     else {}
                 ),
+                legacy_claims=[
+                    claim.model_dump(mode="json") for claim in memory.claims
+                ],
             )
         runner.persist_runtime_state()
 

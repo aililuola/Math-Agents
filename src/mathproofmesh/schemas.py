@@ -1175,11 +1175,22 @@ class ProblemContract(StrictModel):
 
 
 class BlindReviewPacket(StrictModel):
+    context_purpose: Literal["blind_review"] = "blind_review"
     problem: ProblemContract
     final_proof_text: str
     cited_fact_packets: list[dict[str, Any]] = Field(default_factory=list)
     negative_evidence_packets: list[dict[str, Any]] = Field(default_factory=list)
     forbidden_claims: list[str] = Field(default_factory=list)
+    fact_context_complete: bool = True
+    missing_cited_fact_refs: list[str] = Field(default_factory=list)
+    fact_context_failure_reasons: list[str] = Field(default_factory=list)
+    negative_context_complete: bool = True
+    negative_context_truncated: bool = False
+    negative_evidence_total_count: int = Field(default=0, ge=0)
+    negative_evidence_omitted_count: int = Field(default=0, ge=0)
+    negative_mandatory_omitted_count: int = Field(default=0, ge=0)
+    negative_context_chars_used: int = Field(default=0, ge=0)
+    negative_context_char_budget: int = Field(default=0, ge=0)
 
 
 class TriageResult(StrictModel):

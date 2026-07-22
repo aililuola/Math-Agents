@@ -901,6 +901,7 @@ Conduct an independent structural examination using only the packet below.
 2. Check completeness and dependency integrity: no missing dependencies, circular claims, orphan conclusions, or uncertain material presented as established fact.
 3. Check every named theorem structurally: its invoked form and all applicability conditions must be explicit.
 4. Flag vague placeholders that conceal a nontrivial step.
+5. Inspect fact_context_complete and negative_context_complete. Either being false is a deterministic context-integrity defect and cannot receive PASS. Optional negative_context_truncated=true alone is not a defect because mandatory counterexamples and direct conflicts are selected first.
 Do not infer authorship, provenance, ranking, or any assessment made outside this packet.
 Do not perform an expensive line-by-line reconstruction unless needed to identify a structural defect.
 Set problem_integrity_ok=false if the proof changes the statement. Classify a defect as execution, plan, or strategy.
@@ -936,6 +937,7 @@ Locate the first invalid or unjustified step. A later correct conclusion does no
 Actively try to falsify decisive claims with exact small cases, extremal cases, dimensional checks, substitutions, or counterexamples.
 Treat not_refuted, heuristic, and bounded_evidence experiments as non-proofs. Validate any finite-reduction mapping behind an exhaustive certificate. A tool exception is inconclusive, not a mathematical failure.
 When a deterministic calculation would materially resolve uncertainty, emit a narrowly scoped ToolRequest. Never request arbitrary code execution.
+Inspect fact_context_complete and negative_context_complete before judging the proof. Either being false prevents PASS; report the missing cited Fact or omitted mandatory negative evidence as the first structural defect when applicable. Optional negative_context_truncated=true alone does not prevent PASS.
 Return PASS only when every requested conclusion and decisive step is supported. Use UNCERTAIN when a genuine gap remains.
 Do not infer authorship, provenance, ranking, or any assessment made outside this packet.
 

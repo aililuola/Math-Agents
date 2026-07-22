@@ -235,7 +235,15 @@ Active 拓扑使用 `32K / 64K / 96K / 128K` 四档。`provider_max_output_token
 | `src/mathproofmesh/resume_phase.py` 与 `report.py` | checkpoint 持久化 deep-exploration 状态，并生成独立审计报告和汇总指标 |
 | `tests/test_deep_exploration_*.py` 与 `tests/test_post_failure_bottleneck.py` | 覆盖并行不同签名、阻止相同高档重复、逐档升级、128K 门控、局部换向、无正文恢复、resume 和报告 |
 
-本轮离线验收基线为：`203 passed`、Ruff check 通过、Ruff format check 通过、`compileall` 通过、topology Mock benchmark 通过且真实 provider 调用数为 0。
+旧 checkpoint 恢复也采用 fail-closed 路线：即使中断发生在 triage 完成、strategy 尚未生成的窗口，恢复后也会先幂等注册每个 Strategy 的 Route、补齐 Prover、重算稀疏邻居并保存拓扑，之后才允许继续证明。实际选中的 Prover 会同步回 RouteRegistry；`hierarchical_sparse` 若缺少 Route、Broker 或 TypedMemory 会明确失败，绝不静默回退到 legacy `proof_continuation`。
+
+hierarchical 报告把 `Broker-admitted global Fact` 与 `Legacy ClaimMemory history` 分开。全局 Fact 计数只接受 Broker 已准入、独立 Referee 已记录且仍存在于 TypedMemory Fact 层的交集；旧 checkpoint 的 verified Claim 只能作为迁移历史展示，不能获得全局事实资格。对应清单写入 `reports/global_fact_inventory.json`。
+
+全局 Fact 上下文现在按 `ContextPurpose` 区分 verification、synthesis、blind review 和 revision 的排序字段与字符预算。证明显式引用的 `message_id/content_hash` 及其完整依赖闭包始终先于词法相似度；引用未通过 Broker Fact Gate 或必需闭包装不进预算时，最终审查 fail closed。Blind NegativeMemory 使用“全部精确反例/显式冲突强制保留，再按相关性、证据强度和中心性补充”的有界选择；若强制负面证据仍无法装入，禁止最终 PASS。
+
+Blind packet 不再暴露 `artifact://` 原始路径，只携带实际文件内容的 SHA-256、证书类型和 replay 状态。这样不会通过文件名泄漏 Agent/Route，同时保留可审计证据身份。
+
+本轮离线验收基线为：安装 `.[dev,server]`（包含 `z3-solver`）后 `209 passed`、Ruff check 通过、Ruff format check 通过、`compileall` 通过、topology component-contract Mock benchmark 通过且真实 provider 调用数为 0。该 Mock benchmark 验证组件契约和消融开关，不代表真实 IMO 求解性能。
 
 ## 推理优先计算流程
 
