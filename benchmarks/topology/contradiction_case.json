@@ -1,0 +1,12 @@
+{
+  "case_id": "exact_counterexample",
+  "description": "An exact witness refutes a universal route claim and reopens dependents.",
+  "claim": "Every positive integer has property P.",
+  "counterexample": "The integer 2 does not have property P.",
+  "expected": {
+    "resolution": "counterexample_wins",
+    "claim_memory_tier": "negative",
+    "dependent_obligation_reopened": true,
+    "majority_vote_required": false
+  }
+}

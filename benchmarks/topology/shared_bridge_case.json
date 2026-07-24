@@ -1,0 +1,13 @@
+{
+  "case_id": "shared_bridge",
+  "description": "Two of three isolated routes require the same normalized lemma.",
+  "routes": ["route-a", "route-b", "route-c"],
+  "shared_routes": ["route-a", "route-b"],
+  "excluded_routes": ["route-c"],
+  "obligation": "For every integer n, the auxiliary difference telescopes.",
+  "expected": {
+    "bridge_tasks": 1,
+    "targeted_delivery_only": true,
+    "verified_fact_reused": true
+  }
+}

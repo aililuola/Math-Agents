@@ -5,6 +5,7 @@ import re
 import threading
 import time
 from collections import OrderedDict
+from collections.abc import Iterable
 from enum import StrEnum
 from typing import Any, Callable, Literal
 
@@ -49,6 +50,8 @@ class ActivityEvent(BaseModel):
     stage: str | None = None
     task_id: str
     parent_task_id: str | None = None
+    started_elapsed_ms: int | None = Field(default=None, ge=0)
+    initial_event_type: str | None = None
     title: str
     detail: str = ""
     agent_id: str | None = None
@@ -66,9 +69,12 @@ _SECRET_PATTERNS = (
 )
 
 _STAGE_LABELS_ZH = {
+    "goal_preflight": "题意预检与目标冻结",
+    "goal_normalization": "检查题意歧义并生成候选表述",
     "triage": "分析题目类型与主要风险",
     "strategy_generation": "生成互相独立的证明路线",
     "independent_exploration": "沿指定路线独立推演",
+    "pattern_conjecture_completion": "补全计算启发的候选规律",
     "claim_extraction": "提取可复用的引理与结论",
     "structural_verification": "检查证明结构与题意一致性",
     "detailed_verification": "逐步核查关键推导",
@@ -83,12 +89,19 @@ _STAGE_LABELS_ZH = {
     "checkpoint_verification": "验证并提交证明检查点",
     "agent_failover": "切换备用 Agent 继续当前任务",
     "run_resume": "恢复中断的多 Agent 运行",
+    "message_broker": "路由强类型数学消息",
+    "route_team": "执行路线局部协作与独立审查",
+    "proof_graph": "更新证明义务图",
+    "inspiration": "执行表示、类比、构造与策略灵感机制",
 }
 
 _STAGE_LABELS_EN = {
+    "goal_preflight": "Preflight and freeze the mathematical goal",
+    "goal_normalization": "Review ambiguity and propose interpretations",
     "triage": "Analyze the problem type and main risks",
     "strategy_generation": "Generate independent proof strategies",
     "independent_exploration": "Explore the assigned route independently",
+    "pattern_conjecture_completion": "Complete a computation-inspired conjecture",
     "claim_extraction": "Extract reusable lemmas and claims",
     "structural_verification": "Check structure and theorem integrity",
     "detailed_verification": "Audit the key derivation step by step",
@@ -103,7 +116,36 @@ _STAGE_LABELS_EN = {
     "checkpoint_verification": "Verify and commit a proof checkpoint",
     "agent_failover": "Fail over to a backup agent",
     "run_resume": "Resume an interrupted multi-agent run",
+    "message_broker": "Route typed mathematical messages",
+    "route_team": "Run route-local collaboration and independent review",
+    "proof_graph": "Update the proof-obligation graph",
+    "inspiration": "Run representation, analogy, construction, and meta inspiration",
 }
+
+
+def collapse_activity_events(
+    events: Iterable[ActivityEvent],
+) -> list[ActivityEvent]:
+    """Keep one latest snapshot per logical task without changing task order."""
+    latest: OrderedDict[str, ActivityEvent] = OrderedDict()
+    for event in events:
+        previous = latest.get(event.task_id)
+        if previous is not None:
+            event = event.model_copy(
+                update={
+                    "parent_task_id": event.parent_task_id or previous.parent_task_id,
+                    "started_elapsed_ms": (
+                        event.started_elapsed_ms
+                        if event.started_elapsed_ms is not None
+                        else previous.started_elapsed_ms
+                    ),
+                    "initial_event_type": event.initial_event_type
+                    or previous.initial_event_type
+                    or previous.event_type,
+                }
+            )
+        latest[event.task_id] = event
+    return list(latest.values())
 
 
 def redact_activity_text(value: str, *, limit: int = 800) -> str:
@@ -223,6 +265,8 @@ class ActivityStream:
         self.persist = persist
         self.path = self.store.root / "activity.jsonl"
         self.events: list[ActivityEvent] = []
+        self._latest_by_task: dict[str, ActivityEvent] = {}
+        self._task_order: list[str] = []
         self._sequence = 0
         self._lock = threading.Lock()
         self._finalized = False
@@ -244,7 +288,39 @@ class ActivityStream:
                         event = ActivityEvent.model_validate_json(line)
                     except (ValueError, json.JSONDecodeError):
                         continue
+                    previous = self._latest_by_task.get(event.task_id)
+                    if previous is not None:
+                        event.parent_task_id = (
+                            event.parent_task_id or previous.parent_task_id
+                        )
+                        event.started_elapsed_ms = (
+                            event.started_elapsed_ms
+                            if event.started_elapsed_ms is not None
+                            else previous.started_elapsed_ms
+                        )
+                        event.initial_event_type = (
+                            event.initial_event_type
+                            or previous.initial_event_type
+                            or previous.event_type
+                        )
+                    else:
+                        event.started_elapsed_ms = (
+                            event.started_elapsed_ms
+                            if event.started_elapsed_ms is not None
+                            else event.elapsed_ms
+                        )
+                        event.initial_event_type = (
+                            event.initial_event_type or event.event_type
+                        )
+                        if (
+                            event.parent_task_id is None
+                            and event.initial_event_type != "run"
+                        ):
+                            event.parent_task_id = self._infer_parent_task_id(
+                                event.task_id
+                            )
                     self.events.append(event)
+                    self._remember_event(event)
                     self._sequence = max(self._sequence, event.sequence)
                     max_elapsed = max(max_elapsed, event.elapsed_ms)
         except OSError:
@@ -275,18 +351,37 @@ class ActivityStream:
     ) -> ActivityEvent:
         with self._lock:
             self._sequence += 1
+            resolved_task_id = task_id or new_id("activity")
+            elapsed_ms = max(0, int((time.monotonic() - self.started_monotonic) * 1000))
+            previous = self._latest_by_task.get(resolved_task_id)
+            if previous is None:
+                resolved_parent_task_id = parent_task_id
+                if resolved_parent_task_id is None and event_type != "run":
+                    resolved_parent_task_id = self._infer_parent_task_id(
+                        resolved_task_id
+                    )
+                started_elapsed_ms = elapsed_ms
+                initial_event_type = event_type
+            else:
+                resolved_parent_task_id = parent_task_id or previous.parent_task_id
+                started_elapsed_ms = (
+                    previous.started_elapsed_ms
+                    if previous.started_elapsed_ms is not None
+                    else previous.elapsed_ms
+                )
+                initial_event_type = previous.initial_event_type or previous.event_type
             event = ActivityEvent(
                 sequence=self._sequence,
                 timestamp=utc_now_iso(),
-                elapsed_ms=max(
-                    0, int((time.monotonic() - self.started_monotonic) * 1000)
-                ),
+                elapsed_ms=elapsed_ms,
                 event_type=event_type,
                 status=status,
                 importance=importance,
                 stage=stage,
-                task_id=task_id or new_id("activity"),
-                parent_task_id=parent_task_id,
+                task_id=resolved_task_id,
+                parent_task_id=resolved_parent_task_id,
+                started_elapsed_ms=started_elapsed_ms,
+                initial_event_type=initial_event_type,
                 title=redact_activity_text(title, limit=240),
                 detail=redact_activity_text(detail, limit=800),
                 agent_id=redact_activity_text(agent_id, limit=120)
@@ -296,6 +391,7 @@ class ActivityStream:
                 metrics=sanitize_activity_value(metrics or {}),
             )
             self.events.append(event)
+            self._remember_event(event)
             if self.persist:
                 with self.path.open("a", encoding="utf-8") as handle:
                     handle.write(
@@ -313,6 +409,25 @@ class ActivityStream:
                 # Progress rendering must never interrupt mathematical work.
                 pass
         return event
+
+    def _remember_event(self, event: ActivityEvent) -> None:
+        if event.task_id not in self._latest_by_task:
+            self._task_order.append(event.task_id)
+        self._latest_by_task[event.task_id] = event
+
+    def _infer_parent_task_id(self, task_id: str) -> str | None:
+        """Attach unscoped events to the innermost active orchestration task."""
+        for candidate_id in reversed(self._task_order):
+            if candidate_id == task_id:
+                continue
+            candidate = self._latest_by_task.get(candidate_id)
+            if candidate is None or candidate.status != ActivityStatus.RUNNING:
+                continue
+            initial_type = candidate.initial_event_type or candidate.event_type
+            if initial_type == "agent_call":
+                continue
+            return candidate_id
+        return None
 
     def start_task(
         self,
@@ -509,20 +624,21 @@ class ActivityStream:
         self._finalized = True
         if not self.persist:
             return None, None
+        logical_events = collapse_activity_events(self.events)
         json_ref = self.store.write_json(
             "reports",
             "activity_timeline",
-            [event.model_dump(mode="json") for event in self.events],
+            [event.model_dump(mode="json") for event in logical_events],
         )
         markdown_ref = self.store.write_text(
             "reports",
             "activity_timeline",
-            self._markdown(),
+            self._markdown(logical_events),
             suffix=".md",
         )
         return json_ref, markdown_ref
 
-    def _markdown(self) -> str:
+    def _markdown(self, events: Iterable[ActivityEvent] | None = None) -> str:
         zh = self.is_zh
         title = "# 运行时间线" if zh else "# Run activity timeline"
         note = (
@@ -531,7 +647,12 @@ class ActivityStream:
             else "> This records auditable stage status and structured-result summaries, not private model chain of thought."
         )
         lines = [title, "", note, ""]
-        for event in self.events:
+        logical_events = (
+            list(events)
+            if events is not None
+            else collapse_activity_events(self.events)
+        )
+        for event in logical_events:
             elapsed = format_elapsed(event.elapsed_ms / 1000)
             marker = {
                 ActivityStatus.RUNNING: "▶",
@@ -565,6 +686,7 @@ class ConsoleActivityView:
         self.console = console or Console(stderr=True)
         self.started_monotonic = time.monotonic()
         self._latest: OrderedDict[str, ActivityEvent] = OrderedDict()
+        self._lifecycle_task_ids: set[str] = set()
         self._live: Live | None = None
         self._interactive = bool(self.console.is_terminal)
         self._closed = False
@@ -593,20 +715,13 @@ class ConsoleActivityView:
             return
         is_new = event.task_id not in self._latest
         self._latest[event.task_id] = event
+        if event.status == ActivityStatus.RUNNING:
+            self._lifecycle_task_ids.add(event.task_id)
         if is_new:
             self._latest.move_to_end(event.task_id)
         if self._interactive:
             if self._live is not None:
                 self._live.refresh()
-            return
-        # Redirected logs get concise milestone lines rather than ANSI redraws.
-        if not self._show_in_current_mode(event):
-            return
-        icon = self._icon(event.status)
-        elapsed = format_elapsed(event.elapsed_ms / 1000)
-        detail = f" — {event.detail}" if event.detail else ""
-        agent = f" [{event.agent_id}]" if event.agent_id else ""
-        self.console.print(f"{icon} {elapsed} {event.title}{agent}{detail}")
 
     def close(self) -> None:
         if self._closed:
@@ -616,6 +731,8 @@ class ConsoleActivityView:
             self._live.refresh()
             self._live.stop()
             self._live = None
+        elif self.mode != "off" and not self._interactive:
+            self._print_snapshot()
 
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
@@ -661,6 +778,15 @@ class ConsoleActivityView:
             padding=(0, 1),
         )
 
+    def _print_snapshot(self) -> None:
+        """Emit one final line per logical task when in-place redraw is unavailable."""
+        for event in self._visible_events():
+            icon = self._icon(event.status)
+            elapsed = format_elapsed(event.elapsed_ms / 1000)
+            detail = f" — {event.detail}" if event.detail else ""
+            agent = f" [{event.agent_id}]" if event.agent_id else ""
+            self.console.print(f"{icon} {elapsed} {event.title}{agent}{detail}")
+
     def _visible_events(self) -> list[ActivityEvent]:
         events = [
             event
@@ -687,19 +813,9 @@ class ConsoleActivityView:
             return True
         if event.status in {ActivityStatus.WARNING, ActivityStatus.FAILED}:
             return True
-        # In an interactive compact panel, keep only currently active Agent calls.
-        # Their completed rows disappear once the containing major stage is summarized.
-        # Redirected logs retain only milestones so CI output remains short.
-        return (
-            self._interactive
-            and event.event_type
-            in {
-                "agent_call",
-                "agent_call_heartbeat",
-                "agent_call_retry",
-            }
-            and event.status == ActivityStatus.RUNNING
-        )
+        # A task that was ever running is one logical solving step. Keep its latest
+        # snapshot after completion instead of printing each heartbeat as a new row.
+        return event.task_id in self._lifecycle_task_ids
 
     @staticmethod
     def _icon(status: ActivityStatus) -> str:

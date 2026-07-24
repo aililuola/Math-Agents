@@ -68,11 +68,50 @@ def test_activity_stream_redacts_and_persists(tmp_path: Path) -> None:
     assert "不包含任何模型的原始私有思考链" in timeline_md
 
     payload = json.loads(timeline_json)
-    assert [event["status"] for event in payload] == ["running", "running", "completed"]
-    assert payload[1]["metrics"]["path"] == str(tmp_path)
+    assert len(raw_jsonl.splitlines()) == 3
+    assert [event["status"] for event in payload] == ["completed"]
+    assert payload[0]["task_id"] == task_id
 
 
-def test_compact_console_view_prints_progress_without_ansi(tmp_path: Path) -> None:
+def test_activity_stream_infers_and_preserves_topology_parent(
+    tmp_path: Path,
+) -> None:
+    store = ArtifactStore(tmp_path / "runs", "activity-topology")
+    stream = ActivityStream(store, persist=False)
+
+    run_task = stream.start_task("run", title="开始运行")
+    stage_task = stream.start_task(
+        "stage",
+        title="并行探索",
+        parent_task_id=run_task,
+    )
+    agent_task = stream.start_task(
+        "agent_call",
+        title="路线求证",
+        agent_id="explorer-a",
+    )
+    started_elapsed_ms = stream.events[-1].started_elapsed_ms
+    stream.update_task(
+        agent_task,
+        title="路线求证",
+        detail="实时进度",
+        agent_id="explorer-a",
+    )
+    stream.complete_task(
+        agent_task,
+        title="路线求证完成",
+        agent_id="explorer-a",
+    )
+
+    latest_agent = stream.events[-1]
+    assert latest_agent.parent_task_id == stage_task
+    assert latest_agent.started_elapsed_ms == started_elapsed_ms
+    assert latest_agent.initial_event_type == "agent_call"
+
+
+def test_compact_console_view_prints_one_snapshot_per_task_without_ansi(
+    tmp_path: Path,
+) -> None:
     store = ArtifactStore(tmp_path / "runs", "console-test")
     stream = ActivityStream(store, persist=False)
     output = io.StringIO()
@@ -89,15 +128,30 @@ def test_compact_console_view_prints_progress_without_ansi(tmp_path: Path) -> No
             title="并行探索不同证明方向",
             importance=ActivityImportance.MAJOR,
         )
+        stream.update_task(
+            task_id,
+            title="并行探索不同证明方向",
+            detail="已收 1,000 chunks",
+            importance=ActivityImportance.MAJOR,
+        )
+        stream.update_task(
+            task_id,
+            title="并行探索不同证明方向",
+            detail="已收 2,000 chunks",
+            importance=ActivityImportance.MAJOR,
+        )
         stream.complete_task(
             task_id,
-            title="首轮并行探索完成",
+            title="并行探索不同证明方向",
+            detail="首轮并行探索完成",
             importance=ActivityImportance.MAJOR,
         )
 
     rendered = output.getvalue()
-    assert "并行探索不同证明方向" in rendered
+    assert rendered.count("并行探索不同证明方向") == 1
     assert "首轮并行探索完成" in rendered
+    assert "1,000 chunks" not in rendered
+    assert "2,000 chunks" not in rendered
 
 
 def test_long_agent_call_emits_content_free_heartbeat(tmp_path: Path) -> None:

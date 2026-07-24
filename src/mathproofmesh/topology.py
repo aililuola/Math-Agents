@@ -62,6 +62,35 @@ def strategy_text(strategy: StrategyCard) -> str:
     )
 
 
+def select_sparse_route_neighbors(
+    routes: Iterable[tuple[str, StrategyCard]],
+    *,
+    max_neighbors: int,
+) -> dict[str, list[str]]:
+    """Build deterministic, relevance-ranked sparse route neighborhoods."""
+
+    items = list(routes)
+    if max_neighbors <= 0:
+        return {route_id: [] for route_id, _ in items}
+    result: dict[str, list[str]] = {}
+    for route_id, strategy in items:
+        ranked = sorted(
+            (
+                (
+                    jaccard_similarity(
+                        strategy_text(strategy), strategy_text(other_strategy)
+                    ),
+                    other_id,
+                )
+                for other_id, other_strategy in items
+                if other_id != route_id
+            ),
+            key=lambda item: (-item[0], item[1]),
+        )
+        result[route_id] = [item[1] for item in ranked[:max_neighbors]]
+    return result
+
+
 class SparseTopologyRouter:
     """
     Hierarchical sparse topology:

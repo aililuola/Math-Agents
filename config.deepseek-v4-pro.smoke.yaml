@@ -11,11 +11,12 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [planner, meta_reviewer, final_verifier, experimenter]
+    roles: [planner, meta_reviewer, final_verifier, experimenter, meta_strategist, inspiration_referee]
     specialties: [problem_decomposition, strategy_generation, meta_review]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 50000
+    provider_max_output_tokens: 384000
+    max_output_tokens: 128000
     timeout_seconds: 600
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
   - id: ds-explorer-a
@@ -27,11 +28,11 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [explorer, summarizer, detailed_verifier, final_verifier]
+    roles: [explorer, summarizer, detailed_verifier, final_verifier, route_prover, route_skeptic, analogy_agent, invariant_hypothesis_agent]
     specialties: [number_theory, algebra, combinatorics]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 50000
+    max_output_tokens: 96000
     timeout_seconds: 600
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
   - id: ds-explorer-b
@@ -43,11 +44,11 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [explorer, summarizer, detailed_verifier, final_verifier]
+    roles: [explorer, summarizer, detailed_verifier, final_verifier, route_prover, construction_inventor, representation_switchboard, reverse_goal_analyzer]
     specialties: [analysis, inequalities, geometry]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 50000
+    max_output_tokens: 96000
     timeout_seconds: 600
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
   - id: ds-verifier
@@ -59,7 +60,7 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [structural_verifier, detailed_verifier, final_verifier]
+    roles: [structural_verifier, detailed_verifier, final_verifier, route_skeptic, route_referee, tool_specialist, bridge_prover, counterexample_hunter]
     specialties: [proof_audit, counterexample_search]
     max_concurrency: 1
     temperature: 0.0
@@ -75,7 +76,7 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [synthesizer, structural_verifier, detailed_verifier, final_verifier]
+    roles: [synthesizer, structural_verifier, detailed_verifier, final_verifier, route_referee, inspiration_referee, conflict_resolver]
     specialties: [proof_synthesis, rigorous_exposition]
     max_concurrency: 1
     temperature: 0.0
@@ -84,9 +85,9 @@ agents:
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
 
 budget:
-  max_total_calls: 28
-  # Initial exploration plus one adaptive round.
-  max_rounds: 2
+  max_total_calls: 40
+  # Initial exploration plus two adaptive rounds.
+  max_rounds: 3
   initial_paths: 2
   max_paths: 3
   strategies_to_generate: 3
@@ -97,7 +98,7 @@ budget:
   high_risk_threshold: 0.45
   verification_pass_threshold: 0.78
   synthesis_threshold: 0.70
-  max_total_tokens: 300000
+  max_total_tokens: 500000
   max_cost_usd: 0.75
   breadth_share: 0.30
   depth_share: 0.35
@@ -105,6 +106,11 @@ budget:
   synthesis_share: 0.10
 
 scheduler:
+  hard_stagnation_enabled: true
+  max_normal_attempts_per_signature: 1
+  max_repair_attempts_per_signature: 1
+  global_no_progress_rounds_before_meta_pivot: 2
+  global_no_progress_rounds_before_stop: 3
   max_actions_per_round: 2
   widen_paths_per_action: 1
   force_widen_when_all_failed: true
@@ -135,6 +141,7 @@ scheduler:
   diagnostic_candidate_limit: 8
 
 topology:
+  mode: hierarchical_sparse
   neighbor_k: 1
   prefer_cross_provider_review: false
   isolate_initial_exploration: true
@@ -144,6 +151,43 @@ topology:
   max_context_chars: 70000
   max_verified_claims_per_context: 12
   preserve_raw_evidence: true
+  typed_communication:
+    enabled: true
+  route_teams:
+    enabled: true
+  cross_route:
+    enabled: true
+    initial_isolation_rounds: 1
+    max_neighbors_per_route: 2
+    max_messages_per_route_per_round: 6
+    max_global_messages_per_round: 24
+  proof_graph:
+    enabled: true
+    mode: shadow
+  typed_memory:
+    enabled: true
+    strict_fact_gate: true
+  inspiration:
+    enabled: true
+    # Active proposals may create or reshape routes after novelty, referee,
+    # skeptic, and scheduler admission; they still cannot bypass the Fact Gate.
+    mode: active
+    # Candidate assignment scales with the configured live agent pool rather
+    # than assuming a fixed number of DeepSeek API keys.
+    proposer_generalist_roles: [explorer, route_prover]
+    max_single_agent_proposals_per_task: 2
+    representation_switchboard: true
+    analogy_agent: true
+    auxiliary_construction_inventor: true
+    invariant_hypothesis_agent: true
+    reverse_goal_analysis: true
+    bridge_lemma_generator: true
+    persistent_meta_strategist: true
+    surprise_exploration: true
+  validation_escalation:
+    enabled: true
+  agent_capability:
+    enabled: true
 
 verification:
   structural_first: true
@@ -162,9 +206,10 @@ continuation:
   checkpoint_policy: verified_subgoal
   max_new_steps_per_call: 8
   max_new_claims_per_call: 2
-  # Leave enough room for max-effort reasoning before the structured JSON answer.
-  max_output_tokens_per_segment: 50000
-  segments_per_explore_call: 1
+  # Initial route deepening is admitted at 96K with max-effort thinking.
+  max_output_tokens_per_segment: 96000
+  # Two consecutive segments may advance, but every delta is independently reviewed.
+  segments_per_explore_call: 2
   max_segments_per_path: 4
   verify_each_delta: true
   delta_verifier_replicas: 1
@@ -186,10 +231,17 @@ computation:
   sandbox_cpus: 1
   sandbox_pids_limit: 32
   execute_planner_hints_immediately: false
+  critical_calculation_gate_enabled: true
+  critical_calculation_require_declarations: true
+  critical_calculation_max_checks_per_artifact: 8
   targeted_falsification_fast_path: true
+  bounded_typed_probe_fast_path: true
+  bounded_typed_probe_max_cases: 25000
   soft_experiments_per_path: 2
   hard_experiments_per_path: 6
   max_compute_cycles_per_segment: 1
+  max_contract_repairs_per_segment: 1
+  contract_repair_max_output_tokens: 8192
   max_total_cpu_seconds: 120
   max_cases_per_experiment: 1000000
   max_output_chars: 20000
@@ -212,5 +264,60 @@ runtime:
   activity_persist: true
   activity_include_agent_calls: true
   activity_heartbeat_seconds: 20
+  stream_first_chunk_timeout_seconds: 90
+  stream_idle_timeout_seconds: 300
+  agent_call_wall_timeout_seconds: 7200
+  stage_thinking_modes:
+    goal_normalization: disabled
+    triage: disabled
+    claim_extraction: disabled
+    post_failure_bottleneck: disabled
+    computation_contract_repair: disabled
+    pattern_conjecture_completion: disabled
+    strategy_generation: max
+    independent_exploration: tiered
+    proof_continuation: tiered
+    route_prove: tiered
+    structural_verification: high
+    checkpoint_verification: high
+    detailed_verification: high
+    final_verification: high
+    blind_structural_verification: high
+    blind_detailed_verification: high
+    meta_review: high
+    route_skeptic: high
+    route_referee: high
+    route_tool_audit: high
+    synthesis: high
+    final_revision: high
+  stage_output_token_limits:
+    goal_normalization: 4096
+    triage: 12000
+    strategy_generation: 128000
+    claim_extraction: 12000
+    structural_verification: 16000
+    checkpoint_verification: 24000
+    detailed_verification: 32000
+    final_verification: 32000
+    blind_structural_verification: 16000
+    blind_detailed_verification: 32000
+    meta_review: 16000
+    route_skeptic: 24000
+    route_referee: 16000
+    route_tool_audit: 16000
+    representation_switchboard: 24000
+    structural_analogy_search: 24000
+    invent_auxiliary_construction: 24000
+    hypothesize_invariant: 24000
+    reverse_goal_analysis: 24000
+    persistent_meta_strategy: 24000
+    surprise_exploration: 24000
+    inspiration_referee: 16000
+    post_failure_bottleneck: 16000
+    synthesis: 64000
+    final_revision: 64000
+    experiment_codegen: 12000
+    computation_contract_repair: 8192
+    pattern_conjecture_completion: 4096
   log_level: INFO
   random_seed: 20260719

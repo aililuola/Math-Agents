@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterable, Sequence, TypeVar
 
@@ -23,67 +23,177 @@ from .agents import (
     StructuredOutputError,
 )
 from .budget import AdaptiveBudgetManager, SoftBudgetAllocator
+from .communication.broker import MessageBroker
+from .communication.route_registry import RouteRegistry
 from .config import SystemConfig
+from .computation.contracts import validate_experiment_contract
 from .computation.policy import ComputationContext
+from .context_policy import (
+    ContextPurpose,
+    build_admissible_fact_context,
+    explicit_dependency_refs,
+    select_legacy_claim_context,
+)
 from .continuation import (
     attempt_from_checkpoint,
+    checkpoint_to_route_message,
     local_delta_verification,
     make_genesis_checkpoint,
     merge_verified_delta,
     normalize_delta_claims,
 )
+from .critical_calculations import CriticalCalculationGate
+from .deep_exploration import (
+    DeepExplorationRegistry,
+    ExplorationAdmission,
+    ExplorationEvidence,
+    ExplorationOutcome,
+    ExplorationSignature,
+)
 from .llm.mock import MockResponder
-from .llm.pool import AgentPool, AgentRuntime
-from .memory import LemmaMemory
+from .llm.pool import AgentPool, AgentRuntime, ProviderCircuitOpenError
+from .inspiration.engine import InspirationEngine
+from .inspiration.context import build_inspiration_prompt_context
+from .inspiration.trigger_policy import InspirationSnapshot
+from .memory import LemmaMemory, TypedMemory
+from .goal_preflight import (
+    ClarificationResolver,
+    GoalClarificationRequired,
+    GoalNormalizationError,
+    decision_confidence,
+    deterministic_goal_precheck,
+    requires_confirmation,
+    validate_clarification_decision,
+)
 from .prompts import PromptBundle, PromptFactory
-from .report import write_run_report
+from .report import write_hierarchical_reports, write_run_report
+from .stall_recovery import (
+    PostFailureBottleneckExtractor,
+    classify_no_artifact_failure,
+)
+from .task_contracts import (
+    apply_task_contract,
+    assess_task_deliverables,
+    deliverable_instructions,
+    infer_task_requirements,
+)
+from .proof_graph.bridges import BridgeBroker
+from .proof_graph.contradictions import ContradictionBroker
+from .proof_graph.matching import DuplicateRouteDetector
+from .proof_graph.store import ProofGraphStore
+from .proof_identity import (
+    attempt_content_fingerprint,
+    canonical_obligation_statement,
+    checkpoint_math_fingerprint,
+    is_feedback_only_statement,
+    progress_signature,
+)
 from .schemas import (
     ActionKind,
     AgentMetric,
     AttemptStatus,
+    BlindReviewPacket,
+    BlindVerificationReport,
+    BrokerDecision,
     CandidateAssessment,
+    CandidateConjecture,
+    CandidateConjectureBatch,
+    CalculationGateVerdict,
     ClaimBatch,
     ClaimCard,
     ClaimStatus,
+    ComputationContractRepair,
+    ComputationContractRepairAction,
+    ComputationContractRepairStatus,
     ComputationDecision,
     ComputationDecisionStatus,
+    ComputationHint,
     ComputationMethod,
+    ComputationPurpose,
     ContinuationAction,
     ContinuationTurn,
     Difficulty,
+    EvidenceType,
     EvidenceRef,
     EvidenceStrength,
     ExperimentOutcome,
     ExperimentProgram,
     ExperimentResult,
     ExperimentSpec,
+    ExecutionStatus,
     FailureLevel,
     FinalProof,
+    GoalClarificationRequest,
     InitialExplorationAction,
     InitialExplorationTurn,
+    InspirationAssignmentPlan,
+    InspirationMechanism,
+    InspirationContextMode,
+    InspirationProposal,
+    InspirationReview,
+    InspirationTask,
     MetaReview,
+    MemoryTier,
+    MessageEnvelope,
+    MessageReceipt,
+    MessageType,
+    MathStatus,
+    ObligationKind,
+    PostFailureBottleneckDiagnostic,
     ProblemContract,
     ProblemKind,
     ProofAttempt,
     ProofCheckpoint,
     ProofDelta,
+    ProofObligation,
+    ReceiptStatus,
+    ResearchProgressReport,
     RunResult,
     RunStatus,
+    RouteRole,
+    RouteStatus,
     Severity,
     StrategyCard,
     StrategySet,
+    TaskRequirement,
+    TaskStatus,
     TriageResult,
+    ToolAuditReport,
     UsageRecord,
     VerificationIssue,
     VerificationReport,
     VerificationStage,
     VerificationVerdict,
+    WorkingProofCheckpoint,
     new_id,
     stable_hash,
 )
 from .store import ArtifactStore
+from .teams.role_runner import RoleRunner
+from .teams.route_team import RouteTeam
 from .tools import ToolBroker
-from .topology import SparseTopologyRouter, jaccard_similarity, strategy_text
+from .topology import (
+    SparseTopologyRouter,
+    jaccard_similarity,
+    select_sparse_route_neighbors,
+    strategy_text,
+)
+from .verification import (
+    AgentCapabilityProfile,
+    ValidationEscalationExecutor,
+    ValidationEscalator,
+    infer_capability_domain,
+)
+from .verification.escalation import ValidationLevel, ValidationStepResult
+from .synthesis_phase import (
+    apply_blind_context_integrity_guard,
+    build_blind_review_packet,
+)
+from .broker_phase import record_verified_message_usage
+from .inspiration_phase import admit_inspiration_tasks
+from .cross_route_phase import team_reviews_allow_global_share
+from .resume_phase import export_hierarchical_checkpoint
+from .route_pipeline import acknowledge_route_messages, build_route_prompt_context
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
@@ -109,6 +219,30 @@ class SolveState:
     final_proof: FinalProof | None = None
     final_verification: VerificationReport | None = None
     budget_exhausted: bool = False
+    route_registry: RouteRegistry | None = None
+    message_broker: MessageBroker | None = None
+    proof_graph: ProofGraphStore | None = None
+    typed_memory: TypedMemory | None = None
+    inspiration_engine: InspirationEngine | None = None
+    bridge_broker: BridgeBroker | None = None
+    contradiction_broker: ContradictionBroker | None = None
+    duplicate_route_detector: DuplicateRouteDetector | None = None
+    current_round: int = 0
+    graph_frozen: bool = False
+    proof_debt_history: dict[str, list[float]] | None = None
+    capability_profile: AgentCapabilityProfile | None = None
+    validation_escalator: ValidationEscalator | None = None
+    final_repair_failed: bool = False
+    route_team_reviews: dict[str, list[dict[str, Any]]] | None = None
+    capability_domain: str = "algebra"
+    math_status: MathStatus = MathStatus.INCONCLUSIVE
+    execution_status: ExecutionStatus = ExecutionStatus.COMPLETED
+    research_progress_report: ResearchProgressReport | None = None
+    deep_exploration_registry: DeepExplorationRegistry | None = None
+    global_no_progress_rounds: int = 0
+    global_meta_pivot_used: bool = False
+    last_progress_signature: str | None = None
+    certified_counterexample_hashes: list[str] = field(default_factory=list)
 
 
 class ProofMeshOrchestrator:
@@ -129,10 +263,12 @@ class ProofMeshOrchestrator:
         *,
         mock_responders: dict[str, MockResponder] | None = None,
         activity_listener: ActivityListener | None = None,
+        clarification_resolver: ClarificationResolver | None = None,
     ) -> None:
         self.config = config
         self.mock_responders = mock_responders or {}
         self.activity_listener = activity_listener
+        self.clarification_resolver = clarification_resolver
 
     async def solve(self, problem_text: str, *, run_id: str | None = None) -> RunResult:
         if not problem_text or not problem_text.strip():
@@ -158,44 +294,64 @@ class ProofMeshOrchestrator:
         memory = LemmaMemory(store)
         tools = ToolBroker(self.config, store, activity)
 
-        problem = ProblemContract(
-            exact_statement=problem_text,
-            normalized_statement=self._normalize_statement(problem_text),
-            problem_kind=ProblemKind.UNKNOWN,
-            deliverables=[
-                "Give a correct answer and an explicit, auditable derivation or proof."
-            ],
-            hard_constraints=[
-                "Do not change hypotheses, quantifiers, domains, or requested conclusions.",
-                "Distinguish proved claims from conjectures and unresolved gaps.",
-            ],
-            allowed_tools=self._allowed_tools(),
-            output_language=self.config.runtime.output_language,
-        )
-        store.write_json("structured", "problem_contract", problem)
         store.write_json("structured", "config_redacted", self.config.redacted_dict())
-        store.append_event(
-            "run_started",
-            {
-                "problem_id": problem.problem_id,
-                "problem_hash": problem.integrity_hash,
-                "system_name": self.config.system_name,
-            },
-        )
         run_activity_task = activity.start_task(
             "run",
             title=activity.text(
                 "启动多 Agent 数学求解", "Starting the multi-agent mathematics run"
             ),
             detail=activity.text(
-                f"已冻结原题；启用 {len(pool.agents)} 个隔离子 Agent",
-                f"Problem contract frozen; {len(pool.agents)} isolated sub-agents are available",
+                "先执行本地题意预检；确认目标后才允许解题调用",
+                "Running local goal preflight before any solving call",
+            ),
+            stage="run",
+            importance=ActivityImportance.MAJOR,
+            metrics={
+                "agent_count": len(pool.agents),
+                "original_statement_hash": stable_hash(problem_text.strip()),
+            },
+        )
+        try:
+            problem = await self._prepare_problem_contract(
+                problem_text,
+                runner=runner,
+                prompts=prompts,
+                store=store,
+                activity=activity,
+                parent_task_id=run_activity_task,
+            )
+        except BaseException:
+            activity.finalize()
+            await pool.aclose()
+            raise
+
+        store.write_json("structured", "problem_contract", problem)
+        store.append_event(
+            "run_started",
+            {
+                "problem_id": problem.problem_id,
+                "problem_hash": problem.integrity_hash,
+                "goal_hash": problem.goal_hash,
+                "interpretation_source": problem.interpretation_source,
+                "system_name": self.config.system_name,
+            },
+        )
+        activity.update_task(
+            run_activity_task,
+            title=activity.text(
+                "启动多 Agent 数学求解", "Starting the multi-agent mathematics run"
+            ),
+            detail=activity.text(
+                f"已冻结规范化目标；启用 {len(pool.agents)} 个隔离子 Agent",
+                f"Canonical goal frozen; {len(pool.agents)} isolated sub-agents are available",
             ),
             stage="run",
             importance=ActivityImportance.MAJOR,
             metrics={
                 "agent_count": len(pool.agents),
                 "problem_hash": problem.integrity_hash,
+                "goal_hash": problem.goal_hash,
+                "interpretation_source": problem.interpretation_source,
             },
         )
         activity.info(
@@ -218,6 +374,15 @@ class ProofMeshOrchestrator:
             aggregate_reports={},
             meta_reviews=[],
             checkpoints=[],
+            proof_debt_history={},
+            route_team_reviews={},
+        )
+        self._initialize_hierarchical_runtime(
+            state,
+            problem=problem,
+            store=store,
+            activity=activity,
+            memory=memory,
         )
 
         try:
@@ -237,6 +402,18 @@ class ProofMeshOrchestrator:
             )
             state.triage = await self._triage(problem, runner, prompts, store)
             problem.problem_kind = state.triage.problem_kind
+            apply_task_contract(problem, state.triage)
+            store.write_json("structured", "problem_contract", problem)
+            state.capability_domain = infer_capability_domain(
+                problem.exact_statement,
+                state.triage.rationale,
+                *state.triage.key_risks,
+                *state.triage.likely_tools,
+            )
+            pool.set_capability_context(
+                state.capability_profile,
+                domain=state.capability_domain,
+            )
             activity.complete_task(
                 triage_task,
                 title=activity.text("题目分析完成", "Problem triage completed"),
@@ -249,6 +426,9 @@ class ProofMeshOrchestrator:
                 importance=ActivityImportance.MAJOR,
                 metrics={
                     "problem_kind": state.triage.problem_kind.value,
+                    "task_requirements": [
+                        item.value for item in problem.task_requirements
+                    ],
                     "difficulty": state.triage.difficulty.value,
                     "suggested_paths": state.triage.suggested_paths,
                 },
@@ -277,6 +457,14 @@ class ProofMeshOrchestrator:
                 store,
             )
             assignments = router.assign_explorers(state.strategies)
+            self._ensure_hierarchical_routes(
+                state,
+                router,
+                assignments=assignments,
+                round_index=0,
+                activity=activity,
+                store=store,
+            )
             strategy_names = "；".join(
                 strategy.title for strategy in state.strategies[:4]
             )
@@ -326,6 +514,7 @@ class ProofMeshOrchestrator:
             )
             initial_attempts = await self._parallel_initial_exploration(
                 problem,
+                state,
                 assignments,
                 runner,
                 prompts,
@@ -334,7 +523,7 @@ class ProofMeshOrchestrator:
                 store,
                 tools,
             )
-            state.attempts.extend(initial_attempts)
+            initial_attempts = self._record_attempts(state, initial_attempts, store)
             complete_count = sum(
                 a.status == AttemptStatus.COMPLETE for a in initial_attempts
             )
@@ -401,6 +590,77 @@ class ProofMeshOrchestrator:
             )
             self._checkpoint(store, "initial_exploration", state, memory, runner)
 
+            initial_task_status, _initial_deliverables = assess_task_deliverables(
+                problem,
+                state,
+                store.list_experiment_results(),
+                verification_threshold=self.config.budget.verification_pass_threshold,
+            )
+            early_finish_requirements = set(problem.task_requirements)
+            if (
+                initial_task_status == TaskStatus.COMPLETED
+                and TaskRequirement.CONJECTURE in early_finish_requirements
+                and early_finish_requirements
+                <= {
+                    TaskRequirement.COMPUTATION,
+                    TaskRequirement.CONJECTURE,
+                }
+            ):
+                state.execution_status = ExecutionStatus.COMPLETED
+                self._checkpoint(
+                    store,
+                    "requested_deliverables_completed",
+                    state,
+                    memory,
+                    runner,
+                )
+                result = self._build_result(
+                    run_id,
+                    RunStatus.COMPLETED,
+                    problem,
+                    state,
+                    pool.metrics(),
+                    runner,
+                    pool,
+                    store,
+                    memory,
+                )
+                router.export()
+                store.write_json("structured", "run_result", result)
+                store.append_event(
+                    "run_completed",
+                    {
+                        "status": result.status.value,
+                        "task_status": result.task_status.value,
+                        "completion_reason": "requested_nonproof_deliverables_complete",
+                        "total_calls": result.total_calls,
+                        "total_tokens": result.total_usage.total_tokens,
+                    },
+                )
+                activity.complete_task(
+                    run_activity_task,
+                    title=activity.text(
+                        "用户要求的交付物已完成",
+                        "Requested deliverables completed",
+                    ),
+                    detail=activity.text(
+                        "定向计算与候选规律已保存；未把另行证明的义务当成本次失败",
+                        "The computation and scoped conjecture were saved without treating a separate proof obligation as failure",
+                    ),
+                    event_type="run_completed",
+                    stage="run",
+                    importance=ActivityImportance.MAJOR,
+                    metrics={
+                        "status": result.status.value,
+                        "task_status": result.task_status.value,
+                        "total_calls": result.total_calls,
+                        "total_tokens": result.total_usage.total_tokens,
+                    },
+                )
+                activity.finalize()
+                write_run_report(store, result)
+                return result
+
             candidates = self._rank_attempts(state.attempts)[
                 : self.config.budget.candidates_to_verify
             ]
@@ -425,8 +685,16 @@ class ProofMeshOrchestrator:
                 memory,
                 tools,
                 store,
+                state=state,
             )
             self._record_verification_bundles(state, verification_bundles)
+            self._sync_hierarchical_artifacts(
+                state,
+                problem=problem,
+                memory=memory,
+                current_round=0,
+                store=store,
+            )
             verdict_counts = {verdict.value: 0 for verdict in VerificationVerdict}
             for bundle in verification_bundles:
                 verdict_counts[bundle.aggregate.verdict.value] += 1
@@ -468,6 +736,7 @@ class ProofMeshOrchestrator:
                     store,
                 )
                 state.meta_reviews.append(review)
+                self._apply_meta_route_controls(state, review, 0, store)
                 meta_detail_zh = (
                     "已有候选可进入综合"
                     if review.can_synthesize
@@ -492,10 +761,13 @@ class ProofMeshOrchestrator:
                     },
                 )
             self._checkpoint(store, "initial_verification", state, memory, runner)
+            if state.last_progress_signature is None:
+                state.last_progress_signature = self._global_progress_signature(state)
 
             # Adaptive breadth/depth loop. Actions are selected from verified progress,
             # novelty, uncertainty, gaps, stagnation, and protected future call reserves.
             for round_index in range(1, self.config.budget.max_rounds):
+                state.current_round = round_index
                 round_task = activity.start_task(
                     "adaptive_round",
                     title=activity.text(
@@ -532,11 +804,35 @@ class ProofMeshOrchestrator:
                         )
                         break
 
+                self._sync_hierarchical_artifacts(
+                    state,
+                    problem=problem,
+                    memory=memory,
+                    current_round=round_index,
+                    store=store,
+                )
+                graph_signals = self._hierarchical_graph_signals(state)
+                await self._run_inspiration_round(
+                    state,
+                    problem=problem,
+                    remaining_calls=runner.ledger.remaining_calls,
+                    store=store,
+                    runner=runner,
+                    prompts=prompts,
+                    allocator=allocator,
+                    router=router,
+                    memory=memory,
+                    tools=tools,
+                )
+                graph_signals = self._hierarchical_graph_signals(state)
                 stats = budget_manager.build_path_stats(
                     state.strategies,
                     state.attempts,
                     state.reports,
                     state.aggregate_reports,
+                    graph_signals=graph_signals,
+                    route_team_reviews=state.route_team_reviews,
+                    meta_review=state.meta_reviews[-1] if state.meta_reviews else None,
                 )
                 decision = budget_manager.decide(
                     stats,
@@ -691,17 +987,20 @@ class ProofMeshOrchestrator:
                             tools,
                         )
                         if attempt is not None:
-                            state.attempts.append(attempt)
-                            await self._extract_claims_many(
-                                problem,
-                                [attempt],
-                                runner,
-                                prompts,
-                                memory,
-                                store,
-                                budget_bucket="depth",
+                            accepted_attempts = self._record_attempts(
+                                state, [attempt], store
                             )
-                            performed = True
+                            if accepted_attempts:
+                                await self._extract_claims_many(
+                                    problem,
+                                    accepted_attempts,
+                                    runner,
+                                    prompts,
+                                    memory,
+                                    store,
+                                    budget_bucket="depth",
+                                )
+                                performed = True
                     elif action.action == ActionKind.WIDEN:
                         new_attempts = await self._widen(
                             problem,
@@ -717,17 +1016,20 @@ class ProofMeshOrchestrator:
                             requested_count=action.planned_paths or None,
                         )
                         if new_attempts:
-                            state.attempts.extend(new_attempts)
-                            await self._extract_claims_many(
-                                problem,
-                                new_attempts,
-                                runner,
-                                prompts,
-                                memory,
-                                store,
-                                budget_bucket="breadth",
+                            accepted_attempts = self._record_attempts(
+                                state, new_attempts, store
                             )
-                            performed = True
+                            if accepted_attempts:
+                                await self._extract_claims_many(
+                                    problem,
+                                    accepted_attempts,
+                                    runner,
+                                    prompts,
+                                    memory,
+                                    store,
+                                    budget_bucket="breadth",
+                                )
+                                performed = True
                     elif action.action == ActionKind.VERIFY and action.target_id:
                         target = next(
                             (
@@ -747,9 +1049,41 @@ class ProofMeshOrchestrator:
                                 memory,
                                 tools,
                                 store,
+                                state=state,
                             )
                             self._record_verification_bundles(state, [bundle])
                             performed = True
+                    elif action.action in {
+                        ActionKind.BRIDGE,
+                        ActionKind.RESOLVE_CONFLICT,
+                        ActionKind.SEARCH_COUNTEREXAMPLE,
+                        ActionKind.MERGE_ROUTE,
+                        ActionKind.COOLDOWN_ROUTE,
+                        ActionKind.SWITCH_REPRESENTATION,
+                        ActionKind.TRIGGER_INSPIRATION,
+                        ActionKind.SEARCH_ANALOGY,
+                        ActionKind.INVENT_CONSTRUCTION,
+                        ActionKind.GENERATE_INVARIANT,
+                        ActionKind.REVERSE_GOAL,
+                        ActionKind.META_REPLAN,
+                        ActionKind.SURPRISE_WIDEN,
+                    }:
+                        performed = (
+                            await self._execute_hierarchical_action(
+                                state,
+                                action.action,
+                                strategy_id=action.strategy_id,
+                                current_round=round_index,
+                                store=store,
+                                problem=problem,
+                                runner=runner,
+                                prompts=prompts,
+                                router=router,
+                                memory=memory,
+                                tools=tools,
+                            )
+                            or performed
+                        )
 
                 # Verify the best newly generated candidate when its marginal value is high.
                 unverified = [
@@ -779,6 +1113,7 @@ class ProofMeshOrchestrator:
                         memory,
                         tools,
                         store,
+                        state=state,
                     )
                     self._record_verification_bundles(state, [bundle])
                     performed = True
@@ -796,6 +1131,21 @@ class ProofMeshOrchestrator:
                         store,
                     )
                     state.meta_reviews.append(review)
+                    self._apply_meta_route_controls(state, review, round_index, store)
+
+                self._sync_hierarchical_artifacts(
+                    state,
+                    problem=problem,
+                    memory=memory,
+                    current_round=round_index,
+                    store=store,
+                )
+                hard_stagnation_stop = self._apply_global_progress_gate(
+                    state,
+                    round_index=round_index,
+                    store=store,
+                    activity=activity,
+                )
 
                 self._checkpoint(
                     store, f"adaptive_round_{round_index}", state, memory, runner
@@ -819,11 +1169,21 @@ class ProofMeshOrchestrator:
                     importance=ActivityImportance.MAJOR,
                     metrics={"round_index": round_index, "performed": performed},
                 )
-                if not performed:
+                if hard_stagnation_stop or not performed:
                     break
 
-            # Form a final proof even when all paths are partial; caveats preserve honesty.
-            if state.attempts:
+            if (
+                state.proof_graph is not None
+                and self.config.topology.final_stage.freeze_graph_before_synthesis
+                and not state.proof_graph.frozen
+            ):
+                state.proof_graph.freeze()
+                state.graph_frozen = True
+
+            # Final synthesis is a proof-producing stage, not a generic summarizer.
+            # When no candidate meets the evidence gate, preserve the mathematics in
+            # a separate research-progress report instead of fabricating closure.
+            if self._can_enter_synthesis(state):
                 synthesis_task = activity.start_task(
                     "stage",
                     title=activity.text(
@@ -890,6 +1250,7 @@ class ProofMeshOrchestrator:
                         memory,
                         tools,
                         store,
+                        state=state,
                     )
                     state.reports.extend(final_bundle.reports)
                     state.final_verification = final_bundle.aggregate
@@ -979,8 +1340,10 @@ class ProofMeshOrchestrator:
                             memory,
                             store,
                             revisions + 1,
+                            state=state,
                         )
                         if revised is None:
+                            state.final_repair_failed = True
                             activity.fail_task(
                                 revision_task,
                                 title=activity.text(
@@ -1008,6 +1371,7 @@ class ProofMeshOrchestrator:
                             memory,
                             tools,
                             store,
+                            state=state,
                         )
                         state.reports.extend(final_bundle.reports)
                         state.final_verification = final_bundle.aggregate
@@ -1068,6 +1432,18 @@ class ProofMeshOrchestrator:
                                 "revision_count": revisions,
                             },
                         )
+                    if (
+                        revisions > 0
+                        and state.final_verification.verdict != VerificationVerdict.PASS
+                    ):
+                        state.final_repair_failed = True
+                        store.append_event(
+                            "final_repair_inspiration_trigger_ready",
+                            {
+                                "revision_count": revisions,
+                                "verdict": state.final_verification.verdict.value,
+                            },
+                        )
                 else:
                     activity.fail_task(
                         synthesis_task,
@@ -1085,23 +1461,40 @@ class ProofMeshOrchestrator:
                         importance=ActivityImportance.MAJOR,
                     )
             else:
+                state.research_progress_report = self._build_research_progress_report(
+                    problem,
+                    state,
+                    execution_note=(
+                        "未达到最终证明综合门槛；保留已审查的局部进展。"
+                        if self.config.runtime.output_language.lower().startswith("zh")
+                        else "Final-proof synthesis gate was not met; reviewed partial progress was preserved."
+                    ),
+                )
+                store.write_json(
+                    "reports",
+                    "research_progress_report",
+                    state.research_progress_report,
+                )
                 activity.info(
-                    "no_attempts",
+                    "research_progress_report_ready",
                     title=activity.text(
-                        "没有可综合的证明路线",
-                        "No proof route is available for synthesis",
+                        "未达到最终综合门槛，已生成研究进展报告",
+                        "Synthesis gate not met; research progress report created",
                     ),
                     detail=activity.text(
-                        "运行将以未验证状态结束，并保留审计记录",
-                        "The run will finish unverified while preserving the audit trail",
+                        "局部步骤、反例、失败路线与剩余缺口均已保留",
+                        "Partial steps, counterevidence, failed routes, and remaining gaps were preserved",
                     ),
                     stage="synthesis",
                     parent_task_id=run_activity_task,
                     importance=ActivityImportance.MAJOR,
                 )
+                if runner.ledger.remaining_calls == 0:
+                    state.budget_exhausted = True
+                    state.execution_status = ExecutionStatus.BUDGET_EXHAUSTED
 
             self._checkpoint(store, "final", state, memory, runner)
-            status = self._run_status(state)
+            status = self._run_status(problem, state, store)
             result = self._build_result(
                 run_id,
                 status,
@@ -1142,6 +1535,84 @@ class ProofMeshOrchestrator:
             activity.finalize()
             write_run_report(store, result)
             return result
+        except ProviderCircuitOpenError as exc:
+            state.execution_status = ExecutionStatus.NETWORK_INTERRUPTED
+            state.math_status = MathStatus.INCONCLUSIVE
+            state.research_progress_report = self._build_research_progress_report(
+                problem,
+                state,
+                execution_note=(
+                    f"公共模型服务连接中断，已暂停；约 {exc.retry_after_seconds:.0f} 秒后可恢复。"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else (
+                        "The shared model-provider transport was interrupted; the run "
+                        f"was paused and may be resumed after about {exc.retry_after_seconds:.0f}s."
+                    )
+                ),
+            )
+            self._checkpoint(store, "paused_external_failure", state, memory, runner)
+            store.write_json(
+                "reports", "research_progress_report", state.research_progress_report
+            )
+            store.append_event(
+                "provider_circuit_open",
+                {
+                    "provider_scope": exc.provider_scope,
+                    "agent_ids": exc.agent_ids,
+                    "retry_after_seconds": exc.retry_after_seconds,
+                    "resume_stage": "paused_external_failure",
+                },
+            )
+            result = self._build_result(
+                run_id,
+                RunStatus.PAUSED_EXTERNAL_FAILURE,
+                problem,
+                state,
+                pool.metrics(),
+                runner,
+                pool,
+                store,
+                memory,
+                summary_override=(
+                    "公共 API 连接故障已触发 provider 熔断；数学结论仍为 inconclusive，"
+                    "所有外部检查点和局部结果已保存，可恢复运行。"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else (
+                        "A shared provider transport failure opened the circuit. The "
+                        "mathematical status remains inconclusive; external checkpoints "
+                        "and partial results were saved for resume."
+                    )
+                ),
+            )
+            router.export()
+            store.write_json("structured", "run_result", result)
+            activity.close_open_tasks(
+                status=ActivityStatus.WARNING,
+                detail=activity.text(
+                    "公共网络故障触发暂停；已保存检查点，未继续消耗备用 Agent",
+                    "A shared transport failure paused the run; checkpoints were saved and backup agents were not consumed",
+                ),
+                exclude_task_ids={run_activity_task},
+            )
+            activity.warn_task(
+                run_activity_task,
+                title=activity.text(
+                    "外部服务中断，运行已安全暂停",
+                    "External service interrupted; run safely paused",
+                ),
+                detail=str(exc),
+                event_type="provider_circuit_open",
+                stage="run",
+                importance=ActivityImportance.MAJOR,
+                metrics={
+                    "provider_scope": exc.provider_scope,
+                    "agent_ids": exc.agent_ids,
+                    "retry_after_seconds": exc.retry_after_seconds,
+                },
+            )
+            activity.finalize()
+            write_run_report(store, result)
+            return result
         except BudgetExhaustedError as exc:
             state.budget_exhausted = True
             logger.warning("Budget exhausted: %s", exc)
@@ -1156,7 +1627,11 @@ class ProofMeshOrchestrator:
                 pool,
                 store,
                 memory,
-                summary_override="Global call/token/cost budget was exhausted; partial artifacts were preserved.",
+                summary_override=(
+                    "全局调用、Token 或费用预算已耗尽；所有可用的局部结果均已保留。"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else "Global call/token/cost budget was exhausted; partial artifacts were preserved."
+                ),
             )
             router.export()
             store.write_json("structured", "run_result", result)
@@ -1205,7 +1680,11 @@ class ProofMeshOrchestrator:
                 pool,
                 store,
                 memory,
-                summary_override=f"Run failed with {type(exc).__name__}: {exc}",
+                summary_override=(
+                    f"运行因 {type(exc).__name__} 异常终止；当前产物已保留：{exc}"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else f"Run failed with {type(exc).__name__}: {exc}"
+                ),
             )
             router.export()
             store.write_json("structured", "run_result", result)
@@ -1280,6 +1759,7 @@ class ProofMeshOrchestrator:
         )
         pool = AgentPool(self.config, mock_responders=self.mock_responders)
         runner = StructuredAgentRunner(self.config, pool, store, activity=activity)
+        allocator = SoftBudgetAllocator(self.config, runner.ledger)
         prompts = PromptFactory(
             self.config.runtime.output_language,
             computation_enabled=self.config.computation.enabled,
@@ -1289,6 +1769,16 @@ class ProofMeshOrchestrator:
         tools = ToolBroker(self.config, store, activity)
 
         state = self._restore_state_from_checkpoint(payload, store)
+        apply_task_contract(problem, state.triage)
+        store.write_json("structured", "problem_contract", problem)
+        self._initialize_hierarchical_runtime(
+            state,
+            problem=problem,
+            store=store,
+            activity=activity,
+            memory=memory,
+            checkpoint_payload=payload,
+        )
         state.resumed = True
         latest_proof_checkpoint = max(
             state.checkpoints,
@@ -1304,6 +1794,19 @@ class ProofMeshOrchestrator:
             if isinstance(lemma_payload, list):
                 persisted_claims.extend(lemma_payload)
         memory.add_many([ClaimCard.model_validate(item) for item in persisted_claims])
+        if self.config.topology.mode == "hierarchical_sparse" and not all(
+            isinstance(payload.get(key), dict)
+            for key in ("typed_memory", "message_broker")
+        ):
+            verified_count = len(memory.verified())
+            if verified_count:
+                store.append_event(
+                    "legacy_claims_quarantined",
+                    {
+                        "verified_count": verified_count,
+                        "policy": "not_admitted_without_typed_broker_provenance",
+                    },
+                )
         runtime_payload = (
             store.read_named_json("checkpoints", "runtime_ledger")
             if store.has_named_json("checkpoints", "runtime_ledger")
@@ -1318,8 +1821,30 @@ class ProofMeshOrchestrator:
         for key in runner.ledger.bucket_calls:
             if key in bucket_calls:
                 runner.ledger.bucket_calls[key] = int(bucket_calls[key] or 0)
+        runner.ledger.reservation_calls = {
+            str(key): int(value or 0)
+            for key, value in dict(
+                runtime_payload.get("reservation_calls") or {}
+            ).items()
+        }
+        stale_capacity = dict(runtime_payload.get("capacity_reservations") or {})
+        # Capacity belonged to an in-process call/recovery pair. No private call
+        # can be resumed after a process restart, so stale capacity is released.
+        runner.ledger.capacity_reservations = {}
+        if stale_capacity:
+            store.append_event(
+                "artifact_recovery_capacity_released_on_resume",
+                {"reservation_count": len(stale_capacity)},
+            )
+        if state.inspiration_engine is not None:
+            state.inspiration_engine.reconcile_call_reservations(
+                runner.ledger.reservation_calls
+            )
         pool.restore_metrics(
             runtime_payload.get("agent_metrics") or payload.get("agent_metrics") or []
+        )
+        pool.restore_provider_circuit_state(
+            dict(runtime_payload.get("provider_circuit") or {})
         )
         runner.persist_runtime_state()
 
@@ -1368,9 +1893,15 @@ class ProofMeshOrchestrator:
                     store,
                     memory,
                     summary_override=(
-                        f"Completed run recovered from stage {resume_stage} and proof "
-                        f"checkpoint {state.resumed_from_checkpoint_id or 'none'} without "
-                        "new model calls."
+                        f"已从阶段 {resume_stage} 和证明检查点 "
+                        f"{state.resumed_from_checkpoint_id or '无'} 恢复已完成结果，"
+                        "未产生新的模型调用。"
+                        if self.config.runtime.output_language.lower().startswith("zh")
+                        else (
+                            f"Completed run recovered from stage {resume_stage} and proof "
+                            f"checkpoint {state.resumed_from_checkpoint_id or 'none'} without "
+                            "new model calls."
+                        )
                     ),
                 )
                 store.write_json("structured", "run_result", result)
@@ -1406,6 +1937,16 @@ class ProofMeshOrchestrator:
 
             if state.triage is None:
                 state.triage = await self._triage(problem, runner, prompts, store)
+            state.capability_domain = infer_capability_domain(
+                problem.exact_statement,
+                state.triage.rationale,
+                *state.triage.key_risks,
+                *state.triage.likely_tools,
+            )
+            pool.set_capability_context(
+                state.capability_profile,
+                domain=state.capability_domain,
+            )
             if not state.strategies:
                 state.strategies = await self._initial_strategies(
                     problem,
@@ -1415,9 +1956,29 @@ class ProofMeshOrchestrator:
                     router,
                     store,
                 )
+            self._ensure_hierarchical_routes(
+                state,
+                router,
+                round_index=state.current_round,
+                activity=activity,
+                store=store,
+            )
+            # Persist the repaired topology before any resumed route can run. If the
+            # process stops again here, the next resume sees one coherent v0.7 state
+            # rather than repeating the legacy pre-strategy checkpoint.
+            self._checkpoint(
+                store,
+                "resume_routes_ensured",
+                state,
+                memory,
+                runner,
+            )
 
             max_resume_rounds = max(1, self.config.budget.max_rounds)
+            if state.last_progress_signature is None:
+                state.last_progress_signature = self._global_progress_signature(state)
             for resume_round in range(max_resume_rounds):
+                state.current_round = resume_round
                 updated_attempts: list[ProofAttempt] = []
                 for strategy in state.strategies:
                     path_attempts = [
@@ -1434,6 +1995,16 @@ class ProofMeshOrchestrator:
                         previous is not None
                         and previous.status == AttemptStatus.COMPLETE
                     ):
+                        continue
+                    route = (
+                        state.route_registry.route_for_strategy(strategy.strategy_id)
+                        if state.route_registry is not None
+                        else None
+                    )
+                    if route is not None and route.status not in {
+                        RouteStatus.ACTIVE,
+                        RouteStatus.REPAIR_ONCE,
+                    }:
                         continue
                     if runner.ledger.remaining_calls <= 0:
                         break
@@ -1456,6 +2027,7 @@ class ProofMeshOrchestrator:
                         problem,
                         strategy,
                         agent,
+                        state=state,
                         round_index=(
                             previous.round_index + 1 if previous else resume_round
                         ),
@@ -1474,13 +2046,9 @@ class ProofMeshOrchestrator:
                             for review in state.meta_reviews[-1:]
                         ),
                     )
-                    state.attempts = [
-                        item
-                        for item in state.attempts
-                        if item.attempt_id != updated.attempt_id
-                    ]
-                    state.attempts.append(updated)
-                    updated_attempts.append(updated)
+                    updated_attempts.extend(
+                        self._record_attempts(state, [updated], store)
+                    )
 
                 if updated_attempts:
                     await self._extract_claims_many(
@@ -1505,8 +2073,28 @@ class ProofMeshOrchestrator:
                     memory,
                     tools,
                     store,
+                    state=state,
                 )
                 self._record_verification_bundles(state, verification_bundles)
+                self._sync_hierarchical_artifacts(
+                    state,
+                    problem=problem,
+                    memory=memory,
+                    current_round=resume_round,
+                    store=store,
+                )
+                await self._run_inspiration_round(
+                    state,
+                    problem=problem,
+                    remaining_calls=runner.ledger.remaining_calls,
+                    store=store,
+                    runner=runner,
+                    prompts=prompts,
+                    allocator=allocator,
+                    router=router,
+                    memory=memory,
+                    tools=tools,
+                )
                 if state.attempts and runner.ledger.remaining_calls > 0:
                     review = await self._meta_review(
                         problem,
@@ -1517,6 +2105,13 @@ class ProofMeshOrchestrator:
                         store,
                     )
                     state.meta_reviews.append(review)
+                    self._apply_meta_route_controls(state, review, resume_round, store)
+                hard_stagnation_stop = self._apply_global_progress_gate(
+                    state,
+                    round_index=resume_round,
+                    store=store,
+                    activity=activity,
+                )
                 self._checkpoint(
                     store,
                     f"resume_round_{resume_round}",
@@ -1526,10 +2121,17 @@ class ProofMeshOrchestrator:
                 )
                 if self._has_synthesis_ready_candidate(state):
                     break
-                if not updated_attempts:
+                if hard_stagnation_stop or not updated_attempts:
                     break
 
-            if state.attempts:
+            if (
+                state.proof_graph is not None
+                and self.config.topology.final_stage.freeze_graph_before_synthesis
+                and not state.proof_graph.frozen
+            ):
+                state.proof_graph.freeze()
+                state.graph_frozen = True
+            if self._can_enter_synthesis(state):
                 state.final_proof, synthesizer = await self._synthesize(
                     problem,
                     state,
@@ -1550,13 +2152,32 @@ class ProofMeshOrchestrator:
                         memory,
                         tools,
                         store,
+                        state=state,
                     )
                     state.reports.extend(final_bundle.reports)
                     state.final_verification = final_bundle.aggregate
+            else:
+                state.research_progress_report = self._build_research_progress_report(
+                    problem,
+                    state,
+                    execution_note=(
+                        "恢复运行后仍未达到最终证明综合门槛。"
+                        if self.config.runtime.output_language.lower().startswith("zh")
+                        else "The resumed run still did not meet the final-proof synthesis gate."
+                    ),
+                )
+                store.write_json(
+                    "reports",
+                    "research_progress_report",
+                    state.research_progress_report,
+                )
+                if runner.ledger.remaining_calls == 0:
+                    state.budget_exhausted = True
+                    state.execution_status = ExecutionStatus.BUDGET_EXHAUSTED
 
             state.checkpoints = store.list_proof_checkpoints()
             self._checkpoint(store, "resume_final", state, memory, runner)
-            status = self._run_status(state)
+            status = self._run_status(problem, state, store)
             result = self._build_result(
                 run_id,
                 status,
@@ -1568,8 +2189,15 @@ class ProofMeshOrchestrator:
                 store,
                 memory,
                 summary_override=(
-                    f"Run resumed from stage {resume_stage} and proof checkpoint "
-                    f"{state.resumed_from_checkpoint_id or 'none'}; {self._result_summary(status, state)}"
+                    f"运行已从阶段 {resume_stage} 和证明检查点 "
+                    f"{state.resumed_from_checkpoint_id or '无'} 恢复；"
+                    f"{self._result_summary(status, state)}"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else (
+                        f"Run resumed from stage {resume_stage} and proof checkpoint "
+                        f"{state.resumed_from_checkpoint_id or 'none'}; "
+                        f"{self._result_summary(status, state)}"
+                    )
                 ),
             )
             router.export()
@@ -1599,6 +2227,58 @@ class ProofMeshOrchestrator:
             activity.finalize()
             write_run_report(store, result)
             return result
+        except ProviderCircuitOpenError as exc:
+            state.execution_status = ExecutionStatus.NETWORK_INTERRUPTED
+            state.math_status = MathStatus.INCONCLUSIVE
+            state.research_progress_report = self._build_research_progress_report(
+                problem,
+                state,
+                execution_note=(
+                    "恢复期间公共 API 连接再次中断；运行已停在最近外部检查点。"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else "The shared provider connection failed during resume; the run stopped at the latest external checkpoint."
+                ),
+            )
+            self._checkpoint(store, "paused_external_failure", state, memory, runner)
+            store.write_json(
+                "reports", "research_progress_report", state.research_progress_report
+            )
+            result = self._build_result(
+                run_id,
+                RunStatus.PAUSED_EXTERNAL_FAILURE,
+                problem,
+                state,
+                pool.metrics(),
+                runner,
+                pool,
+                store,
+                memory,
+                summary_override=(
+                    "恢复期间 provider 熔断；数学状态仍为 inconclusive，可在网络恢复后再次 resume。"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else "The provider circuit opened during resume; mathematical status remains inconclusive and the run can be resumed after recovery."
+                ),
+            )
+            store.write_json("structured", "run_result", result)
+            activity.close_open_tasks(
+                status=ActivityStatus.WARNING,
+                detail=activity.text(
+                    "外部服务中断；已保存恢复检查点",
+                    "External service interrupted; resume checkpoint saved",
+                ),
+                exclude_task_ids={run_task},
+            )
+            activity.warn_task(
+                run_task,
+                title=activity.text("恢复运行已安全暂停", "Resumed run safely paused"),
+                detail=str(exc),
+                event_type="provider_circuit_open",
+                stage="run_resume",
+                importance=ActivityImportance.MAJOR,
+            )
+            activity.finalize()
+            write_run_report(store, result)
+            return result
         except BudgetExhaustedError as exc:
             state.budget_exhausted = True
             result = self._build_result(
@@ -1611,7 +2291,11 @@ class ProofMeshOrchestrator:
                 pool,
                 store,
                 memory,
-                summary_override=f"Resume budget exhausted: {exc}",
+                summary_override=(
+                    f"恢复运行的预算已耗尽；当前检查点和局部结果已保留：{exc}"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else f"Resume budget exhausted: {exc}"
+                ),
             )
             store.write_json("structured", "run_result", result)
             activity.emit(
@@ -1642,7 +2326,11 @@ class ProofMeshOrchestrator:
                 pool,
                 store,
                 memory,
-                summary_override=f"Resume failed with {type(exc).__name__}: {exc}",
+                summary_override=(
+                    f"恢复运行因 {type(exc).__name__} 异常终止；最近的已验证检查点已保留：{exc}"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else f"Resume failed with {type(exc).__name__}: {exc}"
+                ),
             )
             store.write_json("structured", "run_result", result)
             activity.close_open_tasks(
@@ -1669,6 +2357,3072 @@ class ProofMeshOrchestrator:
         finally:
             await pool.aclose()
 
+    def _initialize_hierarchical_runtime(
+        self,
+        state: SolveState,
+        *,
+        problem: ProblemContract,
+        store: ArtifactStore,
+        activity: ActivityStream,
+        memory: LemmaMemory,
+        checkpoint_payload: dict[str, Any] | None = None,
+    ) -> None:
+        if self.config.topology.mode != "hierarchical_sparse":
+            return
+        payload = checkpoint_payload or {}
+        registry_state = payload.get("route_registry")
+        state.route_registry = (
+            RouteRegistry.from_state(registry_state, self.config)
+            if isinstance(registry_state, dict)
+            else RouteRegistry(self.config, problem_hash=problem.integrity_hash)
+        )
+        deep_state = payload.get("deep_exploration_registry")
+        if store.has_named_json("structured", "deep_exploration_registry"):
+            try:
+                deep_state = store.read_named_json(
+                    "structured", "deep_exploration_registry"
+                )
+            except (OSError, ValueError):
+                pass
+        deep_policy = self.config.deep_exploration_policy.model_copy(
+            update={
+                "no_progress_high_tier_limit_per_signature": (
+                    self.config.scheduler.max_normal_attempts_per_signature
+                ),
+                "max_partial_repairs_per_signature": (
+                    self.config.scheduler.max_repair_attempts_per_signature
+                ),
+            }
+        )
+        state.deep_exploration_registry = (
+            DeepExplorationRegistry.from_state(
+                deep_state,
+                deep_policy,
+                problem_hash=problem.integrity_hash,
+            )
+            if self.config.deep_exploration_policy.enabled
+            and isinstance(deep_state, dict)
+            else (
+                DeepExplorationRegistry(
+                    deep_policy,
+                    problem_hash=problem.integrity_hash,
+                )
+                if self.config.deep_exploration_policy.enabled
+                else None
+            )
+        )
+        if state.deep_exploration_registry is not None:
+            store.write_json(
+                "structured",
+                "deep_exploration_registry",
+                state.deep_exploration_registry.export_state(),
+            )
+        memory_state = payload.get("typed_memory")
+        state.typed_memory = (
+            TypedMemory.from_state(
+                memory_state,
+                store=store,
+                config=self.config,
+                lemma_memory=memory,
+            )
+            if isinstance(memory_state, dict)
+            else TypedMemory(store, self.config, lemma_memory=memory)
+        )
+        graph_state = payload.get("proof_graph")
+        state.proof_graph = (
+            ProofGraphStore.from_state(graph_state, config=self.config, store=store)
+            if isinstance(graph_state, dict)
+            else ProofGraphStore(
+                self.config, store, problem_hash=problem.integrity_hash
+            )
+        )
+        broker_state = payload.get("message_broker")
+        state.message_broker = (
+            MessageBroker.from_state(
+                broker_state,
+                config=self.config,
+                store=store,
+                activity=activity,
+                route_registry=state.route_registry,
+                proof_graph=state.proof_graph,
+                typed_memory=state.typed_memory,
+            )
+            if isinstance(broker_state, dict)
+            else MessageBroker(
+                self.config,
+                store,
+                activity,
+                state.route_registry,
+                state.proof_graph,
+                state.typed_memory,
+            )
+        )
+        bridge_state = payload.get("bridge_broker")
+        state.bridge_broker = (
+            BridgeBroker.from_state(
+                bridge_state,
+                config=self.config,
+                proof_graph=state.proof_graph,
+            )
+            if isinstance(bridge_state, dict)
+            else BridgeBroker(self.config, state.proof_graph)
+        )
+        contradiction_state = payload.get("contradiction_broker")
+        state.contradiction_broker = (
+            ContradictionBroker.from_state(
+                contradiction_state,
+                config=self.config,
+                proof_graph=state.proof_graph,
+            )
+            if isinstance(contradiction_state, dict)
+            else ContradictionBroker(self.config, state.proof_graph)
+        )
+        state.duplicate_route_detector = DuplicateRouteDetector(self.config)
+        capability_state = payload.get("agent_capability")
+        state.capability_profile = (
+            AgentCapabilityProfile.from_state(
+                capability_state,
+                config=self.config.topology.agent_capability,
+            )
+            if isinstance(capability_state, dict)
+            else AgentCapabilityProfile(self.config.topology.agent_capability)
+        )
+        state.validation_escalator = ValidationEscalator(
+            self.config.topology.validation_escalation
+        )
+        state.proof_debt_history = {
+            str(key): [float(item) for item in value]
+            for key, value in dict(payload.get("proof_debt_history", {})).items()
+        }
+        state.current_round = int(payload.get("current_round", state.current_round))
+        state.graph_frozen = state.proof_graph.frozen
+        state.final_repair_failed = bool(payload.get("final_repair_failed", False))
+
+        for strategy in state.strategies:
+            route = state.route_registry.route_for_strategy(strategy.strategy_id)
+            if route is None:
+                route = state.route_registry.register_route(strategy)
+            if strategy.assigned_agent_id and not state.route_registry.owns_agent(
+                route.route_id, strategy.assigned_agent_id, RouteRole.PROVER
+            ):
+                try:
+                    state.route_registry.assign_member(
+                        route.route_id,
+                        strategy.assigned_agent_id,
+                        RouteRole.PROVER,
+                        state.current_round,
+                    )
+                except ValueError:
+                    pass
+
+        state.inspiration_engine = InspirationEngine(
+            self.config,
+            problem=problem,
+            proof_graph=state.proof_graph,
+            typed_memory=state.typed_memory,
+            route_registry=state.route_registry,
+            broker=state.message_broker,
+            store=store,
+            activity=activity,
+            project_root=self.config.runtime.project_root,
+        )
+        inspiration_state = payload.get("inspiration_engine")
+        if isinstance(inspiration_state, dict):
+            state.inspiration_engine.restore_state(inspiration_state)
+
+        if checkpoint_payload is not None and not all(
+            isinstance(payload.get(key), dict)
+            for key in (
+                "route_registry",
+                "typed_memory",
+                "proof_graph",
+                "message_broker",
+                "inspiration_engine",
+            )
+        ):
+            store.append_event(
+                "checkpoint_migrated_to_v0_7",
+                {
+                    "initialized_empty_components": [
+                        key
+                        for key in (
+                            "route_registry",
+                            "typed_memory",
+                            "proof_graph",
+                            "message_broker",
+                            "inspiration_engine",
+                        )
+                        if not isinstance(payload.get(key), dict)
+                    ]
+                },
+            )
+            activity.info(
+                "checkpoint_migrated_to_v0_7",
+                title="Checkpoint migrated to v0.7",
+                detail="Missing hierarchical topology state was initialized conservatively.",
+                stage="run_resume",
+            )
+
+    def _ensure_hierarchical_routes(
+        self,
+        state: SolveState,
+        router: SparseTopologyRouter,
+        *,
+        assignments: Sequence[tuple[StrategyCard, AgentRuntime]] | None = None,
+        round_index: int,
+        activity: ActivityStream | None,
+        store: ArtifactStore,
+    ) -> None:
+        if self.config.topology.mode != "hierarchical_sparse":
+            return
+        registry = state.route_registry
+        if registry is None:
+            raise RuntimeError(
+                "hierarchical_sparse requires an initialized RouteRegistry"
+            )
+
+        assigned_by_strategy = {
+            strategy.strategy_id: agent for strategy, agent in (assignments or [])
+        }
+        for strategy in state.strategies:
+            existing = registry.route_for_strategy(strategy.strategy_id)
+            route = existing or registry.register_route(strategy)
+            if existing is None:
+                store.append_event("route_registered", route)
+                if activity is not None:
+                    activity.info(
+                        "route_registered",
+                        title="Hierarchical route registered",
+                        detail=strategy.title,
+                        stage="route_team",
+                        agent_id=(
+                            assigned_by_strategy[strategy.strategy_id].id
+                            if strategy.strategy_id in assigned_by_strategy
+                            else strategy.assigned_agent_id
+                        ),
+                        metrics={
+                            "route_id": route.route_id,
+                            "strategy_id": strategy.strategy_id,
+                            "recovered": state.resumed,
+                        },
+                    )
+
+        needs_assignment: list[StrategyCard] = []
+        for strategy in state.strategies:
+            route = registry.route_for_strategy(strategy.strategy_id)
+            if route is None:
+                raise RuntimeError(
+                    "hierarchical route registration failed for strategy "
+                    f"{strategy.strategy_id}"
+                )
+            if any(member.role == RouteRole.PROVER for member in route.members):
+                continue
+            if strategy.strategy_id in assigned_by_strategy:
+                continue
+            if strategy.assigned_agent_id:
+                try:
+                    assigned_by_strategy[strategy.strategy_id] = router.pool.get(
+                        strategy.assigned_agent_id
+                    )
+                    continue
+                except KeyError:
+                    pass
+            needs_assignment.append(strategy)
+
+        if needs_assignment:
+            assigned_by_strategy.update(
+                {
+                    strategy.strategy_id: agent
+                    for strategy, agent in router.assign_explorers(needs_assignment)
+                }
+            )
+
+        for strategy in state.strategies:
+            route = registry.route_for_strategy(strategy.strategy_id)
+            if route is None or any(
+                member.role == RouteRole.PROVER for member in route.members
+            ):
+                continue
+            agent = assigned_by_strategy.get(strategy.strategy_id)
+            if agent is None:
+                raise RuntimeError(
+                    "hierarchical route has no available Prover for strategy "
+                    f"{strategy.strategy_id}"
+                )
+            registry.assign_member(
+                route.route_id, agent.id, RouteRole.PROVER, round_index
+            )
+            store.append_event(
+                "route_member_assigned",
+                {
+                    "route_id": route.route_id,
+                    "agent_id": agent.id,
+                    "role": RouteRole.PROVER.value,
+                    "round_index": round_index,
+                    "recovered": state.resumed,
+                },
+            )
+
+        routes = registry.routes
+        limit = self.config.topology.cross_route.max_neighbors_per_route
+        strategies = {item.strategy_id: item for item in state.strategies}
+        neighborhoods = select_sparse_route_neighbors(
+            [
+                (route.route_id, strategies[route.strategy_id])
+                for route in routes
+                if route.strategy_id in strategies
+            ],
+            max_neighbors=limit,
+        )
+        for route_id, neighbors in neighborhoods.items():
+            registry.set_neighbors(route_id, neighbors)
+        self._persist_hierarchical_route_runtime(state, store)
+
+    def _ensure_hierarchical_prover(
+        self,
+        state: SolveState | None,
+        strategy: StrategyCard,
+        agent: AgentRuntime,
+        *,
+        round_index: int,
+        activity: ActivityStream | None,
+        store: ArtifactStore,
+    ) -> str | None:
+        if self.config.topology.mode != "hierarchical_sparse":
+            return None
+        if state is None or state.route_registry is None:
+            raise RuntimeError(
+                "hierarchical_sparse cannot explore without an initialized RouteRegistry"
+            )
+        registry = state.route_registry
+        changed = False
+        route = registry.route_for_strategy(strategy.strategy_id)
+        if route is None:
+            route = registry.register_route(strategy)
+            changed = True
+            store.append_event("route_registered", route)
+            if activity is not None:
+                activity.info(
+                    "route_registered",
+                    title="Missing hierarchical route repaired before exploration",
+                    detail=strategy.title,
+                    stage="route_team",
+                    agent_id=agent.id,
+                    metrics={
+                        "route_id": route.route_id,
+                        "strategy_id": strategy.strategy_id,
+                        "recovered": state.resumed,
+                    },
+                )
+            registry.recompute_neighbors()
+        if not registry.owns_agent(route.route_id, agent.id, RouteRole.PROVER):
+            registry.assign_member(
+                route.route_id,
+                agent.id,
+                RouteRole.PROVER,
+                round_index,
+            )
+            changed = True
+            store.append_event(
+                "route_member_assigned",
+                {
+                    "route_id": route.route_id,
+                    "agent_id": agent.id,
+                    "role": RouteRole.PROVER.value,
+                    "round_index": round_index,
+                    "actual_selected_prover": True,
+                },
+            )
+        if changed:
+            self._persist_hierarchical_route_runtime(state, store)
+        return route.route_id
+
+    @staticmethod
+    def _persist_hierarchical_route_runtime(
+        state: SolveState,
+        store: ArtifactStore,
+    ) -> None:
+        components = {
+            "route_registry": state.route_registry,
+            "message_broker": state.message_broker,
+            "typed_memory": state.typed_memory,
+            "proof_graph": state.proof_graph,
+        }
+        for name, component in components.items():
+            if component is not None:
+                store.write_json("structured", name, component.export_state())
+
+    def _route_for_strategy(self, state: SolveState, strategy_id: str) -> str | None:
+        if state.route_registry is None:
+            return None
+        route = state.route_registry.route_for_strategy(strategy_id)
+        return route.route_id if route else None
+
+    def _sync_hierarchical_artifacts(
+        self,
+        state: SolveState,
+        *,
+        problem: ProblemContract,
+        memory: LemmaMemory,
+        current_round: int,
+        store: ArtifactStore,
+    ) -> None:
+        broker = state.message_broker
+        graph = state.proof_graph
+        registry = state.route_registry
+        if broker is None or graph is None or registry is None or graph.frozen:
+            return
+        attempts_by_id = {item.attempt_id: item for item in state.attempts}
+        for claim in memory.claims:
+            attempt = attempts_by_id.get(claim.source_attempt_id or "")
+            if attempt is None:
+                continue
+            route_id = self._route_for_strategy(state, attempt.strategy_id)
+            if route_id is None:
+                continue
+            if not registry.owns_agent(route_id, attempt.agent_id, RouteRole.PROVER):
+                try:
+                    registry.assign_member(
+                        route_id, attempt.agent_id, RouteRole.PROVER, current_round
+                    )
+                except ValueError:
+                    continue
+            report = state.aggregate_reports.get(attempt.attempt_id)
+            team_reviews = (state.route_team_reviews or {}).get(attempt.attempt_id, [])
+            scoped_team_reviews = (
+                [
+                    review
+                    for review in team_reviews
+                    if review.get("delta_id") == claim.source_delta_id
+                ]
+                if claim.source_delta_id is not None
+                else team_reviews
+            )
+            team_review = scoped_team_reviews[-1] if scoped_team_reviews else None
+            teams_enabled = self.config.topology.route_teams.enabled
+            team_global_allowed = team_reviews_allow_global_share(
+                team_reviews,
+                teams_enabled=teams_enabled,
+                delta_id=claim.source_delta_id,
+            )
+            if teams_enabled:
+                referee_id = (
+                    str(team_review.get("referee_agent_id"))
+                    if team_review and team_review.get("referee_agent_id")
+                    else None
+                )
+            else:
+                referee_id = (
+                    report.agent_id
+                    if report is not None
+                    and report.agent_id not in {"system-aggregate", attempt.agent_id}
+                    else next(
+                        (
+                            item.agent_id
+                            for item in state.reports
+                            if item.target_id == attempt.attempt_id
+                            and item.agent_id != attempt.agent_id
+                        ),
+                        None,
+                    )
+                )
+            if referee_id is not None and not registry.owns_agent(
+                route_id, referee_id, RouteRole.REFEREE
+            ):
+                try:
+                    registry.assign_member(
+                        route_id, referee_id, RouteRole.REFEREE, current_round
+                    )
+                except ValueError:
+                    referee_id = None
+            if teams_enabled:
+                skeptic_id = (
+                    str(team_review.get("skeptic_agent_id"))
+                    if team_review and team_review.get("skeptic_agent_id")
+                    else None
+                )
+            else:
+                skeptic_id = next(
+                    (
+                        item.agent_id
+                        for item in state.reports
+                        if item.target_id == attempt.attempt_id
+                        and item.stage == VerificationStage.DETAILED
+                        and item.agent_id not in {attempt.agent_id, referee_id}
+                    ),
+                    None,
+                )
+            if skeptic_id is not None and not registry.owns_agent(
+                route_id, skeptic_id, RouteRole.SKEPTIC
+            ):
+                try:
+                    registry.assign_member(
+                        route_id, skeptic_id, RouteRole.SKEPTIC, current_round
+                    )
+                except ValueError:
+                    skeptic_id = None
+            tier = MemoryTier.INSIGHT
+            evidence = EvidenceType.UNVERIFIED_IDEA
+            message_type = MessageType.CLAIM_PROPOSAL
+            verification_status = claim.status
+            confidence = claim.verification_confidence or 0.0
+            if (
+                claim.status == ClaimStatus.VERIFIED
+                and referee_id is not None
+                and team_global_allowed
+            ):
+                tier = MemoryTier.FACT
+                evidence = EvidenceType.NATURAL_PROOF_AUDITED
+                message_type = MessageType.VERIFIED_LEMMA
+            elif claim.status == ClaimStatus.REJECTED:
+                tier = MemoryTier.NEGATIVE
+                message_type = MessageType.FAILURE_RECORD
+            normalized = self._normalize_statement(claim.statement or claim.conclusion)
+            has_implicit_quantifier = any(
+                marker in normalized.casefold()
+                for marker in ("for all", "for every", "there exists", "∀", "∃")
+            )
+            if has_implicit_quantifier and not claim.scope_limitations:
+                tier = MemoryTier.INSIGHT
+                evidence = EvidenceType.UNVERIFIED_IDEA
+                message_type = MessageType.CLAIM_PROPOSAL
+                verification_status = ClaimStatus.UNCERTAIN
+            message = MessageEnvelope(
+                message_id=f"msg_claim_{claim.content_hash[:12]}",
+                problem_hash=problem.integrity_hash,
+                source_agent_id=attempt.agent_id,
+                source_route_id=route_id,
+                source_role=RouteRole.PROVER,
+                message_type=message_type,
+                statement=claim.statement,
+                normalized_statement=normalized,
+                assumptions=claim.assumptions,
+                conclusion=claim.conclusion,
+                dependencies=claim.dependencies,
+                scope_limitations=claim.scope_limitations,
+                evidence_type=evidence,
+                memory_tier=tier,
+                verification_status=verification_status,
+                verification_confidence=confidence,
+                normalization_confidence=(0.7 if has_implicit_quantifier else 1.0),
+                artifact_refs=[ref.artifact_ref for ref in claim.evidence_refs],
+                round_created=current_round,
+                ttl_rounds=self.config.topology.cross_route.message_ttl_rounds,
+            )
+            if broker.contains(message, current_round=current_round):
+                continue
+            publication = broker.publish(
+                message,
+                referee_agent_id=referee_id,
+                current_round=current_round,
+            )
+            if (
+                publication.accepted
+                and tier == MemoryTier.FACT
+                and state.inspiration_engine is not None
+            ):
+                source_strategy = next(
+                    (
+                        item
+                        for item in state.strategies
+                        if item.strategy_id == attempt.strategy_id
+                    ),
+                    None,
+                )
+                proposal_id = (
+                    source_strategy.inspiration_proposal_id
+                    if source_strategy is not None
+                    else None
+                )
+                if proposal_id is None and attempt.strategy_id.startswith(
+                    "strategy_inspiration_"
+                ):
+                    proposal_id = attempt.strategy_id.removeprefix("strategy_")
+                evidence_message_id = publication.duplicate_of or message.message_id
+                closed_obligation_ids = [
+                    item.obligation_id
+                    for item in graph.obligations
+                    if evidence_message_id in item.evidence_message_ids
+                ]
+                state.inspiration_engine.attribute_verified_fact(
+                    evidence_message_id,
+                    source_route_id=route_id,
+                    closed_obligation_ids=closed_obligation_ids,
+                    dependency_message_ids=message.dependencies,
+                    direct_proposal_ids=(
+                        [proposal_id]
+                        if proposal_id in state.inspiration_engine.proposals
+                        else []
+                    ),
+                )
+        for attempt in state.attempts:
+            route_id = self._route_for_strategy(state, attempt.strategy_id)
+            if route_id is None or not registry.owns_agent(
+                route_id, attempt.agent_id, RouteRole.PROVER
+            ):
+                continue
+            for gap in attempt.unresolved_gaps:
+                if is_feedback_only_statement(gap):
+                    continue
+                canonical_gap = canonical_obligation_statement(gap)
+                if not canonical_gap:
+                    continue
+                gap_hash = stable_hash(
+                    (
+                        problem.integrity_hash,
+                        route_id,
+                        self._normalize_statement(canonical_gap),
+                    )
+                )
+                message = MessageEnvelope(
+                    message_id=f"msg_gap_{gap_hash[:12]}",
+                    problem_hash=problem.integrity_hash,
+                    source_agent_id=attempt.agent_id,
+                    source_route_id=route_id,
+                    source_role=RouteRole.PROVER,
+                    message_type=MessageType.PROOF_OBLIGATION,
+                    statement=canonical_gap,
+                    normalized_statement=self._normalize_statement(canonical_gap),
+                    conclusion=canonical_gap,
+                    evidence_type=EvidenceType.UNVERIFIED_IDEA,
+                    memory_tier=MemoryTier.INSIGHT,
+                    verification_status=ClaimStatus.PROPOSED,
+                    normalization_confidence=1.0,
+                    round_created=current_round,
+                    ttl_rounds=self.config.topology.cross_route.message_ttl_rounds,
+                )
+                if not broker.contains(message, current_round=current_round):
+                    broker.publish(
+                        message,
+                        referee_agent_id=None,
+                        current_round=current_round,
+                    )
+
+        for checkpoint in state.checkpoints:
+            route_id = self._route_for_strategy(state, checkpoint.strategy_id)
+            source_agent_id = checkpoint.source_agent_id
+            if route_id is None or not source_agent_id:
+                continue
+            if not registry.owns_agent(route_id, source_agent_id, RouteRole.PROVER):
+                try:
+                    registry.assign_member(
+                        route_id, source_agent_id, RouteRole.PROVER, current_round
+                    )
+                except ValueError:
+                    continue
+            checkpoint_message = checkpoint_to_route_message(
+                checkpoint,
+                route_id=route_id,
+                source_agent_id=source_agent_id,
+                round_index=current_round,
+                ttl_rounds=self.config.topology.cross_route.message_ttl_rounds,
+            )
+            if not broker.contains(checkpoint_message, current_round=current_round):
+                broker.publish(
+                    checkpoint_message,
+                    referee_agent_id=None,
+                    current_round=current_round,
+                )
+
+        self._update_route_progress_state(state, current_round=current_round)
+
+        if state.bridge_broker is not None:
+            state.bridge_broker.detect(
+                current_round=current_round,
+                allowed_fact_ids=[item.message_id for item in state.typed_memory.facts]
+                if state.typed_memory
+                else [],
+                forbidden_negative_ids=[
+                    item.message_id
+                    for item in (
+                        state.typed_memory.negatives if state.typed_memory else []
+                    )
+                    if isinstance(item, MessageEnvelope)
+                ],
+                budget_available=True,
+            )
+        if state.contradiction_broker is not None:
+            state.contradiction_broker.detect(current_round=current_round)
+
+    def _materialize_post_failure_bottleneck(
+        self,
+        state: SolveState | None,
+        diagnostic: PostFailureBottleneckDiagnostic,
+    ) -> ProofObligation | None:
+        """Keep a no-artifact diagnosis route-local and outside the Fact gate."""
+
+        if (
+            state is None
+            or state.proof_graph is None
+            or state.proof_graph.frozen
+            or diagnostic.route_id is None
+        ):
+            return None
+        obligation = ProofObligation(
+            obligation_id=f"obl_stall_{diagnostic.failure_fingerprint[:12]}",
+            problem_hash=diagnostic.problem_hash,
+            route_ids=[diagnostic.route_id],
+            kind=ObligationKind.SUBGOAL,
+            statement=diagnostic.smallest_blocked_claim,
+            normalized_statement=self._normalize_statement(
+                diagnostic.smallest_blocked_claim
+            ),
+            status="blocked",
+            priority=0.95,
+            centrality=0.75,
+            first_error_fingerprint=(
+                f"post_failure:{diagnostic.failure_fingerprint[:24]}"
+            ),
+        )
+        materialized = state.proof_graph.add_obligation(obligation)
+        if state.route_registry is not None:
+            try:
+                route = state.route_registry.get(diagnostic.route_id)
+            except KeyError:
+                route = None
+            if route is not None:
+                route.requires_revision = True
+                route.revision_summary = (
+                    "A no-artifact route failure was reduced to the explicit "
+                    f"obligation {materialized.obligation_id}."
+                )
+                if (
+                    self.config.continuation.post_failure_trigger_inspiration
+                    and diagnostic.requires_inspiration
+                ):
+                    route.stagnation_rounds = max(
+                        route.stagnation_rounds,
+                        self.config.topology.inspiration.stagnation_rounds,
+                    )
+        return materialized
+
+    def _admit_deep_exploration(
+        self,
+        state: SolveState | None,
+        *,
+        problem: ProblemContract,
+        strategy: StrategyCard,
+        checkpoint: ProofCheckpoint,
+        route_id: str | None,
+        round_index: int,
+        meta_approved: bool,
+        remaining_calls: int,
+        remaining_tokens: int | None,
+        store: ArtifactStore,
+    ) -> tuple[ExplorationAdmission | None, ExplorationSignature | None]:
+        if (
+            state is None
+            or state.deep_exploration_registry is None
+            or route_id is None
+            or not self.config.deep_exploration_policy.enabled
+        ):
+            return None, None
+
+        obligations = (
+            [
+                item
+                for item in state.proof_graph.obligations
+                if item.status not in {"closed", "refuted"}
+                and (not item.route_ids or route_id in item.route_ids)
+            ]
+            if state.proof_graph is not None
+            else []
+        )
+        obligations.sort(
+            key=lambda item: (
+                not str(item.first_error_fingerprint or "").startswith("post_failure:"),
+                -item.priority,
+                -item.centrality,
+                item.obligation_id,
+            )
+        )
+        bottleneck_obligation = obligations[0] if obligations else None
+        if bottleneck_obligation is not None and str(
+            bottleneck_obligation.first_error_fingerprint or ""
+        ).startswith("post_failure:"):
+            target_statement = bottleneck_obligation.statement
+            target_obligation_id = bottleneck_obligation.obligation_id
+        elif checkpoint.current_goal:
+            target_statement = checkpoint.current_goal
+            target_obligation_id = (
+                bottleneck_obligation.obligation_id
+                if bottleneck_obligation is not None
+                and self._normalize_statement(bottleneck_obligation.statement)
+                == self._normalize_statement(checkpoint.current_goal)
+                else None
+            )
+        elif checkpoint.remaining_subgoals:
+            target_statement = checkpoint.remaining_subgoals[0]
+            target_obligation_id = None
+        elif bottleneck_obligation is not None:
+            target_statement = bottleneck_obligation.statement
+            target_obligation_id = bottleneck_obligation.obligation_id
+        else:
+            target_statement = strategy.bottleneck
+            target_obligation_id = None
+
+        route = state.route_registry.get(route_id) if state.route_registry else None
+        mechanism_tags = [
+            strategy.title,
+            strategy.core_idea,
+            strategy.bottleneck,
+            *strategy.tags,
+            *strategy.expected_lemmas,
+            *(route.mechanism_signature if route is not None else []),
+        ]
+        representation_tags: list[str] = []
+        construction_tags: list[str] = []
+        invariant_tags: list[str] = []
+        transformation_tags: list[str] = []
+        proposal = None
+        review = None
+        if strategy.inspiration_proposal_id and state.inspiration_engine is not None:
+            proposal = state.inspiration_engine.proposals.get(
+                strategy.inspiration_proposal_id
+            )
+            review = state.inspiration_engine.reviews.get(
+                strategy.inspiration_proposal_id
+            )
+        if proposal is not None:
+            novelty = proposal.novelty_signature
+            representation_tags.extend(novelty.representation_tags)
+            mechanism_tags.extend(novelty.mechanism_tags)
+            transformation_tags.extend(novelty.key_transformations)
+            transformation_tags.extend(novelty.proof_principles)
+            if proposal.representation is not None:
+                representation_tags.extend(
+                    [
+                        proposal.representation.representation_name,
+                        *proposal.representation.preserved_invariants,
+                    ]
+                )
+            if proposal.construction is not None:
+                construction_tags.extend(proposal.construction.constructed_objects)
+            if proposal.invariant is not None:
+                invariant_tags.extend(
+                    [
+                        proposal.invariant.state_definition,
+                        proposal.invariant.candidate_expression,
+                        proposal.invariant.behavior,
+                    ]
+                )
+            if proposal.reverse_goal is not None:
+                transformation_tags.extend(
+                    proposal.reverse_goal.sufficient_intermediate_claims
+                )
+
+        signature = ExplorationSignature(
+            problem_hash=problem.integrity_hash,
+            verified_checkpoint_id=checkpoint.checkpoint_id,
+            verified_checkpoint_hash=checkpoint_math_fingerprint(checkpoint),
+            target_obligation_id=target_obligation_id,
+            target_statement=target_statement,
+            mechanism_tags=mechanism_tags,
+            representation_tags=representation_tags,
+            construction_tags=construction_tags,
+            invariant_tags=invariant_tags,
+            transformation_tags=transformation_tags,
+            assumptions=[
+                *checkpoint.active_assumptions,
+                *strategy.prerequisites,
+            ],
+            route_id=route_id,
+        )
+        referee_confirmed = bool(
+            review is not None
+            and review.semantically_distinct
+            and review.recommendation != "reject"
+        )
+        evidence = ExplorationEvidence(
+            has_verified_checkpoint=bool(
+                checkpoint.verified_steps or checkpoint.verified_claim_ids
+            ),
+            explicit_critical_target=bool(
+                checkpoint.current_goal
+                or checkpoint.remaining_subgoals
+                or bottleneck_obligation is not None
+            ),
+            meta_approved=(
+                meta_approved
+                or bool(
+                    proposal is not None
+                    and proposal.mechanism == InspirationMechanism.META_REPLAN
+                    and referee_confirmed
+                )
+            ),
+            final_reserve_available=(
+                remaining_calls
+                >= self.config.deep_exploration_policy.min_remaining_calls_for_128k
+                and (
+                    remaining_tokens is None
+                    or remaining_tokens
+                    >= self.config.deep_exploration_policy.min_remaining_tokens_for_128k
+                )
+            ),
+            novelty_review_passed=referee_confirmed,
+            referee_confirmed_mechanism_change=referee_confirmed,
+        )
+
+        if referee_confirmed:
+            for parent_hash in list(state.deep_exploration_registry.locked_signatures):
+                parent = state.deep_exploration_registry._latest_by_signature(
+                    parent_hash
+                )
+                if (
+                    parent is None
+                    or parent.route_id != route_id
+                    or parent.signature.verified_checkpoint_hash
+                    != signature.verified_checkpoint_hash
+                ):
+                    continue
+                pivot = state.deep_exploration_registry.register_pivot(
+                    route_id=route_id,
+                    parent_signature_hash=parent_hash,
+                    new_signature=signature,
+                    referee_confirmed=True,
+                )
+                if pivot is not None:
+                    store.append_event(
+                        "local_bottleneck_pivot_registered",
+                        pivot.model_dump(mode="json"),
+                    )
+                    break
+
+        admission = state.deep_exploration_registry.admit(
+            signature,
+            route_id=route_id,
+            round_index=round_index,
+            evidence=evidence,
+        )
+        store.write_json(
+            "structured",
+            "deep_exploration_registry",
+            state.deep_exploration_registry.export_state(),
+        )
+        return admission, signature
+
+    def _finish_deep_exploration(
+        self,
+        state: SolveState | None,
+        admission: ExplorationAdmission | None,
+        *,
+        outcome: ExplorationOutcome,
+        usage: UsageRecord,
+        checkpoint_after: ProofCheckpoint,
+        proof_debt_before: float | None,
+        current_goal_before: str | None,
+        reason: str,
+        store: ArtifactStore,
+        current_goal_override: str | None = None,
+    ) -> None:
+        if (
+            state is None
+            or state.deep_exploration_registry is None
+            or admission is None
+            or admission.lease_id is None
+        ):
+            return
+        record = state.deep_exploration_registry.attempts.get(admission.lease_id)
+        if record is None or record.outcome != ExplorationOutcome.RUNNING:
+            return
+        proof_debt_after = (
+            state.proof_graph.proof_debt(record.route_id)
+            if state.proof_graph is not None
+            else None
+        )
+        current_goal_after = (
+            current_goal_override
+            if current_goal_override is not None
+            else checkpoint_after.current_goal
+        )
+        finished = state.deep_exploration_registry.finish(
+            admission.lease_id,
+            outcome,
+            usage=usage,
+            checkpoint_after_hash=checkpoint_math_fingerprint(checkpoint_after),
+            proof_debt_changed=(
+                proof_debt_before is not None
+                and proof_debt_after is not None
+                and abs(proof_debt_before - proof_debt_after) > 1e-9
+            ),
+            current_goal_changed=(
+                self._normalize_statement(current_goal_before or "")
+                != self._normalize_statement(current_goal_after or "")
+            ),
+            reason=reason,
+        )
+        if state.route_registry is not None:
+            if finished.outcome in {
+                ExplorationOutcome.VERIFIED_PROGRESS,
+                ExplorationOutcome.VERIFIED_MECHANISM_CHANGE,
+            }:
+                state.route_registry.mark_progress(
+                    finished.route_id,
+                    checkpoint_math_fingerprint(checkpoint_after),
+                )
+            elif finished.outcome in {
+                ExplorationOutcome.USABLE_PARTIAL,
+                ExplorationOutcome.NO_ARTIFACT,
+                ExplorationOutcome.NO_VERIFIED_PROGRESS,
+                ExplorationOutcome.INTERRUPTED,
+            }:
+                state.route_registry.mark_no_progress(
+                    finished.route_id,
+                    signature=finished.signature.signature_hash,
+                    reason=reason,
+                    recovery_only=finished.recovery_only,
+                )
+        event = {
+            "lease_id": finished.lease_id,
+            "route_id": finished.route_id,
+            "signature_hash": finished.signature.signature_hash,
+            "granted_tier": finished.granted_tier,
+            "max_output_tokens": finished.max_output_tokens,
+            "outcome": finished.outcome.value,
+            "usage": finished.usage.model_dump(mode="json"),
+            "proof_debt_changed": finished.proof_debt_changed,
+            "current_goal_changed": finished.current_goal_changed,
+            "reason": reason,
+        }
+        store.append_event("deep_exploration_finished", event)
+        store.write_json(
+            "structured",
+            "deep_exploration_registry",
+            state.deep_exploration_registry.export_state(),
+        )
+        if state.deep_exploration_registry.locked_signatures.get(
+            finished.signature.signature_hash
+        ):
+            route_status = None
+            if state.route_registry is not None:
+                route_status = state.route_registry.get(finished.route_id).status.value
+            store.append_event(
+                "deep_exploration_signature_locked",
+                {
+                    **event,
+                    "route_status": route_status,
+                    "next_action": (
+                        "use the verified parent checkpoint and request a "
+                        "referee-confirmed mechanism pivot"
+                    ),
+                },
+            )
+
+    @staticmethod
+    def _is_referee_confirmed_inspiration(
+        state: SolveState | None, strategy: StrategyCard
+    ) -> bool:
+        if (
+            state is None
+            or state.inspiration_engine is None
+            or not strategy.inspiration_proposal_id
+        ):
+            return False
+        review = state.inspiration_engine.reviews.get(strategy.inspiration_proposal_id)
+        return bool(
+            review is not None
+            and review.semantically_distinct
+            and review.recommendation != "reject"
+        )
+
+    def _update_route_progress_state(
+        self, state: SolveState, *, current_round: int
+    ) -> None:
+        registry = state.route_registry
+        typed_memory = state.typed_memory
+        if registry is None:
+            return
+        for route in registry.routes:
+            attempts = sorted(
+                (
+                    item
+                    for item in state.attempts
+                    if item.strategy_id == route.strategy_id
+                ),
+                key=lambda item: (item.round_index, item.attempt_id),
+            )
+            if not attempts:
+                continue
+            latest = attempts[-1]
+            route.latest_attempt_id = latest.attempt_id
+            route.latest_checkpoint_id = latest.latest_checkpoint_id
+            route.failure_count = sum(
+                state.aggregate_reports.get(item.attempt_id) is not None
+                and state.aggregate_reports[item.attempt_id].verdict
+                == VerificationVerdict.FAIL
+                for item in attempts
+            )
+            progress_rounds = {
+                item.round_index
+                for item in attempts
+                if item.proof_steps or item.final_answer
+            }
+            if typed_memory is not None:
+                progress_rounds.update(
+                    item.round_created
+                    for item in typed_memory.facts_for_route(route.route_id)
+                )
+            if progress_rounds:
+                route.stagnation_rounds = max(0, current_round - max(progress_rounds))
+            else:
+                route.stagnation_rounds = max(
+                    0, current_round - attempts[0].round_index + 1
+                )
+            if (
+                self.config.continuation.post_failure_trigger_inspiration
+                and state.proof_graph is not None
+                and any(
+                    item.status == "blocked"
+                    and (item.first_error_fingerprint or "").startswith("post_failure:")
+                    and route.route_id in item.route_ids
+                    for item in state.proof_graph.obligations
+                )
+            ):
+                route.stagnation_rounds = max(
+                    route.stagnation_rounds,
+                    self.config.topology.inspiration.stagnation_rounds,
+                )
+
+    def _record_attempts(
+        self,
+        state: SolveState,
+        attempts: Iterable[ProofAttempt],
+        store: ArtifactStore,
+    ) -> list[ProofAttempt]:
+        """Write-before-dedupe guard for public mathematical attempt content."""
+
+        existing = {
+            (item.strategy_id, attempt_content_fingerprint(item)): item
+            for item in state.attempts
+        }
+        accepted: list[ProofAttempt] = []
+        for attempt in attempts:
+            fingerprint = attempt_content_fingerprint(attempt)
+            key = (attempt.strategy_id, fingerprint)
+            duplicate = existing.get(key)
+            route = (
+                state.route_registry.route_for_strategy(attempt.strategy_id)
+                if state.route_registry is not None
+                else None
+            )
+            if duplicate is not None:
+                if route is not None:
+                    route.duplicate_attempt_count += 1
+                    route.latest_attempt_id = duplicate.attempt_id
+                    route.latest_checkpoint_id = duplicate.latest_checkpoint_id
+                    if route.status == RouteStatus.ACTIVE:
+                        state.route_registry.mark_no_progress(
+                            route.route_id,
+                            signature=fingerprint,
+                            reason="duplicate public proof state",
+                            recovery_only=False,
+                        )
+                store.append_event(
+                    "duplicate_attempt_collapsed",
+                    {
+                        "attempt_id": attempt.attempt_id,
+                        "canonical_attempt_id": duplicate.attempt_id,
+                        "strategy_id": attempt.strategy_id,
+                        "content_fingerprint": fingerprint,
+                    },
+                )
+                continue
+            state.attempts.append(attempt)
+            existing[key] = attempt
+            accepted.append(attempt)
+            if route is not None:
+                route.latest_attempt_id = attempt.attempt_id
+                route.latest_checkpoint_id = attempt.latest_checkpoint_id
+        return accepted
+
+    @staticmethod
+    def _global_progress_signature(state: SolveState) -> str:
+        facts = state.typed_memory.facts if state.typed_memory is not None else []
+        negatives = (
+            state.typed_memory.negatives if state.typed_memory is not None else []
+        )
+        obligations = (
+            state.proof_graph.obligations if state.proof_graph is not None else []
+        )
+        certified_attempts = [
+            attempt
+            for attempt in state.attempts
+            if attempt.latest_checkpoint_id is not None
+            or (
+                state.aggregate_reports.get(attempt.attempt_id) is not None
+                and state.aggregate_reports[attempt.attempt_id].verdict
+                == VerificationVerdict.PASS
+            )
+        ]
+        return stable_hash(
+            {
+                "base_progress_signature": progress_signature(
+                    attempts=certified_attempts,
+                    facts=facts,
+                    obligations=obligations,
+                    negatives=negatives,
+                    final_proof=state.final_proof,
+                ),
+                "certified_counterexamples": sorted(
+                    set(state.certified_counterexample_hashes)
+                ),
+            }
+        )
+
+    def _apply_global_progress_gate(
+        self,
+        state: SolveState,
+        *,
+        round_index: int,
+        store: ArtifactStore,
+        activity: ActivityStream | None = None,
+    ) -> bool:
+        """Return True when the run must stop after a certified progress plateau."""
+
+        current = self._global_progress_signature(state)
+        prior = state.last_progress_signature
+        changed = prior is not None and current != prior
+        if prior is None or changed:
+            state.global_no_progress_rounds = 0
+            state.global_meta_pivot_used = False
+        else:
+            state.global_no_progress_rounds += 1
+        state.last_progress_signature = current
+
+        certificate = {
+            "round_index": round_index,
+            "progress_signature": current,
+            "previous_progress_signature": prior,
+            "verified_progress": changed,
+            "consecutive_no_progress_rounds": state.global_no_progress_rounds,
+            "attempt_count": len(state.attempts),
+            "verified_fact_count": (
+                len(state.typed_memory.facts) if state.typed_memory is not None else 0
+            ),
+            "resolved_obligation_count": (
+                sum(
+                    item.status == "closed"
+                    or (item.status == "refuted" and bool(item.evidence_message_ids))
+                    for item in state.proof_graph.obligations
+                )
+                if state.proof_graph is not None
+                else 0
+            ),
+        }
+        store.write_json(
+            "structured",
+            f"progress_certificate_round_{round_index}",
+            certificate,
+        )
+        store.append_event("progress_certificate_recorded", certificate)
+
+        scheduler = self.config.scheduler
+        if not scheduler.hard_stagnation_enabled:
+            return False
+        if (
+            state.global_no_progress_rounds
+            >= scheduler.global_no_progress_rounds_before_meta_pivot
+            and not state.global_meta_pivot_used
+        ):
+            state.global_meta_pivot_used = True
+            if state.route_registry is not None:
+                for route in state.route_registry.active_routes(round_index):
+                    route.stagnation_rounds = max(
+                        route.stagnation_rounds,
+                        self.config.topology.inspiration.stagnation_rounds,
+                    )
+            store.append_event(
+                "global_stagnation_meta_pivot_requested",
+                {
+                    "round_index": round_index,
+                    "progress_signature": current,
+                    "consecutive_no_progress_rounds": (state.global_no_progress_rounds),
+                    "next_action": "one inspiration/meta-replan pivot",
+                },
+            )
+            if activity is not None:
+                activity.info(
+                    "global_stagnation_meta_pivot",
+                    title=activity.text(
+                        "全局停滞，启动一次元策略转向",
+                        "Global plateau: one meta-strategy pivot requested",
+                    ),
+                    detail=activity.text(
+                        "连续两轮没有可验证的数学进展；下一轮只允许一次新机制转向。",
+                        "Two rounds produced no certified mathematical progress; one new-mechanism pivot is allowed next.",
+                    ),
+                    stage="adaptive_round",
+                    importance=ActivityImportance.MAJOR,
+                    metrics={
+                        "round_index": round_index,
+                        "progress_signature": current,
+                    },
+                )
+        if (
+            state.global_no_progress_rounds
+            < scheduler.global_no_progress_rounds_before_stop
+        ):
+            return False
+        if state.route_registry is not None:
+            for route in state.route_registry.active_routes(round_index):
+                state.route_registry.mark_stalled(
+                    route.route_id,
+                    signature=current,
+                    reason="global certified-progress plateau",
+                )
+        store.append_event(
+            "global_stagnation_hard_stop",
+            {
+                "round_index": round_index,
+                "progress_signature": current,
+                "consecutive_no_progress_rounds": state.global_no_progress_rounds,
+                "reason": (
+                    "No new verified checkpoint content, admitted fact, resolved "
+                    "obligation, or independently checked counterexample."
+                ),
+            },
+        )
+        if activity is not None:
+            activity.info(
+                "global_stagnation_hard_stop",
+                title=activity.text(
+                    "连续无有效进展，已停止重复求解",
+                    "Repeated solving stopped after a certified plateau",
+                ),
+                detail=activity.text(
+                    "未新增已验证检查点、全局事实、已关闭义务或独立反例；当前状态已完整保留。",
+                    "No verified checkpoint, admitted fact, closed obligation, or independent counterexample was added; state was preserved.",
+                ),
+                stage="adaptive_round",
+                importance=ActivityImportance.MAJOR,
+                metrics={
+                    "round_index": round_index,
+                    "consecutive_no_progress_rounds": (state.global_no_progress_rounds),
+                },
+            )
+        return True
+
+    def _hierarchical_graph_signals(
+        self, state: SolveState
+    ) -> dict[str, dict[str, object]]:
+        if (
+            state.route_registry is None
+            or state.proof_graph is None
+            or state.typed_memory is None
+        ):
+            return {}
+        graph = state.proof_graph
+        registry = state.route_registry
+        shared = graph.find_shared_bottlenecks()
+        result: dict[str, dict[str, object]] = {}
+        for route in registry.routes:
+            debt = graph.proof_debt(route.route_id)
+            history = (state.proof_debt_history or {}).setdefault(route.route_id, [])
+            reduction = max(0.0, history[-1] - debt) if history else 0.0
+            if not history or history[-1] != debt:
+                history.append(debt)
+            route_obligations = [
+                item for item in graph.obligations if route.route_id in item.route_ids
+            ]
+            shared_count = sum(
+                1
+                for group in shared
+                if any(route.route_id in item.route_ids for item in group)
+            )
+            contradictions = (
+                [
+                    item
+                    for item in state.contradiction_broker.unresolved()
+                    if route.route_id in item.route_ids
+                ]
+                if state.contradiction_broker is not None
+                else []
+            )
+            counterexamples = [
+                item
+                for item in state.typed_memory.negatives_for_route(route.route_id)
+                if isinstance(item, MessageEnvelope)
+                and item.evidence_type == EvidenceType.COUNTEREXAMPLE
+            ]
+            redundancy = 0.0
+            if state.duplicate_route_detector is not None:
+                for other in registry.routes:
+                    if other.route_id == route.route_id:
+                        continue
+                    redundancy = max(
+                        redundancy,
+                        state.duplicate_route_detector.similarity(route, other),
+                    )
+            accepted_receipts = (
+                [
+                    item
+                    for item in state.message_broker.receipts
+                    if item.target_route_id == route.route_id
+                    and item.status.value == "accepted"
+                ]
+                if state.message_broker is not None
+                else []
+            )
+            result[route.strategy_id] = {
+                "proof_debt": debt,
+                "proof_debt_reduction": reduction,
+                "verified_fact_gain": len(
+                    state.typed_memory.facts_for_route(route.route_id)
+                ),
+                "shared_obligation_count": shared_count,
+                "high_centrality_obligation_count": sum(
+                    item.centrality >= 0.6 and item.status != "closed"
+                    for item in route_obligations
+                ),
+                "contradiction_count": len(contradictions),
+                "counterexample_count": len(counterexamples),
+                "message_utility": min(1.0, len(accepted_receipts) / 3),
+                "route_redundancy": redundancy,
+                "bridge_opportunity": min(1.0, shared_count / 2),
+                "negative_memory_hits": len(
+                    state.typed_memory.negatives_for_route(route.route_id)
+                ),
+                "inspiration_trigger_count": len(
+                    state.inspiration_engine.triggers
+                    if state.inspiration_engine is not None
+                    else {}
+                ),
+                "novelty_score": max(0.0, 1.0 - redundancy),
+                "representation_diversity": max(0.0, 1.0 - redundancy),
+                "analogy_opportunity": (
+                    1.0
+                    if state.inspiration_engine is not None
+                    and state.inspiration_engine.analogy_library.records
+                    else 0.0
+                ),
+                "construction_opportunity": 1.0
+                if any(item.status != "closed" for item in route_obligations)
+                else 0.0,
+                "surprise_budget_remaining": (
+                    state.inspiration_engine.surprise_explorer.state.remaining_calls
+                    if state.inspiration_engine is not None
+                    else 0
+                ),
+            }
+        return result
+
+    def _inspiration_snapshot(
+        self,
+        state: SolveState,
+        *,
+        remaining_calls: int,
+    ) -> InspirationSnapshot | None:
+        if (
+            state.inspiration_engine is None
+            or state.route_registry is None
+            or state.proof_graph is None
+        ):
+            return None
+        routes = state.route_registry.active_routes(state.current_round)
+        post_failure_obligations = (
+            [
+                item
+                for item in state.proof_graph.obligations
+                if item.status == "blocked"
+                and (item.first_error_fingerprint or "").startswith("post_failure:")
+            ]
+            if self.config.continuation.post_failure_trigger_inspiration
+            else []
+        )
+        post_failure_route_ids = self._deduplicate_strings(
+            [
+                route_id
+                for item in post_failure_obligations
+                for route_id in item.route_ids
+                if any(route.route_id == route_id for route in routes)
+            ]
+        )
+        attempt_by_strategy = {
+            item.strategy_id: item
+            for item in sorted(state.attempts, key=lambda item: item.round_index)
+        }
+        failed_routes: list[str] = []
+        stagnation: dict[str, int] = {}
+        first_errors: list[str] = []
+        for route in routes:
+            attempt = attempt_by_strategy.get(route.strategy_id)
+            if attempt is None:
+                continue
+            report = state.aggregate_reports.get(attempt.attempt_id)
+            if report is not None and report.verdict == VerificationVerdict.FAIL:
+                failed_routes.append(route.route_id)
+            stagnation[route.route_id] = route.stagnation_rounds
+            if report is not None and report.first_error_step:
+                first_errors.append(report.first_error_step)
+        first_errors.extend(
+            item.first_error_fingerprint
+            for item in post_failure_obligations
+            if item.first_error_fingerprint
+        )
+        shared = state.proof_graph.find_shared_bottlenecks()
+        signatures = [
+            state.inspiration_engine.mechanism_normalizer.signature_from_route_tags(
+                route.mechanism_signature,
+                targeted_obligation_ids=[
+                    item.obligation_id
+                    for item in state.proof_graph.obligations
+                    if route.route_id in item.route_ids and item.status != "closed"
+                ],
+            )
+            for route in routes
+        ]
+        redundancy = 0.0
+        if state.duplicate_route_detector is not None:
+            for index, left in enumerate(routes):
+                for right in routes[index + 1 :]:
+                    redundancy = max(
+                        redundancy,
+                        state.duplicate_route_detector.similarity(left, right),
+                    )
+        total_tokens = sum(item.usage.total_tokens for item in state.attempts)
+        route_budget_share: dict[str, float] = {}
+        for route in routes:
+            spent = sum(
+                item.usage.total_tokens
+                for item in state.attempts
+                if item.strategy_id == route.strategy_id
+            )
+            route_budget_share[route.route_id] = spent / max(1, total_tokens)
+        histories = state.proof_debt_history or {}
+        debt_reduction = sum(
+            max(0.0, values[-2] - values[-1])
+            for values in histories.values()
+            if len(values) >= 2
+        )
+        message_utility_by_route: dict[str, float] = {}
+        if state.message_broker is not None:
+            message_utility_by_route = {
+                route.route_id: state.message_broker.utility_for_route(route.route_id)
+                for route in routes
+            }
+        return InspirationSnapshot(
+            round_index=state.current_round,
+            problem_hash=state.inspiration_engine.problem.integrity_hash,
+            domain=(state.triage.problem_kind.value if state.triage else "unknown"),
+            active_route_ids=[item.route_id for item in routes],
+            failed_route_ids=failed_routes,
+            stagnation_rounds_by_route=stagnation,
+            verified_fact_gain_recent=(
+                sum(
+                    item.round_created == state.current_round
+                    for item in state.typed_memory.facts
+                )
+                if state.typed_memory
+                else 0
+            ),
+            proof_debt_by_route={
+                route.route_id: state.proof_graph.proof_debt(route.route_id)
+                for route in routes
+            },
+            proof_debt_reduction_recent=debt_reduction,
+            proof_debt_history=[
+                value for values in histories.values() for value in values
+            ],
+            first_error_fingerprints=first_errors,
+            route_redundancy=redundancy,
+            shared_bottleneck_ids=[
+                item.obligation_id for group in shared for item in group
+            ],
+            route_budget_share=route_budget_share,
+            message_utility_by_route=message_utility_by_route,
+            unresolved_conflict_ids=(
+                [
+                    item.contradiction_id
+                    for item in state.contradiction_broker.unresolved()
+                ]
+                if state.contradiction_broker is not None
+                else []
+            ),
+            final_repair_failed=state.final_repair_failed,
+            manual_trigger=bool(post_failure_route_ids),
+            manual_trigger_route_ids=post_failure_route_ids,
+            manual_evidence_refs=[
+                item.obligation_id for item in post_failure_obligations
+            ],
+            remaining_calls=remaining_calls,
+            finalization_reserve_calls=(
+                state.inspiration_engine.surprise_explorer.state.finalization_reserve_calls
+            ),
+            current_path_count=len(state.strategies),
+            max_paths=self.config.budget.max_paths,
+            route_signatures=signatures,
+            open_obligation_ids=[
+                item.obligation_id
+                for item in state.proof_graph.obligations
+                if item.status != "closed"
+            ],
+            obligation_kinds={
+                item.obligation_id: item.kind.value
+                for item in state.proof_graph.obligations
+                if item.status != "closed"
+            },
+        )
+
+    async def _run_inspiration_round(
+        self,
+        state: SolveState,
+        *,
+        problem: ProblemContract,
+        remaining_calls: int,
+        store: ArtifactStore,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        allocator: SoftBudgetAllocator,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        tools: ToolBroker,
+    ) -> None:
+        snapshot = self._inspiration_snapshot(state, remaining_calls=remaining_calls)
+        engine = state.inspiration_engine
+        if snapshot is None or engine is None:
+            return
+        triggers = engine.detect_triggers(snapshot)
+        tasks = engine.select_tasks(triggers, snapshot)
+        selected_tasks = list(tasks)
+        (
+            tasks,
+            assignment_plans,
+            task_call_breakdowns,
+            assignment_rejected,
+        ) = self._plan_inspiration_proposers(
+            engine,
+            tasks,
+            snapshot=snapshot,
+            problem=problem,
+            runner=runner,
+            allocator=allocator,
+        )
+        admission = admit_inspiration_tasks(
+            tasks,
+            allocator,
+            current_path_count=snapshot.current_path_count,
+            has_candidate=self._has_synthesis_ready_candidate(state),
+            task_call_breakdowns=task_call_breakdowns or None,
+        )
+        rejected_reasons = {**assignment_rejected, **admission.rejected}
+        store.append_event(
+            "inspiration_scheduler_admission",
+            {
+                "admitted_task_ids": [
+                    task.task_id for task in admission.admitted_tasks
+                ],
+                "rejected": rejected_reasons,
+                "decision": admission.decision.model_dump(mode="json"),
+                "proposer_assignment_plans": {
+                    task_id: plan.model_dump(mode="json")
+                    for task_id, plan in assignment_plans.items()
+                },
+            },
+        )
+        rejected_tasks = [
+            task
+            for task in selected_tasks
+            if task.task_id not in {item.task_id for item in admission.admitted_tasks}
+        ]
+        engine.requeue_tasks(rejected_tasks, reasons=rejected_reasons)
+        tasks = admission.admitted_tasks
+        if not tasks:
+            return
+        if engine.inspiration_config.mode == "active":
+            reserved_tasks = []
+            reservation_rejected: list[InspirationTask] = []
+            reservation_reasons: dict[str, str] = {}
+            for task in tasks:
+                breakdown = task_call_breakdowns.get(
+                    task.task_id,
+                    allocator.inspiration_call_breakdown(),
+                )
+                reservation, reason = engine.reserve_task_calls(
+                    task,
+                    snapshot=snapshot,
+                    **breakdown,
+                )
+                if reservation is None:
+                    reservation_rejected.append(task)
+                    reservation_reasons[task.task_id] = reason
+                    store.append_event(
+                        "inspiration_task_reservation_rejected",
+                        {"task_id": task.task_id, "reason": reason},
+                    )
+                    continue
+                reserved_tasks.append(task)
+            engine.requeue_tasks(
+                reservation_rejected,
+                reasons=reservation_reasons,
+            )
+            tasks = reserved_tasks
+            if not tasks:
+                return
+        try:
+            proposals = await self._generate_inspiration_proposals(
+                engine,
+                tasks,
+                snapshot=snapshot,
+                problem=problem,
+                runner=runner,
+                prompts=prompts,
+                assignment_plans=assignment_plans,
+            )
+        except Exception:
+            self._finish_inspiration_reservations(engine, tasks, interrupted=True)
+            raise
+        proposals = engine.select_proposals_for_review(
+            proposals,
+            existing_signatures=snapshot.route_signatures,
+        )
+        manual_trigger_ids = {
+            trigger.trigger_id
+            for trigger in triggers
+            if trigger.trigger_type.value == "manual"
+        }
+        if (
+            any(proposal.trigger_id in manual_trigger_ids for proposal in proposals)
+            and state.proof_graph is not None
+        ):
+            consumed: list[str] = []
+            for obligation_id in snapshot.manual_evidence_refs:
+                try:
+                    obligation = state.proof_graph.get_obligation(obligation_id)
+                except KeyError:
+                    continue
+                if obligation.status == "blocked" and (
+                    obligation.first_error_fingerprint or ""
+                ).startswith("post_failure:"):
+                    obligation.status = "open"
+                    consumed.append(obligation_id)
+            if consumed:
+                store.append_event(
+                    "post_failure_inspiration_trigger_consumed",
+                    {
+                        "round_index": state.current_round,
+                        "obligation_ids": consumed,
+                        "trigger_ids": sorted(manual_trigger_ids),
+                    },
+                )
+        try:
+            (
+                precomputed,
+                counterexamples,
+                hidden_assumptions,
+            ) = await self._review_inspiration_proposals(
+                engine,
+                proposals,
+                snapshot=snapshot,
+                problem=problem,
+                runner=runner,
+                prompts=prompts,
+            )
+        except Exception:
+            self._finish_inspiration_reservations(engine, tasks, interrupted=True)
+            raise
+        for task in tasks:
+            reservation_id = engine.reservation_id_for_task(task.task_id)
+            if reservation_id is None:
+                continue
+            engine.record_reserved_calls(
+                task.task_id,
+                runner.ledger.reservation_calls.get(reservation_id, 0),
+                phase="proposal_review_pipeline",
+            )
+        try:
+            reviews = await engine.review(
+                proposals,
+                precomputed_reviews=precomputed,
+                immediate_counterexamples=counterexamples,
+                hidden_assumptions=hidden_assumptions,
+            )
+            compositions = engine.queue_compositions(
+                proposals,
+                reviews,
+                snapshot,
+            )
+            if compositions:
+                # A composed idea is reviewed as its own proposal on the next
+                # scheduler turn. Its source ideas remain route-local insights
+                # so that one trigger cannot materialize all of them and bypass
+                # the configured route-creation cap.
+                reviews = engine.defer_composed_sources(reviews, compositions)
+            materializations = engine.materialize(reviews, snapshot)
+        except Exception:
+            self._finish_inspiration_reservations(engine, tasks, interrupted=True)
+            raise
+        newly_created_ids = {
+            item.proposal_id
+            for item in materializations
+            if item.action == "route_created"
+        }
+        new_strategies: list[StrategyCard] = []
+        for strategy in engine.materialized_strategies.values():
+            if all(
+                item.strategy_id != strategy.strategy_id for item in state.strategies
+            ):
+                state.strategies.append(strategy)
+                if strategy.inspiration_proposal_id in newly_created_ids:
+                    new_strategies.append(strategy)
+        if new_strategies:
+            assignments = router.assign_explorers(new_strategies)
+            if state.route_registry is not None:
+                for strategy, agent in assignments:
+                    route = state.route_registry.register_route(strategy)
+                    state.route_registry.assign_member(
+                        route.route_id,
+                        agent.id,
+                        RouteRole.PROVER,
+                        state.current_round,
+                    )
+                state.route_registry.recompute_neighbors()
+            calls_before_routes = runner.ledger.calls_started
+            try:
+                attempts = await self._parallel_round_exploration(
+                    problem,
+                    state,
+                    assignments,
+                    state.current_round,
+                    runner,
+                    prompts,
+                    router,
+                    memory,
+                    store,
+                    tools,
+                    max_segments_this_call=1,
+                )
+            except Exception:
+                self._finish_inspiration_reservations(engine, tasks, interrupted=True)
+                raise
+            route_calls = max(0, runner.ledger.calls_started - calls_before_routes)
+            route_task_ids = list(
+                dict.fromkeys(
+                    proposal.task_id
+                    for strategy in new_strategies
+                    if (
+                        proposal := engine.proposals.get(
+                            strategy.inspiration_proposal_id or ""
+                        )
+                    )
+                    is not None
+                    and proposal.task_id is not None
+                )
+            )
+            if route_task_ids and route_calls:
+                base, extra = divmod(route_calls, len(route_task_ids))
+                for index, task_id in enumerate(route_task_ids):
+                    engine.record_reserved_calls(
+                        task_id,
+                        base + int(index < extra),
+                        phase="first_route_attempt",
+                    )
+            proposal_by_strategy = {
+                strategy.strategy_id: strategy.inspiration_proposal_id
+                for strategy in new_strategies
+                if strategy.inspiration_proposal_id
+            }
+            for attempt in attempts:
+                proposal_id = proposal_by_strategy.get(attempt.strategy_id)
+                if proposal_id is None:
+                    continue
+                engine.record_outcome_usage(
+                    proposal_id,
+                    phase="route",
+                    calls=1,
+                    tokens=attempt.usage.total_tokens,
+                )
+            attempts = self._record_attempts(state, attempts, store)
+            store.append_event(
+                "inspiration_route_attempted",
+                {
+                    "strategy_ids": [item.strategy_id for item in new_strategies],
+                    "attempt_ids": [item.attempt_id for item in attempts],
+                    "proposal_ids": [
+                        item.inspiration_proposal_id for item in new_strategies
+                    ],
+                },
+            )
+        store.write_json(
+            "inspiration",
+            f"round_{state.current_round}",
+            {
+                "triggers": triggers,
+                "tasks": tasks,
+                "proposals": proposals,
+                "reviews": reviews,
+                "compositions_queued": compositions,
+                "materializations": materializations,
+            },
+        )
+        self._finish_inspiration_reservations(engine, tasks)
+
+    def _plan_inspiration_proposers(
+        self,
+        engine: InspirationEngine,
+        tasks: Sequence[InspirationTask],
+        *,
+        snapshot: InspirationSnapshot,
+        problem: ProblemContract,
+        runner: StructuredAgentRunner,
+        allocator: SoftBudgetAllocator,
+    ) -> tuple[
+        list[InspirationTask],
+        dict[str, InspirationAssignmentPlan],
+        dict[str, dict[str, int]],
+        dict[str, str],
+    ]:
+        if engine.inspiration_config.mode != "active":
+            return list(tasks), {}, {}, {}
+
+        ready: list[InspirationTask] = []
+        plans: dict[str, InspirationAssignmentPlan] = {}
+        call_breakdowns: dict[str, dict[str, int]] = {}
+        rejected: dict[str, str] = {}
+        for task in tasks:
+            if task.mechanism == InspirationMechanism.INSPIRATION_COMPOSITION:
+                ready.append(task)
+                call_breakdowns[task.task_id] = allocator.inspiration_call_breakdown(
+                    proposer_calls=0,
+                    review_candidates=1,
+                )
+                continue
+
+            requested = (
+                1
+                if task.mechanism == InspirationMechanism.META_REPLAN
+                else min(
+                    engine.inspiration_config.active_proposals_per_task,
+                    task.max_proposals,
+                )
+            )
+            if (
+                task.mechanism == InspirationMechanism.STRUCTURAL_ANALOGY
+                and not self._analogy_records_for_task(
+                    engine,
+                    task,
+                    snapshot=snapshot,
+                    problem=problem,
+                )
+            ):
+                plan = InspirationAssignmentPlan(
+                    task_id=task.task_id,
+                    mechanism=task.mechanism,
+                    round_index=snapshot.round_index,
+                    requested_proposals=requested,
+                    deferred_reason=(
+                        "no applicable verified local analogy records are available"
+                    ),
+                )
+            else:
+                role = self._inspiration_role_for_mechanism(task.mechanism)
+                plan = engine.assignment_planner.plan(
+                    task,
+                    proposer_role=role,
+                    pool=runner.pool,
+                    round_index=snapshot.round_index,
+                    specialty_hints=(snapshot.domain, task.mechanism.value),
+                    allow_generalists=(
+                        task.mechanism != InspirationMechanism.META_REPLAN
+                    ),
+                    requested_proposals=requested,
+                )
+            plans[task.task_id] = engine.register_assignment_plan(plan)
+            if not plan.assignments:
+                rejected[task.task_id] = (
+                    plan.deferred_reason
+                    or "no inspiration proposer assignment was available"
+                )
+                continue
+            ready.append(task)
+            call_breakdowns[task.task_id] = allocator.inspiration_call_breakdown(
+                proposer_calls=len(plan.assignments),
+                review_candidates=len(plan.assignments),
+            )
+        return ready, plans, call_breakdowns, rejected
+
+    @staticmethod
+    def _finish_inspiration_reservations(
+        engine: InspirationEngine,
+        tasks: Sequence[Any],
+        *,
+        interrupted: bool = False,
+    ) -> None:
+        for task in tasks:
+            engine.finish_task_reservation(
+                task.task_id,
+                interrupted=interrupted,
+            )
+
+    async def _generate_inspiration_proposals(
+        self,
+        engine: InspirationEngine,
+        tasks: Sequence[InspirationTask],
+        *,
+        snapshot: InspirationSnapshot,
+        problem: ProblemContract,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        assignment_plans: dict[str, InspirationAssignmentPlan],
+    ) -> list[InspirationProposal]:
+        if engine.inspiration_config.mode != "active":
+            return await engine.generate(tasks)
+
+        async def generate_one(
+            task: InspirationTask,
+            *,
+            proposal_slot: int,
+            context_mode: InspirationContextMode,
+            agent: AgentRuntime,
+        ) -> InspirationProposal | None:
+            role, bundle = self._inspiration_agent_prompt(
+                engine,
+                task,
+                snapshot=snapshot,
+                problem=problem,
+                prompts=prompts,
+                context_mode=context_mode,
+                proposal_slot=proposal_slot,
+            )
+            result = await self._safe_call(
+                runner,
+                role,
+                bundle,
+                fixed_agent=agent,
+                budget_bucket="breadth",
+                budget_reservation_id=engine.reservation_id_for_task(task.task_id),
+            )
+            if result is None:
+                return None
+            try:
+                proposal = engine.register_agent_artifact(
+                    task,
+                    result.value,
+                    source_agent_id=agent.id,
+                    state=snapshot,
+                    proposal_slot=proposal_slot,
+                    context_mode=context_mode,
+                )
+                if proposal is not None:
+                    engine.record_outcome_usage(
+                        proposal.proposal_id,
+                        phase="proposer",
+                        tokens=result.usage.total_tokens,
+                    )
+                return proposal
+            except (TypeError, ValueError) as exc:
+                if engine.store is not None:
+                    engine.store.append_event(
+                        "inspiration_agent_artifact_rejected",
+                        {
+                            "task_id": task.task_id,
+                            "agent_id": agent.id,
+                            "proposal_slot": proposal_slot,
+                            "context_mode": context_mode.value,
+                            "reason": str(exc),
+                        },
+                    )
+                return None
+
+        pending: list[Any] = []
+        deterministic_proposals: list[InspirationProposal] = []
+        for task in tasks:
+            if task.mechanism == InspirationMechanism.INSPIRATION_COMPOSITION:
+                proposal = engine.pending_composition_for_task(
+                    task.task_id,
+                    state=snapshot,
+                )
+                if proposal is not None:
+                    deterministic_proposals.append(proposal)
+                continue
+            plan = assignment_plans.get(task.task_id)
+            if plan is None or not plan.assignments:
+                continue
+            population = []
+            for assignment in plan.assignments:
+                try:
+                    agent = runner.pool.get(assignment.proposer_agent_id)
+                except KeyError:
+                    if engine.store is not None:
+                        engine.store.append_event(
+                            "inspiration_proposer_assignment_unavailable",
+                            {
+                                "task_id": task.task_id,
+                                "agent_id": assignment.proposer_agent_id,
+                                "reason": "assigned agent is no longer in the live pool",
+                            },
+                        )
+                    continue
+                if agent.in_cooldown:
+                    if engine.store is not None:
+                        engine.store.append_event(
+                            "inspiration_proposer_assignment_unavailable",
+                            {
+                                "task_id": task.task_id,
+                                "agent_id": agent.id,
+                                "reason": "assigned agent entered cooldown",
+                            },
+                        )
+                    continue
+                population.append(
+                    {
+                        "proposal_slot": assignment.proposal_slot,
+                        "context_mode": assignment.context_mode.value,
+                        "agent_id": agent.id,
+                        "specialist_match": assignment.specialist_match,
+                    }
+                )
+                pending.append(
+                    generate_one(
+                        task,
+                        proposal_slot=assignment.proposal_slot,
+                        context_mode=assignment.context_mode,
+                        agent=agent,
+                    )
+                )
+            if engine.store is not None:
+                engine.store.append_event(
+                    "inspiration_candidate_population_started",
+                    {
+                        "task_id": task.task_id,
+                        "mechanism": task.mechanism.value,
+                        "population": population,
+                        "eligible_agent_ids": plan.eligible_agent_ids,
+                        "parallel_generation": True,
+                    },
+                )
+        if not pending:
+            return deterministic_proposals
+        results = await asyncio.gather(*pending)
+        return [
+            *deterministic_proposals,
+            *(proposal for proposal in results if proposal is not None),
+        ]
+
+    @staticmethod
+    def _inspiration_role_for_mechanism(
+        mechanism: InspirationMechanism,
+    ) -> str:
+        return {
+            InspirationMechanism.REPRESENTATION_SWITCH: "representation_switchboard",
+            InspirationMechanism.STRUCTURAL_ANALOGY: "analogy_agent",
+            InspirationMechanism.AUXILIARY_CONSTRUCTION: "construction_inventor",
+            InspirationMechanism.INVARIANT_HYPOTHESIS: "invariant_hypothesis_agent",
+            InspirationMechanism.REVERSE_GOAL_ANALYSIS: "reverse_goal_analyzer",
+            InspirationMechanism.BRIDGE_LEMMA: "reverse_goal_analyzer",
+            InspirationMechanism.META_REPLAN: "meta_strategist",
+            InspirationMechanism.SURPRISE_EXPLORATION: "representation_switchboard",
+            # Composition proposals are deterministic control artifacts and do
+            # not invoke a proposer role. This mapping is defensive only.
+            InspirationMechanism.INSPIRATION_COMPOSITION: "inspiration_referee",
+        }[mechanism]
+
+    def _inspiration_agent_prompt(
+        self,
+        engine: InspirationEngine,
+        task: Any,
+        *,
+        snapshot: InspirationSnapshot,
+        problem: ProblemContract,
+        prompts: PromptFactory,
+        context_mode: InspirationContextMode,
+        proposal_slot: int,
+    ) -> tuple[str, PromptBundle]:
+        context = build_inspiration_prompt_context(
+            engine,
+            task,
+            snapshot=snapshot,
+            context_mode=context_mode,
+            proposal_slot=proposal_slot,
+        )
+        mechanism = task.mechanism
+        if mechanism == InspirationMechanism.REPRESENTATION_SWITCH:
+            return (
+                "representation_switchboard",
+                prompts.representation_switchboard(problem, **context),
+            )
+        if mechanism == InspirationMechanism.STRUCTURAL_ANALOGY:
+            records = self._analogy_records_for_task(
+                engine,
+                task,
+                snapshot=snapshot,
+                problem=problem,
+            )
+            return (
+                "analogy_agent",
+                prompts.structural_analogy_search(
+                    problem=problem,
+                    verified_local_records=records,
+                    negative_transfer_records=[
+                        item.model_dump(mode="json")
+                        for item in engine.negative_analogy_records.values()
+                    ],
+                    **context,
+                ),
+            )
+        if mechanism == InspirationMechanism.AUXILIARY_CONSTRUCTION:
+            return (
+                "construction_inventor",
+                prompts.invent_auxiliary_construction(problem=problem, **context),
+            )
+        if mechanism == InspirationMechanism.INVARIANT_HYPOTHESIS:
+            return (
+                "invariant_hypothesis_agent",
+                prompts.hypothesize_invariant(problem=problem, **context),
+            )
+        if mechanism in {
+            InspirationMechanism.REVERSE_GOAL_ANALYSIS,
+            InspirationMechanism.BRIDGE_LEMMA,
+        }:
+            return (
+                "reverse_goal_analyzer",
+                prompts.reverse_goal_analysis(problem=problem, **context),
+            )
+        if mechanism == InspirationMechanism.META_REPLAN:
+            return (
+                "meta_strategist",
+                prompts.persistent_meta_strategy(problem=problem, **context),
+            )
+        return (
+            "representation_switchboard",
+            prompts.surprise_exploration(problem=problem, **context),
+        )
+
+    @staticmethod
+    def _analogy_records_for_task(
+        engine: InspirationEngine,
+        task: InspirationTask,
+        *,
+        snapshot: InspirationSnapshot,
+        problem: ProblemContract,
+    ) -> list[dict[str, Any]]:
+        return engine.analogy_library.search(
+            query_text=problem.normalized_statement,
+            object_tags=problem.definitions,
+            mechanism_tags=[
+                tag for item in snapshot.route_signatures for tag in item.mechanism_tags
+            ],
+            obligation_kinds=[
+                snapshot.obligation_kinds[item]
+                for item in task.target_obligation_ids
+                if item in snapshot.obligation_kinds
+            ],
+            mechanism_chain=[
+                tag
+                for item in snapshot.route_signatures
+                for tag in [
+                    *item.representation_tags,
+                    *item.mechanism_tags,
+                    *item.key_transformations,
+                ]
+            ],
+            graph_motif_tags=(
+                ["shared_bottleneck"] if snapshot.shared_bottleneck_ids else []
+            ),
+            problem_hash=problem.integrity_hash,
+            top_k=engine.inspiration_config.analogy_top_k,
+        )
+
+    async def _review_inspiration_proposals(
+        self,
+        engine: InspirationEngine,
+        proposals: Sequence[InspirationProposal],
+        *,
+        snapshot: InspirationSnapshot,
+        problem: ProblemContract,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+    ) -> tuple[
+        dict[str, InspirationReview],
+        dict[str, list[str]],
+        dict[str, list[str]],
+    ]:
+        precomputed: dict[str, InspirationReview] = {}
+        counterexamples: dict[str, list[str]] = {}
+        hidden: dict[str, list[str]] = {}
+        for proposal in proposals:
+            eligible = [
+                agent
+                for agent in runner.pool.agents
+                if agent.id != proposal.source_agent_id
+                and agent.supports_role("inspiration_referee")
+                and not agent.in_cooldown
+            ]
+            if (
+                engine.inspiration_config.mode != "active"
+                or not eligible
+                or runner.ledger.remaining_calls <= snapshot.finalization_reserve_calls
+            ):
+                local = engine.referee.review(
+                    proposal,
+                    reviewer_agent_id="local_deterministic_referee",
+                    open_obligation_ids=snapshot.open_obligation_ids,
+                    existing_signatures=snapshot.route_signatures,
+                )
+                precomputed[proposal.proposal_id] = (
+                    local.model_copy(update={"recommendation": "store_insight"})
+                    if engine.inspiration_config.require_inspiration_referee
+                    else local
+                )
+                continue
+            reviewer = runner.pool.select(
+                "inspiration_referee",
+                exclude={proposal.source_agent_id},
+            )
+            result = await self._safe_call(
+                runner,
+                "inspiration_referee",
+                prompts.inspiration_referee(
+                    problem=problem,
+                    proposal=proposal.model_dump(mode="json"),
+                    open_obligation_ids=snapshot.open_obligation_ids,
+                    existing_novelty_signatures=[
+                        item.model_dump(mode="json")
+                        for item in snapshot.route_signatures
+                    ],
+                ),
+                fixed_agent=reviewer,
+                budget_bucket="verification",
+                budget_reservation_id=engine.reservation_id_for_task(proposal.task_id),
+            )
+            if result is None:
+                local = engine.referee.review(
+                    proposal,
+                    reviewer_agent_id="local_deterministic_referee",
+                    open_obligation_ids=snapshot.open_obligation_ids,
+                    existing_signatures=snapshot.route_signatures,
+                )
+                precomputed[proposal.proposal_id] = (
+                    local.model_copy(update={"recommendation": "store_insight"})
+                    if engine.inspiration_config.require_inspiration_referee
+                    else local
+                )
+                continue
+            review = result.value
+            review.proposal_id = proposal.proposal_id
+            review.reviewer_agent_id = reviewer.id
+            precomputed[proposal.proposal_id] = review
+            engine.record_outcome_usage(
+                proposal.proposal_id,
+                phase="referee",
+                tokens=result.usage.total_tokens,
+            )
+
+            skeptic_candidates = [
+                agent
+                for agent in runner.pool.agents
+                if agent.id not in {proposal.source_agent_id, reviewer.id}
+                and agent.supports_role("route_skeptic")
+                and not agent.in_cooldown
+            ]
+            if (
+                review.recommendation == "reject"
+                or not skeptic_candidates
+                or runner.ledger.remaining_calls <= snapshot.finalization_reserve_calls
+            ):
+                continue
+            skeptic = max(
+                skeptic_candidates, key=lambda item: (item.trust_score, item.id)
+            )
+            skeptic_result = await self._safe_call(
+                runner,
+                "route_skeptic",
+                prompts.route_skeptic(
+                    problem=problem,
+                    inspiration_proposal=proposal.model_dump(mode="json"),
+                    repair_request=False,
+                    task="quick falsification only",
+                ),
+                fixed_agent=skeptic,
+                budget_bucket="verification",
+                budget_reservation_id=engine.reservation_id_for_task(proposal.task_id),
+            )
+            if skeptic_result is None:
+                continue
+            engine.record_outcome_usage(
+                proposal.proposal_id,
+                phase="skeptic",
+                tokens=skeptic_result.usage.total_tokens,
+            )
+            report = skeptic_result.value
+            if report.verdict == VerificationVerdict.FAIL:
+                engine.record_quick_falsification(
+                    proposal.proposal_id,
+                    passed=False,
+                    reason="quick skeptic found a blocking issue",
+                )
+                descriptions = [item.description for item in report.issues]
+                immediate = [
+                    item for item in descriptions if "counterexample" in item.casefold()
+                ]
+                counterexamples[proposal.proposal_id] = immediate
+                hidden[proposal.proposal_id] = [
+                    item for item in descriptions if item not in immediate
+                ]
+                if not immediate:
+                    precomputed[proposal.proposal_id] = review.model_copy(
+                        update={"recommendation": "store_insight"}
+                    )
+            elif report.verdict == VerificationVerdict.PASS:
+                engine.record_quick_falsification(
+                    proposal.proposal_id,
+                    passed=True,
+                    reason="quick skeptic found no blocking counterexample",
+                )
+        return precomputed, counterexamples, hidden
+
+    async def _execute_hierarchical_action(
+        self,
+        state: SolveState,
+        action: ActionKind,
+        *,
+        strategy_id: str | None,
+        current_round: int,
+        store: ArtifactStore,
+        problem: ProblemContract,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        tools: ToolBroker,
+    ) -> bool:
+        if state.route_registry is None:
+            return False
+        if action == ActionKind.MERGE_ROUTE and state.duplicate_route_detector:
+            matches = state.duplicate_route_detector.detect(state.route_registry.routes)
+            match = next(
+                (
+                    item
+                    for item in matches
+                    if strategy_id is None
+                    or state.route_registry.get(item.source_route_id).strategy_id
+                    == strategy_id
+                ),
+                None,
+            )
+            if match is not None:
+                state.route_registry.merge_routes(
+                    match.source_route_id, match.target_route_id
+                )
+                match_payload = {
+                    "source_route_id": match.source_route_id,
+                    "target_route_id": match.target_route_id,
+                    "similarity": match.similarity,
+                    "survivor_route_id": match.survivor_route_id,
+                    "reason": match.reason,
+                }
+                store.append_event("route_duplicate_detected", match_payload)
+                store.append_event("route_merged", match_payload)
+                return True
+        if action == ActionKind.COOLDOWN_ROUTE and strategy_id:
+            route_id = self._route_for_strategy(state, strategy_id)
+            if route_id:
+                state.route_registry.mark_cooling(
+                    route_id,
+                    current_round + self.config.scheduler.failed_path_cooldown_rounds,
+                    "scheduler cooldown",
+                )
+                store.append_event(
+                    "route_cooled",
+                    {"route_id": route_id, "round_index": current_round},
+                )
+                return True
+        if action in {
+            ActionKind.BRIDGE,
+            ActionKind.RESOLVE_CONFLICT,
+            ActionKind.SEARCH_COUNTEREXAMPLE,
+        }:
+            return await self._execute_cross_route_verification_task(
+                state,
+                action,
+                strategy_id=strategy_id,
+                current_round=current_round,
+                store=store,
+                problem=problem,
+                runner=runner,
+                prompts=prompts,
+            )
+        if (
+            action
+            in {
+                ActionKind.SWITCH_REPRESENTATION,
+                ActionKind.TRIGGER_INSPIRATION,
+                ActionKind.SEARCH_ANALOGY,
+                ActionKind.INVENT_CONSTRUCTION,
+                ActionKind.GENERATE_INVARIANT,
+                ActionKind.REVERSE_GOAL,
+                ActionKind.META_REPLAN,
+                ActionKind.SURPRISE_WIDEN,
+            }
+            and state.inspiration_engine is not None
+        ):
+            materialized_this_round = any(
+                state.inspiration_engine.triggers.get(proposal.trigger_id) is not None
+                and state.inspiration_engine.triggers[proposal.trigger_id].round_index
+                == current_round
+                and materialization.action
+                in {"attached", "route_created", "bridge_requested"}
+                for proposal_id, materialization in state.inspiration_engine.materializations.items()
+                for proposal in [state.inspiration_engine.proposals[proposal_id]]
+            )
+            pending = [
+                strategy
+                for strategy in state.inspiration_engine.materialized_strategies.values()
+                if all(
+                    attempt.strategy_id != strategy.strategy_id
+                    for attempt in state.attempts
+                )
+            ]
+            if not pending:
+                return materialized_this_round
+            assignments = router.assign_explorers(pending)
+            for strategy, agent in assignments:
+                route_id = self._route_for_strategy(state, strategy.strategy_id)
+                if route_id is not None and not state.route_registry.owns_agent(
+                    route_id, agent.id, RouteRole.PROVER
+                ):
+                    try:
+                        state.route_registry.assign_member(
+                            route_id, agent.id, RouteRole.PROVER, current_round
+                        )
+                    except ValueError:
+                        continue
+            attempts = await self._parallel_round_exploration(
+                problem,
+                state,
+                assignments,
+                current_round,
+                runner,
+                prompts,
+                router,
+                memory,
+                store,
+                tools,
+            )
+            if attempts:
+                attempts = self._record_attempts(state, attempts, store)
+            if attempts:
+                await self._extract_claims_many(
+                    problem,
+                    attempts,
+                    runner,
+                    prompts,
+                    memory,
+                    store,
+                    budget_bucket="breadth",
+                )
+                return True
+            return materialized_this_round
+        return False
+
+    async def _execute_cross_route_verification_task(
+        self,
+        state: SolveState,
+        action: ActionKind,
+        *,
+        strategy_id: str | None,
+        current_round: int,
+        store: ArtifactStore,
+        problem: ProblemContract,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+    ) -> bool:
+        registry = state.route_registry
+        broker = state.message_broker
+        graph = state.proof_graph
+        if registry is None or broker is None or graph is None or graph.frozen:
+            return False
+
+        role_runner = RoleRunner(runner.pool, registry)
+        target: Any
+        source_route_id: str
+        source_role: RouteRole
+        role_name: str
+        bundle: PromptBundle
+        excluded_authors: set[str]
+
+        if action == ActionKind.BRIDGE:
+            bridge = state.bridge_broker
+            if bridge is None:
+                return False
+            target = next(
+                (
+                    item
+                    for item in bridge.tasks
+                    if item.task_id not in bridge.completed_task_ids
+                    and (
+                        strategy_id is None
+                        or any(
+                            registry.get(route_id).strategy_id == strategy_id
+                            for route_id in item.route_ids
+                        )
+                    )
+                ),
+                None,
+            )
+            if target is None:
+                return False
+            source_route_id = target.route_ids[0]
+            source_role = RouteRole.BRIDGE_PROVER
+            role_name = "bridge_prover"
+            excluded_authors = self._route_authors(registry, target.route_ids)
+            bundle = prompts.bridge_lemma(
+                problem=problem,
+                shared_obligation=target.model_dump(mode="json"),
+                verified_facts=[
+                    item.model_dump(mode="json")
+                    for item in (state.typed_memory.facts if state.typed_memory else [])
+                    if item.message_id in target.allowed_fact_ids
+                ],
+                failure_records=list(target.forbidden_negative_ids),
+            )
+        elif action == ActionKind.RESOLVE_CONFLICT:
+            conflicts = state.contradiction_broker
+            if conflicts is None:
+                return False
+            target = next(
+                (
+                    item
+                    for item in conflicts.unresolved()
+                    if strategy_id is None
+                    or any(
+                        registry.get(route_id).strategy_id == strategy_id
+                        for route_id in item.route_ids
+                    )
+                ),
+                None,
+            )
+            if target is None:
+                return False
+            source_route_id = target.route_ids[0]
+            source_role = RouteRole.CONFLICT_RESOLVER
+            role_name = "conflict_resolver"
+            excluded_authors = self._route_authors(registry, target.route_ids)
+            related = [
+                item.model_dump(mode="json")
+                for item in graph.claim_nodes
+                if item.message_id in target.message_ids
+            ]
+            bundle = prompts.resolve_contradiction(
+                problem=problem,
+                contradiction=target.model_dump(mode="json"),
+                scoped_messages=related,
+            )
+        else:
+            target_route_id = (
+                self._route_for_strategy(state, strategy_id) if strategy_id else None
+            )
+            candidates = [
+                item
+                for item in graph.claim_nodes
+                if target_route_id is None
+                or item.source_route_id == target_route_id
+                or target_route_id in item.target_route_ids
+            ]
+            target = next(
+                (
+                    item
+                    for item in candidates
+                    if item.evidence_type != EvidenceType.COUNTEREXAMPLE
+                ),
+                None,
+            )
+            if target is None:
+                return False
+            source_route_id = target.source_route_id
+            source_role = RouteRole.COUNTEREXAMPLE_HUNTER
+            role_name = "counterexample_hunter"
+            excluded_authors = {target.source_agent_id}
+            bundle = prompts.counterexample_search(
+                problem=problem,
+                exact_scoped_claim=target.model_dump(mode="json"),
+                deterministic_replay_required=True,
+            )
+
+        assignment = role_runner.select(
+            source_route_id,
+            source_role,
+            round_index=current_round,
+            exclude=excluded_authors,
+        )
+        if assignment.agent_id is None:
+            store.append_event(
+                "route_role_unavailable",
+                {
+                    "route_id": source_route_id,
+                    "role": source_role.value,
+                    "reason": assignment.reason,
+                },
+            )
+            return False
+        agent = role_runner.runtime(assignment)
+        store.append_event(
+            "route_member_assigned",
+            {
+                "route_id": source_route_id,
+                "agent_id": agent.id,
+                "role": source_role.value,
+                "round_index": current_round,
+            },
+        )
+        result = await self._safe_call(
+            runner,
+            role_name,
+            bundle,
+            fixed_agent=agent,
+            budget_bucket=("verification" if action != ActionKind.BRIDGE else "depth"),
+        )
+        if result is None:
+            return False
+
+        candidate = result.value
+        if not isinstance(candidate, MessageEnvelope):
+            return False
+        if action == ActionKind.BRIDGE:
+            expected_statement = target.normalized_goal
+        elif action == ActionKind.RESOLVE_CONFLICT:
+            expected_statement = target.normalized_statement
+        else:
+            expected_statement = target.normalized_statement
+        if action != ActionKind.RESOLVE_CONFLICT and (
+            self._normalize_statement(candidate.normalized_statement)
+            != self._normalize_statement(expected_statement)
+        ):
+            store.append_event(
+                "cross_route_task_rejected",
+                {
+                    "action": action.value,
+                    "reason": "agent changed the exact scoped target",
+                },
+            )
+            return False
+
+        referee = role_runner.select(
+            source_route_id,
+            RouteRole.REFEREE,
+            round_index=current_round,
+            exclude={agent.id},
+        )
+        if referee.agent_id is None:
+            return False
+        referee_agent = role_runner.runtime(referee)
+        review_result = await self._safe_call(
+            runner,
+            "route_referee",
+            prompts.route_referee(
+                problem=problem,
+                proposed_message=candidate.model_dump(mode="json"),
+                author_agent_id=agent.id,
+                permitted_target=expected_statement,
+            ),
+            fixed_agent=referee_agent,
+            budget_bucket="verification",
+        )
+        if review_result is None or not review_result.value.accepted:
+            return False
+
+        payload = candidate.model_dump(mode="json")
+        message_type = MessageType.VERIFIED_LEMMA
+        evidence_type = EvidenceType.NATURAL_PROOF_AUDITED
+        memory_tier = MemoryTier.FACT
+        verification_status = ClaimStatus.VERIFIED
+        dependencies: list[str] = []
+        target_routes: list[str] = []
+        if action == ActionKind.BRIDGE:
+            dependencies = list(target.allowed_fact_ids)
+            target_routes = [
+                route_id for route_id in target.route_ids if route_id != source_route_id
+            ]
+        elif action == ActionKind.RESOLVE_CONFLICT:
+            allowed = {
+                "a refutes b",
+                "b refutes a",
+                "same statement with different scopes",
+                "both unsupported",
+                "both compatible after variable/quantifier normalization",
+                "requires external tool/formal check",
+            }
+            resolution = self._normalize_statement(candidate.conclusion)
+            if resolution not in allowed:
+                return False
+            message_type = MessageType.CONTRADICTION_NOTICE
+            memory_tier = MemoryTier.INSIGHT
+            dependencies = list(target.message_ids)
+            target_routes = [
+                route_id for route_id in target.route_ids if route_id != source_route_id
+            ]
+        else:
+            message_type = MessageType.COUNTEREXAMPLE
+            evidence_type = EvidenceType.COUNTEREXAMPLE
+            memory_tier = MemoryTier.NEGATIVE
+            verification_status = ClaimStatus.REJECTED
+            dependencies = [target.message_id]
+            target_routes = sorted(
+                set([target.source_route_id, *target.target_route_ids])
+                - {source_route_id}
+            )
+        payload.update(
+            {
+                "problem_hash": problem.integrity_hash,
+                "source_agent_id": agent.id,
+                "source_route_id": source_route_id,
+                "source_role": source_role.value,
+                "target_route_ids": target_routes,
+                "message_type": message_type.value,
+                "normalized_statement": self._normalize_statement(expected_statement),
+                "dependencies": dependencies,
+                "evidence_type": evidence_type.value,
+                "memory_tier": memory_tier.value,
+                "verification_status": verification_status.value,
+                "verification_confidence": max(
+                    self.config.topology.typed_memory.fact_pass_threshold,
+                    candidate.verification_confidence,
+                ),
+                "normalization_confidence": 1.0,
+                "raw_source_ref": result.raw_ref,
+                "round_created": current_round,
+                "ttl_rounds": self.config.topology.cross_route.message_ttl_rounds,
+                "content_hash": "",
+            }
+        )
+        verified_message = MessageEnvelope.model_validate(payload)
+        decision = broker.publish(
+            verified_message,
+            referee_agent_id=referee_agent.id,
+            current_round=current_round,
+        )
+        if not decision.accepted:
+            return False
+        if verified_message.evidence_type == EvidenceType.COUNTEREXAMPLE:
+            self._cool_routes_for_counterexample(
+                state,
+                verified_message,
+                current_round=current_round,
+                store=store,
+            )
+        if action == ActionKind.BRIDGE and state.bridge_broker is not None:
+            state.bridge_broker.accept_verified_result(target.task_id, verified_message)
+        elif (
+            action == ActionKind.RESOLVE_CONFLICT
+            and state.contradiction_broker is not None
+        ):
+            state.contradiction_broker.resolve(
+                target.contradiction_id,
+                resolution_message_id=verified_message.message_id,
+            )
+        if (
+            memory_tier == MemoryTier.FACT
+            and state.inspiration_engine is not None
+            and state.proof_graph is not None
+        ):
+            evidence_message_id = decision.duplicate_of or verified_message.message_id
+            closed_obligation_ids = [
+                item.obligation_id
+                for item in state.proof_graph.obligations
+                if evidence_message_id in item.evidence_message_ids
+            ]
+            state.inspiration_engine.attribute_verified_fact(
+                evidence_message_id,
+                source_route_id=source_route_id,
+                closed_obligation_ids=closed_obligation_ids,
+                dependency_message_ids=verified_message.dependencies,
+            )
+        return True
+
+    def _cool_routes_for_counterexample(
+        self,
+        state: SolveState,
+        message: MessageEnvelope,
+        *,
+        current_round: int,
+        store: ArtifactStore,
+    ) -> None:
+        registry = state.route_registry
+        if registry is None:
+            return
+        refuted_statements = {self._normalize_statement(message.conclusion)}
+        refuted_statements.add(self._normalize_statement(message.normalized_statement))
+        affected = set(message.target_route_ids) | {message.source_route_id}
+        if state.typed_memory is not None:
+            affected.update(
+                state.typed_memory.affected_routes_for_counterexample(message)
+            )
+            refuted_statements.update(
+                state.typed_memory.refuted_statements_for_counterexample(message)
+            )
+        for route in registry.routes:
+            normalized_assumptions = [
+                self._normalize_statement(item) for item in route.shared_assumptions
+            ]
+            if any(
+                target == assumption or target in assumption or assumption in target
+                for target in refuted_statements
+                for assumption in normalized_assumptions
+                if target and assumption
+            ):
+                affected.add(route.route_id)
+        for route_id in sorted(affected):
+            try:
+                registry.mark_cooling(
+                    route_id,
+                    current_round + self.config.scheduler.failed_path_cooldown_rounds,
+                    f"confirmed counterexample to shared premise: {message.statement}",
+                    requires_revision=True,
+                )
+            except KeyError:
+                continue
+        store.append_event(
+            "counterexample_route_cooldown",
+            {
+                "message_id": message.message_id,
+                "affected_route_ids": sorted(affected),
+                "requires_explicit_revision": True,
+            },
+        )
+
+    @staticmethod
+    def _route_authors(registry: RouteRegistry, route_ids: Iterable[str]) -> set[str]:
+        return {
+            member.agent_id
+            for route_id in route_ids
+            for member in registry.get(route_id).members
+            if member.role == RouteRole.PROVER
+        }
+
+    def _apply_confirmed_counterexample_impact(
+        self,
+        state: SolveState | None,
+        strategy: StrategyCard,
+        *,
+        route_id: str | None,
+        impact: FailureLevel,
+        experiment_results: Sequence[dict[str, Any]],
+        current_round: int,
+        store: ArtifactStore,
+    ) -> None:
+        confirmed = [
+            item
+            for item in experiment_results
+            if item.get("outcome") == ExperimentOutcome.COUNTEREXAMPLE_FOUND.value
+            and item.get("evidence_strength") == EvidenceStrength.COUNTEREXAMPLE.value
+            and bool(item.get("independently_verified"))
+        ]
+        if not confirmed:
+            return
+        if state is not None:
+            state.certified_counterexample_hashes = list(
+                dict.fromkeys(
+                    [
+                        *state.certified_counterexample_hashes,
+                        *(
+                            str(
+                                item.get("result_hash")
+                                or item.get("request_hash")
+                                or item.get("experiment_id")
+                            )
+                            for item in confirmed
+                        ),
+                    ]
+                )
+            )
+        refuted_required: list[str] = []
+        for result in confirmed:
+            target = canonical_obligation_statement(str(result.get("target_claim", "")))
+            if not target:
+                continue
+            for claim in strategy.critical_claims:
+                if canonical_obligation_statement(claim.statement) != target:
+                    continue
+                claim.status = "refuted"
+                evidence_ref = (
+                    f"experiment:{result.get('experiment_id', 'unknown')}:"
+                    f"{result.get('result_hash', result.get('request_hash', ''))}"
+                )
+                claim.evidence_refs = list(
+                    dict.fromkeys([*claim.evidence_refs, evidence_ref])
+                )
+                if claim.necessity == "required":
+                    refuted_required.append(claim.claim_id)
+
+        route_action = "recorded"
+        if (
+            state is not None
+            and state.route_registry is not None
+            and route_id is not None
+        ):
+            if impact == FailureLevel.STRATEGY or refuted_required:
+                state.route_registry.mark_refuted(
+                    route_id,
+                    "independently checked counterexample refuted a required claim",
+                )
+                route_action = "refuted"
+            elif impact == FailureLevel.PLAN:
+                state.route_registry.mark_cooling(
+                    route_id,
+                    current_round + self.config.scheduler.failed_path_cooldown_rounds,
+                    "confirmed counterexample requires a new route plan",
+                    requires_revision=True,
+                )
+                route_action = "repair_required"
+        store.append_event(
+            "confirmed_counterexample_propagated",
+            {
+                "strategy_id": strategy.strategy_id,
+                "route_id": route_id,
+                "failure_level": impact.value,
+                "route_action": route_action,
+                "refuted_required_claim_ids": refuted_required,
+                "experiment_ids": [
+                    str(item.get("experiment_id", "")) for item in confirmed
+                ],
+            },
+        )
+
+    @staticmethod
+    def _deduplicate_restored_attempts(
+        raw_attempts: Iterable[dict[str, Any]],
+        store: ArtifactStore,
+    ) -> list[ProofAttempt]:
+        canonical: dict[tuple[str, str], ProofAttempt] = {}
+        collapsed: list[dict[str, str]] = []
+        for raw in raw_attempts:
+            attempt = ProofAttempt.model_validate(raw)
+            key = (attempt.strategy_id, attempt_content_fingerprint(attempt))
+            previous = canonical.get(key)
+            if previous is None or (
+                attempt.round_index,
+                attempt.attempt_id,
+            ) > (
+                previous.round_index,
+                previous.attempt_id,
+            ):
+                if previous is not None:
+                    collapsed.append(
+                        {
+                            "duplicate_attempt_id": previous.attempt_id,
+                            "canonical_attempt_id": attempt.attempt_id,
+                        }
+                    )
+                canonical[key] = attempt
+            else:
+                collapsed.append(
+                    {
+                        "duplicate_attempt_id": attempt.attempt_id,
+                        "canonical_attempt_id": previous.attempt_id,
+                    }
+                )
+        if collapsed:
+            store.append_event(
+                "restored_attempt_duplicates_collapsed",
+                {
+                    "duplicate_count": len(collapsed),
+                    "aliases": collapsed[:200],
+                },
+            )
+        return sorted(
+            canonical.values(),
+            key=lambda item: (item.round_index, item.strategy_id, item.attempt_id),
+        )
+
     def _restore_state_from_checkpoint(
         self,
         payload: dict[str, Any],
@@ -1682,10 +5436,9 @@ class ProofMeshOrchestrator:
                 StrategyCard.model_validate(item)
                 for item in payload.get("strategies", [])
             ],
-            attempts=[
-                ProofAttempt.model_validate(item)
-                for item in payload.get("attempts", [])
-            ],
+            attempts=self._deduplicate_restored_attempts(
+                payload.get("attempts", []), store
+            ),
             reports=[
                 VerificationReport.model_validate(item)
                 for item in payload.get("reports", [])
@@ -1712,7 +5465,242 @@ class ProofMeshOrchestrator:
                 else None
             ),
             budget_exhausted=bool(payload.get("budget_exhausted", False)),
+            math_status=MathStatus(
+                payload.get("math_status", MathStatus.INCONCLUSIVE.value)
+            ),
+            execution_status=ExecutionStatus(
+                payload.get("execution_status", ExecutionStatus.COMPLETED.value)
+            ),
+            research_progress_report=(
+                ResearchProgressReport.model_validate(
+                    payload["research_progress_report"]
+                )
+                if payload.get("research_progress_report")
+                else None
+            ),
+            current_round=int(payload.get("current_round", 0)),
+            graph_frozen=bool(payload.get("graph_frozen", False)),
+            proof_debt_history={
+                str(key): [float(item) for item in value]
+                for key, value in dict(payload.get("proof_debt_history", {})).items()
+            },
+            route_team_reviews={
+                str(key): [dict(item) for item in value]
+                for key, value in dict(payload.get("route_team_reviews", {})).items()
+            },
+            capability_domain=str(payload.get("capability_domain", "algebra")),
+            global_no_progress_rounds=int(payload.get("global_no_progress_rounds", 0)),
+            global_meta_pivot_used=bool(payload.get("global_meta_pivot_used", False)),
+            last_progress_signature=payload.get("last_progress_signature"),
+            certified_counterexample_hashes=[
+                str(item) for item in payload.get("certified_counterexample_hashes", [])
+            ],
         )
+
+    async def _prepare_problem_contract(
+        self,
+        problem_text: str,
+        *,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        store: ArtifactStore,
+        activity: ActivityStream,
+        parent_task_id: str,
+    ) -> ProblemContract:
+        original = problem_text.strip()
+        task_id = activity.start_task(
+            "goal_preflight",
+            task_id="goal-preflight",
+            title=activity.text(
+                "题意预检与目标规范化",
+                "Problem preflight and goal normalization",
+            ),
+            detail=activity.text(
+                "正在本地检查缺失模数、参数、占位内容与外部上下文",
+                "Checking locally for missing parameters, placeholders, and context",
+            ),
+            stage="goal_preflight",
+            parent_task_id=parent_task_id,
+            importance=ActivityImportance.MAJOR,
+            metrics={"api_call": False, "phase": "local_precheck"},
+        )
+        local_precheck = deterministic_goal_precheck(original)
+        store.write_json("structured", "goal_preflight", local_precheck)
+
+        canonical = original
+        interpretation_source = "original"
+        interpretation_confidence = 1.0
+        interpretation_reasons: list[str] = []
+        interpretation_agent_id: str | None = None
+        interpretation_raw_ref: str | None = None
+
+        if local_precheck.status == "model_review_required":
+            activity.update_task(
+                task_id,
+                title=activity.text(
+                    "发现题意疑点，正在生成候选解释",
+                    "Goal warning found; generating candidate interpretations",
+                ),
+                detail=activity.text(
+                    "仅调用一次小型、禁用 Thinking 的结构化检查；不会开始解题",
+                    "Running one small non-thinking structured review; solving has not started",
+                ),
+                stage="goal_preflight",
+                parent_task_id=parent_task_id,
+                importance=ActivityImportance.MAJOR,
+                metrics={
+                    "api_call": True,
+                    "phase": "model_review",
+                    "rule_ids": local_precheck.rule_ids,
+                },
+            )
+            result = await self._safe_call(
+                runner,
+                "planner",
+                prompts.goal_normalization(original, local_precheck),
+                budget_bucket="other",
+            )
+            if result is None:
+                activity.fail_task(
+                    task_id,
+                    title=activity.text(
+                        "题意规范化失败",
+                        "Goal normalization failed",
+                    ),
+                    detail=activity.text(
+                        "题目存在疑点且无法获得可靠的结构化解释，已在解题前停止",
+                        "The goal is unclear and no reliable structured interpretation was available",
+                    ),
+                    event_type="goal_normalization_failed",
+                    stage="goal_preflight",
+                    parent_task_id=parent_task_id,
+                    importance=ActivityImportance.MAJOR,
+                )
+                raise GoalNormalizationError(
+                    "goal normalization failed before solving; the original statement was not changed"
+                )
+
+            assessment = result.value
+            interpretation_agent_id = result.agent.id
+            interpretation_raw_ref = result.raw_ref
+            store.write_json("structured", "goal_normalization", assessment)
+            interpretation_reasons = [
+                *local_precheck.reasons,
+                *assessment.ambiguity_reasons,
+            ]
+
+            if requires_confirmation(assessment):
+                request = GoalClarificationRequest(
+                    original_statement=original,
+                    local_precheck=local_precheck,
+                    assessment=assessment,
+                )
+                store.write_json("structured", "goal_clarification_request", request)
+                activity.warn_task(
+                    task_id,
+                    title=activity.text(
+                        "等待确认规范化目标",
+                        "Waiting for canonical-goal confirmation",
+                    ),
+                    detail=activity.text(
+                        "候选解释会改变或补充数学含义；确认前不会启动后续 Agent",
+                        "The candidate changes or completes the meaning; no solver agent will start before confirmation",
+                    ),
+                    event_type="goal_clarification_required",
+                    stage="goal_preflight",
+                    parent_task_id=parent_task_id,
+                    importance=ActivityImportance.MAJOR,
+                    metrics={
+                        "request_id": request.request_id,
+                        "recommendation_confidence": (
+                            assessment.recommendation_confidence
+                        ),
+                    },
+                )
+                if self.clarification_resolver is None:
+                    raise GoalClarificationRequired(request)
+                decision = validate_clarification_decision(
+                    request,
+                    await self.clarification_resolver(request),
+                )
+                if decision.canonical_statement == original:
+                    raise ValueError(
+                        "the confirmed statement must resolve the detected ambiguity"
+                    )
+                store.write_json("structured", "goal_clarification_decision", decision)
+                canonical = decision.canonical_statement
+                interpretation_source = decision.source
+                interpretation_confidence = decision_confidence(request, decision)
+            else:
+                # A negative model review is not permission to polish or paraphrase.
+                canonical = original
+                interpretation_source = "original"
+                interpretation_confidence = assessment.recommendation_confidence
+
+        task_requirements = infer_task_requirements(canonical)
+        problem = ProblemContract(
+            exact_statement=canonical,
+            normalized_statement=self._normalize_statement(canonical),
+            original_statement=original,
+            canonical_statement=canonical,
+            interpretation_source=interpretation_source,
+            interpretation_confidence=interpretation_confidence,
+            interpretation_reasons=list(dict.fromkeys(interpretation_reasons)),
+            interpretation_agent_id=interpretation_agent_id,
+            interpretation_raw_ref=interpretation_raw_ref,
+            problem_kind=ProblemKind.UNKNOWN,
+            task_requirements=task_requirements,
+            deliverables=deliverable_instructions(task_requirements),
+            hard_constraints=[
+                "Do not change hypotheses, quantifiers, domains, or requested conclusions.",
+                "Distinguish proved claims from conjectures and unresolved gaps.",
+                "Every downstream artifact must retain the frozen goal hash.",
+            ],
+            allowed_tools=self._allowed_tools(),
+            output_language=self.config.runtime.output_language,
+        )
+        store.write_json(
+            "structured",
+            "goal_interpretation",
+            {
+                "original_statement": problem.original_statement,
+                "canonical_statement": problem.canonical_statement,
+                "interpretation_source": problem.interpretation_source,
+                "interpretation_confidence": problem.interpretation_confidence,
+                "interpretation_reasons": problem.interpretation_reasons,
+                "interpretation_agent_id": problem.interpretation_agent_id,
+                "goal_hash": problem.goal_hash,
+            },
+        )
+        activity.complete_task(
+            task_id,
+            title=activity.text(
+                "题意预检完成，目标已冻结",
+                "Problem preflight completed; goal frozen",
+            ),
+            detail=activity.text(
+                (
+                    "未发现歧义，原题原样保留且未调用模型"
+                    if local_precheck.status == "clear"
+                    else f"已按 {problem.interpretation_source} 冻结规范化目标"
+                ),
+                (
+                    "No ambiguity found; the original statement was preserved without a model call"
+                    if local_precheck.status == "clear"
+                    else f"Canonical goal frozen from {problem.interpretation_source}"
+                ),
+            ),
+            event_type="goal_preflight_completed",
+            stage="goal_preflight",
+            parent_task_id=parent_task_id,
+            importance=ActivityImportance.MAJOR,
+            metrics={
+                "api_call": local_precheck.status == "model_review_required",
+                "interpretation_source": problem.interpretation_source,
+                "goal_hash": problem.goal_hash,
+            },
+        )
+        return problem
 
     async def _triage(
         self,
@@ -1757,9 +5745,21 @@ class ProofMeshOrchestrator:
         router: SparseTopologyRouter,
         store: ArtifactStore,
     ) -> list[StrategyCard]:
-        requested = min(
-            self.config.budget.strategies_to_generate,
-            max(self.config.budget.initial_paths, triage.suggested_paths),
+        scoped_discovery_task = (
+            TaskRequirement.CONJECTURE in problem.task_requirements
+            and set(problem.task_requirements)
+            <= {
+                TaskRequirement.COMPUTATION,
+                TaskRequirement.CONJECTURE,
+            }
+        )
+        requested = (
+            1
+            if scoped_discovery_task
+            else min(
+                self.config.budget.strategies_to_generate,
+                max(self.config.budget.initial_paths, triage.suggested_paths),
+            )
         )
         result = await self._safe_call(
             runner,
@@ -1772,17 +5772,160 @@ class ProofMeshOrchestrator:
             if result is not None
             else self._fallback_strategy_set(problem, requested)
         )
-        selected = router.select_diverse_strategies(
-            strategy_set.strategies,
-            min(self.config.budget.initial_paths, len(strategy_set.strategies)),
+        target = 1 if scoped_discovery_task else self.config.budget.initial_paths
+        candidates = self._deduplicate_strategy_cards(
+            self._attach_planner_computation_hints(strategy_set.strategies)
         )
+        selected = router.select_diverse_strategies(
+            candidates, min(target, len(candidates))
+        )
+        if (
+            result is not None
+            and len(selected) < target
+            and runner.ledger.remaining_calls > 0
+        ):
+            missing = target - len(selected)
+            supplement = await self._safe_call(
+                runner,
+                "planner",
+                prompts.strategies(
+                    problem,
+                    triage,
+                    missing,
+                    prior_strategy_titles=[item.title for item in selected],
+                    regulator_feedback=[
+                        "Return only mechanisms genuinely different from the listed routes; do not rename an existing idea."
+                    ],
+                ),
+                budget_bucket="breadth",
+            )
+            if supplement is not None:
+                candidates = self._deduplicate_strategy_cards(
+                    [
+                        *selected,
+                        *self._attach_planner_computation_hints(
+                            supplement.value.strategies
+                        ),
+                    ]
+                )
+                selected = router.select_diverse_strategies(
+                    candidates, min(target, len(candidates))
+                )
+        if len(selected) < target:
+            fallbacks = self._fallback_strategy_set(problem, target).strategies
+            candidates = self._deduplicate_strategy_cards([*selected, *fallbacks])
+            selected = router.select_diverse_strategies(
+                candidates, min(target, len(candidates))
+            )
         store.write_json("structured", "strategy_set", strategy_set)
         store.write_json("structured", "selected_strategies", selected)
         return selected
 
+    def _attach_planner_computation_hints(
+        self, strategies: Iterable[StrategyCard]
+    ) -> list[StrategyCard]:
+        """Turn explicit numerical-check language into inert, auditable hints."""
+        simulation_markers = (
+            "模拟",
+            "枚举",
+            "数值检验",
+            "具体检验",
+            "检验若干",
+            "测试周期",
+            "simulate",
+            "enumerate",
+            "numerically test",
+            "test a period",
+            "check a period",
+        )
+        broad_markers = ("寻找规律", "猜测规律", "find a pattern", "discover a pattern")
+        enriched: list[StrategyCard] = []
+        for strategy in strategies:
+            text = " ".join(
+                filter(
+                    None,
+                    [
+                        strategy.title,
+                        strategy.core_idea,
+                        strategy.bottleneck,
+                        strategy.falsification_test,
+                        strategy.key_original_step or "",
+                    ],
+                )
+            )
+            folded = text.casefold()
+            if strategy.computation_hints or not any(
+                marker in folded for marker in simulation_markers
+            ):
+                enriched.append(strategy)
+                continue
+            if "周期" in folded or "period" in folded:
+                method = ComputationMethod.CANDIDATE_PERIOD_CHECK
+            elif any(marker in folded for marker in ("贪心", "greedy sequence")):
+                method = ComputationMethod.BOUNDED_GREEDY_SEQUENCE
+            else:
+                method = ComputationMethod.BOUNDED_INTEGER_SEARCH
+            broad = any(marker in folded for marker in broad_markers)
+            target = strategy.falsification_test.strip() or (
+                f"Check the finite numerical assertion used by strategy {strategy.strategy_id}."
+            )
+            hint = ComputationHint(
+                purpose=(
+                    ComputationPurpose.DISCOVER_PATTERN
+                    if broad
+                    else ComputationPurpose.FALSIFY_CLAIM
+                ),
+                target_claim=target,
+                suggested_method=method,
+                decision_use=(
+                    "Reject or revise this route if a bounded exact check finds a counterexample; "
+                    "otherwise retain only not_refuted evidence and continue the proof."
+                ),
+                broad_search=broad,
+            )
+            enriched.append(strategy.model_copy(update={"computation_hints": [hint]}))
+        return enriched
+
+    def _deduplicate_strategy_cards(
+        self, strategies: Iterable[StrategyCard]
+    ) -> list[StrategyCard]:
+        result: list[StrategyCard] = []
+        seen_ids: set[str] = set()
+        seen_signatures: set[str] = set()
+        threshold = self.config.topology.broker.duplicate_strategy_threshold
+        token_sets: list[set[str]] = []
+        for strategy in strategies:
+            if strategy.strategy_id in seen_ids:
+                continue
+            signature = RouteRegistry.strategy_signature(strategy)
+            tokens = RouteRegistry._tokens(
+                " ".join(
+                    [
+                        strategy.title,
+                        strategy.core_idea,
+                        strategy.falsification_test,
+                        *strategy.tags,
+                        *strategy.prerequisites,
+                    ]
+                )
+            )
+            if signature in seen_signatures:
+                continue
+            if any(
+                len(tokens & prior) / max(1, len(tokens | prior)) >= threshold
+                for prior in token_sets
+            ):
+                continue
+            seen_ids.add(strategy.strategy_id)
+            seen_signatures.add(signature)
+            token_sets.append(tokens)
+            result.append(strategy)
+        return result
+
     async def _parallel_initial_exploration(
         self,
         problem: ProblemContract,
+        state: SolveState,
         assignments: list[tuple[StrategyCard, AgentRuntime]],
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
@@ -1796,6 +5939,7 @@ class ProofMeshOrchestrator:
                 problem,
                 strategy,
                 agent,
+                state=state,
                 round_index=0,
                 runner=runner,
                 prompts=prompts,
@@ -1812,6 +5956,7 @@ class ProofMeshOrchestrator:
             *(one(strategy, agent) for strategy, agent in assignments),
             return_exceptions=True,
         )
+        self._raise_if_provider_circuit(results)
         attempts: list[ProofAttempt] = []
         for (strategy, agent), result in zip(assignments, results):
             if isinstance(result, Exception):
@@ -1829,6 +5974,320 @@ class ProofMeshOrchestrator:
             else:
                 attempts.append(result)
         return attempts
+
+    @staticmethod
+    def _computation_stalled_rounds(
+        state: SolveState | None,
+        strategy: StrategyCard,
+        *,
+        round_index: int,
+    ) -> int:
+        if state is None or state.route_registry is None:
+            return max(0, round_index)
+        route = state.route_registry.route_for_strategy(strategy.strategy_id)
+        if route is None:
+            return 0
+        return max(route.stagnation_rounds, route.no_progress_strikes)
+
+    async def _retry_deferred_computations(
+        self,
+        problem: ProblemContract,
+        strategy: StrategyCard,
+        author: AgentRuntime,
+        *,
+        state: SolveState | None,
+        round_index: int,
+        path_id: str,
+        parent_checkpoint_id: str | None,
+        meta_review_approved: bool,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        tools: ToolBroker,
+        budget_bucket: str,
+        max_experiments: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, bool]:
+        feedback: list[dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
+        executed = 0
+        still_deferred = False
+        stalled_rounds = self._computation_stalled_rounds(
+            state,
+            strategy,
+            round_index=round_index,
+        )
+        pending_requests = tools.deferred_for_path(path_id)
+        if max_experiments <= 0:
+            return feedback, results, executed, bool(pending_requests)
+        for pending in pending_requests:
+            if executed >= max_experiments:
+                break
+            spec = pending.spec.model_copy(deep=True)
+            spec.path_id = path_id
+            spec.parent_checkpoint_id = parent_checkpoint_id
+            tools.update_experiment_activity(
+                spec,
+                phase="deferred_retry",
+                detail=(
+                    "The saved request is being re-evaluated against current "
+                    "route progress and Meta-Reviewer state."
+                ),
+                event_type="computation_deferred_retry",
+                progress=0.1,
+                metrics={
+                    "defer_count": pending.defer_count,
+                    "stalled_rounds": stalled_rounds,
+                    "meta_review_approved": meta_review_approved,
+                },
+            )
+            decision, experiment = await self._run_requested_computation(
+                problem,
+                spec,
+                author,
+                path_id=path_id,
+                parent_checkpoint_id=parent_checkpoint_id,
+                stalled_rounds=stalled_rounds,
+                meta_review_approved=meta_review_approved,
+                runner=runner,
+                prompts=prompts,
+                tools=tools,
+                budget_bucket=budget_bucket,
+            )
+            feedback.append(decision.model_dump(mode="json"))
+            if experiment is not None:
+                results.append(experiment.model_dump(mode="json"))
+                executed += 1
+            elif decision.decision == ComputationDecisionStatus.DEFER:
+                still_deferred = True
+                break
+        return feedback, results, executed, still_deferred
+
+    @staticmethod
+    def _successful_pattern_results(
+        tools: ToolBroker,
+        experiment_results: Sequence[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        successful: list[dict[str, Any]] = []
+        for payload in experiment_results:
+            if payload.get("outcome") not in {
+                ExperimentOutcome.NOT_REFUTED.value,
+                ExperimentOutcome.CERTIFIED.value,
+            }:
+                continue
+            request_hash = str(payload.get("request_hash") or "")
+            if not request_hash:
+                continue
+            try:
+                spec = tools.cache.load_spec(request_hash)
+            except (FileNotFoundError, OSError, ValueError):
+                continue
+            if spec.purpose == ComputationPurpose.DISCOVER_PATTERN:
+                successful.append(payload)
+        return successful
+
+    @staticmethod
+    def _attach_pattern_evidence(
+        candidates: Sequence[CandidateConjecture],
+        results_by_id: dict[str, dict[str, Any]],
+        *,
+        proposal_raw_ref: str | None,
+    ) -> None:
+        for candidate in candidates:
+            candidate.evidence_refs = []
+            for experiment_id in candidate.supporting_experiment_ids:
+                payload = results_by_id.get(experiment_id)
+                if payload is None:
+                    continue
+                for raw_ref in payload.get("artifact_refs", []):
+                    try:
+                        evidence = (
+                            EvidenceRef(artifact_ref=raw_ref)
+                            if isinstance(raw_ref, str)
+                            else EvidenceRef.model_validate(raw_ref)
+                        )
+                    except (TypeError, ValueError):
+                        continue
+                    if not any(
+                        item.artifact_ref == evidence.artifact_ref
+                        for item in candidate.evidence_refs
+                    ):
+                        candidate.evidence_refs.append(evidence)
+            if proposal_raw_ref and not any(
+                item.artifact_ref == proposal_raw_ref
+                for item in candidate.evidence_refs
+            ):
+                candidate.evidence_refs.append(
+                    EvidenceRef(
+                        artifact_ref=proposal_raw_ref,
+                        summary=(
+                            "Raw structured response that proposed this unproved "
+                            "candidate conjecture."
+                        ),
+                    )
+                )
+
+    @staticmethod
+    def _canonicalize_candidate_experiment_ids(
+        candidate: CandidateConjecture,
+        alias_to_experiment_id: dict[str, str],
+    ) -> CandidateConjecture | None:
+        canonical_ids: list[str] = []
+        for identifier in candidate.supporting_experiment_ids:
+            canonical = alias_to_experiment_id.get(identifier)
+            if canonical is None:
+                return None
+            if canonical not in canonical_ids:
+                canonical_ids.append(canonical)
+        payload = candidate.model_dump(mode="json")
+        payload["supporting_experiment_ids"] = canonical_ids
+        payload["content_hash"] = ""
+        return CandidateConjecture.model_validate(payload)
+
+    async def _ensure_pattern_conjectures(
+        self,
+        problem: ProblemContract,
+        candidates: Sequence[CandidateConjecture],
+        experiment_results: Sequence[dict[str, Any]],
+        *,
+        agent: AgentRuntime,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        tools: ToolBroker,
+        store: ArtifactStore,
+        budget_bucket: str,
+    ) -> tuple[list[CandidateConjecture], UsageRecord, set[str]]:
+        pattern_results = self._successful_pattern_results(tools, experiment_results)
+        if not pattern_results:
+            return list(candidates), UsageRecord(), set()
+
+        results_by_id: dict[str, dict[str, Any]] = {}
+        alias_to_id: dict[str, str] = {}
+        ambiguous_aliases: set[str] = set()
+        for payload in pattern_results:
+            observed_experiment_id = str(payload.get("experiment_id") or "")
+            request_hash = str(payload.get("request_hash") or "")
+            if not observed_experiment_id or not request_hash:
+                continue
+            canonical_result = tools.cache.get(request_hash)
+            experiment_id = (
+                canonical_result.experiment_id
+                if canonical_result is not None
+                else observed_experiment_id
+            )
+            canonical_payload = dict(payload)
+            canonical_payload["experiment_id"] = experiment_id
+            results_by_id[experiment_id] = canonical_payload
+            aliases = {
+                experiment_id,
+                observed_experiment_id,
+                request_hash,
+                *tools.cache.aliases_for(request_hash),
+            }
+            for alias in aliases:
+                previous = alias_to_id.get(alias)
+                if previous is not None and previous != experiment_id:
+                    ambiguous_aliases.add(alias)
+                    continue
+                alias_to_id[alias] = experiment_id
+        for alias in ambiguous_aliases:
+            alias_to_id.pop(alias, None)
+
+        allowed_ids = set(results_by_id)
+        accepted: list[CandidateConjecture] = []
+        seen_hashes: set[str] = set()
+        for raw_candidate in candidates:
+            candidate = self._canonicalize_candidate_experiment_ids(
+                raw_candidate, alias_to_id
+            )
+            if candidate is None:
+                continue
+            referenced = set(candidate.supporting_experiment_ids)
+            if not referenced or not referenced.issubset(allowed_ids):
+                continue
+            if candidate.content_hash in seen_hashes:
+                continue
+            seen_hashes.add(candidate.content_hash)
+            accepted.append(candidate)
+
+        covered = {
+            experiment_id
+            for candidate in accepted
+            for experiment_id in candidate.supporting_experiment_ids
+        }
+        missing = allowed_ids - covered
+        repair_usage = UsageRecord()
+        proposal_raw_ref: str | None = None
+        if missing:
+            bundle = prompts.complete_pattern_conjectures(
+                problem,
+                [results_by_id[experiment_id] for experiment_id in sorted(missing)],
+                [item.model_dump(mode="json") for item in accepted],
+            )
+            try:
+                completion = await self._safe_call(
+                    runner,
+                    "explorer",
+                    bundle,
+                    fixed_agent=agent,
+                    budget_bucket=budget_bucket,
+                )
+            except (BudgetExhaustedError, ProviderCircuitOpenError) as exc:
+                store.append_event(
+                    "pattern_conjecture_completion_failed",
+                    {
+                        "agent_id": agent.id,
+                        "missing_experiment_ids": sorted(missing),
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                completion = None
+            if completion is not None:
+                repair_usage = completion.usage
+                proposal_raw_ref = completion.raw_ref
+                batch = completion.value
+                if isinstance(batch, CandidateConjectureBatch):
+                    for raw_candidate in batch.candidate_conjectures:
+                        candidate = self._canonicalize_candidate_experiment_ids(
+                            raw_candidate, alias_to_id
+                        )
+                        if candidate is None:
+                            continue
+                        referenced = set(candidate.supporting_experiment_ids)
+                        if (
+                            not referenced
+                            or not referenced.issubset(allowed_ids)
+                            or not referenced.intersection(missing)
+                            or candidate.content_hash in seen_hashes
+                        ):
+                            continue
+                        seen_hashes.add(candidate.content_hash)
+                        accepted.append(candidate)
+
+        self._attach_pattern_evidence(
+            accepted,
+            results_by_id,
+            proposal_raw_ref=proposal_raw_ref,
+        )
+        covered = {
+            experiment_id
+            for candidate in accepted
+            for experiment_id in candidate.supporting_experiment_ids
+        }
+        missing = allowed_ids - covered
+        store.append_event(
+            (
+                "pattern_conjecture_completion_failed"
+                if missing
+                else "pattern_conjecture_completed"
+            ),
+            {
+                "agent_id": agent.id,
+                "experiment_ids": sorted(allowed_ids),
+                "candidate_count": len(accepted),
+                "missing_experiment_ids": sorted(missing),
+                "repair_call_used": bool(proposal_raw_ref),
+            },
+        )
+        return accepted, repair_usage, missing
 
     async def _run_requested_computation(
         self,
@@ -1857,11 +6316,49 @@ class ProofMeshOrchestrator:
             remaining_llm_calls=runner.ledger.remaining_calls,
         )
         decision = tools.decide(spec, context)
+        if decision.rule_id in {
+            "request.invalid_tool_contract",
+            "request.invalid_precision_claim",
+            "sandbox.typed_tool_first",
+            "sandbox.disabled",
+            "tool.unavailable",
+        }:
+            decision, repaired_spec = await self._repair_computation_contract(
+                problem,
+                spec,
+                decision,
+                author,
+                context=context,
+                runner=runner,
+                prompts=prompts,
+                tools=tools,
+                budget_bucket=budget_bucket,
+            )
+            if repaired_spec is None:
+                return decision, None
+            spec = repaired_spec
         if decision.decision != ComputationDecisionStatus.ALLOW:
             return decision, None
 
         program: ExperimentProgram | None = None
-        if spec.method == ComputationMethod.SANDBOXED_PYTHON:
+        if spec.method == ComputationMethod.SANDBOXED_PYTHON and not decision.cache_hit:
+            tools.update_experiment_activity(
+                spec,
+                phase="code_generation",
+                detail=(
+                    "正在生成受约束的 Python 实验程序"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else "Generating the constrained Python experiment program"
+                ),
+                event_type="computation_code_generation",
+                progress=0.35,
+                metrics={
+                    "decision": decision.decision.value,
+                    "decision_reason": decision.reason,
+                    "rule_id": decision.rule_id,
+                    "cache_hit": decision.cache_hit,
+                },
+            )
             try:
                 code_agent = runner.pool.select("experimenter", exclude={author.id})
             except RuntimeError:
@@ -1881,9 +6378,447 @@ class ProofMeshOrchestrator:
             if code_result is not None:
                 program = code_result.value
                 program.experiment_id = spec.experiment_id
+            else:
+                failed_decision = decision.model_copy(deep=True)
+                failed_decision.decision = ComputationDecisionStatus.REJECT
+                failed_decision.reason = (
+                    "The bounded sandbox fallback was admitted, but no valid "
+                    "ExperimentProgram was generated. Nothing was executed."
+                )
+                failed_decision.rule_id = "sandbox.codegen_failed"
+                tools.cache.save_decision(failed_decision)
+                tools.update_experiment_activity(
+                    spec,
+                    phase="code_generation_failed",
+                    detail=failed_decision.reason,
+                    status=ActivityStatus.FAILED,
+                    event_type="computation_code_generation_failed",
+                    progress=1.0,
+                    metrics={
+                        "decision": failed_decision.decision.value,
+                        "decision_reason": failed_decision.reason,
+                        "rule_id": failed_decision.rule_id,
+                        "cache_hit": False,
+                        "contract_repair_status": (
+                            failed_decision.contract_repair_status.value
+                        ),
+                        "original_request_hash": (
+                            failed_decision.original_request_hash
+                        ),
+                        "contract_repair_reason": (
+                            failed_decision.contract_repair_reason
+                        ),
+                    },
+                )
+                return failed_decision, None
 
-        result = tools.run_experiment(spec, decision, program=program)
+        # Sandbox execution is blocking. Run it off the event loop so the desktop
+        # can receive and render the already-created computation node immediately.
+        result = await asyncio.to_thread(
+            tools.run_experiment,
+            spec,
+            decision,
+            program=program,
+        )
         return decision, result
+
+    async def _repair_computation_contract(
+        self,
+        problem: ProblemContract,
+        original_spec: ExperimentSpec,
+        original_decision: ComputationDecision,
+        author: AgentRuntime,
+        *,
+        context: ComputationContext,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        tools: ToolBroker,
+        budget_bucket: str,
+    ) -> tuple[ComputationDecision, ExperimentSpec | None]:
+        issues = validate_experiment_contract(original_spec)
+        if not issues:
+            issues = [original_decision.reason]
+        if self.config.computation.max_contract_repairs_per_segment <= 0:
+            return (
+                self._finish_computation_contract_repair(
+                    original_spec,
+                    original_decision,
+                    tools=tools,
+                    status=ComputationContractRepairStatus.DISABLED,
+                    reason=(
+                        "The request was not executed because bounded contract "
+                        "repair is disabled in this profile."
+                    ),
+                    issues=issues,
+                ),
+                None,
+            )
+        if runner.ledger.remaining_calls <= 0:
+            return (
+                self._finish_computation_contract_repair(
+                    original_spec,
+                    original_decision,
+                    tools=tools,
+                    status=ComputationContractRepairStatus.FAILED,
+                    reason=(
+                        "The request was not executed because no LLM call remained "
+                        "for the bounded contract repair."
+                    ),
+                    issues=issues,
+                ),
+                None,
+            )
+
+        repair_agent = author
+        repair_role = "explorer"
+        for role in ("experimenter", "planner"):
+            try:
+                repair_agent = runner.pool.select(role, exclude={author.id})
+                repair_role = role
+                break
+            except RuntimeError:
+                continue
+        if repair_agent is author:
+            if "planner" in author.config.roles:
+                repair_role = "planner"
+            elif "experimenter" in author.config.roles:
+                repair_role = "experimenter"
+
+        sandbox_enabled = (
+            self.config.computation.sandboxed_python_enabled
+            and ComputationMethod.SANDBOXED_PYTHON.value in problem.allowed_tools
+        )
+        base_bundle = prompts.computation_contract_repair(
+            problem,
+            original_spec,
+            issues,
+            repair_agent.id,
+            sandbox_enabled=sandbox_enabled,
+        )
+        bundle = PromptBundle(
+            base_bundle.stage,
+            base_bundle.system,
+            base_bundle.user,
+            base_bundle.response_model,
+            temperature=0.0,
+            max_output_tokens=min(
+                self.config.computation.contract_repair_max_output_tokens,
+                repair_agent.config.max_output_tokens,
+            ),
+            output_tier=base_bundle.output_tier,
+        )
+        tools.update_experiment_activity(
+            original_spec,
+            phase="contract_repair",
+            detail=(
+                "The request failed pre-execution validation; compiling one "
+                "semantics-preserving replacement."
+            ),
+            event_type="computation_contract_repair_started",
+            progress=0.12,
+            metrics={
+                "decision": original_decision.decision.value,
+                "decision_reason": original_decision.reason,
+                "rule_id": original_decision.rule_id,
+                "cache_hit": False,
+                "contract_repair_status": "running",
+                "original_request_hash": original_spec.request_hash,
+            },
+        )
+        repair_result = await self._safe_call(
+            runner,
+            repair_role,
+            bundle,
+            fixed_agent=repair_agent,
+            budget_bucket=budget_bucket,
+        )
+        if repair_result is None:
+            return (
+                self._finish_computation_contract_repair(
+                    original_spec,
+                    original_decision,
+                    tools=tools,
+                    status=ComputationContractRepairStatus.FAILED,
+                    reason=(
+                        "The single bounded repair call returned no valid "
+                        "ComputationContractRepair object. Nothing was executed."
+                    ),
+                    issues=issues,
+                    repair_agent_id=repair_agent.id,
+                ),
+                None,
+            )
+
+        repair: ComputationContractRepair = repair_result.value
+        if repair.action == ComputationContractRepairAction.ABANDON_AS_UNREPRESENTABLE:
+            return (
+                self._finish_computation_contract_repair(
+                    original_spec,
+                    original_decision,
+                    tools=tools,
+                    status=ComputationContractRepairStatus.ABANDONED,
+                    reason=repair.reason,
+                    issues=issues,
+                    repair=repair,
+                    repair_agent_id=repair_result.agent.id,
+                    raw_ref=repair_result.raw_ref,
+                ),
+                None,
+            )
+
+        assert repair.repaired_spec is not None
+        repaired_spec = repair.repaired_spec
+        immutable_fields = (
+            "purpose",
+            "target_claim",
+            "assumptions",
+            "reasoning_basis",
+            "why_computation_is_needed",
+            "decision_if_confirmed",
+            "decision_if_refuted",
+            "noncomputational_alternative",
+            "broad_search",
+            "max_cases",
+            "seed",
+        )
+        changed_fields = [
+            name
+            for name in immutable_fields
+            if getattr(repaired_spec, name) != getattr(original_spec, name)
+        ]
+        if changed_fields:
+            return (
+                self._finish_computation_contract_repair(
+                    original_spec,
+                    original_decision,
+                    tools=tools,
+                    status=ComputationContractRepairStatus.FAILED,
+                    reason=(
+                        "The repair attempted to change immutable computation "
+                        f"semantics: {', '.join(changed_fields)}. Nothing was executed."
+                    ),
+                    issues=issues,
+                    repair=repair,
+                    repair_agent_id=repair_result.agent.id,
+                    raw_ref=repair_result.raw_ref,
+                ),
+                None,
+            )
+
+        repaired_payload = repaired_spec.model_dump(
+            mode="json",
+            exclude={"request_hash", "runtime_fingerprint"},
+        )
+        repaired_payload.update(
+            {
+                "experiment_id": original_spec.experiment_id,
+                "requested_by": author.id,
+                "path_id": context.path_id,
+                "parent_checkpoint_id": original_spec.parent_checkpoint_id,
+                "runtime_fingerprint": {},
+                "request_hash": "",
+            }
+        )
+        repaired_spec = ExperimentSpec.model_validate(repaired_payload)
+        if (
+            problem.allowed_tools
+            and repaired_spec.method.value not in problem.allowed_tools
+        ):
+            repaired_issues = [
+                f"method {repaired_spec.method.value} is not enabled for this run"
+            ]
+        else:
+            repaired_issues = validate_experiment_contract(repaired_spec)
+        if repaired_issues:
+            return (
+                self._finish_computation_contract_repair(
+                    original_spec,
+                    original_decision,
+                    tools=tools,
+                    status=ComputationContractRepairStatus.FAILED,
+                    reason=(
+                        "The single replacement request still failed validation: "
+                        + "; ".join(repaired_issues)
+                    ),
+                    issues=[*issues, *repaired_issues],
+                    repair=repair,
+                    repair_agent_id=repair_result.agent.id,
+                    raw_ref=repair_result.raw_ref,
+                ),
+                None,
+            )
+
+        repaired_context = ComputationContext(
+            path_id=context.path_id,
+            stalled_rounds=context.stalled_rounds,
+            meta_review_approved=context.meta_review_approved,
+            remaining_llm_calls=runner.ledger.remaining_calls,
+        )
+        repaired_decision = tools.decide(repaired_spec, repaired_context)
+        repaired_decision.contract_repair_status = (
+            ComputationContractRepairStatus.SUCCEEDED
+        )
+        repaired_decision.original_request_hash = original_spec.request_hash
+        repaired_decision.contract_repair_reason = repair.reason
+        tools.cache.save_decision(repaired_decision)
+        record = self._computation_contract_repair_record(
+            original_spec,
+            repaired_spec,
+            original_decision,
+            repaired_decision,
+            status=ComputationContractRepairStatus.SUCCEEDED,
+            reason=repair.reason,
+            issues=issues,
+            repair=repair,
+            repair_agent_id=repair_result.agent.id,
+            raw_ref=repair_result.raw_ref,
+        )
+        tools.store.write_experiment_artifact(
+            original_spec.request_hash, "contract_repair", record
+        )
+        tools.store.write_experiment_artifact(
+            repaired_spec.request_hash, "contract_repair", record
+        )
+        tools.store.append_event("computation_contract_repaired", record)
+        tools.update_experiment_activity(
+            repaired_spec,
+            phase=(
+                "contract_repaired"
+                if repaired_decision.decision == ComputationDecisionStatus.ALLOW
+                else repaired_decision.decision.value
+            ),
+            detail=(
+                "Contract repair succeeded. " + repaired_decision.reason
+                if repaired_decision.decision == ComputationDecisionStatus.ALLOW
+                else repaired_decision.reason
+            ),
+            status=(
+                ActivityStatus.RUNNING
+                if repaired_decision.decision == ComputationDecisionStatus.ALLOW
+                else ActivityStatus.WARNING
+            ),
+            event_type=(
+                "computation_contract_repaired"
+                if repaired_decision.decision == ComputationDecisionStatus.ALLOW
+                else "computation_not_executed"
+            ),
+            progress=(
+                0.25
+                if repaired_decision.decision == ComputationDecisionStatus.ALLOW
+                else 1.0
+            ),
+            metrics={
+                "decision": repaired_decision.decision.value,
+                "decision_reason": repaired_decision.reason,
+                "rule_id": repaired_decision.rule_id,
+                "cache_hit": repaired_decision.cache_hit,
+                "contract_repair_status": (
+                    repaired_decision.contract_repair_status.value
+                ),
+                "original_request_hash": original_spec.request_hash,
+                "contract_repair_reason": repair.reason,
+            },
+        )
+        return repaired_decision, repaired_spec
+
+    def _finish_computation_contract_repair(
+        self,
+        original_spec: ExperimentSpec,
+        original_decision: ComputationDecision,
+        *,
+        tools: ToolBroker,
+        status: ComputationContractRepairStatus,
+        reason: str,
+        issues: list[str],
+        repair: ComputationContractRepair | None = None,
+        repair_agent_id: str | None = None,
+        raw_ref: str | None = None,
+    ) -> ComputationDecision:
+        final_decision = original_decision.model_copy(deep=True)
+        final_decision.decision = ComputationDecisionStatus.REJECT
+        final_decision.rule_id = {
+            ComputationContractRepairStatus.ABANDONED: (
+                "request.contract_unrepresentable"
+            ),
+            ComputationContractRepairStatus.DISABLED: (
+                "request.contract_repair_disabled"
+            ),
+        }.get(status, "request.contract_repair_failed")
+        final_decision.reason = reason
+        final_decision.contract_repair_status = status
+        final_decision.original_request_hash = original_spec.request_hash
+        final_decision.contract_repair_reason = reason
+        tools.cache.save_decision(final_decision)
+        record = self._computation_contract_repair_record(
+            original_spec,
+            None,
+            original_decision,
+            final_decision,
+            status=status,
+            reason=reason,
+            issues=issues,
+            repair=repair,
+            repair_agent_id=repair_agent_id,
+            raw_ref=raw_ref,
+        )
+        tools.store.write_experiment_artifact(
+            original_spec.request_hash, "contract_repair", record
+        )
+        tools.store.append_event("computation_contract_repair_finished", record)
+        tools.update_experiment_activity(
+            original_spec,
+            phase=final_decision.rule_id,
+            detail=reason,
+            status=ActivityStatus.WARNING,
+            event_type="computation_not_executed",
+            progress=1.0,
+            metrics={
+                "decision": final_decision.decision.value,
+                "decision_reason": final_decision.reason,
+                "rule_id": final_decision.rule_id,
+                "cache_hit": False,
+                "contract_repair_status": status.value,
+                "original_request_hash": original_spec.request_hash,
+                "contract_repair_reason": reason,
+            },
+        )
+        return final_decision
+
+    @staticmethod
+    def _computation_contract_repair_record(
+        original_spec: ExperimentSpec,
+        repaired_spec: ExperimentSpec | None,
+        original_decision: ComputationDecision,
+        final_decision: ComputationDecision,
+        *,
+        status: ComputationContractRepairStatus,
+        reason: str,
+        issues: list[str],
+        repair: ComputationContractRepair | None,
+        repair_agent_id: str | None,
+        raw_ref: str | None,
+    ) -> dict[str, Any]:
+        return {
+            "experiment_id": original_spec.experiment_id,
+            "status": status.value,
+            "issues": issues,
+            "reason": reason,
+            "original_request_hash": original_spec.request_hash,
+            "original_method": original_spec.method.value,
+            "repaired_request_hash": (
+                repaired_spec.request_hash if repaired_spec is not None else None
+            ),
+            "repaired_method": (
+                repaired_spec.method.value if repaired_spec is not None else None
+            ),
+            "original_decision": original_decision.model_dump(mode="json"),
+            "final_decision": final_decision.model_dump(mode="json"),
+            "repair_response": (
+                repair.model_dump(mode="json") if repair is not None else None
+            ),
+            "repair_agent_id": repair_agent_id,
+            "raw_artifact_ref": raw_ref,
+        }
 
     @staticmethod
     def _experiment_context(
@@ -1911,12 +6846,614 @@ class ProofMeshOrchestrator:
             context.append(payload)
         return context
 
+    def _hierarchical_route_prompt_context(
+        self,
+        state: SolveState | None,
+        *,
+        strategy_id: str,
+        current_round: int,
+    ) -> tuple[str | None, list[MessageEnvelope], dict[str, Any]]:
+        if self.config.topology.mode != "hierarchical_sparse":
+            return None, [], {}
+        if not self.config.topology.typed_communication.enabled:
+            raise RuntimeError(
+                "hierarchical_sparse route prompts require typed communication"
+            )
+        if (
+            state is None
+            or state.route_registry is None
+            or state.message_broker is None
+            or state.typed_memory is None
+        ):
+            raise RuntimeError(
+                "hierarchical_sparse route prompt context is not initialized"
+            )
+        route_id = self._route_for_strategy(state, strategy_id)
+        if route_id is None:
+            raise RuntimeError(
+                f"hierarchical_sparse route is missing for strategy {strategy_id}"
+            )
+
+        delivered, context = build_route_prompt_context(
+            self.config,
+            route_id=route_id,
+            current_round=current_round,
+            broker=state.message_broker,
+            typed_memory=state.typed_memory,
+            proof_graph=state.proof_graph,
+        )
+        return route_id, delivered, context
+
+    @staticmethod
+    def _acknowledge_route_messages(
+        broker: MessageBroker,
+        delivered: Sequence[MessageEnvelope],
+        receipts: Sequence[MessageReceipt],
+        *,
+        route_id: str,
+        current_round: int,
+    ) -> list[MessageReceipt]:
+        return acknowledge_route_messages(
+            broker,
+            delivered,
+            receipts,
+            route_id=route_id,
+            current_round=current_round,
+        )
+
+    async def _run_active_route_team(
+        self,
+        state: SolveState | None,
+        *,
+        problem: ProblemContract,
+        strategy: StrategyCard,
+        checkpoint: ProofCheckpoint,
+        delta: ProofDelta,
+        attempt_id: str,
+        author: AgentRuntime,
+        round_index: int,
+        experiment_results: Sequence[dict[str, Any]],
+        route_context: dict[str, Any],
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        store: ArtifactStore,
+        tools: ToolBroker,
+    ) -> Any | None:
+        if (
+            state is None
+            or state.route_registry is None
+            or not self.config.topology.route_teams.enabled
+            or self.config.topology.mode != "hierarchical_sparse"
+        ):
+            return None
+        route_id = self._route_for_strategy(state, strategy.strategy_id)
+        if route_id is None:
+            return None
+
+        team = RouteTeam(
+            self.config,
+            RoleRunner(runner.pool, state.route_registry),
+        )
+        risk_artifact = delta.model_dump(mode="json")
+        if experiment_results:
+            risk_artifact["evidence_type"] = EvidenceType.BOUNDED_EXPERIMENT.value
+            risk_artifact["tool_requests"] = [
+                item.get("request_hash") or item.get("experiment_id")
+                for item in experiment_results
+            ]
+        plan = team.plan(
+            route_id,
+            author.id,
+            risk_artifact,
+            round_index=round_index,
+            entering_global_fact_gate=bool(delta.new_claims or delta.proof_complete),
+        )
+        store.append_event(
+            "route_team_started",
+            {
+                "route_id": route_id,
+                "attempt_id": attempt_id,
+                "delta_id": delta.delta_id,
+                "prover_agent_id": author.id,
+                "skeptic_agent_id": (
+                    plan.skeptic.agent_id if plan.skeptic is not None else None
+                ),
+                "tool_agent_id": (
+                    plan.tool_specialist.agent_id
+                    if plan.tool_specialist is not None
+                    else None
+                ),
+                "referee_agent_id": plan.referee.agent_id,
+                "risk_score": plan.risk.score,
+                "risk_reasons": list(plan.risk.reasons),
+            },
+        )
+
+        async def skeptic_handler(assignment: Any, artifact: Any) -> Any:
+            skeptic = team.role_runner.runtime(assignment)
+            call = await self._safe_call(
+                runner,
+                "route_skeptic",
+                prompts.route_skeptic(
+                    problem=problem,
+                    route_id=route_id,
+                    strategy=strategy,
+                    parent_checkpoint=checkpoint,
+                    candidate_delta=artifact,
+                    fact_inbox=route_context.get("fact_inbox", []),
+                    negative_memory=route_context.get("negative_memory", []),
+                    open_obligations=route_context.get("open_obligations", []),
+                    repair_request=False,
+                ),
+                fixed_agent=skeptic,
+                budget_bucket="verification",
+            )
+            if call is None:
+                return None
+            report: VerificationReport = call.value
+            report.target_id = delta.delta_id
+            report.target_type = "proof_delta"
+            report.agent_id = skeptic.id
+            report.stage = VerificationStage.DETAILED
+            report.raw_artifact_ref = call.raw_ref
+            report.usage = call.usage
+            store.write_json(
+                "structured",
+                f"route_skeptic_{delta.delta_id}_{skeptic.id}",
+                report,
+            )
+            store.append_event("route_skeptic_completed", report)
+            return report
+
+        async def tool_handler(assignment: Any, artifact: Any) -> Any:
+            specialist = team.role_runner.runtime(assignment)
+            expected_request_hashes = {
+                str(item.get("request_hash"))
+                for item in experiment_results
+                if item.get("request_hash")
+            }
+            replay_audits = [
+                item
+                for item in tools.audit_key_results()
+                if str(item.get("request_hash")) in expected_request_hashes
+            ]
+            call = await self._safe_call(
+                runner,
+                "tool_specialist",
+                prompts.route_tool_audit(
+                    problem=problem,
+                    route_id=route_id,
+                    strategy=strategy,
+                    candidate_delta=artifact,
+                    experiment_results=list(experiment_results),
+                    deterministic_replay_audits=replay_audits,
+                    authoritative_agent_id=specialist.id,
+                ),
+                fixed_agent=specialist,
+                budget_bucket="verification",
+            )
+            if call is None:
+                return None
+            audit: ToolAuditReport = call.value
+            replayed_hashes = {str(item.get("request_hash")) for item in replay_audits}
+            reported_experiments_match = (
+                set(audit.experiment_ids) == expected_request_hashes
+            )
+            deterministic_pass = (
+                bool(expected_request_hashes)
+                and replayed_hashes == expected_request_hashes
+                and reported_experiments_match
+                and all(bool(item.get("valid", False)) for item in replay_audits)
+                and all(
+                    item.get("outcome") != ExperimentOutcome.COUNTEREXAMPLE_FOUND.value
+                    or bool(item.get("independently_verified"))
+                    for item in experiment_results
+                )
+            )
+            audit.agent_id = specialist.id
+            audit.route_id = route_id
+            audit.experiment_ids = sorted(expected_request_hashes)
+            audit.all_results_replayed_independently = (
+                audit.all_results_replayed_independently and deterministic_pass
+            )
+            if not audit.all_results_replayed_independently:
+                audit.verdict = "fail"
+                audit.issues = list(
+                    dict.fromkeys(
+                        [
+                            *audit.issues,
+                            "deterministic replay or authoritative experiment-ID gate did not pass",
+                        ]
+                    )
+                )
+            audit.replay_artifact_refs = list(
+                dict.fromkeys(
+                    [
+                        *audit.replay_artifact_refs,
+                        *[
+                            str(item.get("artifact_ref"))
+                            for item in replay_audits
+                            if item.get("artifact_ref")
+                        ],
+                    ]
+                )
+            )
+            store.write_json(
+                "structured",
+                f"route_tool_audit_{delta.delta_id}_{specialist.id}",
+                audit,
+            )
+            store.append_event("route_tool_audit_completed", audit)
+            return audit
+
+        async def referee_handler(assignment: Any, sanitized: Any) -> Any:
+            referee = team.role_runner.runtime(assignment)
+            message_id = f"route_artifact_{delta.delta_id}"
+            call = await self._safe_call(
+                runner,
+                "route_referee",
+                prompts.route_referee(
+                    problem=problem,
+                    candidate_message_id=message_id,
+                    route_id=route_id,
+                    author_agent_id=author.id,
+                    sanitized_artifact=sanitized,
+                    required_fact_threshold=(
+                        self.config.topology.typed_memory.fact_pass_threshold
+                    ),
+                ),
+                fixed_agent=referee,
+                budget_bucket="verification",
+            )
+            if call is None:
+                return None
+            decision: BrokerDecision = call.value
+            decision.message_id = message_id
+            store.write_json(
+                "structured",
+                f"route_referee_{delta.delta_id}_{referee.id}",
+                decision,
+            )
+            store.append_event("route_referee_completed", decision)
+            return decision
+
+        result = await team.run(
+            plan,
+            delta,
+            skeptic_handler=skeptic_handler,
+            tool_handler=tool_handler,
+            referee_handler=referee_handler,
+        )
+        reviewer_verdicts = []
+        if isinstance(result.skeptic_result, VerificationReport):
+            reviewer_verdicts.append(result.skeptic_result.verdict.value)
+        if isinstance(result.referee_result, BrokerDecision):
+            reviewer_verdicts.append(
+                "pass" if result.referee_result.accepted else "fail"
+            )
+        referee_runtime = (
+            team.role_runner.runtime(plan.referee)
+            if plan.referee.agent_id is not None
+            else None
+        )
+        assigned_agent_ids = {
+            author.id,
+            plan.skeptic.agent_id if plan.skeptic is not None else None,
+            plan.tool_specialist.agent_id if plan.tool_specialist is not None else None,
+            plan.referee.agent_id,
+        }
+        cross_provider_candidates = [
+            candidate
+            for candidate in runner.pool.agents
+            if candidate.id not in assigned_agent_ids
+            and candidate.provider != author.provider
+            and candidate.supports_role("route_referee")
+            and not candidate.in_cooldown
+        ]
+        existing_cross_provider_review = (
+            referee_runtime is not None
+            and referee_runtime.provider != author.provider
+            and isinstance(result.referee_result, BrokerDecision)
+        )
+        escalation_plan = (
+            state.validation_escalator
+            or ValidationEscalator(self.config.topology.validation_escalation)
+        ).plan(
+            risk_score=plan.risk.score,
+            reviewer_verdicts=reviewer_verdicts,
+            cross_provider_available=(
+                existing_cross_provider_review or bool(cross_provider_candidates)
+            ),
+            tool_or_formal_available=result.tool_result is not None,
+            before_fact_promotion=bool(delta.new_claims or delta.proof_complete),
+        )
+        cross_provider_referee = (
+            referee_runtime if existing_cross_provider_review else None
+        )
+        cross_provider_decision = (
+            result.referee_result if existing_cross_provider_review else None
+        )
+        if (
+            ValidationLevel.CROSS_PROVIDER in escalation_plan.levels
+            and cross_provider_decision is None
+            and cross_provider_candidates
+        ):
+            cross_provider_referee = max(
+                cross_provider_candidates,
+                key=lambda candidate: (
+                    runner.pool.capability_score(candidate, "route_referee"),
+                    candidate.trust_score,
+                    candidate.id,
+                ),
+            )
+            cross_call = await self._safe_call(
+                runner,
+                "route_referee",
+                prompts.route_referee(
+                    problem=problem,
+                    candidate_message_id=f"route_artifact_{delta.delta_id}",
+                    route_id=route_id,
+                    author_agent_id=author.id,
+                    sanitized_artifact={
+                        "artifact": delta.model_dump(mode="json"),
+                        "skeptic_result": result.skeptic_result,
+                        "tool_result": result.tool_result,
+                    },
+                    required_fact_threshold=(
+                        self.config.topology.typed_memory.fact_pass_threshold
+                    ),
+                    validation_level=ValidationLevel.CROSS_PROVIDER.value,
+                ),
+                fixed_agent=cross_provider_referee,
+                budget_bucket="verification",
+            )
+            if cross_call is not None:
+                cross_provider_decision = cross_call.value
+                cross_provider_decision.message_id = f"route_artifact_{delta.delta_id}"
+                store.write_json(
+                    "structured",
+                    f"route_cross_provider_referee_{delta.delta_id}_{cross_provider_referee.id}",
+                    cross_provider_decision,
+                )
+                store.append_event(
+                    "route_cross_provider_referee_completed",
+                    {
+                        "agent_id": cross_provider_referee.id,
+                        "provider": cross_provider_referee.provider,
+                        **cross_provider_decision.model_dump(mode="json"),
+                    },
+                )
+        execution = await ValidationEscalationExecutor().execute(
+            escalation_plan,
+            {
+                ValidationLevel.DETERMINISTIC: lambda: ValidationStepResult(
+                    level=ValidationLevel.DETERMINISTIC,
+                    executed=True,
+                    passed=(
+                        delta.problem_hash == problem.integrity_hash
+                        and delta.parent_checkpoint_id == checkpoint.checkpoint_id
+                        and delta.segment_index == checkpoint.segment_index + 1
+                    ),
+                    evidence_refs=[delta.delta_id],
+                ),
+                ValidationLevel.BLIND_SAME_MODEL: lambda: ValidationStepResult(
+                    level=ValidationLevel.BLIND_SAME_MODEL,
+                    executed=isinstance(result.skeptic_result, VerificationReport),
+                    passed=(
+                        isinstance(result.skeptic_result, VerificationReport)
+                        and result.skeptic_result.verdict == VerificationVerdict.PASS
+                        and result.skeptic_result.agent_id != author.id
+                    ),
+                    evidence_refs=(
+                        [result.skeptic_result.raw_artifact_ref]
+                        if isinstance(result.skeptic_result, VerificationReport)
+                        and result.skeptic_result.raw_artifact_ref
+                        else []
+                    ),
+                ),
+                ValidationLevel.ADVERSARIAL_BLIND: lambda: ValidationStepResult(
+                    level=ValidationLevel.ADVERSARIAL_BLIND,
+                    executed=isinstance(result.referee_result, BrokerDecision),
+                    passed=(
+                        isinstance(result.referee_result, BrokerDecision)
+                        and result.referee_result.accepted
+                        and plan.referee.agent_id
+                        not in {
+                            author.id,
+                            plan.skeptic.agent_id if plan.skeptic else None,
+                            plan.tool_specialist.agent_id
+                            if plan.tool_specialist
+                            else None,
+                        }
+                    ),
+                    evidence_refs=[f"route_referee:{delta.delta_id}"],
+                ),
+                ValidationLevel.CROSS_PROVIDER: lambda: ValidationStepResult(
+                    level=ValidationLevel.CROSS_PROVIDER,
+                    executed=(
+                        cross_provider_referee is not None
+                        and isinstance(cross_provider_decision, BrokerDecision)
+                    ),
+                    passed=(
+                        cross_provider_referee is not None
+                        and cross_provider_referee.provider != author.provider
+                        and isinstance(cross_provider_decision, BrokerDecision)
+                        and cross_provider_decision.accepted
+                    ),
+                    evidence_refs=[f"route_cross_provider_referee:{delta.delta_id}"],
+                ),
+                ValidationLevel.TOOL_OR_FORMAL: lambda: ValidationStepResult(
+                    level=ValidationLevel.TOOL_OR_FORMAL,
+                    executed=result.tool_result is not None,
+                    passed=(
+                        isinstance(result.tool_result, ToolAuditReport)
+                        and result.tool_result.verdict == "pass"
+                        and result.tool_result.mathematical_mapping_checked
+                        and result.tool_result.all_results_replayed_independently
+                    ),
+                    evidence_refs=[
+                        str(item.get("request_hash") or item.get("experiment_id"))
+                        for item in experiment_results
+                    ],
+                ),
+            },
+        )
+        result.global_share_allowed = (
+            result.global_share_allowed and execution.fact_promotion_allowed
+        )
+        store.append_event(
+            "validation_escalation_executed",
+            {
+                "target_id": delta.delta_id,
+                **execution.model_dump(mode="json"),
+            },
+        )
+        summary = {
+            "route_id": route_id,
+            "attempt_id": attempt_id,
+            "delta_id": delta.delta_id,
+            "prover_agent_id": author.id,
+            "skeptic_agent_id": (
+                plan.skeptic.agent_id if plan.skeptic is not None else None
+            ),
+            "tool_agent_id": (
+                plan.tool_specialist.agent_id
+                if plan.tool_specialist is not None
+                else None
+            ),
+            "referee_agent_id": plan.referee.agent_id,
+            "skeptic_verdict": (
+                result.skeptic_result.verdict.value
+                if isinstance(result.skeptic_result, VerificationReport)
+                else None
+            ),
+            "skeptic_failure_level": (
+                result.skeptic_result.failure_level.value
+                if isinstance(result.skeptic_result, VerificationReport)
+                else None
+            ),
+            "skeptic_confidence": (
+                result.skeptic_result.confidence
+                if isinstance(result.skeptic_result, VerificationReport)
+                else None
+            ),
+            "skeptic_first_error_step": (
+                result.skeptic_result.first_error_step
+                if isinstance(result.skeptic_result, VerificationReport)
+                else None
+            ),
+            "referee_accepted": (
+                result.referee_result.accepted
+                if isinstance(result.referee_result, BrokerDecision)
+                else False
+            ),
+            "global_share_allowed": result.global_share_allowed,
+            "validation_passed": execution.passed,
+            "validation_execution": execution.model_dump(mode="json"),
+            "diagnostics": list(result.diagnostics),
+        }
+        if state.route_team_reviews is None:
+            state.route_team_reviews = {}
+        state.route_team_reviews.setdefault(attempt_id, []).append(summary)
+        store.append_event("route_local_review_completed", summary)
+        return result
+
+    def _record_route_checkpoint_outcome(
+        self,
+        state: SolveState | None,
+        *,
+        attempt_id: str,
+        delta: ProofDelta,
+        reports: Sequence[VerificationReport],
+        accepted: bool,
+        feedback: str,
+        store: ArtifactStore,
+    ) -> None:
+        """Persist delta rejection at route scope so a blank Attempt cannot erase it."""
+
+        if state is None:
+            return
+        if state.route_team_reviews is None:
+            state.route_team_reviews = {}
+        reviews = state.route_team_reviews.setdefault(attempt_id, [])
+        summary = next(
+            (
+                item
+                for item in reversed(reviews)
+                if item.get("delta_id") == delta.delta_id
+            ),
+            None,
+        )
+        if summary is None:
+            summary = {
+                "route_id": self._route_for_strategy(state, delta.strategy_id),
+                "attempt_id": attempt_id,
+                "delta_id": delta.delta_id,
+                "prover_agent_id": delta.agent_id,
+                "diagnostics": [],
+            }
+            reviews.append(summary)
+
+        failed = [
+            report for report in reports if report.verdict == VerificationVerdict.FAIL
+        ]
+        uncertain = [
+            report
+            for report in reports
+            if report.verdict == VerificationVerdict.UNCERTAIN
+        ]
+        failure_order = {
+            FailureLevel.NONE: 0,
+            FailureLevel.EXECUTION: 1,
+            FailureLevel.PLAN: 2,
+            FailureLevel.STRATEGY: 3,
+        }
+        strongest = max(
+            failed or uncertain,
+            key=lambda report: (
+                failure_order[report.failure_level],
+                report.confidence,
+            ),
+            default=None,
+        )
+        summary.update(
+            {
+                "checkpoint_status": (
+                    "accepted" if accepted else "rejected" if failed else "uncertain"
+                ),
+                "checkpoint_failure_level": (
+                    strongest.failure_level.value
+                    if strongest is not None
+                    else FailureLevel.NONE.value
+                ),
+                "checkpoint_failure_confidence": (
+                    strongest.confidence if strongest is not None else 0.0
+                ),
+                "checkpoint_first_error_step": (
+                    strongest.first_error_step if strongest is not None else None
+                ),
+                "checkpoint_feedback": feedback,
+            }
+        )
+        store.append_event(
+            "route_checkpoint_outcome_recorded",
+            {
+                "attempt_id": attempt_id,
+                "delta_id": delta.delta_id,
+                "checkpoint_status": summary["checkpoint_status"],
+                "failure_level": summary["checkpoint_failure_level"],
+                "confidence": summary["checkpoint_failure_confidence"],
+                "first_error_step": summary["checkpoint_first_error_step"],
+            },
+        )
+
     async def _explore_path(
         self,
         problem: ProblemContract,
         strategy: StrategyCard,
         agent: AgentRuntime,
         *,
+        state: SolveState | None = None,
         round_index: int,
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
@@ -1928,12 +7465,54 @@ class ProofMeshOrchestrator:
         previous_attempt: ProofAttempt | None,
         budget_bucket: str,
         computation_meta_approved: bool = False,
+        deep_exploration_meta_approved: bool = False,
+        max_segments_this_call: int | None = None,
     ) -> ProofAttempt:
+        path_id = (
+            previous_attempt.path_id
+            if previous_attempt and previous_attempt.path_id
+            else f"path_{strategy.strategy_id}"
+        )
+        calculation_gate = CriticalCalculationGate(self.config, tools, store)
+        strategy_gate = calculation_gate.evaluate_strategy(
+            strategy,
+            path_id=path_id,
+            requested_by=agent.id,
+        )
+        if not strategy_gate.passed:
+            reason = strategy_gate.concise_failure()
+            store.append_event(
+                "strategy_blocked_by_critical_calculation_gate",
+                {
+                    "strategy_id": strategy.strategy_id,
+                    "path_id": path_id,
+                    "agent_id": agent.id,
+                    "reason": reason,
+                },
+            )
+            blocked = self._failed_attempt(
+                problem,
+                strategy,
+                agent.id,
+                round_index,
+                RuntimeError(f"critical calculation gate blocked the route: {reason}"),
+            )
+            blocked.path_id = path_id
+            blocked.dead_ends = [
+                "Route admission blocked by the deterministic critical calculation "
+                f"gate: {reason}"
+            ]
+            blocked.unresolved_gaps = [
+                "Correct or declare the load-bearing finite calculation before "
+                "exploring this route."
+            ]
+            return blocked
         if self.config.continuation.enabled:
             return await self._explore_path_segmented(
                 problem,
                 strategy,
                 agent,
+                state=state,
                 round_index=round_index,
                 runner=runner,
                 prompts=prompts,
@@ -1945,11 +7524,14 @@ class ProofMeshOrchestrator:
                 previous_attempt=previous_attempt,
                 budget_bucket=budget_bucket,
                 computation_meta_approved=computation_meta_approved,
+                deep_exploration_meta_approved=deep_exploration_meta_approved,
+                max_segments_this_call=max_segments_this_call,
             )
         return await self._explore_path_legacy(
             problem,
             strategy,
             agent,
+            state=state,
             round_index=round_index,
             runner=runner,
             prompts=prompts,
@@ -1969,6 +7551,7 @@ class ProofMeshOrchestrator:
         strategy: StrategyCard,
         agent: AgentRuntime,
         *,
+        state: SolveState | None,
         round_index: int,
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
@@ -1980,8 +7563,18 @@ class ProofMeshOrchestrator:
         previous_attempt: ProofAttempt | None,
         budget_bucket: str,
         computation_meta_approved: bool,
+        deep_exploration_meta_approved: bool = False,
+        max_segments_this_call: int | None,
     ) -> ProofAttempt:
         cfg = self.config.continuation
+        self._ensure_hierarchical_prover(
+            state,
+            strategy,
+            agent,
+            round_index=round_index,
+            activity=runner.activity,
+            store=store,
+        )
         path_id = (
             previous_attempt.path_id
             if previous_attempt and previous_attempt.path_id
@@ -2051,45 +7644,276 @@ class ProofMeshOrchestrator:
         cumulative_usage = UsageRecord()
         latest_raw_ref: str | None = None
         verified_delta_claims: list[ClaimCard] = []
+        route_candidate_conjectures: list[CandidateConjecture] = list(
+            previous_attempt.candidate_conjectures if previous_attempt else []
+        )
         failover_chain: list[str] = []
 
-        for _ in range(cfg.segments_per_explore_call):
+        segment_limit = cfg.segments_per_explore_call
+        if max_segments_this_call is not None:
+            segment_limit = min(segment_limit, max_segments_this_call)
+        for _ in range(segment_limit):
             if (
                 checkpoint.proof_complete
                 or checkpoint.segment_index >= cfg.max_segments_per_path
             ):
                 break
-            relevant = router.relevant_claims(
-                memory.claims, strategy, targeted_feedback
+            relevant = (
+                []
+                if self.config.topology.mode == "hierarchical_sparse"
+                else router.relevant_claims(memory.claims, strategy, targeted_feedback)
+            )
+            route = (
+                state.route_registry.route_for_strategy(strategy.strategy_id)
+                if state is not None and state.route_registry is not None
+                else None
+            )
+            route_id = route.route_id if route is not None else None
+            if self.config.topology.mode == "hierarchical_sparse" and route_id is None:
+                raise RuntimeError(
+                    "hierarchical_sparse route is missing for strategy "
+                    f"{strategy.strategy_id}"
+                )
+            proof_debt_before = (
+                state.proof_graph.proof_debt(route_id)
+                if state is not None
+                and state.proof_graph is not None
+                and route_id is not None
+                else None
             )
             next_segment = checkpoint.segment_index + 1
+            current_goal_before_segment = checkpoint.current_goal
+            prior_working = store.load_latest_working_checkpoint(path_id)
+            if (
+                prior_working is not None
+                and prior_working.parent_verified_checkpoint_id
+                != checkpoint.checkpoint_id
+            ):
+                prior_working = None
+            deep_admission, deep_signature = self._admit_deep_exploration(
+                state,
+                problem=problem,
+                strategy=strategy,
+                checkpoint=checkpoint,
+                route_id=route_id,
+                round_index=round_index,
+                meta_approved=deep_exploration_meta_approved,
+                remaining_calls=runner.ledger.remaining_calls,
+                remaining_tokens=(
+                    None
+                    if self.config.budget.max_total_tokens is None
+                    else max(
+                        0,
+                        self.config.budget.max_total_tokens
+                        - runner.pool.total_tokens(),
+                    )
+                ),
+                store=store,
+            )
+            if deep_admission is not None and not deep_admission.allowed:
+                feedback = (
+                    "Deep exploration admission deferred this exact mathematical "
+                    f"state: {deep_admission.reason}. Use a verified checkpoint or a "
+                    "referee-confirmed different mechanism before requesting another "
+                    "high-token attempt."
+                )
+                targeted_feedback = [*targeted_feedback, feedback]
+                store.append_event(
+                    "deep_exploration_admission_deferred",
+                    {
+                        **deep_admission.model_dump(mode="json"),
+                        "route_id": route_id,
+                        "checkpoint_id": checkpoint.checkpoint_id,
+                    },
+                )
+                if route is not None:
+                    state.route_registry.mark_stalled(
+                        route.route_id,
+                        signature=deep_admission.signature_hash,
+                        reason=deep_admission.reason,
+                    )
+                break
+            if deep_admission is not None:
+                store.append_event(
+                    "deep_exploration_admitted",
+                    {
+                        **deep_admission.model_dump(mode="json"),
+                        "route_id": route_id,
+                        "checkpoint_id": checkpoint.checkpoint_id,
+                        "target_statement": (
+                            deep_signature.target_statement
+                            if deep_signature is not None
+                            else ""
+                        ),
+                    },
+                )
+                if runner.activity is not None:
+                    runner.activity.info(
+                        "deep_exploration_admitted",
+                        title="Deep exploration tier admitted",
+                        detail=(
+                            f"{strategy.title}: {deep_admission.max_output_tokens:,} "
+                            f"tokens; {deep_admission.reason}"
+                        ),
+                        stage="route_prove",
+                        agent_id=agent.id,
+                        importance=ActivityImportance.NORMAL,
+                        metrics={
+                            "route_id": route_id,
+                            "signature_hash": deep_admission.signature_hash,
+                            "requested_tier": deep_admission.requested_tier,
+                            "granted_tier": deep_admission.granted_tier,
+                            "max_output_tokens": deep_admission.max_output_tokens,
+                            "parallel_distinct_signatures_allowed": True,
+                        },
+                    )
+                if deep_admission.novelty_review_required and route is not None:
+                    route.stagnation_rounds = max(
+                        route.stagnation_rounds,
+                        self.config.topology.inspiration.stagnation_rounds,
+                    )
+                    store.append_event(
+                        "deep_exploration_novelty_review_requested",
+                        {
+                            "route_id": route.route_id,
+                            "signature_hash": deep_admission.signature_hash,
+                            "temporary_max_output_tokens": (
+                                deep_admission.max_output_tokens
+                            ),
+                            "reason": deep_admission.reason,
+                        },
+                    )
+            route_id, delivered_messages, route_context = (
+                self._hierarchical_route_prompt_context(
+                    state,
+                    strategy_id=strategy.strategy_id,
+                    current_round=round_index,
+                )
+            )
             experiment_results: list[dict[str, Any]] = []
             computation_feedback: list[dict[str, Any]] = []
-            compute_cycles = 0
-            confirmed_counterexample_pending = False
+            (
+                deferred_feedback,
+                deferred_results,
+                compute_cycles,
+                deferred_still_blocked,
+            ) = await self._retry_deferred_computations(
+                problem,
+                strategy,
+                agent,
+                state=state,
+                round_index=round_index,
+                path_id=path_id,
+                parent_checkpoint_id=checkpoint.checkpoint_id,
+                meta_review_approved=computation_meta_approved,
+                runner=runner,
+                prompts=prompts,
+                tools=tools,
+                budget_bucket=budget_bucket,
+                max_experiments=(
+                    self.config.computation.max_compute_cycles_per_segment
+                ),
+            )
+            computation_feedback.extend(deferred_feedback)
+            experiment_results.extend(deferred_results)
+            confirmed_counterexample_pending = any(
+                item.get("outcome") == ExperimentOutcome.COUNTEREXAMPLE_FOUND.value
+                and item.get("evidence_strength")
+                == EvidenceStrength.COUNTEREXAMPLE.value
+                and bool(item.get("independently_verified"))
+                for item in deferred_results
+            )
             delta: ProofDelta | None = None
             result: StructuredCallResult[Any] | None = None
             tried_agents: list[str] = []
+            receipts_processed = False
+            acknowledged_receipts: list[MessageReceipt] = []
+            segment_usage = UsageRecord()
+            deep_outcome: ExplorationOutcome | None = None
+            deep_outcome_reason = ""
+
+            if deferred_still_blocked:
+                deep_outcome = ExplorationOutcome.NO_VERIFIED_PROGRESS
+                deep_outcome_reason = (
+                    "a durable computation request remains deferred by its "
+                    "explicit stall or Meta-Reviewer gate"
+                )
+                self._finish_deep_exploration(
+                    state,
+                    deep_admission,
+                    outcome=deep_outcome,
+                    usage=segment_usage,
+                    checkpoint_after=checkpoint,
+                    proof_debt_before=proof_debt_before,
+                    current_goal_before=current_goal_before_segment,
+                    reason=deep_outcome_reason,
+                    store=store,
+                )
+                break
 
             while True:
 
                 def bundle_factory(current_agent: AgentRuntime) -> PromptBundle:
-                    bundle = prompts.continue_proof(
-                        problem,
-                        strategy.model_dump(mode="json"),
-                        checkpoint,
-                        current_agent.id,
-                        round_index,
-                        next_segment,
-                        [claim.model_dump(mode="json") for claim in relevant],
-                        targeted_feedback,
-                        max_new_steps=cfg.max_new_steps_per_call,
-                        max_new_claims=cfg.max_new_claims_per_call,
-                        checkpoint_policy=cfg.checkpoint_policy,
-                        remaining_call_budget=runner.ledger.remaining_calls,
-                        experiment_results=experiment_results,
-                        computation_feedback=computation_feedback,
-                    )
+                    if route_id is not None:
+                        bundle = prompts.route_prove(
+                            problem,
+                            authorized_output_tier=(
+                                deep_admission.granted_tier
+                                if deep_admission is not None
+                                and deep_admission.granted_tier is not None
+                                else 0
+                            ),
+                            strategy=strategy,
+                            checkpoint=checkpoint,
+                            previous_working_checkpoint=prior_working,
+                            agent_id=current_agent.id,
+                            # In hierarchical mode all cross-route knowledge must
+                            # pass through Broker + TypedMemory. LemmaMemory is a
+                            # legacy verifier/migration store, never a route inbox.
+                            verified_legacy_claims=[],
+                            targeted_feedback=targeted_feedback,
+                            experiment_results=experiment_results,
+                            computation_feedback=computation_feedback,
+                            continuation_limits={
+                                "checkpoint_policy": cfg.checkpoint_policy,
+                                "max_new_steps": cfg.max_new_steps_per_call,
+                                "max_new_claims": cfg.max_new_claims_per_call,
+                                "max_compute_cycles": self.config.computation.max_compute_cycles_per_segment,
+                            },
+                            authoritative_ids={
+                                "problem_hash": problem.integrity_hash,
+                                "path_id": checkpoint.path_id,
+                                "strategy_id": strategy.strategy_id,
+                                "parent_checkpoint_id": checkpoint.checkpoint_id,
+                                "agent_id": current_agent.id,
+                                "round_index": round_index,
+                                "segment_index": next_segment,
+                            },
+                            remaining_call_budget=runner.ledger.remaining_calls,
+                            **route_context,
+                        )
+                    else:
+                        if self.config.topology.mode == "hierarchical_sparse":
+                            raise RuntimeError(
+                                "hierarchical_sparse cannot fall back to the legacy "
+                                "proof_continuation prompt"
+                            )
+                        bundle = prompts.continue_proof(
+                            problem,
+                            strategy.model_dump(mode="json"),
+                            checkpoint,
+                            current_agent.id,
+                            round_index,
+                            next_segment,
+                            [claim.model_dump(mode="json") for claim in relevant],
+                            targeted_feedback,
+                            max_new_steps=cfg.max_new_steps_per_call,
+                            max_new_claims=cfg.max_new_claims_per_call,
+                            checkpoint_policy=cfg.checkpoint_policy,
+                            remaining_call_budget=runner.ledger.remaining_calls,
+                            experiment_results=experiment_results,
+                            computation_feedback=computation_feedback,
+                        )
                     return PromptBundle(
                         bundle.stage,
                         bundle.system,
@@ -2099,7 +7923,14 @@ class ProofMeshOrchestrator:
                         max_output_tokens=min(
                             cfg.max_output_tokens_per_segment,
                             current_agent.config.max_output_tokens,
+                            (
+                                deep_admission.max_output_tokens
+                                if deep_admission is not None
+                                and deep_admission.max_output_tokens is not None
+                                else cfg.max_output_tokens_per_segment
+                            ),
                         ),
+                        output_tier=bundle.output_tier,
                     )
 
                 try:
@@ -2114,9 +7945,34 @@ class ProofMeshOrchestrator:
                         and cfg.allow_cross_agent_failover,
                         failover_only_on_retryable=True,
                     )
-                except BudgetExhaustedError:
+                except (BudgetExhaustedError, ProviderCircuitOpenError) as exc:
+                    self._finish_deep_exploration(
+                        state,
+                        deep_admission,
+                        outcome=ExplorationOutcome.EXTERNAL_FAILURE,
+                        usage=segment_usage,
+                        checkpoint_after=checkpoint,
+                        proof_debt_before=proof_debt_before,
+                        current_goal_before=current_goal_before_segment,
+                        reason=type(exc).__name__,
+                        store=store,
+                    )
                     raise
                 except Exception as exc:
+                    failed_usage = getattr(exc, "usage", None)
+                    if isinstance(failed_usage, UsageRecord):
+                        cumulative_usage = self._sum_usage(
+                            [cumulative_usage, failed_usage]
+                        )
+                        segment_usage = self._sum_usage([segment_usage, failed_usage])
+                    if classify_no_artifact_failure(exc) is not None:
+                        deep_outcome = ExplorationOutcome.NO_ARTIFACT
+                        deep_outcome_reason = (
+                            "the route call returned no usable structured artifact"
+                        )
+                    else:
+                        deep_outcome = ExplorationOutcome.EXTERNAL_FAILURE
+                        deep_outcome_reason = type(exc).__name__
                     store.append_event(
                         "proof_continuation_failed",
                         {
@@ -2127,14 +7983,59 @@ class ProofMeshOrchestrator:
                             "error": str(exc),
                         },
                     )
-                    targeted_feedback = [
-                        *targeted_feedback,
-                        f"Continuation call failed after retry/failover: {type(exc).__name__}. Resume from checkpoint {checkpoint.checkpoint_id}.",
-                    ]
+                    failed_agents = list(getattr(exc, "tried_agents", []) or [])
+                    failover_chain = self._deduplicate_strings(
+                        [*failover_chain, *failed_agents]
+                    )
+                    bottleneck = await PostFailureBottleneckExtractor(
+                        self.config,
+                        runner,
+                        prompts,
+                        store,
+                    ).extract(
+                        exc,
+                        problem=problem,
+                        strategy=strategy,
+                        checkpoint=checkpoint,
+                        route_id=route_id,
+                        previous_working_checkpoint=prior_working,
+                        typed_public_context=route_context,
+                        has_candidate=bool(
+                            checkpoint.verified_steps
+                            or checkpoint.final_answer
+                            or (state is not None and state.attempts)
+                        ),
+                    )
+                    if bottleneck is not None:
+                        cumulative_usage = self._sum_usage(
+                            [cumulative_usage, bottleneck.diagnostic.usage]
+                        )
+                        self._materialize_post_failure_bottleneck(
+                            state, bottleneck.diagnostic
+                        )
+                        alternatives = ", ".join(
+                            bottleneck.diagnostic.alternative_mechanism_tags
+                        )
+                        targeted_feedback = [
+                            *targeted_feedback,
+                            (
+                                "Route-local post-failure bottleneck, diagnosed only "
+                                "from public checkpoint state: "
+                                f"{bottleneck.diagnostic.smallest_blocked_claim}. "
+                                "The failed call's private reasoning was not recovered. "
+                                f"Alternative mechanisms: {alternatives}."
+                            ),
+                        ]
+                    else:
+                        targeted_feedback = [
+                            *targeted_feedback,
+                            f"Continuation call failed after retry/failover: {type(exc).__name__}. Resume from checkpoint {checkpoint.checkpoint_id}.",
+                        ]
                     break
 
                 latest_raw_ref = result.raw_ref
                 cumulative_usage = self._sum_usage([cumulative_usage, result.usage])
+                segment_usage = self._sum_usage([segment_usage, result.usage])
                 tried_agents = self._deduplicate_strings([*tried_agents, *just_tried])
                 failover_chain = self._deduplicate_strings(
                     [*failover_chain, *just_tried]
@@ -2152,6 +8053,30 @@ class ProofMeshOrchestrator:
                         delta=result.value,
                     )
                 )
+                if (
+                    delivered_messages
+                    and route_id is not None
+                    and state is not None
+                    and state.message_broker is not None
+                    and not receipts_processed
+                ):
+                    acknowledged_receipts = self._acknowledge_route_messages(
+                        state.message_broker,
+                        delivered_messages,
+                        turn.message_receipts,
+                        route_id=route_id,
+                        current_round=round_index,
+                    )
+                    receipts_processed = True
+                    if self.config.topology.typed_communication.require_receipt and any(
+                        receipt.status != ReceiptStatus.ACCEPTED
+                        for receipt in acknowledged_receipts
+                    ):
+                        targeted_feedback = [
+                            *targeted_feedback,
+                            "A cross-route message was not acknowledged with an exact semantic receipt; no checkpoint was advanced.",
+                        ]
+                        break
                 if (
                     confirmed_counterexample_pending
                     and turn.action != ContinuationAction.REQUEST_COMPUTATION
@@ -2172,6 +8097,16 @@ class ProofMeshOrchestrator:
                             "reason": turn.reason,
                         },
                     )
+                    if confirmed_counterexample_pending:
+                        self._apply_confirmed_counterexample_impact(
+                            state,
+                            strategy,
+                            route_id=route_id,
+                            impact=turn.experiment_impact,
+                            experiment_results=experiment_results,
+                            current_round=round_index,
+                            store=store,
+                        )
                 if turn.action in {
                     ContinuationAction.SUBMIT_DELTA,
                     ContinuationAction.COMPLETE,
@@ -2179,6 +8114,8 @@ class ProofMeshOrchestrator:
                     delta = turn.delta
                     break
                 if turn.action == ContinuationAction.ABANDON:
+                    deep_outcome = ExplorationOutcome.NO_VERIFIED_PROGRESS
+                    deep_outcome_reason = turn.reason or "route abandoned"
                     targeted_feedback = [
                         *targeted_feedback,
                         turn.reason or "Explorer abandoned this continuation segment.",
@@ -2200,16 +8137,48 @@ class ProofMeshOrchestrator:
                     agent,
                     path_id=path_id,
                     parent_checkpoint_id=checkpoint.checkpoint_id,
-                    stalled_rounds=round_index,
+                    stalled_rounds=self._computation_stalled_rounds(
+                        state,
+                        strategy,
+                        round_index=round_index,
+                    ),
                     meta_review_approved=computation_meta_approved,
                     runner=runner,
                     prompts=prompts,
                     tools=tools,
                     budget_bucket=budget_bucket,
                 )
-                compute_cycles += 1
                 computation_feedback.append(decision.model_dump(mode="json"))
+                if decision.decision == ComputationDecisionStatus.DEFER:
+                    deep_outcome = ExplorationOutcome.NO_VERIFIED_PROGRESS
+                    deep_outcome_reason = (
+                        "the requested computation was durably queued until its "
+                        "explicit gate condition is satisfied"
+                    )
+                    targeted_feedback = [
+                        *targeted_feedback,
+                        (
+                            f"Computation {turn.experiment_spec.experiment_id} was "
+                            f"queued: {decision.reason}"
+                        ),
+                    ]
+                    break
+                if experiment is None:
+                    deep_outcome = ExplorationOutcome.NO_VERIFIED_PROGRESS
+                    deep_outcome_reason = (
+                        "the requested computation was rejected and produced no "
+                        "admissible evidence"
+                    )
+                    targeted_feedback = [
+                        *targeted_feedback,
+                        (
+                            f"Computation {turn.experiment_spec.experiment_id} was "
+                            f"not executed: {decision.reason}"
+                        ),
+                    ]
+                    break
                 if experiment is not None:
+                    compute_cycles += 1
                     experiment_results.append(experiment.model_dump(mode="json"))
                     confirmed_counterexample_pending = (
                         confirmed_counterexample_pending
@@ -2220,8 +8189,32 @@ class ProofMeshOrchestrator:
                             and experiment.independently_verified
                         )
                     )
+                    if confirmed_counterexample_pending:
+                        deep_outcome = ExplorationOutcome.USEFUL_COUNTEREXAMPLE
+                        deep_outcome_reason = (
+                            "an independently checked counterexample changed the route"
+                        )
 
             if delta is None or result is None:
+                self._finish_deep_exploration(
+                    state,
+                    deep_admission,
+                    outcome=(
+                        deep_outcome
+                        or (
+                            ExplorationOutcome.USEFUL_COUNTEREXAMPLE
+                            if confirmed_counterexample_pending
+                            else ExplorationOutcome.NO_VERIFIED_PROGRESS
+                        )
+                    ),
+                    usage=segment_usage,
+                    checkpoint_after=checkpoint,
+                    proof_debt_before=proof_debt_before,
+                    current_goal_before=current_goal_before_segment,
+                    reason=deep_outcome_reason
+                    or "no checkpoint-eligible delta returned",
+                    store=store,
+                )
                 break
             delta.problem_hash = problem.integrity_hash
             delta.path_id = checkpoint.path_id
@@ -2231,11 +8224,103 @@ class ProofMeshOrchestrator:
             delta.round_index = round_index
             delta.segment_index = next_segment
             delta.raw_artifact_ref = result.raw_ref
-            delta.usage = result.usage
+            (
+                delta.candidate_conjectures,
+                pattern_completion_usage,
+                missing_pattern_results,
+            ) = await self._ensure_pattern_conjectures(
+                problem,
+                delta.candidate_conjectures,
+                experiment_results,
+                agent=result.agent,
+                runner=runner,
+                prompts=prompts,
+                tools=tools,
+                store=store,
+                budget_bucket=budget_bucket,
+            )
+            cumulative_usage = self._sum_usage(
+                [cumulative_usage, pattern_completion_usage]
+            )
+            segment_usage = self._sum_usage([segment_usage, pattern_completion_usage])
+            delta.usage = self._sum_usage([result.usage, pattern_completion_usage])
+            known_candidate_hashes = {
+                item.content_hash for item in route_candidate_conjectures
+            }
+            for candidate in delta.candidate_conjectures:
+                if candidate.content_hash not in known_candidate_hashes:
+                    known_candidate_hashes.add(candidate.content_hash)
+                    route_candidate_conjectures.append(candidate)
+            if missing_pattern_results:
+                delta.proof_complete = False
+                delta.candidate_final_answer = None
+                delta.ready_for_verification = False
+                delta.remaining_subgoals = self._deduplicate_strings(
+                    [
+                        *delta.remaining_subgoals,
+                        (
+                            "Formulate a concrete candidate conjecture for successful "
+                            "discover_pattern experiments: "
+                            + ", ".join(sorted(missing_pattern_results))
+                        ),
+                    ]
+                )
+                delta.known_risks = self._deduplicate_strings(
+                    [
+                        *delta.known_risks,
+                        "A bounded pattern-discovery result has not yet been "
+                        "interpreted as an explicit unproved conjecture.",
+                    ]
+                )
+            candidate_calculation_steps = [
+                *delta.new_steps,
+                *(step for claim in delta.new_claims for step in claim.proof_steps),
+            ]
+            calculation_gate_result = CriticalCalculationGate(
+                self.config, tools, store
+            ).evaluate_steps(
+                candidate_calculation_steps,
+                scope_type="proof_step",
+                path_id=checkpoint.path_id,
+                parent_checkpoint_id=checkpoint.checkpoint_id,
+                requested_by=result.agent.id,
+            )
             store.save_proof_delta(delta.delta_id, delta)
+            working_checkpoint = WorkingProofCheckpoint(
+                parent_verified_checkpoint_id=checkpoint.checkpoint_id,
+                problem_hash=problem.integrity_hash,
+                path_id=checkpoint.path_id,
+                strategy_id=strategy.strategy_id,
+                source_agent_id=result.agent.id,
+                segment_index=next_segment,
+                delta=delta,
+            )
+            store.save_working_checkpoint(working_checkpoint)
 
             local_report = local_delta_verification(problem, checkpoint, delta)
             policy_issues: list[VerificationIssue] = []
+            for gate_failure in calculation_gate_result.failures:
+                policy_issues.append(
+                    VerificationIssue(
+                        phase="critical_calculation_gate",
+                        severity=(
+                            Severity.CRITICAL
+                            if gate_failure.verdict == CalculationGateVerdict.REFUTED
+                            else Severity.ERROR
+                        ),
+                        step_id=gate_failure.scope_id,
+                        description=gate_failure.reason,
+                        counterexample=(
+                            gate_failure.reason
+                            if gate_failure.verdict == CalculationGateVerdict.REFUTED
+                            else None
+                        ),
+                        repair_hint=(
+                            "Correct the finite claim and its typed request, or replace "
+                            "the computed premise with a symbolic derivation."
+                        ),
+                    )
+                )
             if len(delta.new_steps) > cfg.max_new_steps_per_call:
                 policy_issues.append(
                     VerificationIssue(
@@ -2292,6 +8377,27 @@ class ProofMeshOrchestrator:
             )
 
             reports = [local_report]
+            if local_report.verdict == VerificationVerdict.PASS:
+                team_result = await self._run_active_route_team(
+                    state,
+                    problem=problem,
+                    strategy=strategy,
+                    checkpoint=checkpoint,
+                    delta=delta,
+                    attempt_id=attempt_id,
+                    author=result.agent,
+                    round_index=round_index,
+                    experiment_results=experiment_results,
+                    route_context=route_context,
+                    runner=runner,
+                    prompts=prompts,
+                    store=store,
+                    tools=tools,
+                )
+                if team_result is not None and isinstance(
+                    team_result.skeptic_result, VerificationReport
+                ):
+                    reports.append(team_result.skeptic_result)
             if (
                 local_report.verdict == VerificationVerdict.PASS
                 and cfg.verify_each_delta
@@ -2308,6 +8414,7 @@ class ProofMeshOrchestrator:
                         memory,
                         tools,
                         store,
+                        state=state,
                     )
                 )
 
@@ -2330,6 +8437,16 @@ class ProofMeshOrchestrator:
                 )
 
             if not accepted:
+                working_checkpoint.status = (
+                    "rejected"
+                    if any(
+                        report.verdict == VerificationVerdict.FAIL for report in reports
+                    )
+                    else "uncertain"
+                )
+                working_checkpoint.verification_report_ids = [
+                    report.report_id for report in reports
+                ]
                 if cfg.retain_rejected_deltas:
                     store.save_proof_delta(delta.delta_id, delta, rejected=True)
                 feedback = next(
@@ -2339,6 +8456,17 @@ class ProofMeshOrchestrator:
                         if report.verdict != VerificationVerdict.PASS
                     ),
                     "The candidate delta did not pass checkpoint verification.",
+                )
+                working_checkpoint.feedback = [feedback]
+                store.save_working_checkpoint(working_checkpoint)
+                self._record_route_checkpoint_outcome(
+                    state,
+                    attempt_id=attempt_id,
+                    delta=delta,
+                    reports=reports,
+                    accepted=False,
+                    feedback=feedback,
+                    store=store,
                 )
                 store.append_event(
                     "proof_checkpoint_rejected",
@@ -2367,6 +8495,47 @@ class ProofMeshOrchestrator:
                         },
                     )
                 targeted_feedback = [*targeted_feedback, feedback]
+                current_goal_changed = bool(
+                    delta.current_goal
+                    and delta.current_goal.strip()
+                    and delta.current_goal.strip()
+                    != (checkpoint.current_goal or "").strip()
+                )
+                proof_debt_after_candidate = (
+                    state.proof_graph.proof_debt(route_id)
+                    if state is not None
+                    and state.proof_graph is not None
+                    and route_id is not None
+                    else None
+                )
+                proof_debt_changed = bool(
+                    proof_debt_before is not None
+                    and proof_debt_after_candidate is not None
+                    and abs(proof_debt_before - proof_debt_after_candidate) > 1e-9
+                )
+                partial_is_usable = (
+                    current_goal_changed
+                    or proof_debt_changed
+                    or bool(delta.detected_conflicts)
+                ) and all(
+                    report.verdict != VerificationVerdict.FAIL for report in reports
+                )
+                self._finish_deep_exploration(
+                    state,
+                    deep_admission,
+                    outcome=(
+                        ExplorationOutcome.USABLE_PARTIAL
+                        if partial_is_usable
+                        else ExplorationOutcome.NO_VERIFIED_PROGRESS
+                    ),
+                    usage=segment_usage,
+                    checkpoint_after=checkpoint,
+                    proof_debt_before=proof_debt_before,
+                    current_goal_before=current_goal_before_segment,
+                    current_goal_override=delta.current_goal,
+                    reason=feedback,
+                    store=store,
+                )
                 break
 
             claims = normalize_delta_claims(
@@ -2387,7 +8556,47 @@ class ProofMeshOrchestrator:
                 reports,
                 failover_chain=tried_agents,
             )
+            self._record_route_checkpoint_outcome(
+                state,
+                attempt_id=attempt_id,
+                delta=delta,
+                reports=reports,
+                accepted=True,
+                feedback="the proof delta passed checkpoint verification",
+                store=store,
+            )
             store.commit_proof_checkpoint(checkpoint)
+            self._finish_deep_exploration(
+                state,
+                deep_admission,
+                outcome=(
+                    ExplorationOutcome.VERIFIED_MECHANISM_CHANGE
+                    if deep_signature is not None
+                    and self._is_referee_confirmed_inspiration(state, strategy)
+                    else ExplorationOutcome.VERIFIED_PROGRESS
+                ),
+                usage=segment_usage,
+                checkpoint_after=checkpoint,
+                proof_debt_before=proof_debt_before,
+                current_goal_before=current_goal_before_segment,
+                reason="the proof delta passed checkpoint verification",
+                store=store,
+            )
+            if (
+                route_id is not None
+                and state is not None
+                and state.message_broker is not None
+                and acknowledged_receipts
+            ):
+                record_verified_message_usage(
+                    state.message_broker,
+                    delivered_messages,
+                    acknowledged_receipts,
+                    delta,
+                    route_id=route_id,
+                    proof_graph=state.proof_graph,
+                    proof_debt_before=proof_debt_before,
+                )
             store.write_json(
                 "structured",
                 f"proof_checkpoint_{checkpoint.checkpoint_id}",
@@ -2423,6 +8632,7 @@ class ProofMeshOrchestrator:
             previous_attempt=previous_attempt,
             attempt_id=attempt_id,
             proposed_lemmas=verified_delta_claims,
+            candidate_conjectures=route_candidate_conjectures,
             raw_artifact_ref=latest_raw_ref,
             usage=cumulative_usage,
             resumed_from_checkpoint_id=resumed_from,
@@ -2448,6 +8658,8 @@ class ProofMeshOrchestrator:
         memory: LemmaMemory,
         tools: ToolBroker,
         store: ArtifactStore,
+        *,
+        state: SolveState | None = None,
     ) -> list[VerificationReport]:
         reports: list[VerificationReport] = []
         experiment_audit = tools.audit_key_results(
@@ -2458,6 +8670,27 @@ class ProofMeshOrchestrator:
             tools,
             checkpoint.path_id,
             audit_records=experiment_audit,
+        )
+        verification_query = json.dumps(
+            {
+                "checkpoint": checkpoint.model_dump(mode="json"),
+                "delta": delta.model_dump(mode="json"),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        fact_context = self._admissible_fact_context(
+            state=state,
+            legacy_memory=memory,
+            query=verification_query,
+            max_chars=max(2000, self.config.topology.max_context_chars // 4),
+            purpose=ContextPurpose.DELTA_VERIFICATION,
+            required_refs=explicit_dependency_refs(
+                {
+                    "checkpoint": checkpoint.model_dump(mode="json"),
+                    "delta": delta.model_dump(mode="json"),
+                }
+            ),
         )
         excluded = {author.id}
         replicas = self.config.continuation.delta_verifier_replicas
@@ -2479,7 +8712,7 @@ class ProofMeshOrchestrator:
                     checkpoint,
                     delta,
                     current_agent.id,
-                    [claim.model_dump(mode="json") for claim in memory.verified()],
+                    fact_context,
                     auditable_experiments,
                 )
 
@@ -2495,7 +8728,7 @@ class ProofMeshOrchestrator:
                     failover_only_on_retryable=True,
                     exclude_agent_ids={author.id},
                 )
-            except BudgetExhaustedError:
+            except (BudgetExhaustedError, ProviderCircuitOpenError):
                 raise
             except Exception as exc:
                 store.append_event(
@@ -2526,7 +8759,6 @@ class ProofMeshOrchestrator:
             report.agent_id = result.agent.id
             report.stage = VerificationStage.DETAILED
             if delta.problem_hash != problem.integrity_hash:
-                report.problem_integrity_ok = False
                 report.issues.append(
                     VerificationIssue(
                         phase="problem_integrity_guard",
@@ -2538,6 +8770,7 @@ class ProofMeshOrchestrator:
                     )
                 )
                 report.verdict = VerificationVerdict.FAIL
+                report.problem_integrity_ok = False
             report.raw_artifact_ref = result.raw_ref
             report.usage = result.usage
             if report.tool_requests:
@@ -2551,7 +8784,7 @@ class ProofMeshOrchestrator:
                         checkpoint,
                         delta,
                         result.agent.id,
-                        [claim.model_dump(mode="json") for claim in memory.verified()],
+                        fact_context,
                         auditable_experiments,
                         [item.model_dump(mode="json") for item in tool_results],
                     )
@@ -2615,6 +8848,7 @@ class ProofMeshOrchestrator:
         strategy: StrategyCard,
         agent: AgentRuntime,
         *,
+        state: SolveState | None,
         round_index: int,
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
@@ -2635,8 +8869,45 @@ class ProofMeshOrchestrator:
         )
         experiment_results: list[dict[str, Any]] = []
         computation_feedback: list[dict[str, Any]] = []
-        compute_cycles = 0
-        confirmed_counterexample_pending = False
+        (
+            deferred_feedback,
+            deferred_results,
+            compute_cycles,
+            deferred_still_blocked,
+        ) = await self._retry_deferred_computations(
+            problem,
+            strategy,
+            agent,
+            state=state,
+            round_index=round_index,
+            path_id=path_id,
+            parent_checkpoint_id=None,
+            meta_review_approved=computation_meta_approved,
+            runner=runner,
+            prompts=prompts,
+            tools=tools,
+            budget_bucket=budget_bucket,
+            max_experiments=(self.config.computation.max_compute_cycles_per_segment),
+        )
+        computation_feedback.extend(deferred_feedback)
+        experiment_results.extend(deferred_results)
+        if deferred_still_blocked:
+            return self._failed_attempt(
+                problem,
+                strategy,
+                agent.id,
+                round_index,
+                RuntimeError(
+                    "a durable computation request remains deferred by its "
+                    "stall or Meta-Reviewer gate"
+                ),
+            )
+        confirmed_counterexample_pending = any(
+            item.get("outcome") == ExperimentOutcome.COUNTEREXAMPLE_FOUND.value
+            and item.get("evidence_strength") == EvidenceStrength.COUNTEREXAMPLE.value
+            and bool(item.get("independently_verified"))
+            for item in deferred_results
+        )
         cumulative_usage = UsageRecord()
         latest_raw_ref: str | None = None
         attempt: ProofAttempt | None = None
@@ -2704,6 +8975,16 @@ class ProofMeshOrchestrator:
                         "reason": turn.reason,
                     },
                 )
+                if confirmed_counterexample_pending:
+                    self._apply_confirmed_counterexample_impact(
+                        None,
+                        strategy,
+                        route_id=None,
+                        impact=turn.experiment_impact,
+                        experiment_results=experiment_results,
+                        current_round=round_index,
+                        store=store,
+                    )
             if turn.action == InitialExplorationAction.SUBMIT_ATTEMPT:
                 attempt = turn.attempt
                 break
@@ -2730,16 +9011,41 @@ class ProofMeshOrchestrator:
                 agent,
                 path_id=path_id,
                 parent_checkpoint_id=None,
-                stalled_rounds=round_index,
+                stalled_rounds=self._computation_stalled_rounds(
+                    state,
+                    strategy,
+                    round_index=round_index,
+                ),
                 meta_review_approved=computation_meta_approved,
                 runner=runner,
                 prompts=prompts,
                 tools=tools,
                 budget_bucket=budget_bucket,
             )
-            compute_cycles += 1
             computation_feedback.append(decision.model_dump(mode="json"))
+            if decision.decision == ComputationDecisionStatus.DEFER:
+                return self._failed_attempt(
+                    problem,
+                    strategy,
+                    agent.id,
+                    round_index,
+                    RuntimeError(
+                        "computation was durably queued until its gate condition "
+                        f"is satisfied: {decision.reason}"
+                    ),
+                )
+            if experiment is None:
+                return self._failed_attempt(
+                    problem,
+                    strategy,
+                    agent.id,
+                    round_index,
+                    RuntimeError(
+                        f"computation request was not executed: {decision.reason}"
+                    ),
+                )
             if experiment is not None:
+                compute_cycles += 1
                 experiment_results.append(experiment.model_dump(mode="json"))
                 confirmed_counterexample_pending = confirmed_counterexample_pending or (
                     experiment.outcome == ExperimentOutcome.COUNTEREXAMPLE_FOUND
@@ -2748,6 +9054,30 @@ class ProofMeshOrchestrator:
                 )
 
         assert attempt is not None
+        (
+            attempt.candidate_conjectures,
+            pattern_completion_usage,
+            missing_pattern_results,
+        ) = await self._ensure_pattern_conjectures(
+            problem,
+            attempt.candidate_conjectures,
+            experiment_results,
+            agent=agent,
+            runner=runner,
+            prompts=prompts,
+            tools=tools,
+            store=store,
+            budget_bucket=budget_bucket,
+        )
+        cumulative_usage = self._sum_usage([cumulative_usage, pattern_completion_usage])
+        if missing_pattern_results and attempt.status != AttemptStatus.FAILED:
+            attempt.status = AttemptStatus.PARTIAL
+            attempt.final_answer = None
+            attempt.unresolved_gaps.append(
+                "Formulate a concrete candidate conjecture for successful "
+                "discover_pattern experiments: "
+                + ", ".join(sorted(missing_pattern_results))
+            )
         # Authoritative metadata is assigned by the orchestrator, not trusted from model text.
         attempt.problem_hash = problem.integrity_hash
         attempt.strategy_id = strategy.strategy_id
@@ -2756,6 +9086,30 @@ class ProofMeshOrchestrator:
         attempt.path_id = path_id
         attempt.raw_artifact_ref = latest_raw_ref
         attempt.usage = cumulative_usage
+        attempt_calculation_steps = [
+            *attempt.proof_steps,
+            *(step for claim in attempt.proposed_lemmas for step in claim.proof_steps),
+        ]
+        calculation_gate_result = CriticalCalculationGate(
+            self.config, tools, store
+        ).evaluate_steps(
+            attempt_calculation_steps,
+            scope_type="proof_step",
+            path_id=path_id,
+            parent_checkpoint_id=None,
+            requested_by=agent.id,
+        )
+        if not calculation_gate_result.passed:
+            attempt.status = AttemptStatus.FAILED
+            attempt.final_answer = None
+            attempt.dead_ends.append(
+                "Deterministic critical calculation gate blocked the attempt: "
+                + calculation_gate_result.concise_failure()
+            )
+            attempt.unresolved_gaps.append(
+                "Correct or declare every load-bearing finite calculation before "
+                "resubmitting this route."
+            )
         for lemma in attempt.proposed_lemmas:
             lemma.source_attempt_id = attempt.attempt_id
             lemma.source_agent_id = agent.id
@@ -2777,8 +9131,8 @@ class ProofMeshOrchestrator:
                     "一条证明路线已返回", "A proof route returned"
                 ),
                 detail=runner.activity.text(
-                    f"{strategy.title}：{attempt.status.value}；步骤 {len(attempt.proof_steps)}；未解缺口 {len(attempt.unresolved_gaps)}",
-                    f"{strategy.title}: {attempt.status.value}; {len(attempt.proof_steps)} steps; {len(attempt.unresolved_gaps)} unresolved gaps",
+                    f"{strategy.title}：{attempt.status.value}；步骤 {len(attempt.proof_steps)}；候选规律 {len(attempt.candidate_conjectures)}；未解缺口 {len(attempt.unresolved_gaps)}",
+                    f"{strategy.title}: {attempt.status.value}; {len(attempt.proof_steps)} steps; {len(attempt.candidate_conjectures)} candidate conjectures; {len(attempt.unresolved_gaps)} unresolved gaps",
                 ),
                 stage="independent_exploration",
                 agent_id=agent.id,
@@ -2788,10 +9142,43 @@ class ProofMeshOrchestrator:
                     "strategy_id": strategy.strategy_id,
                     "status": attempt.status.value,
                     "proof_step_count": len(attempt.proof_steps),
+                    "candidate_conjecture_count": len(attempt.candidate_conjectures),
                     "unresolved_gap_count": len(attempt.unresolved_gaps),
                 },
             )
         return attempt
+
+    @staticmethod
+    async def _gather_optional_batch_until_provider_circuit(
+        awaitables: Sequence[Any],
+    ) -> tuple[list[Any], ProviderCircuitOpenError | None]:
+        tasks = [asyncio.create_task(item) for item in awaitables]
+        task_indexes = {task: index for index, task in enumerate(tasks)}
+        results: list[Any] = [None] * len(tasks)
+        pending = set(tasks)
+        while pending:
+            done, pending = await asyncio.wait(
+                pending,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            circuit_error: ProviderCircuitOpenError | None = None
+            for task in done:
+                index = task_indexes[task]
+                try:
+                    results[index] = task.result()
+                except Exception as exc:
+                    results[index] = exc
+                    if isinstance(exc, ProviderCircuitOpenError):
+                        circuit_error = exc
+            if circuit_error is None:
+                continue
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            for task in pending:
+                results[task_indexes[task]] = circuit_error
+            return results, circuit_error
+        return results, None
 
     async def _extract_claims_many(
         self,
@@ -2804,11 +9191,20 @@ class ProofMeshOrchestrator:
         *,
         budget_bucket: str,
     ) -> None:
+        summarizers: dict[str, AgentRuntime] = {}
+        reserved_agents: set[str] = set()
+        for attempt in attempts:
+            if attempt.status == AttemptStatus.FAILED:
+                continue
+            exclude = {attempt.agent_id, *reserved_agents}
+            summarizer = runner.pool.select("summarizer", exclude=exclude)
+            summarizers[attempt.attempt_id] = summarizer
+            reserved_agents.add(summarizer.id)
+
         async def one(attempt: ProofAttempt) -> ClaimBatch | None:
             if attempt.status == AttemptStatus.FAILED:
                 return None
-            exclude = {attempt.agent_id} if len(runner.pool.agents) > 1 else set()
-            summarizer = runner.pool.select("summarizer", exclude=exclude)
+            summarizer = summarizers[attempt.attempt_id]
             bundle = prompts.summarize_claims(
                 problem,
                 attempt,
@@ -2836,9 +9232,23 @@ class ProofMeshOrchestrator:
             store.write_json("structured", f"claim_batch_{attempt.attempt_id}", batch)
             return batch
 
-        results = await asyncio.gather(
-            *(one(a) for a in attempts), return_exceptions=True
+        (
+            results,
+            circuit_error,
+        ) = await self._gather_optional_batch_until_provider_circuit(
+            [one(attempt) for attempt in attempts]
         )
+        if circuit_error is not None:
+            store.append_event(
+                "claim_extraction_batch_short_circuited",
+                {
+                    "provider_scope": circuit_error.provider_scope,
+                    "agent_ids": circuit_error.agent_ids,
+                    "retry_after_seconds": circuit_error.retry_after_seconds,
+                    "attempt_count": len(attempts),
+                    "fallback": "retain_explorer_proposed_lemmas",
+                },
+            )
         for attempt, result in zip(attempts, results):
             if isinstance(result, Exception):
                 store.append_event(
@@ -2861,7 +9271,25 @@ class ProofMeshOrchestrator:
         memory: LemmaMemory,
         tools: ToolBroker,
         store: ArtifactStore,
+        *,
+        state: SolveState | None = None,
     ) -> list[VerificationBundle]:
+        eligible = [
+            attempt
+            for attempt in attempts
+            if attempt.proof_steps and attempt.status != AttemptStatus.FAILED
+        ]
+        for attempt in attempts:
+            if attempt not in eligible:
+                store.append_event(
+                    "empty_attempt_verification_skipped",
+                    {
+                        "attempt_id": attempt.attempt_id,
+                        "strategy_id": attempt.strategy_id,
+                        "status": attempt.status.value,
+                        "proof_step_count": len(attempt.proof_steps),
+                    },
+                )
         results = await asyncio.gather(
             *(
                 self._verify_attempt(
@@ -2873,13 +9301,15 @@ class ProofMeshOrchestrator:
                     memory,
                     tools,
                     store,
+                    state=state,
                 )
-                for attempt in attempts
+                for attempt in eligible
             ),
             return_exceptions=True,
         )
+        self._raise_if_provider_circuit(results)
         bundles: list[VerificationBundle] = []
-        for attempt, result in zip(attempts, results):
+        for attempt, result in zip(eligible, results):
             if isinstance(result, Exception):
                 store.append_event(
                     "verification_pipeline_failed",
@@ -2908,6 +9338,8 @@ class ProofMeshOrchestrator:
         memory: LemmaMemory,
         tools: ToolBroker,
         store: ArtifactStore,
+        *,
+        state: SolveState | None = None,
     ) -> VerificationBundle:
         reports: list[VerificationReport] = []
         experiment_audit = (
@@ -2998,6 +9430,7 @@ class ProofMeshOrchestrator:
                 store,
                 stage="detailed",
                 experiment_audit=experiment_audit,
+                state=state,
             )
             reports.extend(detailed_reports)
 
@@ -3033,6 +9466,7 @@ class ProofMeshOrchestrator:
                     store,
                     stage="detailed",
                     experiment_audit=experiment_audit,
+                    state=state,
                 )
                 detailed_reports.extend(extra_reports)
                 reports.extend(extra_reports)
@@ -3162,6 +9596,7 @@ class ProofMeshOrchestrator:
         results = await asyncio.gather(
             *(one(r) for r in reviewers), return_exceptions=True
         )
+        self._raise_if_provider_circuit(results)
         reports: list[VerificationReport] = []
         for reviewer, result in zip(reviewers, results):
             if isinstance(result, Exception):
@@ -3192,6 +9627,8 @@ class ProofMeshOrchestrator:
         *,
         stage: str,
         experiment_audit: Sequence[dict[str, Any]] | None = None,
+        prompt_target: dict[str, Any] | None = None,
+        state: SolveState | None = None,
     ) -> list[VerificationReport]:
         target_id = (
             target.attempt_id if isinstance(target, ProofAttempt) else "final_proof"
@@ -3220,6 +9657,22 @@ class ProofMeshOrchestrator:
                 for result in tools.results
             ]
         )
+        sanitized_target = prompt_target or target.model_dump(mode="json")
+        sanitized_query = json.dumps(
+            sanitized_target, ensure_ascii=False, sort_keys=True
+        )
+        fact_context = self._admissible_fact_context(
+            state=state,
+            legacy_memory=memory,
+            query=sanitized_query,
+            max_chars=max(2000, self.config.topology.max_context_chars // 4),
+            purpose=(
+                ContextPurpose.FINAL_VERIFICATION
+                if stage.startswith("final")
+                else ContextPurpose.ATTEMPT_VERIFICATION
+            ),
+            required_refs=explicit_dependency_refs(sanitized_target),
+        )
         guard_experiments = (
             tools.results_for_path(target.path_id)
             if isinstance(target, ProofAttempt) and target.path_id
@@ -3229,13 +9682,9 @@ class ProofMeshOrchestrator:
         async def one(reviewer: AgentRuntime) -> VerificationReport:
             bundle = prompts.detailed_verify(
                 problem,
-                target.model_dump(mode="json"),
+                sanitized_target,
                 structural_report,
-                self._select_claim_context(
-                    memory.verified(),
-                    target.model_dump_json(),
-                    max_chars=max(2000, self.config.topology.max_context_chars // 4),
-                ),
+                fact_context,
                 reviewer.id,
                 experiment_results=auditable_experiments,
                 stage=stage,
@@ -3285,15 +9734,9 @@ class ProofMeshOrchestrator:
                 if runner.ledger.remaining_calls > 0:
                     follow_up = prompts.detailed_verify(
                         problem,
-                        target.model_dump(mode="json"),
+                        sanitized_target,
                         structural_report,
-                        self._select_claim_context(
-                            memory.verified(),
-                            target.model_dump_json(),
-                            max_chars=max(
-                                2000, self.config.topology.max_context_chars // 4
-                            ),
-                        ),
+                        fact_context,
                         reviewer.id,
                         [t.model_dump(mode="json") for t in tool_results],
                         auditable_experiments,
@@ -3342,6 +9785,7 @@ class ProofMeshOrchestrator:
         results = await asyncio.gather(
             *(one(r) for r in reviewers), return_exceptions=True
         )
+        self._raise_if_provider_circuit(results)
         reports: list[VerificationReport] = []
         for reviewer, result in zip(reviewers, results):
             if isinstance(result, Exception):
@@ -3353,6 +9797,147 @@ class ProofMeshOrchestrator:
                         if stage == "final"
                         else VerificationStage.DETAILED,
                         f"Detailed verifier {reviewer.id} raised: {result}",
+                        uncertain=True,
+                    )
+                )
+            else:
+                reports.append(result)
+        return reports
+
+    @staticmethod
+    def _expand_blind_verification(
+        report: BlindVerificationReport,
+        *,
+        verifier_id: str,
+        stage: VerificationStage,
+        raw_ref: str | None,
+        usage: UsageRecord,
+    ) -> VerificationReport:
+        """Attach system provenance only after an identity-free model call."""
+
+        return VerificationReport(
+            target_id="final_proof",
+            target_type="final_proof",
+            agent_id=verifier_id,
+            stage=stage,
+            problem_integrity_ok=report.problem_integrity_ok,
+            verdict=report.verdict,
+            first_error_step=report.first_error_step,
+            issues=report.issues,
+            checked_dependencies=report.checked_dependencies,
+            tool_requests=report.tool_requests,
+            tool_results=report.tool_results,
+            failure_level=report.failure_level,
+            confidence=report.confidence,
+            concise_feedback=report.concise_feedback,
+            raw_artifact_ref=raw_ref,
+            usage=usage,
+        )
+
+    async def _call_blind_final_reviewers(
+        self,
+        problem: ProblemContract,
+        proof: FinalProof,
+        packet: BlindReviewPacket,
+        reviewers: Sequence[AgentRuntime],
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        tools: ToolBroker,
+        store: ArtifactStore,
+        *,
+        experiment_audit: Sequence[dict[str, Any]] | None = None,
+    ) -> list[VerificationReport]:
+        audit_by_hash = {
+            str(record.get("request_hash")): record
+            for record in (experiment_audit or [])
+        }
+        auditable_experiments = [
+            {
+                **experiment.model_dump(mode="json"),
+                **(
+                    {"independent_replay_audit": audit_by_hash[experiment.request_hash]}
+                    if experiment.request_hash in audit_by_hash
+                    else {}
+                ),
+            }
+            for experiment in tools.results
+        ]
+
+        async def one(reviewer: AgentRuntime) -> VerificationReport:
+            first = await self._safe_call(
+                runner,
+                "final_verifier",
+                prompts.blind_detailed_review(
+                    packet,
+                    experiment_results=auditable_experiments,
+                ),
+                fixed_agent=reviewer,
+                budget_bucket="verification",
+            )
+            if first is None:
+                return self._synthetic_verification_failure(
+                    "final_proof",
+                    "final_proof",
+                    VerificationStage.FINAL,
+                    f"Final verifier {reviewer.id} failed to return a valid report.",
+                    uncertain=True,
+                )
+
+            blind: BlindVerificationReport = first.value
+            raw_ref = first.raw_ref
+            usage = first.usage
+            if blind.tool_requests:
+                tool_results = tools.execute_many(blind.tool_requests)
+                blind.tool_results = tool_results
+                if runner.ledger.remaining_calls > 0:
+                    follow_up = await self._safe_call(
+                        runner,
+                        "final_verifier",
+                        prompts.blind_detailed_review(
+                            packet,
+                            tool_results=[
+                                item.model_dump(mode="json") for item in tool_results
+                            ],
+                            experiment_results=auditable_experiments,
+                        ),
+                        fixed_agent=reviewer,
+                        budget_bucket="verification",
+                    )
+                    if follow_up is not None:
+                        interpreted: BlindVerificationReport = follow_up.value
+                        interpreted.tool_requests = blind.tool_requests
+                        interpreted.tool_results = tool_results
+                        blind = interpreted
+                        raw_ref = follow_up.raw_ref
+                        usage = self._sum_usage([first.usage, follow_up.usage])
+
+            report = self._expand_blind_verification(
+                blind,
+                verifier_id=reviewer.id,
+                stage=VerificationStage.FINAL,
+                raw_ref=raw_ref,
+                usage=usage,
+            )
+            self._apply_local_target_integrity_guard(problem, proof, report)
+            self._apply_deterministic_tool_guard(report)
+            self._apply_experiment_counterexample_guard(proof, report, tools.results)
+            self._apply_experiment_audit_guard(report, experiment_audit or [])
+            store.write_json("structured", f"report_{report.report_id}", report)
+            return report
+
+        results = await asyncio.gather(
+            *(one(reviewer) for reviewer in reviewers), return_exceptions=True
+        )
+        self._raise_if_provider_circuit(results)
+        reports: list[VerificationReport] = []
+        for reviewer, result in zip(reviewers, results):
+            if isinstance(result, Exception):
+                reports.append(
+                    self._synthetic_verification_failure(
+                        "final_proof",
+                        "final_proof",
+                        VerificationStage.FINAL,
+                        f"Final verifier {reviewer.id} raised: {result}",
                         uncertain=True,
                     )
                 )
@@ -3431,6 +10016,25 @@ class ProofMeshOrchestrator:
         )
         if strategy is None:
             return None
+        route = (
+            state.route_registry.route_for_strategy(strategy_id)
+            if state.route_registry is not None
+            else None
+        )
+        if route is not None and route.status not in {
+            RouteStatus.ACTIVE,
+            RouteStatus.REPAIR_ONCE,
+        }:
+            store.append_event(
+                "route_deepening_blocked",
+                {
+                    "route_id": route.route_id,
+                    "strategy_id": strategy_id,
+                    "status": route.status.value,
+                    "reason": route.frozen_reason or route.revision_summary,
+                },
+            )
+            return None
         previous_candidates = [
             a for a in state.attempts if a.strategy_id == strategy_id
         ]
@@ -3457,6 +10061,7 @@ class ProofMeshOrchestrator:
             problem,
             strategy,
             agent,
+            state=state,
             round_index=round_index,
             runner=runner,
             prompts=prompts,
@@ -3468,6 +10073,7 @@ class ProofMeshOrchestrator:
             previous_attempt=previous,
             budget_bucket="depth",
             computation_meta_approved=computation_meta_approved,
+            deep_exploration_meta_approved=True,
         )
 
     async def _widen(
@@ -3490,8 +10096,26 @@ class ProofMeshOrchestrator:
         triage = triage or self._fallback_triage()
         feedback: list[str] = []
         if state.meta_reviews:
-            feedback.extend(state.meta_reviews[-1].unresolved_conflicts)
-            feedback.extend(state.meta_reviews[-1].required_actions)
+            review_index = len(state.meta_reviews) - 1
+            source = f"meta_review:{review_index}"
+            feedback.extend(
+                self._feedback_directive(
+                    item,
+                    kind="unresolved_conflict",
+                    status="open",
+                    source=source,
+                )
+                for item in state.meta_reviews[-1].unresolved_conflicts
+            )
+            feedback.extend(
+                self._feedback_directive(
+                    item,
+                    kind="required_action",
+                    status="open",
+                    source=source,
+                )
+                for item in state.meta_reviews[-1].required_actions
+            )
         count = min(
             requested_count or self.config.scheduler.widen_paths_per_action,
             self.config.budget.max_paths - len(state.strategies),
@@ -3513,8 +10137,16 @@ class ProofMeshOrchestrator:
         else:
             candidates = result.value.strategies
 
+        candidates = self._attach_planner_computation_hints(candidates)
+
         genuinely_new: list[StrategyCard] = []
-        for candidate in candidates:
+        deduplicated = self._deduplicate_strategy_cards(
+            [*state.strategies, *candidates]
+        )
+        existing_ids = {item.strategy_id for item in state.strategies}
+        for candidate in deduplicated:
+            if candidate.strategy_id in existing_ids:
+                continue
             max_similarity = max(
                 (
                     jaccard_similarity(
@@ -3531,8 +10163,17 @@ class ProofMeshOrchestrator:
         selected = router.select_diverse_strategies(genuinely_new, count)
         state.strategies.extend(selected)
         assignments = router.assign_explorers(selected)
+        if state.route_registry is not None:
+            for strategy, agent in assignments:
+                route = state.route_registry.register_route(strategy)
+                state.route_registry.assign_member(
+                    route.route_id, agent.id, RouteRole.PROVER, round_index
+                )
+                store.append_event("route_registered", route)
+            state.route_registry.recompute_neighbors()
         return await self._parallel_round_exploration(
             problem,
+            state,
             assignments,
             round_index,
             runner,
@@ -3546,6 +10187,7 @@ class ProofMeshOrchestrator:
     async def _parallel_round_exploration(
         self,
         problem: ProblemContract,
+        state: SolveState,
         assignments: list[tuple[StrategyCard, AgentRuntime]],
         round_index: int,
         runner: StructuredAgentRunner,
@@ -3554,6 +10196,8 @@ class ProofMeshOrchestrator:
         memory: LemmaMemory,
         store: ArtifactStore,
         tools: ToolBroker,
+        *,
+        max_segments_this_call: int | None = None,
     ) -> list[ProofAttempt]:
         results = await asyncio.gather(
             *(
@@ -3561,6 +10205,7 @@ class ProofMeshOrchestrator:
                     problem,
                     strategy,
                     agent,
+                    state=state,
                     round_index=round_index,
                     runner=runner,
                     prompts=prompts,
@@ -3571,11 +10216,13 @@ class ProofMeshOrchestrator:
                     targeted_feedback=[],
                     previous_attempt=None,
                     budget_bucket="breadth",
+                    max_segments_this_call=max_segments_this_call,
                 )
                 for strategy, agent in assignments
             ),
             return_exceptions=True,
         )
+        self._raise_if_provider_circuit(results)
         attempts: list[ProofAttempt] = []
         for (strategy, agent), result in zip(assignments, results):
             if isinstance(result, Exception):
@@ -3630,10 +10277,37 @@ class ProofMeshOrchestrator:
             + " ".join(step.statement for step in attempt.proof_steps)
             for attempt in selected
         )
-        claim_context = self._select_claim_context(
-            memory.verified(),
-            claim_query,
+        claim_context = self._admissible_fact_context(
+            state=state,
+            legacy_memory=memory,
+            query=claim_query,
             max_chars=max(2000, int(self.config.topology.max_context_chars * 0.25)),
+            purpose=ContextPurpose.SYNTHESIS,
+            required_refs=explicit_dependency_refs(
+                [attempt.model_dump(mode="json") for attempt in selected]
+            ),
+        )
+        open_obligations = (
+            [
+                {
+                    "obligation_id": item.obligation_id,
+                    "statement": item.statement,
+                    "status": item.status,
+                }
+                for item in state.proof_graph.obligations
+                if item.status != "closed"
+            ]
+            if state.proof_graph is not None
+            else []
+        )
+        forbidden_claims = (
+            [
+                item.statement
+                for item in state.typed_memory.negatives
+                if isinstance(item, MessageEnvelope)
+            ]
+            if state.typed_memory is not None
+            else []
         )
 
         def bundle_factory(current_agent: AgentRuntime) -> PromptBundle:
@@ -3643,6 +10317,8 @@ class ProofMeshOrchestrator:
                 claim_context,
                 review,
                 current_agent.id,
+                open_obligations=open_obligations,
+                forbidden_claims=forbidden_claims,
             )
 
         try:
@@ -3657,7 +10333,7 @@ class ProofMeshOrchestrator:
                 failover_only_on_retryable=True,
                 exclude_agent_ids=exclude,
             )
-        except BudgetExhaustedError:
+        except (BudgetExhaustedError, ProviderCircuitOpenError):
             raise
         except (StructuredOutputError, RuntimeError, ValueError) as exc:
             logger.warning("Agent call failed at synthesis (synthesizer): %s", exc)
@@ -3672,7 +10348,7 @@ class ProofMeshOrchestrator:
             )
             result = None
         if result is None:
-            proof = self._fallback_final_from_attempt(problem, selected[0])
+            return None, synthesizer
         else:
             if result.agent.id != synthesizer.id:
                 for attempt in selected:
@@ -3694,6 +10370,25 @@ class ProofMeshOrchestrator:
         store.write_json("structured", "final_proof_draft", proof)
         return proof, synthesizer
 
+    def _build_blind_review_packet(
+        self,
+        problem: ProblemContract,
+        proof: FinalProof,
+        memory: LemmaMemory,
+        typed_memory: TypedMemory | None = None,
+        message_broker: MessageBroker | None = None,
+        artifact_store: ArtifactStore | None = None,
+    ) -> BlindReviewPacket:
+        return build_blind_review_packet(
+            problem,
+            proof,
+            memory,
+            topology_mode=self.config.topology.mode,
+            typed_memory=typed_memory,
+            message_broker=message_broker,
+            artifact_store=artifact_store,
+        )
+
     async def _verify_final(
         self,
         problem: ProblemContract,
@@ -3705,9 +10400,110 @@ class ProofMeshOrchestrator:
         memory: LemmaMemory,
         tools: ToolBroker,
         store: ArtifactStore,
+        *,
+        state: SolveState | None = None,
     ) -> VerificationBundle:
         reports: list[VerificationReport] = []
+        calculation_gate_result = CriticalCalculationGate(
+            self.config, tools, store
+        ).evaluate_steps(
+            proof.proof_steps,
+            scope_type="final_step",
+            path_id="final_proof",
+            parent_checkpoint_id=None,
+            requested_by=(
+                synthesizer.id if synthesizer is not None else "final-synthesizer"
+            ),
+        )
+        if not calculation_gate_result.passed:
+            reason = calculation_gate_result.concise_failure()
+            issues = [
+                VerificationIssue(
+                    phase="critical_calculation_gate",
+                    severity=(
+                        Severity.CRITICAL
+                        if failure.verdict == CalculationGateVerdict.REFUTED
+                        else Severity.ERROR
+                    ),
+                    step_id=failure.scope_id,
+                    description=failure.reason,
+                    repair_hint=(
+                        "Correct the finite claim and its typed request before final "
+                        "mathematical review."
+                    ),
+                )
+                for failure in calculation_gate_result.failures
+            ]
+            report = VerificationReport(
+                target_id="final_proof",
+                target_type="final_proof",
+                agent_id="local-critical-calculation-gate",
+                stage=VerificationStage.FINAL,
+                verdict=VerificationVerdict.FAIL,
+                first_error_step=(
+                    calculation_gate_result.failures[0].scope_id
+                    if calculation_gate_result.failures
+                    else None
+                ),
+                issues=issues,
+                failure_level=FailureLevel.EXECUTION,
+                confidence=1.0,
+                concise_feedback=(
+                    "Final proof blocked before reviewer calls by the deterministic "
+                    f"critical calculation gate: {reason}"
+                ),
+            )
+            store.write_json("structured", "final_critical_calculation_gate", report)
+            store.append_event("final_critical_calculation_gate_blocked", report)
+            return VerificationBundle(aggregate=report, reports=[report])
+        hierarchical = self.config.topology.mode == "hierarchical_sparse"
+        if hierarchical and (
+            state is None or state.typed_memory is None or state.message_broker is None
+        ):
+            store.append_event(
+                "global_fact_context_fail_closed",
+                {
+                    "purpose": ContextPurpose.BLIND_REVIEW.value,
+                    "reason": "typed memory or message broker is unavailable",
+                },
+            )
+        blind_packet = self._build_blind_review_packet(
+            problem,
+            proof,
+            memory,
+            state.typed_memory if state is not None else None,
+            state.message_broker if state is not None else None,
+            store,
+        )
+        blind_structural = (
+            hierarchical and self.config.topology.final_stage.blind_structural_review
+        )
+        blind_detailed = (
+            hierarchical and self.config.topology.final_stage.blind_detailed_review
+        )
+        if blind_structural or blind_detailed:
+            store.write_json("structured", "blind_final_review_packet", blind_packet)
         experiment_audit = tools.audit_key_results()
+        final_cross_provider_candidates = [
+            candidate
+            for candidate in runner.pool.agents
+            if synthesizer is not None
+            and candidate.id != synthesizer.id
+            and candidate.provider != synthesizer.provider
+            and candidate.supports_role("final_verifier")
+        ]
+        escalation = ValidationEscalator(
+            self.config.topology.validation_escalation
+        ).plan(
+            risk_score=max(0.0, 1.0 - proof.confidence),
+            cross_provider_available=bool(final_cross_provider_candidates),
+            tool_or_formal_available=(bool(experiment_audit)),
+            final_proof=True,
+        )
+        store.append_event(
+            "validation_escalation_planned",
+            {"target_id": "final_proof", **escalation.model_dump(mode="json")},
+        )
         failed_experiment_audits = [
             record for record in experiment_audit if not record.get("valid", False)
         ]
@@ -3724,14 +10520,19 @@ class ProofMeshOrchestrator:
             payload_type="FinalProof",
             reason="independent final theorem-integrity and dependency gate",
         )
-        result = await self._safe_call(
-            runner,
-            "structural_verifier",
-            prompts.structural_verify(
+        structural_prompt = (
+            prompts.blind_structural_review(blind_packet)
+            if blind_structural
+            else prompts.structural_verify(
                 problem,
                 proof.model_dump(mode="json"),
                 structural.id,
-            ),
+            )
+        )
+        result = await self._safe_call(
+            runner,
+            "structural_verifier",
+            structural_prompt,
             fixed_agent=structural,
             budget_bucket="verification",
         )
@@ -3744,17 +10545,27 @@ class ProofMeshOrchestrator:
                 uncertain=True,
             )
         else:
-            structural_report = result.value
-            self._normalize_report(
-                structural_report,
-                target_id="final_proof",
-                target_type="final_proof",
-                agent_id=structural.id,
-                stage=VerificationStage.STRUCTURAL,
-                raw_ref=result.raw_ref,
-                usage=result.usage,
-            )
+            if blind_structural:
+                structural_report = self._expand_blind_verification(
+                    result.value,
+                    verifier_id=structural.id,
+                    stage=VerificationStage.STRUCTURAL,
+                    raw_ref=result.raw_ref,
+                    usage=result.usage,
+                )
+            else:
+                structural_report = result.value
+                self._normalize_report(
+                    structural_report,
+                    target_id="final_proof",
+                    target_type="final_proof",
+                    agent_id=structural.id,
+                    stage=VerificationStage.STRUCTURAL,
+                    raw_ref=result.raw_ref,
+                    usage=result.usage,
+                )
             self._apply_local_target_integrity_guard(problem, proof, structural_report)
+            apply_blind_context_integrity_guard(blind_packet, structural_report)
         if failed_experiment_audits:
             structural_report.issues.append(
                 VerificationIssue(
@@ -3778,6 +10589,27 @@ class ProofMeshOrchestrator:
         reports.append(structural_report)
 
         if structural_report.verdict != VerificationVerdict.PASS:
+            execution = await ValidationEscalationExecutor().execute(
+                escalation,
+                {
+                    ValidationLevel.DETERMINISTIC: lambda: ValidationStepResult(
+                        level=ValidationLevel.DETERMINISTIC,
+                        executed=True,
+                        passed=False,
+                        evidence_refs=[structural_report.raw_artifact_ref]
+                        if structural_report.raw_artifact_ref
+                        else [],
+                        diagnostic="structural theorem-integrity gate did not pass",
+                    )
+                },
+            )
+            store.append_event(
+                "validation_escalation_executed",
+                {
+                    "target_id": "final_proof",
+                    **execution.model_dump(mode="json"),
+                },
+            )
             aggregate = VerificationReport(
                 target_id="final_proof",
                 target_type="final_proof",
@@ -3814,19 +10646,33 @@ class ProofMeshOrchestrator:
                 payload_type="FinalProof",
                 reason="independent first-error, step-level final audit",
             )
-        detailed = await self._call_detailed_reviewers(
-            problem,
-            proof,
-            structural_report,
-            final_reviewers,
-            runner,
-            prompts,
-            memory,
-            tools,
-            store,
-            stage="final",
-            experiment_audit=experiment_audit,
-        )
+        if blind_detailed:
+            detailed = await self._call_blind_final_reviewers(
+                problem,
+                proof,
+                blind_packet,
+                final_reviewers,
+                runner,
+                prompts,
+                tools,
+                store,
+                experiment_audit=experiment_audit,
+            )
+        else:
+            detailed = await self._call_detailed_reviewers(
+                problem,
+                proof,
+                structural_report,
+                final_reviewers,
+                runner,
+                prompts,
+                memory,
+                tools,
+                store,
+                stage="final",
+                experiment_audit=experiment_audit,
+                state=state,
+            )
         reports.extend(detailed)
 
         if (
@@ -3845,21 +10691,93 @@ class ProofMeshOrchestrator:
                 1,
                 exclude=exclude | {structural.id} | {r.agent_id for r in detailed},
             )
-            extra_reports = await self._call_detailed_reviewers(
-                problem,
-                proof,
-                structural_report,
-                extra,
-                runner,
-                prompts,
-                memory,
-                tools,
-                store,
-                stage="final",
-                experiment_audit=experiment_audit,
-            )
+            if blind_detailed:
+                extra_reports = await self._call_blind_final_reviewers(
+                    problem,
+                    proof,
+                    blind_packet,
+                    extra,
+                    runner,
+                    prompts,
+                    tools,
+                    store,
+                    experiment_audit=experiment_audit,
+                )
+            else:
+                extra_reports = await self._call_detailed_reviewers(
+                    problem,
+                    proof,
+                    structural_report,
+                    extra,
+                    runner,
+                    prompts,
+                    memory,
+                    tools,
+                    store,
+                    stage="final",
+                    experiment_audit=experiment_audit,
+                    state=state,
+                )
             detailed.extend(extra_reports)
             reports.extend(extra_reports)
+
+        if (
+            ValidationLevel.CROSS_PROVIDER in escalation.levels
+            and synthesizer is not None
+            and not any(
+                report.problem_integrity_ok
+                and report.verdict == VerificationVerdict.PASS
+                and runner.pool.get(report.agent_id).provider != synthesizer.provider
+                for report in detailed
+                if report.agent_id in {agent.id for agent in runner.pool.agents}
+            )
+        ):
+            excluded_reviewers = (
+                exclude | {structural.id} | {report.agent_id for report in detailed}
+            )
+            available_cross_reviewers = [
+                candidate
+                for candidate in final_cross_provider_candidates
+                if candidate.id not in excluded_reviewers and not candidate.in_cooldown
+            ]
+            if available_cross_reviewers:
+                cross_reviewer = max(
+                    available_cross_reviewers,
+                    key=lambda candidate: (
+                        runner.pool.capability_score(candidate, "final_verifier"),
+                        candidate.trust_score,
+                        candidate.id,
+                    ),
+                )
+                if blind_detailed:
+                    cross_reports = await self._call_blind_final_reviewers(
+                        problem,
+                        proof,
+                        blind_packet,
+                        [cross_reviewer],
+                        runner,
+                        prompts,
+                        tools,
+                        store,
+                        experiment_audit=experiment_audit,
+                    )
+                else:
+                    cross_reports = await self._call_detailed_reviewers(
+                        problem,
+                        proof,
+                        structural_report,
+                        [cross_reviewer],
+                        runner,
+                        prompts,
+                        memory,
+                        tools,
+                        store,
+                        stage="final_cross_provider",
+                        experiment_audit=experiment_audit,
+                        state=state,
+                    )
+                detailed.extend(cross_reports)
+                reports.extend(cross_reports)
 
         aggregate = self._aggregate_reports(
             "final_proof",
@@ -3867,6 +10785,109 @@ class ProofMeshOrchestrator:
             VerificationStage.FINAL,
             detailed,
         )
+        detailed_passes = [
+            report
+            for report in detailed
+            if report.problem_integrity_ok
+            and report.verdict == VerificationVerdict.PASS
+            and (synthesizer is None or report.agent_id != synthesizer.id)
+        ]
+
+        def cross_provider_passed() -> ValidationStepResult:
+            if synthesizer is None:
+                return ValidationStepResult(
+                    level=ValidationLevel.CROSS_PROVIDER,
+                    executed=False,
+                    passed=False,
+                    diagnostic="synthesizer provider is unavailable",
+                )
+            different_provider_reports: list[VerificationReport] = []
+            for report in detailed_passes:
+                try:
+                    reviewer = runner.pool.get(report.agent_id)
+                except KeyError:
+                    continue
+                if reviewer.provider != synthesizer.provider:
+                    different_provider_reports.append(report)
+            return ValidationStepResult(
+                level=ValidationLevel.CROSS_PROVIDER,
+                executed=bool(different_provider_reports),
+                passed=bool(different_provider_reports),
+                evidence_refs=[
+                    report.raw_artifact_ref
+                    for report in different_provider_reports
+                    if report.raw_artifact_ref
+                ],
+            )
+
+        execution = await ValidationEscalationExecutor().execute(
+            escalation,
+            {
+                ValidationLevel.DETERMINISTIC: lambda: ValidationStepResult(
+                    level=ValidationLevel.DETERMINISTIC,
+                    executed=True,
+                    passed=(
+                        structural_report.problem_integrity_ok
+                        and structural_report.verdict == VerificationVerdict.PASS
+                        and not failed_experiment_audits
+                    ),
+                    evidence_refs=[structural_report.raw_artifact_ref]
+                    if structural_report.raw_artifact_ref
+                    else [],
+                ),
+                ValidationLevel.BLIND_SAME_MODEL: lambda: ValidationStepResult(
+                    level=ValidationLevel.BLIND_SAME_MODEL,
+                    executed=bool(detailed),
+                    passed=bool(detailed_passes),
+                    evidence_refs=[
+                        report.raw_artifact_ref
+                        for report in detailed_passes
+                        if report.raw_artifact_ref
+                    ],
+                ),
+                ValidationLevel.ADVERSARIAL_BLIND: lambda: ValidationStepResult(
+                    level=ValidationLevel.ADVERSARIAL_BLIND,
+                    executed=bool(detailed),
+                    passed=(
+                        bool(detailed_passes)
+                        and all(
+                            report.verdict == VerificationVerdict.PASS
+                            for report in detailed
+                        )
+                    ),
+                    evidence_refs=[
+                        report.raw_artifact_ref
+                        for report in detailed
+                        if report.raw_artifact_ref
+                    ],
+                ),
+                ValidationLevel.CROSS_PROVIDER: cross_provider_passed,
+                ValidationLevel.TOOL_OR_FORMAL: lambda: ValidationStepResult(
+                    level=ValidationLevel.TOOL_OR_FORMAL,
+                    executed=bool(experiment_audit),
+                    passed=bool(experiment_audit) and not failed_experiment_audits,
+                    evidence_refs=[
+                        str(record.get("request_hash") or record.get("experiment_id"))
+                        for record in experiment_audit
+                    ],
+                ),
+            },
+        )
+        store.append_event(
+            "validation_escalation_executed",
+            {
+                "target_id": "final_proof",
+                **execution.model_dump(mode="json"),
+            },
+        )
+        store.write_json("structured", "final_validation_execution", execution)
+        if aggregate.verdict == VerificationVerdict.PASS and not execution.passed:
+            aggregate.verdict = VerificationVerdict.UNCERTAIN
+            aggregate.concise_feedback = (
+                "The mathematical reviewers passed, but the configured validation "
+                "escalation ladder did not complete: "
+                + "; ".join(execution.diagnostics)
+            )
         # Final PASS has a configured minimum confidence floor.
         if (
             aggregate.verdict == VerificationVerdict.PASS
@@ -3892,6 +10913,8 @@ class ProofMeshOrchestrator:
         memory: LemmaMemory,
         store: ArtifactStore,
         revision_index: int,
+        *,
+        state: SolveState | None = None,
     ) -> FinalProof | None:
         reviser = synthesizer or runner.pool.select("synthesizer")
         result = await self._safe_call(
@@ -3901,10 +10924,13 @@ class ProofMeshOrchestrator:
                 problem,
                 proof,
                 verification,
-                self._select_claim_context(
-                    memory.verified(),
-                    proof.model_dump_json(),
+                self._admissible_fact_context(
+                    state=state,
+                    legacy_memory=memory,
+                    query=proof.model_dump_json(),
                     max_chars=max(2000, self.config.topology.max_context_chars // 4),
+                    purpose=ContextPurpose.FINAL_REVISION,
+                    required_refs=explicit_dependency_refs(proof),
                 ),
                 reviser.id,
             ),
@@ -3931,6 +10957,7 @@ class ProofMeshOrchestrator:
         specialty_hints: list[str] | None = None,
         prefer_provider_not: str | None = None,
         budget_bucket: str,
+        budget_reservation_id: str | None = None,
     ) -> StructuredCallResult[Any] | None:
         try:
             return await runner.call(
@@ -3941,8 +10968,9 @@ class ProofMeshOrchestrator:
                 specialty_hints=specialty_hints,
                 prefer_provider_not=prefer_provider_not,
                 budget_bucket=budget_bucket,
+                budget_reservation_id=budget_reservation_id,
             )
-        except BudgetExhaustedError:
+        except (BudgetExhaustedError, ProviderCircuitOpenError):
             raise
         except (StructuredOutputError, RuntimeError, ValueError) as exc:
             logger.warning("Agent call failed at %s (%s): %s", bundle.stage, role, exc)
@@ -3956,6 +10984,12 @@ class ProofMeshOrchestrator:
                 },
             )
             return None
+
+    @staticmethod
+    def _raise_if_provider_circuit(results: Iterable[Any]) -> None:
+        for result in results:
+            if isinstance(result, ProviderCircuitOpenError):
+                raise result
 
     def _aggregate_reports(
         self,
@@ -4115,7 +11149,6 @@ class ProofMeshOrchestrator:
     ) -> None:
         target_hash = target.problem_hash
         if target_hash != problem.integrity_hash:
-            report.problem_integrity_ok = False
             report.failure_level = FailureLevel.STRATEGY
             report.issues.append(
                 VerificationIssue(
@@ -4129,6 +11162,7 @@ class ProofMeshOrchestrator:
                 )
             )
             report.verdict = VerificationVerdict.FAIL
+            report.problem_integrity_ok = False
             report.concise_feedback = (
                 "Problem-integrity hash mismatch. " + report.concise_feedback
             )
@@ -4148,6 +11182,8 @@ class ProofMeshOrchestrator:
                     "modular_exhaustive",
                     "bounded_integer_search",
                     "recurrence_check",
+                    "bounded_greedy_sequence",
+                    "candidate_period_check",
                     "exact_geometry",
                 }
                 and payload.get("outcome") == "counterexample_found"
@@ -4294,6 +11330,8 @@ class ProofMeshOrchestrator:
                         "modular_exhaustive",
                         "bounded_integer_search",
                         "recurrence_check",
+                        "bounded_greedy_sequence",
+                        "candidate_period_check",
                         "exact_geometry",
                     }
                     and result.result.get("outcome") == "counterexample_found"
@@ -4353,42 +11391,44 @@ class ProofMeshOrchestrator:
         for bundle in bundles:
             state.reports.extend(bundle.reports)
             state.aggregate_reports[bundle.aggregate.target_id] = bundle.aggregate
+            if state.capability_profile is None or state.triage is None:
+                continue
+            domain = state.capability_domain
+            role_by_stage = {
+                VerificationStage.STRUCTURAL: "structural_verifier",
+                VerificationStage.DETAILED: "detailed_verifier",
+                VerificationStage.FINAL: "detailed_verifier",
+                VerificationStage.LEMMA: "route_referee",
+            }
+            for report in bundle.reports:
+                if report.agent_id == "system-aggregate":
+                    continue
+                role = role_by_stage.get(report.stage, "detailed_verifier")
+                state.capability_profile.update(
+                    report.agent_id,
+                    domain,
+                    role,
+                    kind="recent_task",
+                    success=(report.verdict == bundle.aggregate.verdict),
+                )
 
     def _select_for_synthesis(self, state: SolveState) -> list[ProofAttempt]:
         ranked = self._rank_attempts(state.attempts)
         passed = [
             attempt
             for attempt in ranked
+            if attempt.status == AttemptStatus.COMPLETE and bool(attempt.proof_steps)
             if state.aggregate_reports.get(attempt.attempt_id)
             and state.aggregate_reports[attempt.attempt_id].verdict
             == VerificationVerdict.PASS
+            and state.aggregate_reports[attempt.attempt_id].confidence
+            >= self.config.budget.synthesis_threshold
         ]
         repairable_execution = (
             [] if passed else self._meta_selected_execution_repairs(state, ranked)
         )
-        uncertain_complete = [
-            attempt
-            for attempt in ranked
-            if attempt.status == AttemptStatus.COMPLETE
-            and attempt not in passed
-            and (
-                state.aggregate_reports.get(attempt.attempt_id) is None
-                or state.aggregate_reports[attempt.attempt_id].verdict
-                != VerificationVerdict.FAIL
-            )
-        ]
-        partial = [
-            attempt
-            for attempt in ranked
-            if attempt.status == AttemptStatus.PARTIAL
-            and (
-                state.aggregate_reports.get(attempt.attempt_id) is None
-                or state.aggregate_reports[attempt.attempt_id].verdict
-                != VerificationVerdict.FAIL
-            )
-        ]
         selected: list[ProofAttempt] = []
-        for group in (passed, repairable_execution, uncertain_complete, partial):
+        for group in (passed, repairable_execution):
             for attempt in group:
                 if attempt in selected:
                     continue
@@ -4460,8 +11500,7 @@ class ProofMeshOrchestrator:
             reverse=True,
         )
 
-    @staticmethod
-    def _attempt_local_quality(attempt: ProofAttempt) -> float:
+    def _attempt_local_quality(self, attempt: ProofAttempt) -> float:
         status_score = {
             AttemptStatus.COMPLETE: 0.36,
             AttemptStatus.PARTIAL: 0.18,
@@ -4471,7 +11510,6 @@ class ProofMeshOrchestrator:
         key_steps = sum(1 for step in attempt.proof_steps if step.is_key_step)
         key_score = min(0.08, 0.02 * key_steps)
         lemma_score = min(0.08, 0.025 * len(attempt.proposed_lemmas))
-        confidence_score = 0.20 * attempt.self_confidence
         gap_penalty = min(0.25, 0.05 * len(attempt.unresolved_gaps))
         dead_end_penalty = min(0.12, 0.03 * len(attempt.dead_ends))
         return max(
@@ -4482,7 +11520,6 @@ class ProofMeshOrchestrator:
                 + step_score
                 + key_score
                 + lemma_score
-                + confidence_score
                 - gap_penalty
                 - dead_end_penalty,
             ),
@@ -4492,17 +11529,126 @@ class ProofMeshOrchestrator:
         feedback: list[str] = []
         report = state.aggregate_reports.get(attempt.attempt_id)
         if report is not None:
+            report_source = f"verification_report:{report.report_id}"
+            report_status = (
+                "rejected"
+                if report.verdict == VerificationVerdict.FAIL
+                else "uncertain"
+            )
             if report.first_error_step:
-                feedback.append(f"First disputed step: {report.first_error_step}")
-            feedback.append(report.concise_feedback)
+                feedback.append(
+                    self._feedback_directive(
+                        f"First disputed step: {report.first_error_step}",
+                        kind="verification_issue",
+                        status=report_status,
+                        source=report_source,
+                    )
+                )
+            if report.concise_feedback:
+                feedback.append(
+                    self._feedback_directive(
+                        report.concise_feedback,
+                        kind="verification_feedback",
+                        status=report_status,
+                        source=report_source,
+                    )
+                )
             feedback.extend(
-                f"{issue.step_id or issue.claim_id or 'global'}: {issue.description}"
+                self._feedback_directive(
+                    f"{issue.step_id or issue.claim_id or 'global'}: "
+                    f"{issue.description}",
+                    kind="verification_issue",
+                    status=report_status,
+                    source=report_source,
+                )
                 for issue in report.issues[:8]
             )
-        feedback.extend(f"Unresolved gap: {gap}" for gap in attempt.unresolved_gaps[:8])
+        feedback.extend(
+            self._feedback_directive(
+                f"Unresolved gap: {canonical_gap}",
+                kind="proof_obligation",
+                status="open",
+                source=f"attempt:{attempt.attempt_id}",
+            )
+            for gap in attempt.unresolved_gaps[:8]
+            if not is_feedback_only_statement(gap)
+            and (canonical_gap := canonical_obligation_statement(gap))
+        )
         if state.meta_reviews:
-            feedback.extend(state.meta_reviews[-1].required_actions[:6])
+            review_index = len(state.meta_reviews) - 1
+            feedback.extend(
+                self._feedback_directive(
+                    item,
+                    kind="required_action",
+                    status="open",
+                    source=f"meta_review:{review_index}",
+                )
+                for item in state.meta_reviews[-1].required_actions[:6]
+            )
         return self._deduplicate_strings(feedback)
+
+    @staticmethod
+    def _feedback_directive(
+        text: str,
+        *,
+        kind: str,
+        status: str,
+        source: str,
+    ) -> str:
+        normalized = " ".join(text.split())
+        return (
+            f"[{kind}][STATUS:{status}][SOURCE:{source}]"
+            f"[PREMISE_ELIGIBLE:false] {normalized}"
+        )
+
+    def _apply_meta_route_controls(
+        self,
+        state: SolveState,
+        review: MetaReview,
+        current_round: int,
+        store: ArtifactStore,
+    ) -> None:
+        registry = state.route_registry
+        if registry is None:
+            return
+        attempts = {item.attempt_id: item for item in state.attempts}
+        for assessment in review.assessments:
+            action = assessment.recommended_action
+            if action not in {ActionKind.COOLDOWN_ROUTE, ActionKind.STOP}:
+                continue
+            if (
+                action == ActionKind.STOP
+                and review.confidence < self.config.budget.verification_pass_threshold
+            ):
+                continue
+            attempt = attempts.get(assessment.target_id)
+            if attempt is None:
+                continue
+            route = registry.route_for_strategy(attempt.strategy_id)
+            if route is None:
+                continue
+            requires_revision = (
+                action == ActionKind.STOP
+                or review.failure_level == FailureLevel.STRATEGY
+            )
+            reason = "; ".join(assessment.weaknesses[:3]) or review.summary
+            registry.mark_cooling(
+                route.route_id,
+                current_round + self.config.scheduler.failed_path_cooldown_rounds,
+                reason,
+                requires_revision=requires_revision,
+            )
+            store.append_event(
+                "meta_route_control_applied",
+                {
+                    "route_id": route.route_id,
+                    "strategy_id": attempt.strategy_id,
+                    "action": action.value,
+                    "until_round": route.cooldown_until_round,
+                    "requires_revision": requires_revision,
+                    "reason": reason,
+                },
+            )
 
     def _local_meta_review(
         self,
@@ -4572,31 +11718,6 @@ class ProofMeshOrchestrator:
             can_synthesize=can_synthesize,
             confidence=assessments[0].score if assessments else 0.0,
             summary="Deterministic evidence-weighted fallback meta-review.",
-        )
-
-    def _fallback_final_from_attempt(
-        self,
-        problem: ProblemContract,
-        attempt: ProofAttempt,
-    ) -> FinalProof:
-        answer = (
-            attempt.final_answer
-            or "No complete proof was established; the following is the strongest partial derivation."
-        )
-        caveats = list(attempt.unresolved_gaps)
-        if attempt.status != AttemptStatus.COMPLETE:
-            caveats.insert(
-                0,
-                "Source attempt is partial and has not established the full requested conclusion.",
-            )
-        return FinalProof(
-            problem_hash=problem.integrity_hash,
-            answer=answer,
-            proof_steps=attempt.proof_steps,
-            dependencies=[claim.claim_id for claim in attempt.proposed_lemmas],
-            caveats=self._deduplicate_strings(caveats),
-            source_attempt_ids=[attempt.attempt_id],
-            confidence=min(0.45, attempt.self_confidence),
         )
 
     def _fallback_strategy_set(
@@ -4814,72 +11935,34 @@ class ProofMeshOrchestrator:
         *,
         max_chars: int,
     ) -> list[dict[str, Any]]:
-        """Rank verified claims by relevance and include dependency closures without field truncation."""
-        if not claims:
-            return []
-        by_id = {claim.claim_id: claim for claim in claims}
-        ranked = sorted(
+        return select_legacy_claim_context(
             claims,
-            key=lambda claim: (
-                jaccard_similarity(
-                    query,
-                    f"{claim.statement} {claim.conclusion} {' '.join(claim.tags)}",
-                ),
-                claim.verification_confidence or 0.0,
-                claim.self_confidence,
-            ),
-            reverse=True,
+            query=query,
+            max_chars=max_chars,
+            max_items=self.config.topology.max_verified_claims_per_context,
         )
-        selected: list[ClaimCard] = []
-        selected_ids: set[str] = set()
-        used = 0
 
-        def closure(
-            claim: ClaimCard, visiting: set[str] | None = None
-        ) -> list[ClaimCard]:
-            visiting = set(visiting or set())
-            if claim.claim_id in visiting:
-                return []
-            visiting.add(claim.claim_id)
-            ordered: list[ClaimCard] = []
-            for dep_id in claim.dependencies:
-                dep = by_id.get(dep_id)
-                if dep is not None:
-                    ordered.extend(closure(dep, visiting))
-            ordered.append(claim)
-            deduped: list[ClaimCard] = []
-            seen: set[str] = set()
-            for item in ordered:
-                if item.claim_id not in seen:
-                    deduped.append(item)
-                    seen.add(item.claim_id)
-            return deduped
-
-        for claim in ranked:
-            packet = [
-                item for item in closure(claim) if item.claim_id not in selected_ids
-            ]
-            if not packet:
-                continue
-            encoded = [
-                json.dumps(
-                    item.model_dump(mode="json"),
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )
-                for item in packet
-            ]
-            packet_size = sum(len(value) for value in encoded)
-            if selected and used + packet_size > max_chars:
-                continue
-            for item in packet:
-                if item.claim_id not in selected_ids:
-                    selected.append(item)
-                    selected_ids.add(item.claim_id)
-            used += packet_size
-            if len(selected) >= self.config.topology.max_verified_claims_per_context:
-                break
-        return [claim.model_dump(mode="json") for claim in selected]
+    def _admissible_fact_context(
+        self,
+        *,
+        state: SolveState | None,
+        legacy_memory: LemmaMemory,
+        query: str,
+        max_chars: int,
+        purpose: ContextPurpose,
+        required_refs: Sequence[str] = (),
+    ) -> list[dict[str, Any]]:
+        return build_admissible_fact_context(
+            self.config,
+            legacy_memory=legacy_memory,
+            typed_memory=state.typed_memory if state is not None else None,
+            message_broker=state.message_broker if state is not None else None,
+            query=query,
+            max_chars=max_chars,
+            max_items=self.config.topology.max_verified_claims_per_context,
+            purpose=purpose,
+            required_refs=required_refs,
+        )
 
     def _claim_dedup_index(self, claims: Sequence[ClaimCard]) -> list[dict[str, Any]]:
         """Minimal lossless-for-dedup index instead of rebroadcasting every full proof packet."""
@@ -4961,6 +12044,7 @@ class ProofMeshOrchestrator:
     def _has_synthesis_ready_candidate(self, state: SolveState) -> bool:
         return any(
             attempt.status == AttemptStatus.COMPLETE
+            and bool(attempt.proof_steps)
             and state.aggregate_reports.get(attempt.attempt_id) is not None
             and state.aggregate_reports[attempt.attempt_id].verdict
             == VerificationVerdict.PASS
@@ -4969,7 +12053,155 @@ class ProofMeshOrchestrator:
             for attempt in state.attempts
         )
 
-    def _run_status(self, state: SolveState) -> RunStatus:
+    def _can_enter_synthesis(self, state: SolveState) -> bool:
+        if self._has_synthesis_ready_candidate(state):
+            return True
+        ranked = self._rank_attempts(state.attempts)
+        return bool(self._meta_selected_execution_repairs(state, ranked))
+
+    def _build_research_progress_report(
+        self,
+        problem: ProblemContract,
+        state: SolveState,
+        *,
+        execution_note: str,
+    ) -> ResearchProgressReport:
+        reviewed = [
+            attempt
+            for attempt in state.attempts
+            if attempt.proof_steps
+            and (report := state.aggregate_reports.get(attempt.attempt_id)) is not None
+            and report.verdict
+            in {
+                VerificationVerdict.PASS,
+                VerificationVerdict.UNCERTAIN,
+            }
+        ]
+
+        def evidence_rank(attempt: ProofAttempt) -> tuple[int, int, int, int, int]:
+            report = state.aggregate_reports[attempt.attempt_id]
+            verdict_rank = 2 if report.verdict == VerificationVerdict.PASS else 1
+            route = (
+                state.route_registry.route_for_strategy(attempt.strategy_id)
+                if state.route_registry is not None
+                else None
+            )
+            closed_obligations = (
+                sum(
+                    item.status == "closed" and route.route_id in item.route_ids
+                    for item in state.proof_graph.obligations
+                )
+                if route is not None and state.proof_graph is not None
+                else 0
+            )
+            independent_passes = sum(
+                item.target_id == attempt.attempt_id
+                and item.agent_id != attempt.agent_id
+                and not item.agent_id.startswith("system-")
+                and item.verdict == VerificationVerdict.PASS
+                for item in state.reports
+            )
+            key_steps = sum(1 for step in attempt.proof_steps if step.is_key_step)
+            return (
+                verdict_rank,
+                closed_obligations,
+                independent_passes,
+                len(attempt.proof_steps),
+                key_steps,
+            )
+
+        reviewed.sort(key=evidence_rank, reverse=True)
+        verified_attempts = [
+            attempt
+            for attempt in reviewed
+            if state.aggregate_reports[attempt.attempt_id].verdict
+            == VerificationVerdict.PASS
+        ]
+        verified_step_ids = [
+            step.step_id
+            for attempt in verified_attempts
+            for step in attempt.proof_steps
+        ]
+        refuted_routes: list[dict[str, Any]] = []
+        for attempt in state.attempts:
+            report = state.aggregate_reports.get(attempt.attempt_id)
+            if attempt.status != AttemptStatus.FAILED and not (
+                report is not None and report.verdict == VerificationVerdict.FAIL
+            ):
+                continue
+            refuted_routes.append(
+                {
+                    "attempt_id": attempt.attempt_id,
+                    "strategy_id": attempt.strategy_id,
+                    "failure_level": (
+                        report.failure_level.value if report is not None else "unknown"
+                    ),
+                    "first_error_step": (
+                        report.first_error_step if report is not None else None
+                    ),
+                    "dead_ends": list(attempt.dead_ends),
+                }
+            )
+        open_obligations = (
+            [
+                {
+                    "obligation_id": item.obligation_id,
+                    "statement": item.statement,
+                    "status": item.status,
+                    "route_ids": item.route_ids,
+                }
+                for item in state.proof_graph.obligations
+                if item.status != "closed"
+            ]
+            if state.proof_graph is not None
+            else []
+        )
+        negative_evidence = (
+            [item.statement for item in state.typed_memory.negatives]
+            if state.typed_memory is not None
+            else []
+        )
+        remaining_gaps = self._deduplicate_strings(
+            [gap for attempt in reviewed for gap in attempt.unresolved_gaps]
+            + [str(item["statement"]) for item in open_obligations]
+        )
+        zh = self.config.runtime.output_language.lower().startswith("zh")
+        summary = (
+            f"尚未建立完整证明。保留 {len(verified_attempts)} 条通过局部审查的路线、"
+            f"{len(verified_step_ids)} 个已审查步骤、{len(refuted_routes)} 条失败路线，"
+            f"以及 {len(open_obligations)} 个开放证明义务。"
+            if zh
+            else (
+                "No complete proof was established. Preserved "
+                f"{len(verified_attempts)} locally passed routes, "
+                f"{len(verified_step_ids)} reviewed steps, {len(refuted_routes)} failed "
+                f"routes, and {len(open_obligations)} open proof obligations."
+            )
+        )
+        return ResearchProgressReport(
+            problem_hash=problem.integrity_hash,
+            valid_partial_attempt_ids=[item.attempt_id for item in reviewed],
+            strongest_partial_attempt_id=(reviewed[0].attempt_id if reviewed else None),
+            verified_step_ids=self._deduplicate_strings(verified_step_ids),
+            verified_local_claim_ids=(
+                [item.message_id for item in state.typed_memory.facts]
+                if state.typed_memory is not None
+                else []
+            ),
+            refuted_routes=refuted_routes,
+            negative_evidence=self._deduplicate_strings(negative_evidence),
+            open_obligations=open_obligations,
+            remaining_gaps=remaining_gaps,
+            execution_notes=[execution_note],
+            summary=summary,
+        )
+
+    def _run_status(
+        self,
+        problem: ProblemContract,
+        state: SolveState,
+        store: ArtifactStore,
+    ) -> RunStatus:
         if (
             state.final_verification is not None
             and state.final_verification.verdict == VerificationVerdict.PASS
@@ -4977,11 +12209,17 @@ class ProofMeshOrchestrator:
             >= self.config.budget.verification_pass_threshold
         ):
             return RunStatus.VERIFIED
+        task_status, _assessments = assess_task_deliverables(
+            problem,
+            state,
+            store.list_experiment_results(),
+            verification_threshold=self.config.budget.verification_pass_threshold,
+        )
+        if task_status.value == "completed":
+            return RunStatus.COMPLETED
         if state.budget_exhausted:
             return RunStatus.BUDGET_EXHAUSTED
-        if state.final_proof is not None:
-            return RunStatus.UNVERIFIED
-        return RunStatus.FAILED
+        return RunStatus.UNVERIFIED
 
     def _build_result(
         self,
@@ -4999,12 +12237,83 @@ class ProofMeshOrchestrator:
     ) -> RunResult:
         total_usage = self._sum_usage([metric.usage for metric in metrics])
         summary = summary_override or self._result_summary(status, state)
+        if (
+            status not in {RunStatus.VERIFIED, RunStatus.COMPLETED}
+            and state.research_progress_report is None
+        ):
+            state.research_progress_report = self._build_research_progress_report(
+                problem,
+                state,
+                execution_note=summary,
+            )
+            store.write_json(
+                "reports", "research_progress_report", state.research_progress_report
+            )
+        math_status = (
+            MathStatus.VERIFIED if status == RunStatus.VERIFIED else state.math_status
+        )
+        execution_status = state.execution_status
+        if status == RunStatus.BUDGET_EXHAUSTED:
+            execution_status = ExecutionStatus.BUDGET_EXHAUSTED
+        elif status == RunStatus.FAILED:
+            execution_status = ExecutionStatus.FAILED
+        experiment_payloads = store.list_experiment_results()
+        task_status, deliverable_assessments = assess_task_deliverables(
+            problem,
+            state,
+            experiment_payloads,
+            verification_threshold=self.config.budget.verification_pass_threshold,
+        )
+        if (
+            status == RunStatus.VERIFIED
+            and state.final_proof is not None
+            and state.inspiration_engine is not None
+        ):
+            source_ids = set(state.final_proof.source_attempt_ids)
+            strategy_ids = {
+                attempt.strategy_id
+                for attempt in state.attempts
+                if attempt.attempt_id in source_ids
+            }
+            direct_proposal_ids = {
+                strategy.inspiration_proposal_id
+                for strategy in state.strategies
+                if strategy.strategy_id in strategy_ids
+                and strategy.inspiration_proposal_id is not None
+            }
+            source_route_ids = {
+                route_id
+                for strategy_id in strategy_ids
+                if (route_id := self._route_for_strategy(state, strategy_id))
+                is not None
+            }
+            final_dependency_ids = set(state.final_proof.dependencies)
+            final_dependency_ids.update(
+                dependency
+                for step in state.final_proof.proof_steps
+                for dependency in step.dependencies
+            )
+            state.inspiration_engine.mark_final_citations(
+                route_ids=source_route_ids,
+                obligation_ids=final_dependency_ids,
+                message_ids=final_dependency_ids,
+                direct_proposal_ids=direct_proposal_ids,
+            )
+        if state.inspiration_engine is not None:
+            state.inspiration_engine.persist_cross_run_learning(
+                run_verified=status == RunStatus.VERIFIED
+            )
         return RunResult(
             run_id=run_id,
             status=status,
+            task_status=task_status,
+            deliverable_assessments=deliverable_assessments,
+            math_status=math_status,
+            execution_status=execution_status,
             problem=problem,
             final_proof=state.final_proof,
             final_verification=state.final_verification,
+            research_progress_report=state.research_progress_report,
             attempts=state.attempts,
             claims=memory.claims,
             verification_reports=state.reports,
@@ -5012,7 +12321,7 @@ class ProofMeshOrchestrator:
             proof_checkpoints=store.list_proof_checkpoints(),
             experiments=[
                 ExperimentResult.model_validate(payload)
-                for payload in store.list_experiment_results()
+                for payload in experiment_payloads
             ],
             resumed=state.resumed,
             resumed_from_checkpoint_id=state.resumed_from_checkpoint_id,
@@ -5023,20 +12332,48 @@ class ProofMeshOrchestrator:
             summary=summary,
         )
 
-    @staticmethod
-    def _result_summary(status: RunStatus, state: SolveState) -> str:
+    def _result_summary(self, status: RunStatus, state: SolveState) -> str:
+        zh = self.config.runtime.output_language.lower().startswith("zh")
         if status == RunStatus.VERIFIED:
-            return "A final proof passed independent structural and step-level verification under the configured threshold."
+            return (
+                "最终证明已通过独立结构审查和逐步审查。"
+                if zh
+                else "A final proof passed independent structural and step-level verification under the configured threshold."
+            )
+        if status == RunStatus.COMPLETED:
+            return (
+                "用户要求的计算、反例或候选规律等交付物已经完成；未要求的猜想证明不会被伪装成已验证定理。"
+                if zh
+                else "The requested computation, counterexample, or conjecture deliverables were completed; an unrequested proof is not treated as a missing task."
+            )
         if status == RunStatus.UNVERIFIED:
             verdict = (
                 state.final_verification.verdict.value
                 if state.final_verification
                 else "missing"
             )
-            return f"A final answer/proof draft was produced, but final verification is {verdict}; inspect caveats and reports."
+            return (
+                f"尚未建立完整可验证证明；最终审查状态为 {verdict}。请查看研究进展报告。"
+                if zh
+                else f"No complete verified proof was established; final verification is {verdict}. Inspect the research progress report."
+            )
         if status == RunStatus.BUDGET_EXHAUSTED:
-            return "The configured inference budget was exhausted; all partial attempts and evidence were preserved."
-        return "No final proof could be formed; inspect failed paths and structured artifacts."
+            return (
+                "推理预算已耗尽；所有局部路线和证据均已保留。"
+                if zh
+                else "The configured inference budget was exhausted; all partial attempts and evidence were preserved."
+            )
+        if status == RunStatus.PAUSED_EXTERNAL_FAILURE:
+            return (
+                "外部模型服务中断，运行已暂停；数学状态保持 inconclusive。"
+                if zh
+                else "The external model service was interrupted; the run is paused and mathematical status remains inconclusive."
+            )
+        return (
+            "运行异常终止；请查看结构化错误记录。"
+            if zh
+            else "The run failed; inspect the structured error record."
+        )
 
     def _checkpoint(
         self,
@@ -5051,6 +12388,7 @@ class ProofMeshOrchestrator:
         store.checkpoint(
             stage,
             {
+                "schema_version": "0.7",
                 "triage": state.triage,
                 "strategies": state.strategies,
                 "attempts": state.attempts,
@@ -5064,13 +12402,116 @@ class ProofMeshOrchestrator:
                 "final_proof": state.final_proof,
                 "final_verification": state.final_verification,
                 "budget_exhausted": state.budget_exhausted,
+                "math_status": state.math_status,
+                "execution_status": state.execution_status,
+                "research_progress_report": state.research_progress_report,
+                "global_no_progress_rounds": state.global_no_progress_rounds,
+                "global_meta_pivot_used": state.global_meta_pivot_used,
+                "last_progress_signature": state.last_progress_signature,
+                "certified_counterexample_hashes": (
+                    state.certified_counterexample_hashes
+                ),
+                **export_hierarchical_checkpoint(
+                    current_round=state.current_round,
+                    graph_frozen=state.graph_frozen,
+                    final_repair_failed=state.final_repair_failed,
+                    proof_debt_history=state.proof_debt_history,
+                    route_team_reviews=state.route_team_reviews,
+                    capability_domain=state.capability_domain,
+                    route_registry=state.route_registry,
+                    typed_memory=state.typed_memory,
+                    proof_graph=state.proof_graph,
+                    message_broker=state.message_broker,
+                    bridge_broker=state.bridge_broker,
+                    contradiction_broker=state.contradiction_broker,
+                    inspiration_engine=state.inspiration_engine,
+                    capability_profile=state.capability_profile,
+                    deep_exploration_registry=state.deep_exploration_registry,
+                ),
                 "claims": memory.claims,
                 "calls_started": runner.ledger.calls_started,
                 "stage_calls": runner.ledger.stage_calls,
                 "bucket_calls": runner.ledger.bucket_calls,
+                "reservation_calls": runner.ledger.reservation_calls,
                 "agent_metrics": runner.pool.metrics(),
+                "provider_circuit": runner.pool.provider_circuit_state(),
             },
         )
+        if state.route_registry is not None:
+            route_registry_state = state.route_registry.export_state()
+            broker_state = (
+                state.message_broker.export_state()
+                if state.message_broker is not None
+                else {}
+            )
+            graph_state = (
+                state.proof_graph.export_state()
+                if state.proof_graph is not None
+                else {}
+            )
+            typed_memory_state = (
+                state.typed_memory.export_state()
+                if state.typed_memory is not None
+                else {}
+            )
+            bridge_state = (
+                state.bridge_broker.export_state()
+                if state.bridge_broker is not None
+                else {}
+            )
+            contradiction_state = (
+                state.contradiction_broker.export_state()
+                if state.contradiction_broker is not None
+                else {}
+            )
+            inspiration_state = (
+                state.inspiration_engine.export_state()
+                if state.inspiration_engine is not None
+                else {}
+            )
+            store.write_json("structured", "route_registry", route_registry_state)
+            store.write_json("structured", "message_broker", broker_state)
+            store.write_json("structured", "proof_graph", graph_state)
+            store.write_json("structured", "typed_memory", typed_memory_state)
+            store.write_json(
+                "structured",
+                "route_team_reviews",
+                state.route_team_reviews or {},
+            )
+            store.write_json(
+                "structured",
+                "inspiration_engine",
+                inspiration_state,
+            )
+            store.write_json(
+                "structured",
+                "message_receipts",
+                broker_state.get("receipts", {}),
+            )
+            if state.deep_exploration_registry is not None:
+                store.write_json(
+                    "structured",
+                    "deep_exploration_registry",
+                    state.deep_exploration_registry.export_state(),
+                )
+            write_hierarchical_reports(
+                store,
+                route_registry=route_registry_state,
+                message_broker=broker_state,
+                proof_graph=graph_state,
+                typed_memory=typed_memory_state,
+                bridge_broker=bridge_state,
+                contradiction_broker=contradiction_state,
+                inspiration_engine=inspiration_state,
+                deep_exploration=(
+                    state.deep_exploration_registry.export_state()
+                    if state.deep_exploration_registry is not None
+                    else {}
+                ),
+                legacy_claims=[
+                    claim.model_dump(mode="json") for claim in memory.claims
+                ],
+            )
         runner.persist_runtime_state()
 
     def _allowed_tools(self) -> list[str]:
@@ -5079,9 +12520,29 @@ class ProofMeshOrchestrator:
             tools.extend(["sympy_simplify", "sympy_equivalent", "polynomial_factor"])
         if self.config.verification.enable_numeric_counterexamples:
             tools.append("numeric_counterexample")
+        if (
+            self.config.computation.enabled
+            and self.config.computation.typed_tools_enabled
+        ):
+            tools.extend(
+                [
+                    "modular_exhaustive",
+                    "bounded_integer_search",
+                    "graph_certificate",
+                    "recurrence_check",
+                    "bounded_greedy_sequence",
+                    "candidate_period_check",
+                    "exact_geometry",
+                ]
+            )
+        if (
+            self.config.computation.enabled
+            and self.config.computation.sandboxed_python_enabled
+        ):
+            tools.append("sandboxed_python")
         if self.config.verification.enable_lean:
             tools.append("lean_check")
-        return tools
+        return list(dict.fromkeys(tools))
 
     @staticmethod
     def _normalize_statement(text: str) -> str:

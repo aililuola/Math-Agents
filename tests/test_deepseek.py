@@ -135,6 +135,76 @@ async def test_deepseek_payload_and_reasoning_redaction() -> None:
 
 
 @pytest.mark.asyncio
+async def test_deepseek_per_call_policy_can_disable_or_lower_thinking() -> None:
+    captured: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            200,
+            json={
+                "id": f"chat-{len(captured)}",
+                "model": "deepseek-v4-pro",
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"content": '{"ok":true}'},
+                    }
+                ],
+                "usage": {"prompt_tokens": 2, "completion_tokens": 3},
+            },
+        )
+
+    client = DeepSeekClient(
+        api_key="test-secret",
+        thinking_enabled=True,
+        reasoning_effort="max",
+    )
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        await client.complete_with_policy(
+            [{"role": "user", "content": "Return JSON."}],
+            temperature=0.2,
+            max_output_tokens=12000,
+            json_mode=True,
+            thinking_enabled=False,
+        )
+        await client.complete_with_policy(
+            [{"role": "user", "content": "Return JSON."}],
+            temperature=0.2,
+            max_output_tokens=24000,
+            json_mode=True,
+            thinking_enabled=True,
+            reasoning_effort="high",
+        )
+    finally:
+        await client.aclose()
+
+    assert captured[0]["thinking"] == {"type": "disabled"}
+    assert captured[0]["temperature"] == 0.2
+    assert "reasoning_effort" not in captured[0]
+    assert captured[1]["thinking"] == {"type": "enabled"}
+    assert captured[1]["reasoning_effort"] == "high"
+    assert "temperature" not in captured[1]
+
+
+@pytest.mark.asyncio
+async def test_deepseek_progress_is_scoped_to_one_request_task() -> None:
+    client = DeepSeekClient(api_key="test-secret", streaming=True)
+    first = object()
+    second = object()
+    client._progress_by_task[id(first)] = {"chunks": 7}
+    client._progress_by_task[id(second)] = {"chunks": 0}
+
+    assert client.progress_snapshot_for(first)["chunks"] == 7
+    assert client.progress_snapshot_for(second)["chunks"] == 0
+    client.clear_progress_for(first)
+    assert client.progress_snapshot_for(first) == {}
+    await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_deepseek_streaming_payload_and_reasoning_redaction() -> None:
     captured: dict[str, object] = {}
 

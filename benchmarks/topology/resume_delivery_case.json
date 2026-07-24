@@ -1,0 +1,12 @@
+{
+  "case_id": "resume_exactly_once",
+  "description": "The process stops after prompt delivery and before receipt acknowledgement.",
+  "message_id": "resume-fact-1",
+  "source_route": "route-a",
+  "target_route": "route-b",
+  "expected": {
+    "prompt_deliveries_after_resume": 0,
+    "receipt_state_after_resume": "pending",
+    "route_continues": true
+  }
+}

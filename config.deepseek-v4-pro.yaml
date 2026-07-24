@@ -11,11 +11,12 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [planner, meta_reviewer, final_verifier, experimenter]
+    roles: [planner, meta_reviewer, final_verifier, experimenter, meta_strategist, inspiration_referee, conflict_resolver]
     specialties: [problem_decomposition, strategy_generation, failure_classification, meta_review]
     max_concurrency: 1
     temperature: 0.0
-    max_output_tokens: 100000
+    provider_max_output_tokens: 384000
+    max_output_tokens: 384000
     timeout_seconds: 900
     trust_prior: 0.55
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
@@ -29,7 +30,7 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [explorer, summarizer, detailed_verifier, final_verifier]
+    roles: [explorer, summarizer, detailed_verifier, final_verifier, route_prover, route_skeptic, analogy_agent, invariant_hypothesis_agent]
     specialties: [number_theory, algebra, combinatorics, invariants, extremal_arguments]
     max_concurrency: 1
     temperature: 0.0
@@ -47,7 +48,7 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [explorer, summarizer, detailed_verifier, final_verifier]
+    roles: [explorer, summarizer, detailed_verifier, final_verifier, route_prover, construction_inventor, representation_switchboard, reverse_goal_analyzer]
     specialties: [analysis, inequalities, geometry, probability, analytic_methods]
     max_concurrency: 1
     temperature: 0.0
@@ -65,7 +66,7 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [explorer, summarizer, structural_verifier, detailed_verifier, final_verifier]
+    roles: [explorer, summarizer, structural_verifier, detailed_verifier, final_verifier, route_prover, route_skeptic, route_referee, tool_specialist, bridge_prover, counterexample_hunter]
     specialties: [logic, graph_theory, constructive_proofs, counterexample_search, dependency_audit]
     max_concurrency: 1
     temperature: 0.0
@@ -83,7 +84,7 @@ agents:
     thinking_enabled: true
     reasoning_effort: max
     streaming: true
-    roles: [synthesizer, structural_verifier, detailed_verifier, final_verifier]
+    roles: [synthesizer, structural_verifier, detailed_verifier, final_verifier, route_referee, inspiration_referee, conflict_resolver]
     specialties: [proof_synthesis, rigorous_exposition, proof_audit, symbolic_checks]
     max_concurrency: 1
     temperature: 0.0
@@ -93,7 +94,7 @@ agents:
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
 
 budget:
-  max_total_calls: 42
+  max_total_calls: 60
   max_rounds: 4
   initial_paths: 3
   max_paths: 6
@@ -113,6 +114,11 @@ budget:
   synthesis_share: 0.10
 
 scheduler:
+  hard_stagnation_enabled: true
+  max_normal_attempts_per_signature: 1
+  max_repair_attempts_per_signature: 1
+  global_no_progress_rounds_before_meta_pivot: 2
+  global_no_progress_rounds_before_stop: 3
   # All values are policy controls, not assumptions tied to a particular theorem.
   max_actions_per_round: 2
   widen_paths_per_action: 2
@@ -144,6 +150,7 @@ scheduler:
   diagnostic_candidate_limit: 12
 
 topology:
+  mode: hierarchical_sparse
   neighbor_k: 2
   # All five agents use the same provider/model, so independence is enforced by key,
   # user_id, isolated first-pass prompts, and author exclusion rather than provider diversity.
@@ -155,6 +162,39 @@ topology:
   max_context_chars: 180000
   max_verified_claims_per_context: 30
   preserve_raw_evidence: true
+  typed_communication:
+    enabled: true
+  route_teams:
+    enabled: true
+  cross_route:
+    enabled: true
+    initial_isolation_rounds: 1
+    max_neighbors_per_route: 2
+    max_messages_per_route_per_round: 6
+    max_global_messages_per_round: 24
+  proof_graph:
+    enabled: true
+    mode: shadow
+  typed_memory:
+    enabled: true
+    strict_fact_gate: true
+  inspiration:
+    enabled: true
+    mode: shadow
+    proposer_generalist_roles: [explorer, route_prover]
+    max_single_agent_proposals_per_task: 2
+    representation_switchboard: true
+    analogy_agent: true
+    auxiliary_construction_inventor: true
+    invariant_hypothesis_agent: true
+    reverse_goal_analysis: true
+    bridge_lemma_generator: true
+    persistent_meta_strategist: true
+    surprise_exploration: true
+  validation_escalation:
+    enabled: true
+  agent_capability:
+    enabled: true
 
 verification:
   structural_first: true
@@ -176,7 +216,8 @@ continuation:
   max_new_claims_per_call: 3
   max_output_tokens_per_segment: 100000
   # Keep each scheduler action small enough to preserve breadth and final-audit calls.
-  segments_per_explore_call: 1
+  # Two consecutive segments may advance, but every delta is independently reviewed.
+  segments_per_explore_call: 2
   max_segments_per_path: 12
   verify_each_delta: true
   delta_verifier_replicas: 1
@@ -198,10 +239,17 @@ computation:
   sandbox_cpus: 1
   sandbox_pids_limit: 32
   execute_planner_hints_immediately: false
+  critical_calculation_gate_enabled: true
+  critical_calculation_require_declarations: true
+  critical_calculation_max_checks_per_artifact: 8
   targeted_falsification_fast_path: true
+  bounded_typed_probe_fast_path: true
+  bounded_typed_probe_max_cases: 25000
   soft_experiments_per_path: 2
   hard_experiments_per_path: 6
   max_compute_cycles_per_segment: 1
+  max_contract_repairs_per_segment: 1
+  contract_repair_max_output_tokens: 8192
   max_total_cpu_seconds: 120
   max_cases_per_experiment: 1000000
   max_output_chars: 20000
@@ -225,5 +273,60 @@ runtime:
   activity_persist: true
   activity_include_agent_calls: true
   activity_heartbeat_seconds: 20
+  stream_first_chunk_timeout_seconds: 90
+  stream_idle_timeout_seconds: 300
+  agent_call_wall_timeout_seconds: 7200
+  stage_thinking_modes:
+    goal_normalization: disabled
+    triage: disabled
+    claim_extraction: disabled
+    post_failure_bottleneck: disabled
+    computation_contract_repair: disabled
+    pattern_conjecture_completion: disabled
+    strategy_generation: max
+    independent_exploration: tiered
+    proof_continuation: tiered
+    route_prove: tiered
+    structural_verification: high
+    checkpoint_verification: high
+    detailed_verification: high
+    final_verification: high
+    blind_structural_verification: high
+    blind_detailed_verification: high
+    meta_review: high
+    route_skeptic: high
+    route_referee: high
+    route_tool_audit: high
+    synthesis: high
+    final_revision: high
+  stage_output_token_limits:
+    goal_normalization: 4096
+    triage: 12000
+    strategy_generation: 384000
+    claim_extraction: 12000
+    structural_verification: 16000
+    checkpoint_verification: 24000
+    detailed_verification: 32000
+    final_verification: 32000
+    blind_structural_verification: 16000
+    blind_detailed_verification: 32000
+    meta_review: 16000
+    route_skeptic: 24000
+    route_referee: 16000
+    route_tool_audit: 16000
+    representation_switchboard: 24000
+    structural_analogy_search: 24000
+    invent_auxiliary_construction: 24000
+    hypothesize_invariant: 24000
+    reverse_goal_analysis: 24000
+    persistent_meta_strategy: 24000
+    surprise_exploration: 24000
+    inspiration_referee: 16000
+    post_failure_bottleneck: 16000
+    synthesis: 64000
+    final_revision: 64000
+    experiment_codegen: 12000
+    computation_contract_repair: 8192
+    pattern_conjecture_completion: 4096
   log_level: INFO
   random_seed: 20260719

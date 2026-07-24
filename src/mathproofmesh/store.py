@@ -4,6 +4,8 @@ import json
 import os
 import re
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,7 @@ from .schemas import (
     CheckpointStatus,
     EvidenceRef,
     ProofCheckpoint,
+    WorkingProofCheckpoint,
     stable_hash,
     utc_now_iso,
 )
@@ -39,6 +42,7 @@ class ArtifactStore:
     """Run-scoped, append-friendly artifact storage with content hashes and atomic writes."""
 
     def __init__(self, run_root: str | Path, run_id: str) -> None:
+        self._write_lock = threading.RLock()
         self.run_id = _safe_name(run_id)
         self.root = Path(run_root).expanduser().resolve() / self.run_id
         for subdir in [
@@ -50,22 +54,49 @@ class ArtifactStore:
             "prompts",
             "deltas",
             "experiments",
+            "communication",
+            "proof_graph",
+            "inspiration",
+            "verification",
+            "events",
         ]:
             (self.root / subdir).mkdir(parents=True, exist_ok=True)
         self.events_path = self.root / "events.jsonl"
 
+    @staticmethod
+    def _replace_with_retry(source: str, destination: Path) -> None:
+        """Tolerate brief Windows sharing locks without weakening atomic replacement."""
+
+        attempts = 9
+        for attempt in range(attempts):
+            try:
+                os.replace(source, destination)
+                return
+            except PermissionError:
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(min(0.02 * (2**attempt), 0.5))
+
     def _atomic_write(self, path: Path, content: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_name, path)
-        finally:
-            if os.path.exists(tmp_name):
-                os.unlink(tmp_name)
+        with self._write_lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=f".{path.name}.", dir=str(path.parent)
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(content)
+                    f.flush()
+                    os.fsync(f.fileno())
+                self._replace_with_retry(tmp_name, path)
+            finally:
+                if os.path.exists(tmp_name):
+                    try:
+                        os.unlink(tmp_name)
+                    except OSError:
+                        # Never hide the original replacement failure with a
+                        # secondary best-effort temporary-file cleanup error.
+                        pass
 
     def write_json(self, subdir: str, name: str, value: Any) -> str:
         path = self.root / _safe_name(subdir) / f"{_safe_name(name)}.json"
@@ -118,6 +149,18 @@ class ArtifactStore:
             "payload": _to_jsonable(payload),
         }
         with self.events_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+
+    def append_message_event(self, event_type: str, payload: Any) -> None:
+        """Persist the message protocol stream without removing the legacy log."""
+        event = {
+            "timestamp": utc_now_iso(),
+            "run_id": self.run_id,
+            "event_type": event_type,
+            "payload": _to_jsonable(payload),
+        }
+        path = self.root / "events" / "messages.jsonl"
+        with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
 
     def checkpoint(self, stage: str, state: Any) -> str:
@@ -199,6 +242,77 @@ class ArtifactStore:
             return None
         with latest_path.open("r", encoding="utf-8") as f:
             return ProofCheckpoint.model_validate(json.load(f))
+
+    def save_working_checkpoint(self, checkpoint: WorkingProofCheckpoint) -> str:
+        """Persist route-local work without advancing the verified resume pointer."""
+
+        path_dir = (
+            self.root / "checkpoints" / "working" / _safe_name(checkpoint.path_id)
+        )
+        path_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_path = path_dir / (
+            f"{checkpoint.segment_index:04d}_"
+            f"{_safe_name(checkpoint.working_checkpoint_id)}.json"
+        )
+        content = json.dumps(
+            _to_jsonable(checkpoint), ensure_ascii=False, indent=2, sort_keys=True
+        )
+        self._atomic_write(checkpoint_path, content)
+        self._atomic_write(path_dir / "latest.json", content)
+        self.append_event(
+            "working_checkpoint_saved",
+            {
+                "working_checkpoint_id": checkpoint.working_checkpoint_id,
+                "parent_verified_checkpoint_id": (
+                    checkpoint.parent_verified_checkpoint_id
+                ),
+                "path_id": checkpoint.path_id,
+                "segment_index": checkpoint.segment_index,
+                "status": checkpoint.status,
+            },
+        )
+        return self.ref(checkpoint_path)
+
+    def load_latest_working_checkpoint(
+        self, path_id: str
+    ) -> WorkingProofCheckpoint | None:
+        path = (
+            self.root / "checkpoints" / "working" / _safe_name(path_id) / "latest.json"
+        )
+        if not path.exists():
+            return None
+        with path.open("r", encoding="utf-8") as handle:
+            return WorkingProofCheckpoint.model_validate(json.load(handle))
+
+    def list_working_checkpoints(
+        self, path_id: str | None = None
+    ) -> list[WorkingProofCheckpoint]:
+        root = self.root / "checkpoints" / "working"
+        if not root.exists():
+            return []
+        roots = (
+            [root / _safe_name(path_id)]
+            if path_id
+            else [item for item in root.iterdir() if item.is_dir()]
+        )
+        result: list[WorkingProofCheckpoint] = []
+        for item in roots:
+            for path in sorted(item.glob("[0-9][0-9][0-9][0-9]_*.json")):
+                try:
+                    with path.open("r", encoding="utf-8") as handle:
+                        result.append(
+                            WorkingProofCheckpoint.model_validate(json.load(handle))
+                        )
+                except (OSError, ValueError, json.JSONDecodeError):
+                    continue
+        return sorted(
+            result,
+            key=lambda checkpoint: (
+                checkpoint.path_id,
+                checkpoint.segment_index,
+                checkpoint.created_at,
+            ),
+        )
 
     def list_proof_checkpoints(
         self, path_id: str | None = None

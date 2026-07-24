@@ -10,7 +10,9 @@ from .schemas import (
     ActionKind,
     BudgetAction,
     BudgetDecision,
+    ClaimStatus,
     FailureLevel,
+    MetaReview,
     PathStats,
     ProofAttempt,
     StrategyCard,
@@ -37,6 +39,16 @@ class _AttemptEvidence:
     verification_score: float
     uncertainty: float
     structurally_valid: bool | None
+    incomplete_only: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _RouteReviewEvidence:
+    verified_delta_count: int = 0
+    rejected_delta_count: int = 0
+    latest_delta_rejected: bool = False
+    failure_level: FailureLevel = FailureLevel.NONE
+    confidence: float = 0.0
 
 
 class AdaptiveBudgetManager:
@@ -51,6 +63,9 @@ class AdaptiveBudgetManager:
         attempts: list[ProofAttempt],
         reports: list[VerificationReport],
         aggregate_reports: Mapping[str, VerificationReport] | None = None,
+        graph_signals: Mapping[str, Mapping[str, object]] | None = None,
+        route_team_reviews: Mapping[str, list[Mapping[str, object]]] | None = None,
+        meta_review: MetaReview | None = None,
     ) -> list[PathStats]:
         attempts_by_strategy: dict[str, list[ProofAttempt]] = defaultdict(list)
         for attempt in attempts:
@@ -60,6 +75,12 @@ class AdaptiveBudgetManager:
         for report in reports:
             reports_by_target[report.target_id].append(report)
         aggregate_reports = aggregate_reports or self._infer_aggregates(reports)
+        route_team_reviews = route_team_reviews or {}
+        meta_assessments = (
+            {item.target_id: item for item in meta_review.assessments}
+            if meta_review is not None
+            else {}
+        )
 
         stats: list[PathStats] = []
         for strategy in strategies:
@@ -79,12 +100,32 @@ class AdaptiveBudgetManager:
 
             snapshots = [
                 self._evidence_for_attempt(
-                    attempt.attempt_id,
+                    attempt,
                     reports_by_target,
                     aggregate_reports,
                 )
                 for attempt in path_attempts
             ]
+            route_review = self._route_review_evidence(
+                path_attempts,
+                route_team_reviews,
+            )
+            if (
+                route_review.latest_delta_rejected
+                and snapshots[-1].verdict != VerificationVerdict.PASS
+            ):
+                snapshots[-1] = _AttemptEvidence(
+                    verdict=VerificationVerdict.FAIL,
+                    failure_level=route_review.failure_level,
+                    confidence=route_review.confidence,
+                    verification_score=0.0,
+                    uncertainty=self._verdict_uncertainty(
+                        VerificationVerdict.FAIL,
+                        route_review.confidence,
+                    ),
+                    structurally_valid=snapshots[-1].structurally_valid,
+                    incomplete_only=False,
+                )
             raw_progress = [
                 self._raw_attempt_progress(attempt) for attempt in path_attempts
             ]
@@ -126,6 +167,15 @@ class AdaptiveBudgetManager:
                 backed_progress,
             )
             consecutive_failures = self._consecutive_failures(snapshots)
+            attempt_ids = {item.attempt_id for item in path_attempts}
+            meta_assessment = next(
+                (
+                    meta_assessments[item.attempt_id]
+                    for item in reversed(path_attempts)
+                    if item.attempt_id in meta_assessments
+                ),
+                None,
+            )
 
             stats.append(
                 PathStats(
@@ -152,8 +202,49 @@ class AdaptiveBudgetManager:
                         attempt.usage.total_tokens for attempt in path_attempts
                     ),
                     structurally_valid=latest_evidence.structurally_valid,
+                    incomplete_only=latest_evidence.incomplete_only,
+                    verified_delta_count=route_review.verified_delta_count,
+                    rejected_delta_count=route_review.rejected_delta_count,
+                    latest_delta_rejected=route_review.latest_delta_rejected,
+                    meta_recommended_action=(
+                        meta_assessment.recommended_action
+                        if meta_assessment is not None
+                        else None
+                    ),
+                    meta_preferred=(
+                        meta_review is not None
+                        and meta_review.selected_target_id in attempt_ids
+                    ),
+                    meta_review_confidence=(
+                        meta_review.confidence if meta_review is not None else 0.0
+                    ),
                 )
             )
+        graph_signals = graph_signals or {}
+        graph_fields = {
+            "proof_debt",
+            "proof_debt_reduction",
+            "verified_fact_gain",
+            "shared_obligation_count",
+            "high_centrality_obligation_count",
+            "contradiction_count",
+            "counterexample_count",
+            "message_utility",
+            "route_redundancy",
+            "bridge_opportunity",
+            "negative_memory_hits",
+            "inspiration_trigger_count",
+            "novelty_score",
+            "representation_diversity",
+            "analogy_opportunity",
+            "construction_opportunity",
+            "surprise_budget_remaining",
+        }
+        for stat in stats:
+            payload = graph_signals.get(stat.strategy_id, {})
+            for field_name in graph_fields:
+                if field_name in payload:
+                    setattr(stat, field_name, payload[field_name])
         return stats
 
     @staticmethod
@@ -171,10 +262,11 @@ class AdaptiveBudgetManager:
 
     def _evidence_for_attempt(
         self,
-        attempt_id: str,
+        attempt: ProofAttempt,
         reports_by_target: Mapping[str, list[VerificationReport]],
         aggregate_reports: Mapping[str, VerificationReport],
     ) -> _AttemptEvidence:
+        attempt_id = attempt.attempt_id
         target_reports = reports_by_target.get(attempt_id, [])
         aggregate = aggregate_reports.get(attempt_id)
         if aggregate is None:
@@ -187,10 +279,15 @@ class AdaptiveBudgetManager:
             ]
             aggregate = aggregate_candidates[-1] if aggregate_candidates else None
 
+        incomplete_only = bool(
+            aggregate is not None
+            and self._is_incomplete_attempt_report(aggregate, attempt)
+        )
         structural_reports = [
             report
             for report in target_reports
             if report.stage == VerificationStage.STRUCTURAL
+            and not self._is_incomplete_attempt_report(report, attempt)
         ]
         structurally_valid: bool | None = None
         if structural_reports:
@@ -222,6 +319,101 @@ class AdaptiveBudgetManager:
             verification_score=verification_score,
             uncertainty=uncertainty,
             structurally_valid=structurally_valid,
+            incomplete_only=incomplete_only,
+        )
+
+    @staticmethod
+    def _is_incomplete_attempt_report(
+        report: VerificationReport,
+        attempt: ProofAttempt,
+    ) -> bool:
+        if (
+            report.target_type != "attempt"
+            or report.verdict != VerificationVerdict.FAIL
+            or attempt.status.value == "complete"
+            or report.failure_level != FailureLevel.EXECUTION
+            or not report.problem_integrity_ok
+            or report.first_error_step is not None
+        ):
+            return False
+        return not any(
+            issue.step_id is not None
+            or issue.claim_id is not None
+            or issue.counterexample is not None
+            or issue.severity.value == "critical"
+            for issue in report.issues
+        )
+
+    @classmethod
+    def _route_review_evidence(
+        cls,
+        attempts: list[ProofAttempt],
+        reviews_by_attempt: Mapping[str, list[Mapping[str, object]]],
+    ) -> _RouteReviewEvidence:
+        reviews = [
+            review
+            for attempt in attempts
+            for review in reviews_by_attempt.get(attempt.attempt_id, [])
+        ]
+        if not reviews:
+            return _RouteReviewEvidence()
+
+        accepted = [review for review in reviews if cls._route_review_passed(review)]
+        rejected = [review for review in reviews if cls._route_review_rejected(review)]
+        latest = reviews[-1]
+        latest_rejected = cls._route_review_rejected(latest)
+        if not latest_rejected:
+            return _RouteReviewEvidence(
+                verified_delta_count=len(accepted),
+                rejected_delta_count=len(rejected),
+            )
+
+        raw_level = str(
+            latest.get("checkpoint_failure_level")
+            or latest.get("skeptic_failure_level")
+            or FailureLevel.EXECUTION.value
+        )
+        try:
+            failure_level = FailureLevel(raw_level)
+        except ValueError:
+            failure_level = FailureLevel.EXECUTION
+        raw_confidence = latest.get("checkpoint_failure_confidence")
+        if raw_confidence is None:
+            raw_confidence = latest.get("skeptic_confidence", 0.9)
+        try:
+            confidence = max(0.0, min(1.0, float(raw_confidence)))
+        except (TypeError, ValueError):
+            confidence = 0.9
+        return _RouteReviewEvidence(
+            verified_delta_count=len(accepted),
+            rejected_delta_count=len(rejected),
+            latest_delta_rejected=True,
+            failure_level=failure_level,
+            confidence=confidence,
+        )
+
+    @staticmethod
+    def _route_review_passed(review: Mapping[str, object]) -> bool:
+        checkpoint_status = review.get("checkpoint_status")
+        if checkpoint_status == "accepted":
+            return True
+        if checkpoint_status in {"rejected", "uncertain"}:
+            return False
+        return bool(review.get("validation_passed")) and bool(
+            review.get("referee_accepted")
+        )
+
+    @staticmethod
+    def _route_review_rejected(review: Mapping[str, object]) -> bool:
+        checkpoint_status = review.get("checkpoint_status")
+        if checkpoint_status == "rejected":
+            return True
+        if checkpoint_status == "accepted":
+            return False
+        return (
+            review.get("skeptic_verdict") == VerificationVerdict.FAIL.value
+            or review.get("referee_accepted") is False
+            or review.get("validation_passed") is False
         )
 
     @staticmethod
@@ -286,7 +478,11 @@ class AdaptiveBudgetManager:
         evidence: _AttemptEvidence,
     ) -> float:
         cfg = self.config.scheduler
-        if evidence.verdict is None:
+        if evidence.incomplete_only:
+            # A partial attempt can correctly fail the submission gate without
+            # invalidating its already checked mathematics.
+            progress = raw_progress * cfg.unverified_progress_discount
+        elif evidence.verdict is None:
             progress = raw_progress * cfg.unverified_progress_discount
         elif evidence.verdict == VerificationVerdict.PASS:
             progress = raw_progress * (0.75 + 0.25 * evidence.confidence)
@@ -301,9 +497,12 @@ class AdaptiveBudgetManager:
         else:
             progress = raw_progress * 0.25
 
-        if evidence.structurally_valid is False:
+        if evidence.structurally_valid is False and not evidence.incomplete_only:
             progress = min(progress, cfg.structural_failure_progress_cap)
-        if evidence.verdict == VerificationVerdict.FAIL:
+        if (
+            evidence.verdict == VerificationVerdict.FAIL
+            and not evidence.incomplete_only
+        ):
             caps = {
                 FailureLevel.EXECUTION: cfg.execution_failure_progress_cap,
                 FailureLevel.PLAN: cfg.plan_failure_progress_cap,
@@ -325,31 +524,40 @@ class AdaptiveBudgetManager:
         snapshots: list[_AttemptEvidence],
         progress: list[float],
     ) -> int:
+        del progress
         if len(attempts) < 2:
             return 0
-        threshold = self.config.scheduler.meaningful_progress_threshold
         stagnant = 0
         for index in range(len(attempts) - 1, 0, -1):
             previous = attempts[index - 1]
             current = attempts[index]
-            gap_reduction = self._gap_reduction(
-                len(previous.unresolved_gaps),
-                len(current.unresolved_gaps),
+            durable_math_gain = (
+                len(current.proof_steps) > len(previous.proof_steps)
+                or (
+                    bool(current.final_answer)
+                    and current.final_answer != previous.final_answer
+                )
+                or len(
+                    [
+                        claim
+                        for claim in current.proposed_lemmas
+                        if claim.status == ClaimStatus.VERIFIED
+                    ]
+                )
+                > len(
+                    [
+                        claim
+                        for claim in previous.proposed_lemmas
+                        if claim.status == ClaimStatus.VERIFIED
+                    ]
+                )
             )
-            verification_gain = (
-                snapshots[index].verification_score
-                - snapshots[index - 1].verification_score
-            )
-            progress_gain = progress[index] - progress[index - 1]
             became_verified = (
                 snapshots[index].verdict == VerificationVerdict.PASS
                 and snapshots[index - 1].verdict != VerificationVerdict.PASS
             )
-            if (
-                became_verified
-                or progress_gain >= threshold
-                or verification_gain >= threshold
-                or gap_reduction > 0.0
+            if durable_math_gain and (
+                became_verified or snapshots[index].verdict != VerificationVerdict.FAIL
             ):
                 break
             stagnant += 1
@@ -359,7 +567,7 @@ class AdaptiveBudgetManager:
     def _consecutive_failures(snapshots: list[_AttemptEvidence]) -> int:
         failures = 0
         for evidence in reversed(snapshots):
-            if evidence.verdict != VerificationVerdict.FAIL:
+            if evidence.verdict != VerificationVerdict.FAIL or evidence.incomplete_only:
                 break
             failures += 1
         return failures
@@ -432,6 +640,7 @@ class AdaptiveBudgetManager:
             stat
             for stat in evaluated
             if stat.latest_verdict == VerificationVerdict.FAIL
+            and not stat.incomplete_only
         ]
         failure_rate = len(failed) / max(1, len(evaluated))
         all_evaluated_paths_failed = (
@@ -460,6 +669,19 @@ class AdaptiveBudgetManager:
         )
 
         candidates: list[BudgetAction] = []
+        hierarchical = self.config.topology.mode == "hierarchical_sparse"
+        graph_mode = self.config.topology.proof_graph.mode
+        graph_active = (
+            hierarchical
+            and self.config.topology.proof_graph.enabled
+            and graph_mode == "active"
+        )
+        inspiration_mode = self.config.topology.inspiration.mode
+        inspiration_active = (
+            hierarchical
+            and self.config.topology.inspiration.enabled
+            and inspiration_mode == "active"
+        )
         for stat in stats:
             if stat.attempt_id is None:
                 continue
@@ -472,6 +694,7 @@ class AdaptiveBudgetManager:
                 stat.verification_score < self.config.budget.verification_pass_threshold
             )
             verify_blocked: str | None = None
+            meta_blocked = self._meta_block_reason(stat)
             if (
                 stat.latest_verdict == VerificationVerdict.FAIL
                 and stat.failure_confidence
@@ -482,6 +705,15 @@ class AdaptiveBudgetManager:
                     "latest independent audit already rejected this path with "
                     "confidence above the configured verification threshold"
                 )
+            if meta_blocked is not None:
+                verify_eligible = False
+                verify_blocked = meta_blocked
+            if (
+                stat.meta_preferred
+                and stat.meta_recommended_action == ActionKind.VERIFY
+                and self._meta_review_is_authoritative(stat)
+            ):
+                verify_score += 0.20
             candidates.append(
                 BudgetAction(
                     action=ActionKind.VERIFY,
@@ -504,13 +736,35 @@ class AdaptiveBudgetManager:
                 + 0.20 * max(0.0, stat.marginal_progress)
                 + 0.12 * repairability
                 + 0.06 * min(1.0, stat.unresolved_gap_count / 3.0) * repairability
+                + 0.18 * min(1.0, stat.verified_delta_count)
             )
+            if stat.latest_delta_rejected:
+                depth_score -= 0.18
+            if (
+                stat.meta_preferred
+                and stat.meta_recommended_action
+                in {ActionKind.DEEPEN, ActionKind.REVISE}
+                and self._meta_review_is_authoritative(stat)
+            ):
+                depth_score += 0.25
             if stat.latest_verdict in {None, VerificationVerdict.UNCERTAIN}:
                 depth_score += 0.08 * stat.uncertainty
             depth_score -= 0.16 * min(3, stat.stagnation_rounds)
             if stat.structurally_valid is False:
                 depth_score -= self.config.scheduler.structural_failure_penalty
             depth_score -= self._failure_penalty(stat)
+            if graph_active:
+                scheduler = self.config.scheduler
+                depth_score += (
+                    scheduler.proof_debt_reduction_weight
+                    * max(0.0, stat.proof_debt_reduction)
+                    + scheduler.verified_fact_gain_weight
+                    * min(1.0, stat.verified_fact_gain / 2)
+                    + scheduler.message_utility_weight * stat.message_utility
+                    - scheduler.route_redundancy_penalty * stat.route_redundancy
+                    - scheduler.contradiction_priority_weight
+                    * min(1.0, stat.contradiction_count)
+                )
             candidates.append(
                 BudgetAction(
                     action=ActionKind.DEEPEN,
@@ -522,6 +776,191 @@ class AdaptiveBudgetManager:
                     blocked_reason=depth_blocked,
                 )
             )
+
+            if hierarchical and graph_mode in {"shadow", "active"}:
+                shadow = not graph_active
+                if stat.counterexample_count:
+                    candidates.append(
+                        BudgetAction(
+                            action=ActionKind.SEARCH_COUNTEREXAMPLE,
+                            strategy_id=stat.strategy_id,
+                            target_id=stat.attempt_id,
+                            score=(
+                                self.config.scheduler.counterexample_priority_weight
+                                * min(1.0, stat.counterexample_count)
+                                + stat.high_centrality_obligation_count * 0.08
+                            ),
+                            reason="an exact or candidate counterexample has priority over positive votes",
+                            eligible=not shadow,
+                            blocked_reason=(
+                                "proof graph shadow mode records this recommendation only"
+                                if shadow
+                                else None
+                            ),
+                        )
+                    )
+                if stat.contradiction_count:
+                    candidates.append(
+                        BudgetAction(
+                            action=ActionKind.RESOLVE_CONFLICT,
+                            strategy_id=stat.strategy_id,
+                            target_id=stat.attempt_id,
+                            score=(
+                                self.config.scheduler.contradiction_priority_weight
+                                * min(1.0, stat.contradiction_count)
+                                + stat.high_centrality_obligation_count * 0.08
+                            ),
+                            reason="an unresolved scoped contradiction blocks synthesis",
+                            eligible=not shadow,
+                            blocked_reason=(
+                                "proof graph shadow mode records this recommendation only"
+                                if shadow
+                                else None
+                            ),
+                        )
+                    )
+                if stat.shared_obligation_count or stat.bridge_opportunity:
+                    candidates.append(
+                        BudgetAction(
+                            action=ActionKind.BRIDGE,
+                            strategy_id=stat.strategy_id,
+                            target_id=stat.attempt_id,
+                            score=(
+                                self.config.scheduler.bridge_priority_weight
+                                * stat.bridge_opportunity
+                                + self.config.scheduler.shared_bottleneck_weight
+                                * min(1.0, stat.shared_obligation_count / 2)
+                            ),
+                            reason="several routes can share one independently verified bridge lemma",
+                            eligible=not shadow,
+                            blocked_reason=(
+                                "proof graph shadow mode records this recommendation only"
+                                if shadow
+                                else None
+                            ),
+                        )
+                    )
+                if (
+                    stat.route_redundancy
+                    >= self.config.topology.broker.duplicate_strategy_threshold
+                ):
+                    candidates.append(
+                        BudgetAction(
+                            action=ActionKind.MERGE_ROUTE,
+                            strategy_id=stat.strategy_id,
+                            target_id=stat.attempt_id,
+                            score=self.config.scheduler.route_redundancy_penalty
+                            * stat.route_redundancy,
+                            reason="route mechanism, obligations, and facts are redundant",
+                            eligible=not shadow,
+                            blocked_reason=(
+                                "proof graph shadow mode records this recommendation only"
+                                if shadow
+                                else None
+                            ),
+                        )
+                    )
+
+            if hierarchical and inspiration_mode in {"shadow", "active"}:
+                shadow = not inspiration_active
+                obligation_relevance = min(
+                    1.0,
+                    (
+                        stat.high_centrality_obligation_count
+                        + stat.shared_obligation_count
+                    )
+                    / 3.0,
+                )
+                expected_debt_gain = min(1.0, stat.proof_debt / (1.0 + stat.proof_debt))
+                historical_success = min(1.0, stat.verified_fact_gain / 2.0)
+                fast_falsification = 1.0 / 4.0
+                inspiration_base = max(
+                    0.0,
+                    0.30 * stat.novelty_score
+                    + 0.20 * obligation_relevance
+                    + 0.20 * expected_debt_gain
+                    + 0.10 * fast_falsification
+                    + 0.10 * historical_success
+                    - 0.10 * stat.route_redundancy,
+                )
+                inspiration_candidates = [
+                    (
+                        ActionKind.TRIGGER_INSPIRATION,
+                        inspiration_base
+                        + stat.novelty_score
+                        * self.config.scheduler.inspiration_novelty_weight,
+                        stat.inspiration_trigger_count > 0,
+                    ),
+                    (
+                        ActionKind.SWITCH_REPRESENTATION,
+                        stat.representation_diversity
+                        * self.config.scheduler.representation_switch_weight,
+                        stat.representation_diversity > 0,
+                    ),
+                    (
+                        ActionKind.SEARCH_ANALOGY,
+                        stat.analogy_opportunity
+                        * self.config.scheduler.analogy_relevance_weight,
+                        stat.analogy_opportunity > 0,
+                    ),
+                    (
+                        ActionKind.INVENT_CONSTRUCTION,
+                        stat.construction_opportunity
+                        * self.config.scheduler.construction_relevance_weight,
+                        stat.construction_opportunity > 0,
+                    ),
+                    (
+                        ActionKind.GENERATE_INVARIANT,
+                        inspiration_base
+                        + self.config.scheduler.construction_relevance_weight
+                        * expected_debt_gain,
+                        stat.proof_debt > 0
+                        and (
+                            stat.stagnation_rounds > 0
+                            or stat.inspiration_trigger_count > 0
+                        ),
+                    ),
+                    (
+                        ActionKind.REVERSE_GOAL,
+                        inspiration_base
+                        + self.config.scheduler.bridge_priority_weight
+                        * obligation_relevance,
+                        stat.shared_obligation_count > 0
+                        or stat.high_centrality_obligation_count > 0,
+                    ),
+                    (
+                        ActionKind.META_REPLAN,
+                        self.config.scheduler.meta_replan_weight
+                        * min(1.0, stat.stagnation_rounds / 2),
+                        stat.stagnation_rounds > 0,
+                    ),
+                    (
+                        ActionKind.SURPRISE_WIDEN,
+                        inspiration_base
+                        + self.config.scheduler.surprise_exploration_weight
+                        * stat.novelty_score,
+                        stat.surprise_budget_remaining > 0
+                        and current_path_count < self.config.budget.max_paths,
+                    ),
+                ]
+                for action, score, relevant in inspiration_candidates:
+                    if not relevant:
+                        continue
+                    candidates.append(
+                        BudgetAction(
+                            action=action,
+                            strategy_id=stat.strategy_id,
+                            target_id=stat.attempt_id,
+                            score=score,
+                            reason="Inspiration Engine recommends a mechanism-changing action from observable graph signals",
+                            eligible=not shadow,
+                            blocked_reason=(
+                                "inspiration shadow mode records this recommendation only"
+                                if shadow
+                                else None
+                            ),
+                        )
+                    )
 
         best_verified = max((stat.verification_score for stat in stats), default=0.0)
         any_complete = any(stat.complete for stat in stats)
@@ -637,11 +1076,16 @@ class AdaptiveBudgetManager:
         *,
         current_round: int,
     ) -> tuple[bool, str | None, float]:
+        meta_blocked = self._meta_block_reason(stat)
+        if meta_blocked is not None:
+            return False, meta_blocked, 0.0
         if (
             stat.complete
             and stat.verification_score >= self.config.budget.synthesis_threshold
         ):
             return False, "candidate is already complete and synthesis-ready", 0.0
+        if stat.incomplete_only:
+            return True, None, 1.0
         if stat.latest_verdict != VerificationVerdict.FAIL:
             return True, None, 0.75
 
@@ -679,7 +1123,7 @@ class AdaptiveBudgetManager:
         return True, None, max(0.15, 0.5 * repairability)
 
     def _failure_penalty(self, stat: PathStats) -> float:
-        if stat.latest_verdict != VerificationVerdict.FAIL:
+        if stat.latest_verdict != VerificationVerdict.FAIL or stat.incomplete_only:
             return 0.0
         cfg = self.config.scheduler
         base = {
@@ -693,12 +1137,34 @@ class AdaptiveBudgetManager:
 
     @staticmethod
     def _depth_reason(stat: PathStats, repairability: float) -> str:
+        if stat.incomplete_only:
+            return (
+                "the submission is incomplete but no localized mathematical error "
+                "invalidated its checked partial progress"
+            )
         if stat.latest_verdict == VerificationVerdict.FAIL:
             return (
                 f"{stat.failure_level.value} failure has repairability {repairability:.2f}; "
                 "deepen only if the configured repair allowance and cooldown permit"
             )
         return "path has evidence-backed marginal progress or a locally repairable gap"
+
+    def _meta_review_is_authoritative(self, stat: PathStats) -> bool:
+        return (
+            stat.meta_review_confidence
+            >= self.config.budget.verification_pass_threshold
+        )
+
+    def _meta_block_reason(self, stat: PathStats) -> str | None:
+        if not self._meta_review_is_authoritative(stat):
+            return None
+        if stat.meta_recommended_action == ActionKind.STOP:
+            return (
+                "authoritative meta-review instructed the scheduler to stop this route"
+            )
+        if stat.meta_recommended_action == ActionKind.COOLDOWN_ROUTE:
+            return "authoritative meta-review placed this route in cooldown"
+        return None
 
 
 class SoftBudgetAllocator:
@@ -802,7 +1268,9 @@ class SoftBudgetAllocator:
         current_path_count: int,
         has_candidate: bool,
         max_actions: int,
+        estimated_call_overrides: Mapping[str, int] | None = None,
     ) -> BudgetDecision:
+        estimated_call_overrides = estimated_call_overrides or {}
         decision.finish_reserve_calls = self.minimum_finish_reserve
         if not decision.candidates:
             return decision
@@ -867,6 +1335,11 @@ class SoftBudgetAllocator:
                 current_path_count=projected_paths,
                 widen_path_count=candidate.planned_paths or None,
             )
+            if candidate.target_id in estimated_call_overrides:
+                candidate.estimated_calls = max(
+                    0,
+                    int(estimated_call_overrides[candidate.target_id]),
+                )
             bucket = self.bucket_for_action(candidate.action)
             blocked = self.spend_block_reason(
                 bucket,
@@ -890,6 +1363,8 @@ class SoftBudgetAllocator:
             )
             if candidate.action == ActionKind.WIDEN:
                 projected_paths += candidate.planned_paths
+            elif candidate.action == ActionKind.SURPRISE_WIDEN:
+                projected_paths += 1
 
         if admitted:
             decision.actions = admitted
@@ -992,7 +1467,72 @@ class SoftBudgetAllocator:
             return 1 + verification_calls
         if action == ActionKind.REVISE:
             return 1 + verification_calls
+        if action == ActionKind.BRIDGE:
+            return 1 + verification_calls
+        if action == ActionKind.RESOLVE_CONFLICT:
+            return 2 + verification_calls
+        if action == ActionKind.SEARCH_COUNTEREXAMPLE:
+            return 2 + verification_calls
+        if action in {ActionKind.MERGE_ROUTE, ActionKind.COOLDOWN_ROUTE}:
+            return 0
+        if action in {
+            ActionKind.SWITCH_REPRESENTATION,
+            ActionKind.SEARCH_ANALOGY,
+            ActionKind.INVENT_CONSTRUCTION,
+            ActionKind.GENERATE_INVARIANT,
+            ActionKind.REVERSE_GOAL,
+            ActionKind.META_REPLAN,
+            ActionKind.TRIGGER_INSPIRATION,
+            ActionKind.SURPRISE_WIDEN,
+        }:
+            return sum(self.inspiration_call_breakdown().values())
         return 0
+
+    def inspiration_call_breakdown(
+        self,
+        *,
+        proposer_calls: int | None = None,
+        review_candidates: int | None = None,
+    ) -> dict[str, int]:
+        """Conservative atomic cost for one admitted inspiration task."""
+
+        inspiration = self.config.topology.inspiration
+        if inspiration.mode != "active":
+            return {
+                "proposer_calls": 0,
+                "referee_calls": 0,
+                "skeptic_calls": 0,
+                "route_attempt_calls": 0,
+            }
+        configured_proposers = min(
+            inspiration.active_proposals_per_task,
+            inspiration.max_proposals_per_task,
+        )
+        planned_proposers = (
+            configured_proposers
+            if proposer_calls is None
+            else max(0, int(proposer_calls))
+        )
+        planned_candidates = (
+            planned_proposers
+            if review_candidates is None
+            else max(0, int(review_candidates))
+        )
+        reviewed = min(
+            planned_candidates,
+            inspiration.max_reviewed_proposals_per_task,
+        )
+        route_attempts = (
+            min(1, inspiration.max_materialized_proposals_per_trigger)
+            if planned_candidates
+            else 0
+        )
+        return {
+            "proposer_calls": planned_proposers,
+            "referee_calls": reviewed,
+            "skeptic_calls": reviewed,
+            "route_attempt_calls": route_attempts * self._calls_per_explored_path(),
+        }
 
     def _calls_per_explored_path(self) -> int:
         if not self.config.continuation.enabled:
@@ -1026,7 +1566,20 @@ class SoftBudgetAllocator:
             ActionKind.SYNTHESIZE: "synthesis",
             ActionKind.REVISE: "synthesis",
             ActionKind.STOP: "other",
-        }[action]
+            ActionKind.BRIDGE: "depth",
+            ActionKind.RESOLVE_CONFLICT: "verification",
+            ActionKind.SEARCH_COUNTEREXAMPLE: "verification",
+            ActionKind.MERGE_ROUTE: "other",
+            ActionKind.COOLDOWN_ROUTE: "other",
+            ActionKind.SWITCH_REPRESENTATION: "breadth",
+            ActionKind.TRIGGER_INSPIRATION: "breadth",
+            ActionKind.SEARCH_ANALOGY: "breadth",
+            ActionKind.INVENT_CONSTRUCTION: "breadth",
+            ActionKind.GENERATE_INVARIANT: "breadth",
+            ActionKind.REVERSE_GOAL: "depth",
+            ActionKind.META_REPLAN: "breadth",
+            ActionKind.SURPRISE_WIDEN: "breadth",
+        }.get(action, "other")
 
     def estimate_revision_cycle_calls(self) -> int:
         return self.estimate_action_calls(ActionKind.REVISE)

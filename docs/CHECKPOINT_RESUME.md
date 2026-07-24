@@ -1,5 +1,17 @@
 # 证明检查点、断线接力与进程恢复
 
+## 0.7 拓扑恢复语义
+
+分层模式的阶段 checkpoint 除旧 `ProofCheckpoint` 外，还保存 `route_registry`、`message_broker`、`message_receipts`、`typed_memory`、`proof_graph`、`bridge_broker`、`contradiction_broker`、`inspiration_engine` 和 domain-role capability 状态。旧 checkpoint 缺少这些字段时初始化为空，并记录 `checkpoint_migrated_to_v0_7`，不会丢弃原有已验证证明段。
+
+若旧 checkpoint 恰好停在 Triage 完成、Strategy 尚未生成的窗口，恢复流程会在重新生成 Strategy 后、任何证明调用前，幂等补齐 Route、Prover 成员和稀疏邻居，并立即保存 `resume_routes_ensured` checkpoint。实际选中的 Prover 也会同步到 RouteRegistry。`hierarchical_sparse` 缺 Route、MessageBroker 或 TypedMemory 时必须 fail closed，不允许回退到 legacy `proof_continuation` 或把旧 LemmaMemory Claim 当作路线收件箱。
+
+消息恢复使用 `(message_id, target_route_id)` 稳定 delivery key。已经进入 Agent prompt 但尚未回执的投递恢复为 pending receipt，`prompt_consumed=true`，不会再次放入 prompt。Inspiration proposal、review 和 materialization 也有稳定 ID；同一 proposal 恢复后不能重复创建路线或重复花费 Surprise Budget。
+
+Graph freeze、Meta-Strategist cooldown、最后可观测 Inspiration snapshot 和受保护预算都随 checkpoint 恢复。恢复的是可审计外部状态，不是模型私有解码状态。
+
+`InspirationCreditTarget` 及 outcome 中已固化的 `credit_route_ids` / `credit_obligation_ids` 也随 checkpoint 恢复。旧 checkpoint 若缺少这些字段，会根据既有 Proposal、Trigger 和 Materialization 幂等回填；恢复后不会改用新的路线集合重算历史 proof debt，也不会重复给同一 Fact 记账。
+
 MathProofMesh v0.5.0 将一次长证明从“单个超长模型调用”改造成若干可验证的数学增量。系统不能恢复供应商服务器在断线瞬间的隐藏神经网络状态，但可以恢复最近一个**已经独立验证并持久化**的证明状态。因此，用户看到的行为是“证明已通过第 7 步，断线后继续第 8 步”，而不是重新证明全部前置内容。
 
 ## 1. 恢复语义
@@ -131,7 +143,7 @@ continuation:
   max_new_steps_per_call: 3
   max_new_claims_per_call: 3
   max_output_tokens_per_segment: 12000
-  segments_per_explore_call: 1
+  segments_per_explore_call: 2
   max_segments_per_path: 12
   verify_each_delta: true
   delta_verifier_replicas: 1
@@ -147,7 +159,7 @@ continuation:
 
 - `checkpoint_policy=verified_subgoal`：只有明确完成一个连贯子目标的 Delta 才能推进检查点；
 - `verified_delta`：允许更小但完整可验证的增量；
-- `segments_per_explore_call`：一次编排动作最多提交多少个连续段，默认 1 可降低断线损失；
+- `segments_per_explore_call`：一次编排动作最多提交多少个连续段；DeepSeek 运行配置使用 2，并且每个 Delta 仍须独立验证后才能进入下一段；
 - `max_segments_per_path`：单一路线的持久化深度上限；
 - `verify_each_delta`：关闭后仅保留本地完整性守卫，不建议用于高风险证明；
 - `delta_verifier_replicas`：每个 Delta 的独立 Reviewer 数；

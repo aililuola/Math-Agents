@@ -17,6 +17,7 @@ from .llm.deepseek import DeepSeekClient
 from .llm.pool import AgentPool
 from .mock_demo import build_demo_config, demo_responders
 from .orchestrator import ProofMeshOrchestrator
+from .schemas import GoalClarificationDecision, GoalClarificationRequest
 
 app = typer.Typer(
     name="mathproofmesh",
@@ -26,6 +27,41 @@ app = typer.Typer(
 console = Console()
 activity_console = Console(stderr=True)
 _VALID_ACTIVITY_MODES: set[str] = {"off", "compact", "detailed"}
+
+
+def _apply_topology_overrides(
+    config: SystemConfig,
+    *,
+    topology_mode: str | None,
+    proof_graph_mode: str | None,
+    disable_route_teams: bool,
+    disable_cross_route: bool,
+) -> SystemConfig:
+    data = config.model_dump(mode="python")
+    topology = data["topology"]
+    if topology_mode is not None:
+        if topology_mode not in {"legacy_sparse", "hierarchical_sparse"}:
+            raise typer.BadParameter(
+                "--topology-mode must be legacy_sparse or hierarchical_sparse"
+            )
+        topology["mode"] = topology_mode
+        if topology_mode == "hierarchical_sparse":
+            if not topology["proof_graph"]["enabled"]:
+                topology["proof_graph"]["mode"] = "off"
+            if not topology["inspiration"]["enabled"]:
+                topology["inspiration"]["mode"] = "off"
+    if proof_graph_mode is not None:
+        if proof_graph_mode not in {"off", "shadow", "active"}:
+            raise typer.BadParameter(
+                "--proof-graph-mode must be off, shadow, or active"
+            )
+        topology["proof_graph"]["mode"] = proof_graph_mode
+        topology["proof_graph"]["enabled"] = proof_graph_mode != "off"
+    if disable_route_teams:
+        topology["route_teams"]["enabled"] = False
+    if disable_cross_route:
+        topology["cross_route"]["enabled"] = False
+    return SystemConfig.model_validate(data)
 
 
 def _configure_logging(level: str) -> None:
@@ -60,6 +96,7 @@ def _run_solver_with_activity(
     run_id: str | None,
     mode: ActivityMode,
     mock_responders=None,
+    interactive_clarification: bool = True,
 ):
     config.runtime.activity_mode = mode
     view = ConsoleActivityView(
@@ -69,12 +106,59 @@ def _run_solver_with_activity(
         console=activity_console,
     )
     listener = view.handle if mode != "off" else None
+
+    async def clarify(
+        request: GoalClarificationRequest,
+    ) -> GoalClarificationDecision:
+        candidates = [
+            request.assessment.recommended_statement,
+            *(
+                item.statement
+                for item in request.assessment.alternative_interpretations
+            ),
+        ]
+        activity_console.print(
+            Panel.fit(
+                "\n".join(
+                    [
+                        f"原题：{request.original_statement}",
+                        *(
+                            f"{index}. {statement}"
+                            for index, statement in enumerate(candidates, start=1)
+                        ),
+                        f"{len(candidates) + 1}. 输入自定义规范化目标",
+                    ]
+                ),
+                title="题意存在歧义，请确认规范化目标",
+                border_style="yellow",
+            )
+        )
+        selected = typer.prompt(
+            "选择",
+            type=int,
+        )
+        if not 1 <= selected <= len(candidates) + 1:
+            raise typer.BadParameter("选择超出候选范围")
+        if selected <= len(candidates):
+            statement = candidates[selected - 1]
+            candidate_index: int | None = selected - 1
+        else:
+            statement = typer.prompt("规范化目标").strip()
+            candidate_index = None
+        return GoalClarificationDecision(
+            request_id=request.request_id,
+            canonical_statement=statement,
+            source="user_confirmed",
+            selected_candidate_index=candidate_index,
+        )
+
     with view:
         return asyncio.run(
             ProofMeshOrchestrator(
                 config,
                 mock_responders=mock_responders,
                 activity_listener=listener,
+                clarification_resolver=clarify if interactive_clarification else None,
             ).solve(problem, run_id=run_id)
         )
 
@@ -121,13 +205,30 @@ def solve(
         "--activity",
         help="Live progress timeline: off, compact, or detailed. Defaults to runtime.activity_mode.",
     ),
+    topology_mode: Optional[str] = typer.Option(None, "--topology-mode"),
+    proof_graph_mode: Optional[str] = typer.Option(None, "--proof-graph-mode"),
+    disable_route_teams: bool = typer.Option(False, "--disable-route-teams"),
+    disable_cross_route: bool = typer.Option(False, "--disable-cross-route"),
 ) -> None:
     """Solve a problem from a UTF-8 text file using the configured API-key agents."""
     cfg = load_config(config)
+    cfg = _apply_topology_overrides(
+        cfg,
+        topology_mode=topology_mode,
+        proof_graph_mode=proof_graph_mode,
+        disable_route_teams=disable_route_teams,
+        disable_cross_route=disable_cross_route,
+    )
     _configure_logging(cfg.runtime.log_level)
     mode = _resolve_activity_mode(cfg, activity, json_output=json_output)
     text = problem.read_text(encoding="utf-8")
-    result = _run_solver_with_activity(cfg, text, run_id=run_id, mode=mode)
+    result = _run_solver_with_activity(
+        cfg,
+        text,
+        run_id=run_id,
+        mode=mode,
+        interactive_clarification=not json_output,
+    )
     if json_output:
         console.print_json(
             json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
@@ -141,19 +242,32 @@ def solve(
         if cfg.runtime.activity_persist
         else "disabled"
     )
+    run_report = str(Path(result.run_directory) / "reports" / "run_report.md")
     console.print(
         Panel.fit(
             f"status: [bold]{result.status.value}[/bold]\n"
+            f"math status: {result.math_status.value}\n"
+            f"execution status: {result.execution_status.value}\n"
             f"final verification: {verdict}\n"
             f"calls: {result.total_calls}\n"
             f"tokens: {result.total_usage.total_tokens}\n"
             f"run directory: {result.run_directory}\n"
-            f"activity timeline: {timeline}",
+            f"activity timeline: {timeline}\n"
+            f"run report: {run_report}",
             title="MathProofMesh",
         )
     )
-    if result.final_proof:
+    if result.final_proof and result.math_status.value == "verified":
         console.print("\n[bold]Answer[/bold]\n" + result.final_proof.answer)
+    elif result.research_progress_report:
+        heading = (
+            "研究进展"
+            if cfg.runtime.output_language.lower().startswith("zh")
+            else "Research progress"
+        )
+        console.print(
+            f"\n[bold]{heading}[/bold]\n" + result.research_progress_report.summary
+        )
 
 
 @app.command()
@@ -170,9 +284,20 @@ def resume(
         "--activity",
         help="Live progress timeline: off, compact, or detailed.",
     ),
+    topology_mode: Optional[str] = typer.Option(None, "--topology-mode"),
+    proof_graph_mode: Optional[str] = typer.Option(None, "--proof-graph-mode"),
+    disable_route_teams: bool = typer.Option(False, "--disable-route-teams"),
+    disable_cross_route: bool = typer.Option(False, "--disable-cross-route"),
 ) -> None:
     """Resume from the latest stage snapshot and verified proof checkpoint."""
     cfg = load_config(config)
+    cfg = _apply_topology_overrides(
+        cfg,
+        topology_mode=topology_mode,
+        proof_graph_mode=proof_graph_mode,
+        disable_route_teams=disable_route_teams,
+        disable_cross_route=disable_cross_route,
+    )
     _configure_logging(cfg.runtime.log_level)
     mode = _resolve_activity_mode(cfg, activity, json_output=json_output)
     result = _run_resume_with_activity(cfg, run_id=run_id, mode=mode)
@@ -184,19 +309,38 @@ def resume(
     verdict = (
         result.final_verification.verdict.value if result.final_verification else "none"
     )
+    timeline = (
+        str(Path(result.run_directory) / "reports" / "activity_timeline.md")
+        if cfg.runtime.activity_persist
+        else "disabled"
+    )
+    run_report = str(Path(result.run_directory) / "reports" / "run_report.md")
     console.print(
         Panel.fit(
             f"status: [bold]{result.status.value}[/bold]\n"
+            f"math status: {result.math_status.value}\n"
+            f"execution status: {result.execution_status.value}\n"
             f"resumed: {result.resumed}\n"
             f"resume checkpoint: {result.resumed_from_checkpoint_id or 'none'}\n"
             f"final verification: {verdict}\n"
             f"calls recorded: {result.total_calls}\n"
-            f"run directory: {result.run_directory}",
+            f"run directory: {result.run_directory}\n"
+            f"activity timeline: {timeline}\n"
+            f"run report: {run_report}",
             title="MathProofMesh resume",
         )
     )
-    if result.final_proof:
+    if result.final_proof and result.math_status.value == "verified":
         console.print("\n[bold]Answer[/bold]\n" + result.final_proof.answer)
+    elif result.research_progress_report:
+        heading = (
+            "研究进展"
+            if cfg.runtime.output_language.lower().startswith("zh")
+            else "Research progress"
+        )
+        console.print(
+            f"\n[bold]{heading}[/bold]\n" + result.research_progress_report.summary
+        )
 
 
 @app.command()
@@ -239,12 +383,14 @@ def demo(
         if cfg.runtime.activity_persist
         else "disabled"
     )
+    run_report = str(Path(result.run_directory) / "reports" / "run_report.md")
     console.print(
         Panel.fit(
             f"status: [bold]{result.status.value}[/bold]\n"
             f"calls: {result.total_calls}\n"
             f"run directory: {result.run_directory}\n"
-            f"activity timeline: {timeline}",
+            f"activity timeline: {timeline}\n"
+            f"run report: {run_report}",
             title="Deterministic demo",
         )
     )

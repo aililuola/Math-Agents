@@ -3,6 +3,7 @@
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+.mathproofmesh/
 *.pyc
 *.pyo
 *.egg-info/
@@ -15,3 +16,4 @@ dist/
 *.zip
 .coverage
 htmlcov/
+packaging/windows/output/

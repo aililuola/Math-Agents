@@ -1,0 +1,291 @@
+# Inspiration Engine
+
+The 0.7 Inspiration Engine is a first-class, checkpointed search subsystem. It
+does not mean "run widen again". Every trigger names an observable failure,
+every proposal identifies a mechanism change and open obligation, and every
+accepted proposal remains unverified until independent review.
+
+```text
+Trigger -> bounded task selection -> independent proposals
+        -> Novelty Gate -> Inspiration Referee -> fast falsification
+        -> InsightMemory -> obligation/route materialization
+        -> later strict verification -> optional FactMemory
+```
+
+## Triggers
+
+`TriggerPolicy` detects configured stagnation without verified gain, proof-debt
+plateau, shared bottlenecks, repeated first-error fingerprints, all routes
+failed, high mechanism redundancy, a route consuming too much budget without
+progress, failed final repair and manual requests. It selects at most
+`max_inspiration_tasks_per_round`; it never opens every mechanism at once.
+
+Trigger detection and task construction are deterministic and cheap. Before
+any generator, referee or quick-skeptic model call, every task is converted to
+a typed scheduler action and passed through `SoftBudgetAllocator.admit_decision()`.
+The default active estimate reserves 3 proposer calls, up to 2 Referee calls,
+up to 2 quick-Skeptic calls and the first real route attempt as one auditable
+cycle. Rejected tasks emit an admission record and make no provider call.
+
+A cheap exact falsification is still allowed early. Reasoning-first forbids
+computation as the default route generator, not inexpensive rejection of a
+precise false premise.
+
+## Active Candidate Population And Context
+
+Active mode generates `active_proposals_per_task` independent candidates for
+each admitted task. The default is three. Candidates are generated concurrently
+and may rotate across eligible Agents; there is no new global semaphore across
+different domains, subdirections or local proof obligations.
+
+The default population has two context modes:
+
+- `warm`: a mechanism-specific, bounded selection of Broker-admitted Facts,
+  relevant NegativeMemory, the minimal target obligation graph and compact
+  novelty signatures. It never receives every historical Fact or full route
+  transcript.
+- `cold`: the problem, target obligation, observable progress metrics and a
+  forbidden-existing-mechanism list. Existing route proof prose, Facts,
+  negatives and graph history are withheld to reduce anchoring.
+
+Each slot also receives a distinct generation contract. The Novelty Gate then
+removes mechanism duplicates before model review, keeps at most
+`max_reviewed_proposals_per_task`, and preserves context-mode diversity when it
+adds structural value. `max_materialized_proposals_per_trigger` independently
+caps route creation, so a larger candidate population does not multiply paths.
+
+## Representation Switchboard
+
+The switchboard selects applicable representations by domain and unused
+mechanism signature. Its vocabulary includes direct algebra, modular and
+p-adic views, recurrence/finite state, graph or hypergraph, extremal/minimal
+counterexample, invariant/monovariant, double counting, generating functions,
+probabilistic, linear algebra/polynomial, synthetic geometry, coordinates,
+complex plane and inversion/projective views.
+
+Each `RepresentationCandidate` includes a rewritten view, object mapping,
+preserved properties, potentially lost conditions, tools, expected advantage,
+failure risks, fast failure tests and a targeted novelty signature. Geometry
+representations are tags and extension points, not a claim of a complete
+geometry solver.
+
+## Domain Operator Plugins
+
+The switchboard, construction inventor and Surprise planner share a typed
+`DomainOperatorRegistry`. The initial registry covers number theory,
+combinatorics, inequalities and geometry. Every `DomainOperatorSpec` declares
+preconditions, the transformation, generated obligations, reversibility
+requirements, fast failure tests, known failure modes and suggested typed
+tools. Active prompts receive only a bounded domain-relevant catalog. Local
+fallbacks use the same records, so Mock and resume behavior exercise the same
+contracts as Active mode. An Active artifact may only select an operator from
+that admitted catalog; a missing or invented identifier is replaced by a
+deterministic catalog entry for its proposal slot, and the canonical contract
+is restored before novelty review.
+
+An operator is still a heuristic. Selecting `p_adic_valuation`, inversion or
+shifting does not establish that its preconditions hold; the proposal must
+survive ordinary Referee, Skeptic, route and Fact gates.
+
+## Analogy Agent
+
+The first implementation searches verified local JSONL records using
+object/operation tags, graph tags, mechanism tags and deterministic BM25. The
+default seed library is `benchmarks/analogy_library.jsonl`. No external vector
+database or web retrieval is used.
+
+`AnalogyMapping` must state object and operation correspondence, transferable
+lemmas, non-transferable conditions, transfer risks and new bridge lemmas. An
+unverified or incomplete record is ignored. A missing library yields an empty
+result plus a diagnostic, never an invented source.
+
+## Auxiliary Construction Inventor
+
+This agent proposes domain-appropriate auxiliary sequences, extremal objects,
+graphs, colorings, potentials, generating functions, polynomials, coordinate
+systems, geometric auxiliaries, equivalence relations, finite states or
+quotients. `ConstructionProposal` gives an explicit definition, constructed
+objects, target obligations, expected relation and proof-debt reduction,
+falsification tests and failure conditions. A proposal without a definition or
+open target is rejected.
+
+## Invariant And Monovariant Agent
+
+`InvariantHypothesisAgent` declares the state, allowed operations, candidate
+expression and proposed behavior. It records a nontrivial boundary check and
+requests an independent skeptic or exact tool to falsify the idea. It never
+announces the invariant as true. Only a separately proved derived lemma can
+close an obligation.
+
+## Reverse Goal Analyzer
+
+`ReverseGoalAnalyzer` maintains two bounded frontiers. The forward frontier is
+rebuilt from Broker-admitted Typed Facts (or original scoped assumptions when
+none exist); model prose cannot declare a forward claim supported. The backward
+frontier contains sufficient intermediate claims leading to the selected goal.
+Exact matches close a meeting point, while the closest remaining pairs produce
+typed `FrontierBridge` objects of the form `forward_claim implies
+backward_claim`. Only these missing implications may be attached to the Proof
+Obligation Graph. The frontier state is checkpointed and receives a minimal
+graph slice, not route transcripts.
+
+## Persistent Meta-Strategist
+
+The strategist persists across rounds and reads only observable metrics: route
+scores, proof-debt history, verified gain, repeated errors, redundancy, message
+utility, bridge/conflict state and protected budget. It may continue, repair,
+rewrite, switch representation, search analogies, invent a construction,
+launch surprise search or recommend route merge/cooldown. Per-mechanism
+cooldowns prevent repeated bets on the same failed mechanism.
+
+Meta output is no longer wrapped as an ordinary `InspirationProposal`.
+`MetaStrategyDecision` is normalized against the authoritative snapshot and
+converted to a `MetaDirective`. A deterministic auditor checks route ownership,
+observable evidence, expiry and protected budget. Accepted directives either
+mutate route control state (merge, cooldown or audited abandonment) or create a
+new typed mechanism task that must pass ordinary scheduler admission. The
+directive, audit and execution result are checkpointed, but never enter
+FactMemory or InsightMemory. Shadow mode records the same objects without
+mutating routes.
+
+## Outcome Learning
+
+Every proposal receives an `InspirationOutcome` ledger entry recording its
+domain, trigger, obligation kinds, calls, tokens, materialization, verified Fact
+gain, proof-debt change, closed obligations, refutation, time to first gain and
+final-proof citation. A configurable reward combines only these observable
+downstream outcomes.
+
+At registration time the ledger freezes `credit_route_ids` and
+`credit_obligation_ids`. The before and after proof-debt measurements therefore
+use the same route set even when a Surprise proposal initially has no target
+route or later creates a new route. Materialization also creates an
+`InspirationCreditTarget` containing explicit route, obligation, Broker message
+and action IDs. Fact promotion, obligation closure and final citation match
+against those IDs instead of relying only on `Attempt.strategy_id`. This covers
+proposals attached to an existing route, computation and bridge requests,
+obligation-only materializations and every source proposal of a composed idea.
+
+Mechanism selection uses deterministic UCB scores conditioned on domain,
+trigger, mechanism and obligation kind. A fixed minimum exploration rate keeps
+untried mechanisms eligible. The exploration pool is the configured subset of
+`SCHEDULABLE_MECHANISMS`; derived composition proposals are reviewed through
+their own pipeline and never count as an untried ordinary mechanism. These
+scores affect task ordering only: they are not mathematical evidence and cannot
+promote a Claim, close an obligation or change a verification verdict.
+
+## Verified Experience Distillation
+
+Only a proposal that later produces a Broker-admitted, independently verified
+Fact can become a positive analogy experience. The distiller stores the problem
+skeleton, obligation-graph motif, mechanism chain, key construction,
+transferable lemma, non-transferable conditions and transfer risks. These
+records become available to later Analogy searches in the same persistent run.
+
+Rejected structural analogies enter a separate Negative Analogy Library with
+the failed source record and distinguishing condition. A source that already
+failed transfer for the same problem is suppressed from later retrieval. Run
+artifacts are written to `inspiration/verified_experiences.json` and
+`inspiration/negative_analogy_library.json`; neither library bypasses the
+ordinary Referee or Fact gates.
+
+With `cross_run_learning_enabled`, approved records are merged atomically into
+the project-local, git-ignored `.mathproofmesh/learning` directory. Positive
+experience requires a verified run and, by default, actual citation by the
+final proof. Negative analogies and observable outcome records may be retained
+from unsuccessful runs to avoid repeating known failures. Stored records never
+contain prompts, private reasoning, raw provider responses, environment
+variables or API keys. Historical outcomes affect only UCB scheduling.
+
+## Surprise Budget Explorer
+
+Surprise calls are reserved separately from synthesis, high-risk final audit,
+at least one configured revision cycle and the finish-transition buffer. A
+route is created only in active mode, below `max_paths`, above the novelty
+threshold and within `max_new_routes_per_trigger`. Consecutive rejected
+proposals enter cooldown. Shadow mode records the same decision without
+spending calls or changing routes.
+
+Surprise mode now executes a replayable `SurpriseMutationDirective` rather than
+reusing representation switching with a different instruction. Operators
+include dualization, complement, quotient, lift, projection, extremalization,
+seeded auxiliary objects, inverse operations, local-to-global decomposition,
+relax-then-round and graph/polynomial/state-machine encodings. The seed,
+operator, obligations, reversibility checks and failure tests are recorded. If
+an Active model returns a different mutation, the engine restores the admitted
+directive before review.
+
+## Inspiration Composer
+
+`InspirationComposer` considers bounded groups of two through
+`composer_max_sources` independently reviewed proposals. Their obligation
+targets must form one connected dependency neighborhood, their novelty
+signatures must contribute complementary mechanisms, their combined cost must
+fit the configured limit, and at least one source must pass quick
+falsification. It emits a typed `ComposedInspiration` with compatibility
+conditions, a first executable bridge, new obligations and fast failure tests.
+
+The result is queued as a new task for a later scheduler turn. It consumes no
+proposer call, but it must pass scheduler admission, an independent Inspiration
+Referee and a quick Skeptic before it can attach or create a route. Source ideas
+remain Insights, and neither the sources nor their composition can directly
+become a Fact or close a proof checkpoint.
+
+## Novelty And Referee
+
+`NoveltySignature` combines representation tags, mechanism tags, core objects,
+key transformations, proof principles and targeted obligations with configured
+weights. A conservative `MechanismNormalizer` maps free labels into a versioned
+ontology while retaining raw and unknown extension labels for audit. Unknown
+labels carry only weak similarity weight and cannot independently declare a
+duplicate. Reworded prose with the same recognized mechanism is a duplicate.
+Novelty means different, not correct.
+
+`InspirationReferee` must differ from the proposal author. It checks semantic
+distinctness, relevance, coherence, hidden assumptions and immediate
+counterexamples, then chooses reject, store insight, attach, create route,
+request computation or request bridge verification. Self-reviewed inspiration
+cannot be broadcast.
+
+With `require_inspiration_referee: true`, missing, local-deterministic or
+self-review can at most store an Insight; it cannot attach or create a route.
+With the switch explicitly disabled, deterministic local admission is allowed.
+`max_new_routes_per_trigger` is counted across all mechanisms sharing the same
+trigger, not only Surprise proposals.
+
+## Modes, Checkpoint And Activity
+
+`off` disables the engine. `shadow` runs trigger, generation, novelty and review
+for diagnostics but makes no scheduling, graph, memory or budget mutation.
+`active` may store Insights, attach obligations or create routes after all
+gates. Proposal/materialization IDs are stable, so resume cannot materialize
+the same proposal twice.
+
+State is stored in the stage checkpoint and
+`inspiration/inspiration_checkpoint.json`: triggers, tasks, proposals, reviews,
+materializations, derived strategies, verified outcomes, strategist cooldowns,
+surprise budget, candidate-selection decisions, call reservations, Meta
+Directives, adaptive outcome records, verified experiences, negative analogy
+records, bidirectional frontier states, controlled mutations, compositions,
+pending composed proposals, quick-falsification results and the last observable
+snapshot. A reservation records proposer,
+Referee, Skeptic and first route-attempt capacity. Used calls are charged,
+unused calls are released, and an interrupted reservation is reconciled on
+resume. Activity and hierarchical metrics include warm/cold proposal counts,
+pre-review filtering, directive execution, outcome rewards, experience counts
+frontier bridges, mutations, compositions, cross-run loads and reservation
+consumption without private reasoning.
+
+## Benchmark
+
+Run the offline 11-variant benchmark with:
+
+```powershell
+python -m benchmarks.topology.run_mock_benchmark
+```
+
+It covers active/shadow graph and inspiration, plus ablations without analogy,
+representation switching, surprise budget and the persistent strategist. It
+makes no provider calls. Component contracts also exercise domain operators,
+deterministic controlled mutation, forward/backward frontier meeting,
+composition admission and project-local cross-run persistence.

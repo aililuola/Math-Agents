@@ -1,0 +1,15 @@
+{
+  "case_id": "proof_mutation_review",
+  "description": "Blind reviewers must reject deterministic mutations and localize the first fault.",
+  "mutations": [
+    {"kind": "drop_assumption", "expected_verdict": "fail"},
+    {"kind": "reverse_quantifier", "expected_verdict": "fail"},
+    {"kind": "alter_sign", "expected_verdict": "fail"},
+    {"kind": "break_dependency", "expected_verdict": "fail"},
+    {"kind": "insert_circular_step", "expected_verdict": "fail"}
+  ],
+  "expected": {
+    "false_accepts": 0,
+    "first_error_localized": 5
+  }
+}

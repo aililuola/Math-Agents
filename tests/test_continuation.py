@@ -20,6 +20,7 @@ from mathproofmesh.continuation import (
     local_delta_verification,
     make_genesis_checkpoint,
     merge_verified_delta,
+    normalize_delta_claims,
 )
 from mathproofmesh.llm.pool import AgentPool
 from mathproofmesh.mock_demo import build_demo_config, demo_responder, demo_responders
@@ -28,6 +29,7 @@ from mathproofmesh.prompts import PromptBundle, PromptFactory
 from mathproofmesh.schemas import (
     CheckpointStatus,
     ClaimCard,
+    ClaimStatus,
     ProblemContract,
     ProofCheckpoint,
     ProofDelta,
@@ -216,6 +218,42 @@ def test_merge_verified_delta_builds_resumable_attempt() -> None:
     assert attempt.failover_chain == ["explorer-a", "explorer-b"]
 
 
+def test_normalized_delta_claim_keeps_its_narrow_verification_scope() -> None:
+    problem, strategy = _problem_and_strategy()
+    checkpoint = make_genesis_checkpoint(problem, strategy)
+    claim = ClaimCard(statement="The base case holds.", conclusion="P(1)")
+    delta = ProofDelta(
+        delta_id="delta-base-case",
+        problem_hash=problem.integrity_hash,
+        path_id=checkpoint.path_id,
+        strategy_id=strategy.strategy_id,
+        parent_checkpoint_id=checkpoint.checkpoint_id,
+        agent_id="explorer-a",
+        round_index=0,
+        segment_index=1,
+        new_steps=[
+            ProofStep(
+                step_id="base-step",
+                statement="The base case holds.",
+                justification="Direct substitution.",
+            )
+        ],
+        new_claims=[claim],
+        remaining_subgoals=["Inductive step"],
+        current_goal="Inductive step",
+    )
+
+    [normalized] = normalize_delta_claims(
+        delta,
+        attempt_id="attempt-a",
+        raw_ref=None,
+    )
+
+    assert normalized.status == ClaimStatus.VERIFIED
+    assert normalized.source_attempt_id == "attempt-a"
+    assert normalized.source_delta_id == "delta-base-case"
+
+
 @pytest.mark.asyncio
 async def test_runner_switches_to_backup_key_after_retry_exhaustion(
     tmp_path: Path,
@@ -318,6 +356,61 @@ async def test_continuation_end_to_end_and_process_resume(tmp_path: Path) -> Non
     ]
     sequences = [item["sequence"] for item in activity]
     assert sequences == sorted(set(sequences))
+
+
+@pytest.mark.asyncio
+async def test_two_verified_segments_advance_in_one_exploration_action(
+    tmp_path: Path,
+) -> None:
+    config = build_demo_config(str(tmp_path / "runs"))
+    config.continuation = ContinuationConfig(
+        enabled=True,
+        segments_per_explore_call=2,
+        max_segments_per_path=4,
+        verify_each_delta=True,
+        max_failover_agents=1,
+    )
+    config.budget.initial_paths = 1
+    config.budget.max_paths = 1
+    config.budget.strategies_to_generate = 1
+    config.budget.candidates_to_verify = 1
+    config.budget.max_rounds = 1
+    config.budget.max_total_calls = 40
+
+    def staged_responder(schema_name, messages, schema):
+        payload = demo_responder(schema_name, messages, schema)
+        if schema_name not in {"ContinuationTurn", "ProofDelta"}:
+            return payload
+        delta = payload["delta"] if schema_name == "ContinuationTurn" else payload
+        if delta["segment_index"] == 1:
+            delta["completed_subgoal"] = (
+                "Establish the consecutive-square difference identity."
+            )
+            delta["new_steps"] = delta["new_steps"][:1]
+            delta["remaining_subgoals"] = ["Telescope the identity from k=1 to n."]
+            delta["current_goal"] = "Telescope the identity from k=1 to n."
+            delta["candidate_final_answer"] = None
+            delta["proof_complete"] = False
+            if schema_name == "ContinuationTurn":
+                payload["action"] = "submit_delta"
+        return payload
+
+    responders = {agent.id: staged_responder for agent in config.agents}
+    result = await ProofMeshOrchestrator(config, mock_responders=responders).solve(
+        "Prove that for every positive integer n, 1+3+...+(2n-1)=n^2.",
+        run_id="two-segment-fast-continuation",
+    )
+
+    route_attempt = max(result.attempts, key=lambda attempt: attempt.segment_count)
+    assert route_attempt.segment_count == 2
+    assert route_attempt.status.value == "complete"
+    route_checkpoints = [
+        checkpoint
+        for checkpoint in result.proof_checkpoints
+        if checkpoint.strategy_id == route_attempt.strategy_id
+    ]
+    assert {checkpoint.segment_index for checkpoint in route_checkpoints} >= {1, 2}
+    assert max(route_checkpoints, key=lambda item: item.segment_index).proof_complete
 
 
 @pytest.mark.asyncio

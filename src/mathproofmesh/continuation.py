@@ -2,16 +2,26 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from .proof_identity import (
+    canonical_obligation_statement,
+    is_feedback_only_statement,
+)
 from .schemas import (
     AttemptStatus,
+    CandidateConjecture,
     CheckpointStatus,
     ClaimCard,
     ClaimStatus,
+    EvidenceType,
     FailureLevel,
+    MemoryTier,
+    MessageEnvelope,
+    MessageType,
     ProblemContract,
     ProofAttempt,
     ProofCheckpoint,
     ProofDelta,
+    RouteRole,
     Severity,
     StrategyCard,
     UsageRecord,
@@ -210,6 +220,45 @@ def merge_verified_delta(
     )
 
 
+def checkpoint_to_route_message(
+    checkpoint: ProofCheckpoint,
+    *,
+    route_id: str,
+    source_agent_id: str,
+    round_index: int,
+    ttl_rounds: int,
+) -> MessageEnvelope:
+    """Expose a committed checkpoint as a route-local typed audit artifact."""
+
+    summary = (
+        checkpoint.final_answer
+        or checkpoint.current_goal
+        or f"Committed proof checkpoint at segment {checkpoint.segment_index}"
+    )
+    return MessageEnvelope(
+        message_id=f"msg_checkpoint_{checkpoint.content_hash[:12]}",
+        problem_hash=checkpoint.problem_hash,
+        source_agent_id=source_agent_id,
+        source_route_id=route_id,
+        source_role=RouteRole.PROVER,
+        message_type=MessageType.ROUTE_CHECKPOINT,
+        statement=summary,
+        normalized_statement=" ".join(summary.casefold().split()),
+        conclusion=summary,
+        dependencies=list(checkpoint.verified_claim_ids),
+        scope_limitations=[
+            "route-local checkpoint; individual lemmas require separate FactMemory promotion"
+        ],
+        evidence_type=EvidenceType.NATURAL_PROOF_AUDITED,
+        memory_tier=MemoryTier.INSIGHT,
+        verification_status=ClaimStatus.VERIFIED,
+        verification_confidence=1.0,
+        normalization_confidence=1.0,
+        round_created=round_index,
+        ttl_rounds=ttl_rounds,
+    )
+
+
 def normalize_delta_claims(
     delta: ProofDelta,
     *,
@@ -219,6 +268,7 @@ def normalize_delta_claims(
     claims: list[ClaimCard] = []
     for claim in delta.new_claims:
         claim.status = ClaimStatus.VERIFIED
+        claim.source_delta_id = delta.delta_id
         claim.source_attempt_id = attempt_id
         claim.source_agent_id = delta.agent_id
         claim.verification_confidence = 1.0
@@ -246,6 +296,7 @@ def attempt_from_checkpoint(
     previous_attempt: ProofAttempt | None = None,
     attempt_id: str | None = None,
     proposed_lemmas: list[ClaimCard] | None = None,
+    candidate_conjectures: list[CandidateConjecture] | None = None,
     raw_artifact_ref: str | None = None,
     usage: UsageRecord | None = None,
     resumed_from_checkpoint_id: str | None = None,
@@ -258,10 +309,13 @@ def attempt_from_checkpoint(
         AttemptStatus.COMPLETE if checkpoint.proof_complete else AttemptStatus.PARTIAL
     )
     unresolved = _deduplicate(
-        [
+        canonical
+        for value in [
             *checkpoint.remaining_subgoals,
             *([] if checkpoint.proof_complete else checkpoint.known_risks),
         ]
+        if not is_feedback_only_statement(value)
+        and (canonical := canonical_obligation_statement(value))
     )
     return ProofAttempt(
         attempt_id=attempt_id or new_id("attempt"),
@@ -273,6 +327,11 @@ def attempt_from_checkpoint(
         final_answer=checkpoint.final_answer,
         proof_steps=list(checkpoint.verified_steps),
         proposed_lemmas=list(proposed_lemmas or []),
+        candidate_conjectures=list(
+            candidate_conjectures
+            if candidate_conjectures is not None
+            else (previous_attempt.candidate_conjectures if previous_attempt else [])
+        ),
         dead_ends=list(previous_attempt.dead_ends) if previous_attempt else [],
         unresolved_gaps=[] if checkpoint.proof_complete else unresolved,
         falsification_checks=[strategy.falsification_test],
