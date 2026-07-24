@@ -11,6 +11,7 @@ from ..schemas import (
     ExperimentSpec,
 )
 from .cache import ComputationLedger, ExperimentCache
+from .contracts import validate_experiment_contract
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +20,7 @@ class ComputationContext:
     stalled_rounds: int = 0
     meta_review_approved: bool = False
     remaining_llm_calls: int = 0
+    mandatory_calculation_gate: bool = False
 
 
 class ComputationGate:
@@ -35,6 +37,10 @@ class ComputationGate:
         ComputationMethod.BOUNDED_GREEDY_SEQUENCE,
         ComputationMethod.CANDIDATE_PERIOD_CHECK,
         ComputationMethod.EXACT_GEOMETRY,
+        ComputationMethod.NUMERIC_COUNTEREXAMPLE,
+        ComputationMethod.LEAN_CHECK,
+    }
+    _BOUNDED_TYPED_PROBE_METHODS = _TYPED_METHODS - {
         ComputationMethod.NUMERIC_COUNTEREXAMPLE,
         ComputationMethod.LEAN_CHECK,
     }
@@ -62,6 +68,7 @@ class ComputationGate:
             rule_id: str,
             *,
             cache_hit: bool = False,
+            canonical_request_hash: str | None = None,
             requires_meta_review: bool = False,
         ) -> ComputationDecision:
             return ComputationDecision(
@@ -71,6 +78,7 @@ class ComputationGate:
                 reason=reason,
                 rule_id=rule_id,
                 cache_hit=cache_hit,
+                canonical_request_hash=canonical_request_hash,
                 remaining_experiments=remaining,
                 requires_meta_review=requires_meta_review,
             )
@@ -81,14 +89,26 @@ class ComputationGate:
                 "Computation is disabled in this profile.",
                 "computation.disabled",
             )
+        contract_issues = validate_experiment_contract(spec)
+        if contract_issues:
+            return decision(
+                ComputationDecisionStatus.REJECT,
+                "Invalid typed-tool contract: " + "; ".join(contract_issues),
+                "request.invalid_tool_contract",
+            )
         cached_result = self.cache.get(spec.request_hash) if cfg.cache_results else None
+        if cached_result is None and cfg.cache_results:
+            cached_result = self.cache.get_equivalent(spec)
         required_followups = (
             2
             if spec.method == ComputationMethod.SANDBOXED_PYTHON
             and cached_result is None
             else 1
         )
-        if context.remaining_llm_calls < required_followups:
+        if (
+            not context.mandatory_calculation_gate
+            and context.remaining_llm_calls < required_followups
+        ):
             return decision(
                 ComputationDecisionStatus.DEFER,
                 "Insufficient LLM budget remains to interpret the experiment result.",
@@ -100,6 +120,7 @@ class ComputationGate:
                 "An identical completed experiment is available in the run cache.",
                 "cache.hit",
                 cache_hit=True,
+                canonical_request_hash=cached_result.request_hash,
             )
         vague_target = spec.target_claim.casefold()
         vague_basis = spec.reasoning_basis.casefold()
@@ -141,13 +162,27 @@ class ComputationGate:
                 "request.no_reasoning_basis",
             )
         pattern_only_basis = any(marker in vague_basis for marker in vague_markers)
+        bounded_typed_probe = (
+            cfg.bounded_typed_probe_fast_path
+            and cfg.typed_tools_enabled
+            and spec.method in self._BOUNDED_TYPED_PROBE_METHODS
+            and spec.exact_arithmetic
+            and spec.max_cases <= cfg.bounded_typed_probe_max_cases
+            and (
+                spec.broad_search or spec.purpose == ComputationPurpose.DISCOVER_PATTERN
+            )
+        )
         if pattern_only_basis and not spec.broad_search:
             return decision(
                 ComputationDecisionStatus.REJECT,
                 "Pattern hunting must be declared as broad_search and cannot use the falsification fast path.",
                 "reasoning_first.pattern_search_misclassified",
             )
-        if pattern_only_basis and context.stalled_rounds == 0:
+        if (
+            pattern_only_basis
+            and context.stalled_rounds == 0
+            and not bounded_typed_probe
+        ):
             return decision(
                 ComputationDecisionStatus.REJECT,
                 "Initial exploration cannot replace a mathematical basis with pattern hunting.",
@@ -208,6 +243,12 @@ class ComputationGate:
                 "numeric_counterexample must declare exact_arithmetic=false; only a reproduced candidate is exact evidence.",
                 "request.invalid_precision_claim",
             )
+        if context.mandatory_calculation_gate:
+            return decision(
+                ComputationDecisionStatus.ALLOW,
+                "Required by the deterministic route-critical calculation gate.",
+                "critical_calculation.mandatory_gate",
+            )
         if (
             path_count >= cfg.soft_experiments_per_path
             and not context.meta_review_approved
@@ -217,6 +258,15 @@ class ComputationGate:
                 "The path exceeded its soft experiment quota and needs Meta-Reviewer approval.",
                 "budget.path_soft_limit",
                 requires_meta_review=True,
+            )
+        if bounded_typed_probe:
+            return decision(
+                ComputationDecisionStatus.ALLOW,
+                (
+                    "Allowed as a low-cost exact typed probe. Its finite output is "
+                    "bounded evidence only and cannot prove an infinite pattern."
+                ),
+                "fast_path.bounded_typed_probe",
             )
         if spec.broad_search or spec.purpose == ComputationPurpose.DISCOVER_PATTERN:
             if context.stalled_rounds < cfg.broad_search_after_stalled_rounds:

@@ -207,10 +207,9 @@ class RouteRegistry:
         route.neighbor_route_ids = unique[:limit]
 
     def recompute_neighbors(self) -> None:
+        schedulable = {RouteStatus.ACTIVE, RouteStatus.REPAIR_ONCE}
         active = [
-            route
-            for route in self._routes.values()
-            if route.status == RouteStatus.ACTIVE
+            route for route in self._routes.values() if route.status in schedulable
         ]
         limit = (
             self.config.topology.cross_route.max_neighbors_per_route
@@ -218,7 +217,7 @@ class RouteRegistry:
             else max(0, len(active) - 1)
         )
         for route in self._routes.values():
-            if route.status != RouteStatus.ACTIVE:
+            if route.status not in schedulable:
                 route.neighbor_route_ids = []
                 continue
             source = self._tokens(" ".join(route.mechanism_signature))
@@ -252,6 +251,14 @@ class RouteRegistry:
         requires_revision: bool = False,
     ) -> None:
         route = self.get(route_id)
+        if route.status in {
+            RouteStatus.MERGED,
+            RouteStatus.ABANDONED,
+            RouteStatus.COMPLETED,
+            RouteStatus.REFUTED,
+            RouteStatus.FROZEN_STALLED,
+        }:
+            return
         route.status = RouteStatus.COOLING
         route.cooldown_until_round = until_round
         route.requires_revision = requires_revision
@@ -269,6 +276,77 @@ class RouteRegistry:
         route.cooldown_until_round = None
         route.requires_revision = False
         route.revision_summary = revision_summary.strip()
+        route.no_progress_strikes = 0
+        route.frozen_signature = None
+        route.frozen_reason = None
+        self.recompute_neighbors()
+
+    def mark_progress(self, route_id: str, signature: str) -> None:
+        route = self.get(route_id)
+        if route.status in {
+            RouteStatus.MERGED,
+            RouteStatus.ABANDONED,
+            RouteStatus.COMPLETED,
+            RouteStatus.REFUTED,
+        }:
+            return
+        route.status = RouteStatus.ACTIVE
+        route.no_progress_strikes = 0
+        route.last_progress_signature = signature
+        route.frozen_signature = None
+        route.frozen_reason = None
+        route.cooldown_until_round = None
+        self.recompute_neighbors()
+
+    def mark_no_progress(
+        self,
+        route_id: str,
+        *,
+        signature: str,
+        reason: str,
+        recovery_only: bool,
+    ) -> None:
+        route = self.get(route_id)
+        if route.status in {
+            RouteStatus.MERGED,
+            RouteStatus.ABANDONED,
+            RouteStatus.COMPLETED,
+            RouteStatus.REFUTED,
+            RouteStatus.FROZEN_STALLED,
+        }:
+            return
+        route.no_progress_strikes += 1
+        route.frozen_signature = signature
+        route.frozen_reason = reason.strip() or "no verified mathematical progress"
+        route.status = (
+            RouteStatus.FROZEN_STALLED
+            if recovery_only or route.status == RouteStatus.REPAIR_ONCE
+            else RouteStatus.REPAIR_ONCE
+        )
+        self.recompute_neighbors()
+
+    def mark_stalled(self, route_id: str, *, signature: str, reason: str) -> None:
+        route = self.get(route_id)
+        if route.status in {
+            RouteStatus.MERGED,
+            RouteStatus.ABANDONED,
+            RouteStatus.COMPLETED,
+            RouteStatus.REFUTED,
+        }:
+            return
+        route.status = RouteStatus.FROZEN_STALLED
+        route.frozen_signature = signature
+        route.frozen_reason = reason.strip() or "hard stagnation gate"
+        route.no_progress_strikes = max(1, route.no_progress_strikes)
+        self.recompute_neighbors()
+
+    def mark_refuted(self, route_id: str, reason: str) -> None:
+        route = self.get(route_id)
+        route.status = RouteStatus.REFUTED
+        route.requires_revision = False
+        route.cooldown_until_round = None
+        route.frozen_reason = reason.strip() or "required route claim was refuted"
+        self.cooling_reasons.pop(route_id, None)
         self.recompute_neighbors()
 
     def mark_abandoned(self, route_id: str, reason: str) -> None:
@@ -309,7 +387,7 @@ class RouteRegistry:
         return [
             route
             for route in self._routes.values()
-            if route.status == RouteStatus.ACTIVE
+            if route.status in {RouteStatus.ACTIVE, RouteStatus.REPAIR_ONCE}
         ]
 
     def export_state(self) -> dict[str, Any]:

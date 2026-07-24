@@ -45,6 +45,32 @@ class ProblemKind(StrEnum):
     UNKNOWN = "unknown"
 
 
+class TaskRequirement(StrEnum):
+    """The user-visible artifact that must be delivered for the task to finish."""
+
+    PROOF = "proof"
+    SOLUTION = "solution"
+    COMPUTATION = "computation"
+    CONJECTURE = "conjecture"
+    COUNTEREXAMPLE = "counterexample"
+    CLASSIFICATION = "classification"
+    OPTIMIZATION = "optimization"
+    CONSTRUCTION = "construction"
+    RESEARCH_PROGRESS = "research_progress"
+
+
+class DeliverableStatus(StrEnum):
+    COMPLETED = "completed"
+    PARTIAL = "partial"
+    MISSING = "missing"
+
+
+class TaskStatus(StrEnum):
+    COMPLETED = "completed"
+    PARTIAL = "partial"
+    INCOMPLETE = "incomplete"
+
+
 class Difficulty(StrEnum):
     EASY = "easy"
     MEDIUM = "medium"
@@ -155,6 +181,27 @@ class ComputationDecisionStatus(StrEnum):
     REJECT = "reject"
 
 
+class ComputationContractRepairAction(StrEnum):
+    RETRY_WITH_REPAIRED_SPEC = "retry_with_repaired_spec"
+    ABANDON_AS_UNREPRESENTABLE = "abandon_as_unrepresentable"
+
+
+class ComputationContractRepairStatus(StrEnum):
+    NOT_NEEDED = "not_needed"
+    SUCCEEDED = "succeeded"
+    ABANDONED = "abandoned"
+    FAILED = "failed"
+    DISABLED = "disabled"
+
+
+class CalculationGateVerdict(StrEnum):
+    PASSED = "passed"
+    MISSING_DECLARATION = "missing_declaration"
+    INVALID_CONTRACT = "invalid_contract"
+    REFUTED = "refuted"
+    INCONCLUSIVE = "inconclusive"
+
+
 class EvidenceStrength(StrEnum):
     HEURISTIC = "heuristic"
     BOUNDED_EVIDENCE = "bounded_evidence"
@@ -175,6 +222,9 @@ class RouteRole(StrEnum):
 
 class RouteStatus(StrEnum):
     ACTIVE = "active"
+    REPAIR_ONCE = "repair_once"
+    FROZEN_STALLED = "frozen_stalled"
+    REFUTED = "refuted"
     COOLING = "cooling"
     MERGED = "merged"
     ABANDONED = "abandoned"
@@ -315,10 +365,9 @@ class UsageRecord(StrictModel):
 
     @model_validator(mode="after")
     def infer_total(self) -> "UsageRecord":
-        if self.total_tokens == 0 and (self.input_tokens or self.output_tokens):
-            object.__setattr__(
-                self, "total_tokens", self.input_tokens + self.output_tokens
-            )
+        split_total = self.input_tokens + self.output_tokens
+        if split_total and self.total_tokens != split_total:
+            object.__setattr__(self, "total_tokens", split_total)
         return self
 
 
@@ -523,6 +572,11 @@ class RouteDescriptor(StrictModel):
     inspiration_proposal_id: str | None = None
     requires_revision: bool = False
     revision_summary: str | None = None
+    no_progress_strikes: int = Field(default=0, ge=0)
+    duplicate_attempt_count: int = Field(default=0, ge=0)
+    last_progress_signature: str | None = None
+    frozen_signature: str | None = None
+    frozen_reason: str | None = None
 
 
 class ProofObligation(StrictModel):
@@ -708,6 +762,8 @@ class FrontierClaim(StrictModel):
     statement: str = Field(min_length=1)
     source_ref: str | None = None
     assumptions: list[str] = Field(default_factory=list)
+    quantifiers: list[QuantifierSpec] = Field(default_factory=list)
+    scope_limitations: list[str] = Field(default_factory=list)
     supported: bool = False
 
 
@@ -718,7 +774,21 @@ class FrontierBridge(StrictModel):
     missing_implication: str = Field(min_length=1)
     compatibility_conditions: list[str]
     lexical_overlap: float = Field(default=0.0, ge=0.0, le=1.0)
+    semantic_relationship: Literal["scope_only", "candidate_ingredient"] = "scope_only"
+    source_sufficiency_assumed: Literal[False] = False
+    required_supporting_conditions: list[str] = Field(default_factory=list)
     status: Literal["open", "refuted", "closed"] = "open"
+
+    @model_validator(mode="after")
+    def require_auditable_candidate_use(self) -> "FrontierBridge":
+        if (
+            self.semantic_relationship == "candidate_ingredient"
+            and not self.required_supporting_conditions
+        ):
+            raise ValueError(
+                "candidate frontier Facts require explicit applicability conditions"
+            )
+        return self
 
 
 class BidirectionalFrontierState(StrictModel):
@@ -1012,6 +1082,26 @@ class InspirationTask(StrictModel):
     max_proposals: int = Field(default=1, ge=1)
 
 
+class InspirationProposalAssignment(StrictModel):
+    task_id: str
+    mechanism: InspirationMechanism
+    proposal_slot: int = Field(ge=0)
+    proposer_agent_id: str
+    proposer_role: str
+    context_mode: InspirationContextMode
+    specialist_match: bool
+
+
+class InspirationAssignmentPlan(StrictModel):
+    task_id: str
+    mechanism: InspirationMechanism
+    round_index: int = Field(ge=0)
+    requested_proposals: int = Field(ge=0)
+    eligible_agent_ids: list[str] = Field(default_factory=list)
+    assignments: list[InspirationProposalAssignment] = Field(default_factory=list)
+    deferred_reason: str | None = None
+
+
 class InspirationCandidateDecision(StrictModel):
     proposal_id: str
     task_id: str
@@ -1188,7 +1278,43 @@ class ExperimentSpec(StrictModel):
     path_id: str | None = None
     parent_checkpoint_id: str | None = None
     runtime_fingerprint: dict[str, Any] = Field(default_factory=dict)
+    execution_hash: str = ""
     request_hash: str = ""
+
+    def normalized_execution_payload(self) -> dict[str, Any]:
+        """Return the actual deterministic invocation, excluding narrative metadata."""
+
+        arguments = dict(self.arguments)
+        if self.method == ComputationMethod.BOUNDED_GREEDY_SEQUENCE:
+            arguments.setdefault("candidate_min", 0)
+            arguments.setdefault("candidate_max", 1_000_000)
+            arguments.setdefault("strictly_increasing", True)
+        elif self.method == ComputationMethod.CANDIDATE_PERIOD_CHECK:
+            arguments.setdefault("start_index", 0)
+        elif self.method == ComputationMethod.RECURRENCE_CHECK:
+            arguments.setdefault("start_n", 0)
+            arguments.setdefault("inhomogeneous", 0)
+        elif self.method == ComputationMethod.NUMERIC_COUNTEREXAMPLE:
+            arguments.setdefault("relation", "eq")
+
+        runtime = {
+            key: value
+            for key, value in self.runtime_fingerprint.items()
+            if key != "seed"
+        }
+        payload: dict[str, Any] = {
+            "method": self.method.value,
+            "domains": self.domains,
+            "arguments": arguments,
+            "exact_arithmetic": self.exact_arithmetic,
+            "runtime_fingerprint": runtime,
+        }
+        if self.method in {
+            ComputationMethod.NUMERIC_COUNTEREXAMPLE,
+            ComputationMethod.SANDBOXED_PYTHON,
+        }:
+            payload["seed"] = self.seed
+        return payload
 
     def normalized_payload(self) -> dict[str, Any]:
         return {
@@ -1214,6 +1340,9 @@ class ExperimentSpec(StrictModel):
     def bind_runtime_fingerprint(self, fingerprint: dict[str, Any]) -> None:
         """Bind cache-relevant runtime identity before gate/cache lookup."""
         object.__setattr__(self, "runtime_fingerprint", fingerprint)
+        object.__setattr__(
+            self, "execution_hash", stable_hash(self.normalized_execution_payload())
+        )
         object.__setattr__(self, "request_hash", stable_hash(self.normalized_payload()))
 
     @model_validator(mode="after")
@@ -1232,7 +1361,39 @@ class ExperimentSpec(StrictModel):
             raise ValueError(
                 "request_hash does not match the normalized experiment request"
             )
+        object.__setattr__(
+            self, "execution_hash", stable_hash(self.normalized_execution_payload())
+        )
         object.__setattr__(self, "request_hash", expected)
+        return self
+
+
+class ComputationContractRepair(StrictModel):
+    """One narrow repair decision for a malformed computation request."""
+
+    action: ComputationContractRepairAction
+    repaired_spec: ExperimentSpec | None = None
+    reason: str
+    semantic_equivalence: str | None = None
+
+    @model_validator(mode="after")
+    def require_action_payload(self) -> "ComputationContractRepair":
+        if self.action == ComputationContractRepairAction.RETRY_WITH_REPAIRED_SPEC:
+            if self.repaired_spec is None:
+                raise ValueError("retry_with_repaired_spec requires repaired_spec")
+            if not self.semantic_equivalence:
+                raise ValueError(
+                    "retry_with_repaired_spec requires a semantic equivalence statement"
+                )
+            if self.repaired_spec.method == ComputationMethod.SANDBOXED_PYTHON and (
+                not self.repaired_spec.typed_tool_gap
+                or len(self.repaired_spec.typed_tool_gap) < 12
+            ):
+                raise ValueError(
+                    "sandboxed_python repair requires a precise typed_tool_gap"
+                )
+        elif self.repaired_spec is not None:
+            raise ValueError("abandon_as_unrepresentable cannot carry a repaired_spec")
         return self
 
 
@@ -1364,8 +1525,15 @@ class ComputationPlan(StrictModel):
             target_claim=spec.target_claim,
             assumptions=spec.assumptions,
             method=spec.method,
-            decision_use=spec.decision_if_refuted,
-            bounded_scope=spec.domains,
+            decision_use=(
+                f"If confirmed: {spec.decision_if_confirmed} "
+                f"If refuted: {spec.decision_if_refuted}"
+            ),
+            bounded_scope={
+                "domains": spec.domains,
+                "arguments": spec.arguments,
+                "max_cases": spec.max_cases,
+            },
             exact_arithmetic=spec.exact_arithmetic,
         )
 
@@ -1432,9 +1600,26 @@ class ComputationDecision(StrictModel):
     reason: str
     rule_id: str
     cache_hit: bool = False
+    canonical_request_hash: str | None = None
     remaining_experiments: int = Field(default=0, ge=0)
     requires_meta_review: bool = False
+    contract_repair_status: ComputationContractRepairStatus = (
+        ComputationContractRepairStatus.NOT_NEEDED
+    )
+    original_request_hash: str | None = None
+    contract_repair_reason: str | None = None
     created_at: str = Field(default_factory=utc_now_iso)
+
+
+class DeferredExperimentRequest(StrictModel):
+    """A durable computation request waiting for an explicit gate condition."""
+
+    path_id: str
+    spec: ExperimentSpec
+    latest_decision: ComputationDecision
+    defer_count: int = Field(default=1, ge=1)
+    first_deferred_at: str = Field(default_factory=utc_now_iso)
+    last_evaluated_at: str = Field(default_factory=utc_now_iso)
 
 
 class ToolRequest(StrictModel):
@@ -1454,6 +1639,8 @@ class ToolRequest(StrictModel):
         "lean_check",
     ]
     arguments: dict[str, Any] = Field(default_factory=dict)
+    domains: dict[str, Any] = Field(default_factory=dict)
+    max_cases: int = Field(default=100_000, ge=1, le=100_000_000)
     purpose: str
 
 
@@ -1466,11 +1653,105 @@ class ToolResult(StrictModel):
     evidence_ref: EvidenceRef | None = None
 
 
+class CalculationGateRecord(StrictModel):
+    """Authoritative result of checking one route-critical finite calculation."""
+
+    gate_id: str = Field(default_factory=lambda: new_id("calcgate"))
+    scope_type: Literal["strategy", "proof_step", "final_step"]
+    scope_id: str
+    path_id: str
+    trigger: str
+    request: ToolRequest | None = None
+    experiment_id: str | None = None
+    request_hash: str | None = None
+    result_hash: str | None = None
+    verdict: CalculationGateVerdict
+    reason: str
+    evidence_refs: list[EvidenceRef] = Field(default_factory=list)
+    created_at: str = Field(default_factory=utc_now_iso)
+
+
+class GoalInterpretationCandidate(StrictModel):
+    statement: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+    rationale: str = Field(min_length=1)
+
+
+class GoalNormalizationAssessment(StrictModel):
+    has_ambiguity: bool
+    is_well_formed: bool
+    ambiguity_reasons: list[str] = Field(default_factory=list)
+    recommended_statement: str = Field(min_length=1)
+    recommendation_confidence: float = Field(ge=0.0, le=1.0)
+    alternative_interpretations: list[GoalInterpretationCandidate] = Field(
+        default_factory=list
+    )
+    changes_mathematical_meaning: bool
+    clarification_question: str | None = None
+
+    @model_validator(mode="after")
+    def validate_assessment(self) -> "GoalNormalizationAssessment":
+        if self.has_ambiguity and not self.ambiguity_reasons:
+            raise ValueError("ambiguous assessments require at least one reason")
+        if (self.has_ambiguity or not self.is_well_formed) and not (
+            self.clarification_question or ""
+        ).strip():
+            raise ValueError("a clarification question is required for an unclear goal")
+        statements = [
+            self.recommended_statement,
+            *(item.statement for item in self.alternative_interpretations),
+        ]
+        if len(set(statements)) != len(statements):
+            raise ValueError("goal interpretation candidates must be distinct")
+        return self
+
+
+class LocalGoalPrecheck(StrictModel):
+    status: Literal["clear", "model_review_required"]
+    rule_ids: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_precheck(self) -> "LocalGoalPrecheck":
+        if self.status == "clear" and (self.rule_ids or self.reasons):
+            raise ValueError("a clear local precheck cannot contain findings")
+        if self.status == "model_review_required" and not self.reasons:
+            raise ValueError("model review requires at least one local finding")
+        return self
+
+
+class GoalClarificationRequest(StrictModel):
+    request_id: str = Field(default_factory=lambda: new_id("clarification"))
+    original_statement: str = Field(min_length=1)
+    local_precheck: LocalGoalPrecheck
+    assessment: GoalNormalizationAssessment
+
+
+class GoalClarificationDecision(StrictModel):
+    request_id: str
+    canonical_statement: str = Field(min_length=1)
+    source: Literal["user_confirmed", "auto_assumed"] = "user_confirmed"
+    selected_candidate_index: int | None = Field(default=None, ge=0)
+
+
 class ProblemContract(StrictModel):
     problem_id: str = Field(default_factory=lambda: new_id("problem"))
     exact_statement: str
     normalized_statement: str
+    original_statement: str = ""
+    canonical_statement: str = ""
+    interpretation_source: Literal["original", "user_confirmed", "auto_assumed"] = (
+        "original"
+    )
+    interpretation_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    interpretation_reasons: list[str] = Field(default_factory=list)
+    interpretation_agent_id: str | None = Field(default=None, exclude=True)
+    interpretation_raw_ref: str | None = Field(default=None, exclude=True)
+    goal_hash: str = ""
     problem_kind: ProblemKind = ProblemKind.UNKNOWN
+    task_requirements: list[TaskRequirement] = Field(
+        default_factory=lambda: [TaskRequirement.PROOF]
+    )
     deliverables: list[str] = Field(default_factory=list)
     definitions: list[str] = Field(default_factory=list)
     hard_constraints: list[str] = Field(default_factory=list)
@@ -1481,9 +1762,24 @@ class ProblemContract(StrictModel):
 
     @model_validator(mode="after")
     def set_hash(self) -> "ProblemContract":
-        expected = stable_hash(self.exact_statement)
+        original = self.original_statement or self.exact_statement
+        canonical = self.canonical_statement or self.exact_statement
+        if self.exact_statement != canonical:
+            raise ValueError(
+                "exact_statement must equal the frozen canonical_statement"
+            )
+        if self.interpretation_source == "original" and original != canonical:
+            raise ValueError(
+                "an original interpretation cannot change the submitted statement"
+            )
+        expected = stable_hash(canonical)
         if self.integrity_hash and self.integrity_hash != expected:
-            raise ValueError("integrity_hash does not match exact_statement")
+            raise ValueError("integrity_hash does not match canonical_statement")
+        if self.goal_hash and self.goal_hash != expected:
+            raise ValueError("goal_hash does not match canonical_statement")
+        object.__setattr__(self, "original_statement", original)
+        object.__setattr__(self, "canonical_statement", canonical)
+        object.__setattr__(self, "goal_hash", expected)
         object.__setattr__(self, "integrity_hash", expected)
         return self
 
@@ -1509,6 +1805,7 @@ class BlindReviewPacket(StrictModel):
 
 class TriageResult(StrictModel):
     problem_kind: ProblemKind
+    task_requirements: list[TaskRequirement] = Field(default_factory=list)
     difficulty: Difficulty
     key_risks: list[str] = Field(default_factory=list)
     likely_tools: list[str] = Field(default_factory=list)
@@ -1517,6 +1814,18 @@ class TriageResult(StrictModel):
     proof_mode: Literal["direct", "decomposition", "hybrid"] = "hybrid"
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
+
+
+class CriticalClaim(StrictModel):
+    claim_id: str = Field(default_factory=lambda: new_id("critical"))
+    statement: str = Field(min_length=1)
+    necessity: Literal["required", "supporting"] = "required"
+    falsification_test: str = Field(min_length=1)
+    preferred_tool: str | None = None
+    status: Literal["candidate", "needs_check", "verified", "refuted", "blocked"] = (
+        "needs_check"
+    )
+    evidence_refs: list[str] = Field(default_factory=list)
 
 
 class StrategyCard(StrictModel):
@@ -1533,9 +1842,37 @@ class StrategyCard(StrictModel):
     estimated_cost: float = Field(default=0.5, ge=0.0, le=1.0)
     tags: list[str] = Field(default_factory=list)
     computation_hints: list[ComputationHint] = Field(default_factory=list)
+    calculation_checks: list[ToolRequest] = Field(default_factory=list)
+    calculation_evidence_refs: list[EvidenceRef] = Field(default_factory=list)
     assigned_agent_id: str | None = None
     inspiration_proposal_id: str | None = None
     parent_strategy_ids: list[str] = Field(default_factory=list)
+    critical_claims: list[CriticalClaim] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def ensure_critical_claim(self) -> "StrategyCard":
+        if not self.critical_claims:
+            object.__setattr__(
+                self,
+                "critical_claims",
+                [
+                    CriticalClaim(
+                        claim_id=(
+                            "critical_"
+                            + stable_hash(
+                                {
+                                    "title": self.title,
+                                    "bottleneck": self.bottleneck,
+                                }
+                            )[:16]
+                        ),
+                        statement=self.bottleneck,
+                        necessity="required",
+                        falsification_test=self.falsification_test,
+                    )
+                ],
+            )
+        return self
 
 
 class StrategySet(StrictModel):
@@ -1557,9 +1894,21 @@ class ProofStep(StrictModel):
     justification: str
     dependencies: list[str] = Field(default_factory=list)
     calculations: list[str] = Field(default_factory=list)
+    calculation_checks: list[ToolRequest] = Field(default_factory=list)
+    calculation_evidence_refs: list[EvidenceRef] = Field(default_factory=list)
     citations: list[CitationRecord] = Field(default_factory=list)
     is_key_step: bool = False
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    def checkpoint_payload(self) -> dict[str, Any]:
+        """Keep old checkpoint hashes valid when the new fields are empty."""
+
+        payload = self.model_dump(mode="json")
+        if not self.calculation_checks:
+            payload.pop("calculation_checks", None)
+        if not self.calculation_evidence_refs:
+            payload.pop("calculation_evidence_refs", None)
+        return payload
 
 
 class ClaimCard(StrictModel):
@@ -1570,6 +1919,7 @@ class ClaimCard(StrictModel):
     proof_steps: list[ProofStep] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
     status: ClaimStatus = ClaimStatus.PROPOSED
+    source_delta_id: str | None = None
     source_attempt_id: str | None = None
     source_agent_id: str | None = None
     evidence_refs: list[EvidenceRef] = Field(default_factory=list)
@@ -1595,6 +1945,62 @@ class ClaimCard(StrictModel):
         return self
 
 
+class CandidateConjecture(StrictModel):
+    """A computation-inspired hypothesis that is explicitly not a proved fact."""
+
+    conjecture_id: str = Field(default_factory=lambda: new_id("conjecture"))
+    statement: str
+    rationale: str
+    supporting_experiment_ids: list[str]
+    evidence_refs: list[EvidenceRef] = Field(default_factory=list)
+    scope_limitations: list[str]
+    proof_obligations: list[str]
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    status: Literal["candidate"] = "candidate"
+    content_hash: str = ""
+
+    @model_validator(mode="after")
+    def candidate_is_scoped_and_auditable(self) -> "CandidateConjecture":
+        if not self.supporting_experiment_ids:
+            raise ValueError(
+                "candidate conjecture requires at least one supporting experiment"
+            )
+        if not self.scope_limitations:
+            raise ValueError(
+                "candidate conjecture scope_limitations must state why its "
+                "evidence is not a proof"
+            )
+        if not self.proof_obligations:
+            raise ValueError(
+                "candidate conjecture requires at least one separate proof obligation"
+            )
+        expected = stable_hash(
+            {
+                "statement": self.statement,
+                "supporting_experiment_ids": self.supporting_experiment_ids,
+                "scope_limitations": self.scope_limitations,
+                "proof_obligations": self.proof_obligations,
+            }
+        )
+        if self.content_hash and self.content_hash != expected:
+            raise ValueError("candidate conjecture content_hash mismatch")
+        object.__setattr__(self, "content_hash", expected)
+        return self
+
+
+class CandidateConjectureBatch(StrictModel):
+    candidate_conjectures: list[CandidateConjecture]
+
+    @field_validator("candidate_conjectures")
+    @classmethod
+    def require_candidate(
+        cls, value: list[CandidateConjecture]
+    ) -> list[CandidateConjecture]:
+        if not value:
+            raise ValueError("at least one candidate conjecture is required")
+        return value
+
+
 class ProofAttempt(StrictModel):
     attempt_id: str = Field(default_factory=lambda: new_id("attempt"))
     problem_hash: str
@@ -1605,6 +2011,7 @@ class ProofAttempt(StrictModel):
     final_answer: str | None = None
     proof_steps: list[ProofStep] = Field(default_factory=list)
     proposed_lemmas: list[ClaimCard] = Field(default_factory=list)
+    candidate_conjectures: list[CandidateConjecture] = Field(default_factory=list)
     dead_ends: list[str] = Field(default_factory=list)
     unresolved_gaps: list[str] = Field(default_factory=list)
     falsification_checks: list[str] = Field(default_factory=list)
@@ -1640,6 +2047,7 @@ class ProofDelta(StrictModel):
     completed_subgoal: str | None = None
     new_steps: list[ProofStep] = Field(default_factory=list)
     new_claims: list[ClaimCard] = Field(default_factory=list)
+    candidate_conjectures: list[CandidateConjecture] = Field(default_factory=list)
     active_assumptions: list[str] = Field(default_factory=list)
     remaining_subgoals: list[str] = Field(default_factory=list)
     current_goal: str | None = None
@@ -1648,6 +2056,7 @@ class ProofDelta(StrictModel):
     candidate_final_answer: str | None = None
     proof_complete: bool = False
     ready_for_verification: bool = True
+    normalization_notes: list[str] = Field(default_factory=list)
     self_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     raw_artifact_ref: str | None = None
     usage: UsageRecord = Field(default_factory=UsageRecord)
@@ -1768,7 +2177,7 @@ class ProofCheckpoint(StrictModel):
             "strategy_id": self.strategy_id,
             "segment_index": self.segment_index,
             "verified_steps": [
-                step.model_dump(mode="json") for step in self.verified_steps
+                step.checkpoint_payload() for step in self.verified_steps
             ],
             "verified_claim_ids": self.verified_claim_ids,
             "active_assumptions": self.active_assumptions,
@@ -1886,6 +2295,12 @@ class BlindVerificationReport(StrictModel):
     def failed_report_has_issue(self) -> "BlindVerificationReport":
         if self.verdict == VerificationVerdict.FAIL and not self.issues:
             raise ValueError("failed blind report must contain at least one issue")
+        if not self.problem_integrity_ok and self.verdict != VerificationVerdict.FAIL:
+            raise ValueError(
+                "problem_integrity_ok=false is a hard gate and requires verdict=fail"
+            )
+        if not self.problem_integrity_ok and not self.issues:
+            raise ValueError("a goal-alignment failure requires a concrete issue")
         return self
 
 
@@ -1914,6 +2329,12 @@ class VerificationReport(StrictModel):
             raise ValueError(
                 "failed verification report must contain at least one issue"
             )
+        if not self.problem_integrity_ok and self.verdict != VerificationVerdict.FAIL:
+            raise ValueError(
+                "problem_integrity_ok=false is a hard gate and requires verdict=fail"
+            )
+        if not self.problem_integrity_ok and not self.issues:
+            raise ValueError("a goal-alignment failure requires a concrete issue")
         return self
 
 
@@ -1971,6 +2392,13 @@ class PathStats(StrictModel):
     last_round_index: int = Field(default=0, ge=0)
     tokens_spent: int = Field(default=0, ge=0)
     structurally_valid: bool | None = None
+    incomplete_only: bool = False
+    verified_delta_count: int = Field(default=0, ge=0)
+    rejected_delta_count: int = Field(default=0, ge=0)
+    latest_delta_rejected: bool = False
+    meta_recommended_action: ActionKind | None = None
+    meta_preferred: bool = False
+    meta_review_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     proof_debt: float = Field(default=0.0, ge=0.0)
     proof_debt_reduction: float = 0.0
     verified_fact_gain: int = Field(default=0, ge=0)
@@ -2066,8 +2494,16 @@ class ResearchProgressReport(StrictModel):
     created_at: str = Field(default_factory=utc_now_iso)
 
 
+class DeliverableAssessment(StrictModel):
+    requirement: TaskRequirement
+    status: DeliverableStatus
+    summary: str
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
 class RunStatus(StrEnum):
     VERIFIED = "verified"
+    COMPLETED = "completed"
     UNVERIFIED = "unverified"
     BUDGET_EXHAUSTED = "budget_exhausted"
     PAUSED_EXTERNAL_FAILURE = "paused_external_failure"
@@ -2077,6 +2513,8 @@ class RunStatus(StrEnum):
 class RunResult(StrictModel):
     run_id: str
     status: RunStatus
+    task_status: TaskStatus = TaskStatus.INCOMPLETE
+    deliverable_assessments: list[DeliverableAssessment] = Field(default_factory=list)
     math_status: MathStatus = MathStatus.INCONCLUSIVE
     execution_status: ExecutionStatus = ExecutionStatus.COMPLETED
     problem: ProblemContract

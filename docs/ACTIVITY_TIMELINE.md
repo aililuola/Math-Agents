@@ -1,5 +1,7 @@
 # 实时 Activity 时间线
 
+每次新运行首先出现稳定的 `goal-preflight` 节点。清晰题目会在本地完成并标记 `api_call=false`；疑似歧义题目会连接一个 `goal_normalization` Planner 节点，并在需要改变数学含义时停留为“等待确认规范化目标”。用户确认只更新同一个预检节点，不会按轮询或 Token 数重复生成时间线记录。
+
 ## 0.7 拓扑与灵感事件
 
 分层模式增加路线注册/成员分配、typed message 发布/投递/拒绝/过期、Fact/Insight/Negative 变化、义务开关、Bridge/Conflict、路线合并/冷却和 graph freeze 事件。`detailed` 显示 source/target route、消息类型、memory tier、拒绝原因、proof debt 变化和消息成本；`compact` 只显示高层动作。

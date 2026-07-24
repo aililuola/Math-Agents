@@ -204,14 +204,14 @@ mathproofmesh solve examples/problem.txt \
   --run-id deepseek-smoke
 ```
 
-冒烟配置仍使用 V4 Pro 和 `max`，但限制为两条初始探索路径、至多一条拓宽路径、单轮自适应调度以及较低总费用上限。两个配置的关键差异为：
+冒烟配置仍使用 V4 Pro 和 `max`，但限制为两条初始探索路径、至多一条拓宽路径、至多三轮调度以及较低总费用上限。两个配置的关键差异为：
 
 | 配置 | 冒烟版 | 正式版 |
 |---|---:|---:|
 | 单个 Agent 与单个证明分段请求输出上限 | 50,000 tokens | 100,000 tokens |
 | 每段最多新增结构化步骤 | 8 | 12 |
 | 每条路线最多分段数 | 4 | 12 |
-| 最大调用数 | 28 | 42 |
+| 最大调用数 | 40 | 60 |
 | 最终修订上限 | 1 | 3 |
 
 “8 步/12 步”是一次 `ProofDelta` 最多新增的结构化证明步骤，不是整道题的总步数或模型调用数。提供商若实施更低的模型输出硬限制，仍以 API 返回为准。
@@ -244,7 +244,7 @@ mathproofmesh resume olympiad-problem-001 \
 生产配置的默认上限为：
 
 ```text
-42 calls
+60 calls
 4 adaptive rounds
 3 initial paths
 6 maximum paths

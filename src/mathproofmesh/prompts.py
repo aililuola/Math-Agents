@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
@@ -9,21 +10,26 @@ from typing import Any, Type
 
 from pydantic import BaseModel
 
+from .computation.contracts import experiment_tool_catalog
 from .schemas import (
     AnalogyMapping,
     BlindReviewPacket,
     BlindVerificationReport,
     BrokerDecision,
+    CandidateConjectureBatch,
     ClaimBatch,
+    ComputationContractRepair,
     ConstructionProposal,
     ContinuationTurn,
     ExperimentProgram,
     ExperimentSpec,
     FinalProof,
+    GoalNormalizationAssessment,
     InitialExplorationTurn,
     InspirationProposal,
     InspirationReview,
     InvariantHypothesis,
+    LocalGoalPrecheck,
     MessageEnvelope,
     MessageReceipt,
     MetaReview,
@@ -104,6 +110,51 @@ def _json(value: Any) -> str:
     return json.dumps(_to_jsonable(value), ensure_ascii=False, indent=2)
 
 
+def _feedback_directives(
+    items: list[str] | None,
+    *,
+    source: str,
+    default_kind: str,
+    default_status: str,
+) -> list[dict[str, Any]]:
+    """Mark review prose as non-authoritative before it enters a model prompt."""
+
+    directives: list[dict[str, Any]] = []
+    tag_pattern = re.compile(
+        r"^\[(?P<kind>[^\]]+)\]"
+        r"\[STATUS:(?P<status>[^\]]+)\]"
+        r"\[SOURCE:(?P<source>[^\]]+)\]"
+        r"\[PREMISE_ELIGIBLE:false\]\s*"
+        r"(?P<text>.*)$",
+        re.DOTALL,
+    )
+    for index, raw_text in enumerate(items or [], start=1):
+        text = raw_text.strip()
+        if not text:
+            continue
+        tagged = tag_pattern.fullmatch(text)
+        directives.append(
+            {
+                "directive_index": index,
+                "source": tagged.group("source") if tagged else source,
+                "kind": tagged.group("kind") if tagged else default_kind,
+                "status": tagged.group("status") if tagged else default_status,
+                "premise_eligible": False,
+                "allowed_use": [
+                    "open_proof_obligation",
+                    "repair_hint",
+                    "falsification_target",
+                ],
+                "forbidden_use": [
+                    "verified_premise",
+                    "established_conclusion",
+                ],
+                "text": tagged.group("text").strip() if tagged else text,
+            }
+        )
+    return directives
+
+
 def _minimal_schema_value(
     node: dict[str, Any], root: dict[str, Any], *, required: bool = True
 ) -> Any:
@@ -172,6 +223,15 @@ def _validated_model_example(
         "segment_index": 1,
         "referenced_checkpoint_step_ids": [],
         "new_steps": [step],
+        "new_claims": [
+            {
+                "claim_id": "new-claim-1",
+                "statement": "The new step establishes one reusable scoped claim.",
+                "conclusion": "State exactly the consequence established by new-step-1.",
+                "proof_steps": [step],
+                "dependencies": ["new-step-1"],
+            }
+        ],
         "remaining_subgoals": ["State the next unresolved subgoal."],
         "current_goal": "State the next unresolved subgoal.",
     }
@@ -204,6 +264,14 @@ def _validated_model_example(
                     "expected_lemmas": ["One necessary intermediate lemma"],
                     "bottleneck": "The decisive unresolved implication",
                     "falsification_test": "Give one precise fast failure test.",
+                    "critical_claims": [
+                        {
+                            "statement": "The smallest claim on which this mechanism depends.",
+                            "necessity": "required",
+                            "falsification_test": "Give one exact, low-cost attempt to refute it.",
+                            "status": "needs_check",
+                        }
+                    ],
                     "estimated_success": 0.5,
                 }
             ],
@@ -221,6 +289,35 @@ def _validated_model_example(
             "delta": delta,
             "message_receipts": [],
             "reason": "One bounded mathematical delta is ready for review.",
+        },
+        "ComputationContractRepair": {
+            "action": "abandon_as_unrepresentable",
+            "repaired_spec": None,
+            "reason": (
+                "No registered or sandboxed bounded computation can preserve "
+                "the requested semantics."
+            ),
+            "semantic_equivalence": None,
+        },
+        "CandidateConjectureBatch": {
+            "candidate_conjectures": [
+                {
+                    "statement": "State one concrete falsifiable pattern.",
+                    "rationale": (
+                        "Explain how the exact bounded result suggests this pattern."
+                    ),
+                    "supporting_experiment_ids": ["experiment-from-context"],
+                    "evidence_refs": [],
+                    "scope_limitations": [
+                        "The bounded result is evidence only and is not a proof."
+                    ],
+                    "proof_obligations": [
+                        "Prove the candidate pattern symbolically for the full domain."
+                    ],
+                    "confidence": 0.5,
+                    "status": "candidate",
+                }
+            ]
         },
         "ExperimentProgram": {
             "experiment_id": "experiment-from-context",
@@ -402,6 +499,16 @@ def _validated_model_example(
             "verdict": "inconclusive",
             "confidence": 0.0,
         },
+        "GoalNormalizationAssessment": {
+            "has_ambiguity": True,
+            "is_well_formed": False,
+            "ambiguity_reasons": ["A required mathematical parameter is missing."],
+            "recommended_statement": "A complete candidate interpretation.",
+            "recommendation_confidence": 0.5,
+            "alternative_interpretations": [],
+            "changes_mathematical_meaning": True,
+            "clarification_question": "Which complete interpretation is intended?",
+        },
     }
     example = examples.get(model.__name__)
     if example is None:
@@ -436,8 +543,26 @@ Never invent a theorem or bibliographic citation. A standard named theorem may b
 Distinguish rigorously proved facts, plausible conjectures, failed directions, and unresolved gaps.
 Abstract mathematical reasoning is the default. Computation is evidence for a precisely stated decision, never a replacement for proof and never a default strategy generator.
 No finite sample or failure to find a counterexample verifies a universal claim. A computation request must expose only an auditable mathematical basis, not private chain of thought.
+The fields calculation_evidence_refs are server-owned; always return them empty. When a route premise or ProofStep relies on an explicit value attributed to finite computation (for example a generated sequence prefix, enumerated minimum, finite search, or period sample), declare an assertion-checking ToolRequest in calculation_checks. A minimum or classification established symbolically is not a computation trigger. The server executes declared checks locally before admitting that finite premise.
 Return exactly one JSON object conforming to the supplied JSON Schema. Do not add markdown fences or prose outside the JSON object.
 Inside JSON strings, escape every LaTeX backslash as `\\`; an unescaped backslash makes the whole artifact invalid.
+""".strip()
+
+
+GOAL_NORMALIZATION_SYSTEM = """
+You are the goal-normalizer in a verification-first mathematical reasoning system.
+Do not solve the problem. Inspect only whether the submitted statement determines one
+well-formed mathematical task. Treat missing moduli, domains, quantifiers, definitions,
+referenced figures, or parameters as material when they can change the proposition.
+Never silently rewrite the user's goal. A recommended statement is only a candidate for
+explicit user confirmation. If the submitted statement is already unambiguous, copy it
+verbatim into recommended_statement and set changes_mathematical_meaning=false.
+If it is ambiguous, provide the most likely complete interpretation and list genuinely
+different plausible alternatives. Do not disguise added hypotheses or parameters as
+formatting. Confidence is metadata, not authority.
+Return exactly one JSON object conforming to the supplied JSON Schema. Do not add
+markdown fences, a proof, private scratch work, or prose outside the JSON object.
+Inside JSON strings, escape every LaTeX backslash as `\\`.
 """.strip()
 
 
@@ -448,11 +573,43 @@ class PromptFactory:
         self.output_language = output_language
         self.computation_enabled = computation_enabled
 
+    def goal_normalization(
+        self,
+        original_statement: str,
+        local_precheck: LocalGoalPrecheck,
+    ) -> PromptBundle:
+        user = f"""
+[STAGE:goal_normalization]
+Review the exact submitted statement for ambiguity or missing mathematical information.
+The local findings are high-precision warnings, not permission to guess. Return a
+complete recommended interpretation, alternatives when they are genuinely plausible,
+and whether adopting the recommendation changes mathematical meaning.
+The user-facing explanation should use {self.output_language}.
+
+EXACT SUBMITTED STATEMENT:
+{original_statement}
+
+LOCAL DETERMINISTIC PRECHECK:
+{_json(local_precheck)}
+
+JSON SCHEMA:
+{_schema(GoalNormalizationAssessment)}
+""".strip()
+        return PromptBundle(
+            "goal_normalization",
+            GOAL_NORMALIZATION_SYSTEM,
+            user,
+            GoalNormalizationAssessment,
+            temperature=0.0,
+            max_output_tokens=4096,
+        )
+
     def triage(self, problem: ProblemContract) -> PromptBundle:
         user = f"""
 [STAGE:triage]
 Classify the problem and recommend a cost-aware reasoning mode. Do not attempt the full solution yet.
 Assess whether the task needs direct solving, a claim-dependency DAG, or a hybrid. Identify likely failure modes and useful deterministic tools.
+Populate task_requirements from what the user actually requested. Do not add proof merely because the input is mathematical: computation, conjecture, counterexample, classification, optimization, construction, solution, and proof are distinct deliverables. A conjecture explicitly marked for separate later proof does not request that proof in this run.
 The final system output language is {self.output_language}.
 
 IMMUTABLE PROBLEM CONTRACT:
@@ -474,14 +631,27 @@ JSON SCHEMA:
         regulator_feedback: list[str] | None = None,
     ) -> PromptBundle:
         prior_strategy_titles = prior_strategy_titles or []
-        regulator_feedback = regulator_feedback or []
+        calculation_contracts = (
+            experiment_tool_catalog(problem.allowed_tools)
+            if self.computation_enabled
+            else []
+        )
+        feedback_directives = _feedback_directives(
+            regulator_feedback,
+            source="meta_review_or_strategy_regulator",
+            default_kind="required_action_or_unresolved_conflict",
+            default_status="open",
+        )
         user = f"""
 [STAGE:strategy_generation]
 Generate up to {count} genuinely distinct and feasible solution strategies for the immutable problem.
+Optimize each strategy for the explicit task_requirements and deliverables in the contract. Do not add a proof deliverable that the user did not request. For a computation-and-conjecture task, plan one exact bounded computation plus a scoped candidate statement and stop before attempting the separately listed proof obligation.
 The strategies must differ in their decisive mathematical mechanism, not merely wording or notation.
 Do not pad the list with invented weak variants. If the mathematical space supports fewer sound approaches, return fewer.
 For every strategy, state the bottleneck, the intended falsification test, the expected intermediate lemmas, and why it is independent of the others.
+List the smallest load-bearing claims in critical_claims. Mark a claim "required" only when refuting it invalidates the route; give each one a precise low-cost falsification test and a preferred deterministic tool when applicable.
 You may record narrowly described ComputationHint items for later consideration, but hints are non-executable and must not replace the strategy's abstract mathematical mechanism.
+If a strategy already relies on concrete values obtained by finite computation, put one exact assertion-checking ToolRequest in strategy.calculation_checks for each load-bearing finite assertion. This is mandatory for computed sequence terms, an enumerated minimum, a finite search result, or a tested period used as a premise. Do not add a computation check for a symbolic extremum proof, a symbolic case classification, or merely because the falsification test proposes future computation. Use sympy_equivalent rather than result-only simplification/factorization when an exact symbolic equality is the asserted finite result. A bounded check validates only its finite statement and cannot establish an infinite pattern.
 Avoid repeating previous directions unless regulator feedback explicitly asks for a repair.
 
 IMMUTABLE PROBLEM CONTRACT:
@@ -493,8 +663,16 @@ TRIAGE:
 PREVIOUS STRATEGY TITLES TO AVOID OR REVISE:
 {_json(prior_strategy_titles)}
 
-REGULATOR FEEDBACK:
-{_json(regulator_feedback)}
+NON-AUTHORITATIVE REGULATOR DIRECTIVES:
+{_json(feedback_directives)}
+
+Every directive above is an OPEN task, conflict, or repair request, never an established mathematical fact.
+Imperative wording such as "rule out X", "prove Y", or "derive Z" means that X/Y/Z still requires proof.
+Do not cite a directive as theorem support, do not restate it as already proved, and do not promote it to a strategy premise.
+Only items supplied in an explicitly verified/Broker-admitted fact section are premise-eligible.
+
+REGISTERED TYPED CALCULATION CONTRACTS:
+{_json(calculation_contracts)}
 
 JSON SCHEMA:
 {_schema(StrategySet)}
@@ -516,9 +694,19 @@ JSON SCHEMA:
         experiment_results: list[dict[str, Any]] | None = None,
         computation_feedback: list[dict[str, Any]] | None = None,
     ) -> PromptBundle:
-        targeted_feedback = targeted_feedback or []
+        feedback_directives = _feedback_directives(
+            targeted_feedback,
+            source="path_review_or_failure_record",
+            default_kind="repair_or_falsification_directive",
+            default_status="open_or_rejected",
+        )
         experiment_results = experiment_results or []
         computation_feedback = computation_feedback or []
+        computation_contracts = (
+            experiment_tool_catalog(problem.allowed_tools)
+            if self.computation_enabled
+            else []
+        )
         response_model = (
             InitialExplorationTurn if self.computation_enabled else ProofAttempt
         )
@@ -530,13 +718,16 @@ JSON SCHEMA:
         user = f"""
 [STAGE:independent_exploration]
 You are explorer {agent_id}, assigned exactly one strategy. During initial exploration, ignore all other candidate solutions so that diversity is preserved.
-Develop this direction as deeply as possible. A complete proof is preferred, but do not force a false conclusion: rigorous partial lemmas, a precise obstruction, or a proved dead end are valid progress.
+Follow the immutable task_requirements exactly. If the user requested only a computation and a scoped conjecture, return those artifacts without trying to discharge the separately identified proof obligation.
+Develop this direction only as far as the requested deliverables require. A complete proof is preferred only when proof is one of task_requirements; never force a false conclusion. Rigorous partial lemmas, a precise obstruction, or a proved dead end remain valid progress.
 Begin from the structural mathematical mechanism. Computation is not the default route: use no more than three representative hand checks, and never perform long enumeration in prose.
 {computation_instruction}
 The request's reasoning_basis is a short auditable mathematical rationale, not private chain of thought. Pattern discovery or broad search must set broad_search=true and may be deferred by policy. Never request computation merely to "look for a pattern" before doing abstract reasoning.
 Choose a registered typed method whenever possible. sandboxed_python is permitted only as a last resort and requires typed_tool_gap to explain precisely why none of the registered tools can express the check.
 For numeric_counterexample, set exact_arithmetic=false; only an independently re-substituted candidate may later become exact counterexample evidence.
+Use argument names and semantics exactly as declared below. Never invent aliases or send arguments that a tool contract does not list.
 Every non-routine decisive step must have is_key_step=true and be expanded into explicit substeps. Avoid words such as "obvious" or "clearly" in place of justification.
+Whenever a ProofStep relies on a value explicitly obtained by finite computation, include an exact assertion-checking ToolRequest in that ProofStep.calculation_checks. The check must encode the claimed answer, not merely ask the tool to generate an unrelated value. Symbolic extremum arguments, symbolic case classifications, and routine displayed algebra do not require a tool unless they depend on a separate load-bearing finite computation. The server blocks a required check if the declaration is missing, malformed, inconclusive, or refuted. This adds no model call when the request is valid.
 For each dependency, use a step_id or verified claim_id. Encode an external theorem as `external:<exact theorem name>` and state its hypotheses in the justification; never put a bare theorem title in dependencies. Do not use an unverified claim as a theorem.
 State falsification checks and unresolved gaps explicitly.
 The response must retain the problem_hash exactly as given and set agent_id={agent_id!r}, round_index={round_index}.
@@ -550,8 +741,12 @@ ASSIGNED STRATEGY:
 VERIFIED LEMMA LIBRARY (facts only; may be empty):
 {_json(verified_claims)}
 
-TARGETED REVIEW FEEDBACK FOR THIS PATH:
-{_json(targeted_feedback)}
+NON-AUTHORITATIVE TARGETED REVIEW DIRECTIVES FOR THIS PATH:
+{_json(feedback_directives)}
+
+The directives above report open obligations, rejected attempts, verification issues, or repair requests.
+They are not mathematical premises. Convert OPEN items into explicit subgoals; use REJECTED items only as negative evidence.
+Only the verified lemma library and newly proved steps with valid dependencies may support a conclusion.
 
 PREVIOUS ATTEMPT ON THIS SAME PATH (empty on first round):
 {_json(previous_attempt or {})}
@@ -559,10 +754,14 @@ PREVIOUS ATTEMPT ON THIS SAME PATH (empty on first round):
 COMPUTATION DECISIONS FROM THIS SAME TURN (may include reject/defer):
 {_json(computation_feedback)}
 
+REGISTERED TYPED COMPUTATION CONTRACTS:
+{_json(computation_contracts)}
+
 STRUCTURED EXPERIMENT RESULTS FROM THIS SAME PATH:
 {_json(experiment_results)}
 
 Interpret the mathematical consequence of any experiment result before submitting an attempt. not_refuted and bounded_evidence are not proofs. Do not place experimental output directly into proposed_lemmas or present it as a proved step.
+After a successful discover_pattern result, put at least one concrete, falsifiable hypothesis in candidate_conjectures. Link it to the exact experiment_id, state why bounded evidence is not proof, and name the separate symbolic proof obligation. Leave candidate evidence_refs empty for the server.
 After a confirmed counterexample, immediately correct or abandon the affected route and set experiment_impact to execution, plan, or strategy according to its scope.
 
 REMAINING GLOBAL CALL BUDGET: {remaining_call_budget}
@@ -578,6 +777,49 @@ JSON SCHEMA:
             response_model,
             temperature=0.45,
             output_tier=0,
+        )
+
+    def complete_pattern_conjectures(
+        self,
+        problem: ProblemContract,
+        experiment_results: list[dict[str, Any]],
+        existing_candidates: list[dict[str, Any]],
+    ) -> PromptBundle:
+        user = f"""
+[STAGE:pattern_conjecture_completion]
+The previous route response consumed one or more successful discover_pattern experiments but omitted the required structured candidate conjecture.
+Perform only this small semantic completion. Do not redo the proof and do not request another computation.
+
+For every returned CandidateConjecture:
+- state a concrete mathematical formula, recurrence, invariant, classification, or other falsifiable pattern;
+- copy at least one experiment_id exactly into supporting_experiment_ids;
+- explain briefly how the finite result suggests the pattern;
+- state explicitly in scope_limitations that bounded evidence is not a proof;
+- give at least one separate symbolic proof obligation;
+- leave evidence_refs empty because the server attaches audited artifacts;
+- keep status="candidate" and never present the conjecture as a verified fact.
+
+IMMUTABLE PROBLEM CONTRACT:
+{_json(problem)}
+
+SUCCESSFUL DISCOVER_PATTERN RESULTS REQUIRING INTERPRETATION:
+{_json(experiment_results)}
+
+ALREADY RECORDED CANDIDATES:
+{_json(existing_candidates)}
+
+OUTPUT LANGUAGE: {self.output_language}
+
+JSON SCHEMA:
+{_schema(CandidateConjectureBatch)}
+""".strip()
+        return PromptBundle(
+            "pattern_conjecture_completion",
+            COMMON_SYSTEM,
+            user,
+            CandidateConjectureBatch,
+            temperature=0.1,
+            max_output_tokens=4096,
         )
 
     def continue_proof(
@@ -598,9 +840,19 @@ JSON SCHEMA:
         computation_feedback: list[dict[str, Any]] | None = None,
         previous_working_checkpoint: dict[str, Any] | None = None,
     ) -> PromptBundle:
-        targeted_feedback = targeted_feedback or []
+        feedback_directives = _feedback_directives(
+            targeted_feedback,
+            source="path_review_or_failure_record",
+            default_kind="repair_or_falsification_directive",
+            default_status="open_or_rejected",
+        )
         experiment_results = experiment_results or []
         computation_feedback = computation_feedback or []
+        computation_contracts = (
+            experiment_tool_catalog(problem.allowed_tools)
+            if self.computation_enabled
+            else []
+        )
         response_model = ContinuationTurn if self.computation_enabled else ProofDelta
         computation_instruction = (
             'If a precise bounded computation is necessary, return action="request_computation" with one ExperimentSpec instead of enumerating in prose. A cheap exact falsification request may be made before the route stalls; broad pattern search may not.'
@@ -613,11 +865,14 @@ You are explorer {agent_id}. Continue one proof path from a verified external ch
 The checkpoint is authoritative mathematical state, not a suggestion. Do not re-prove committed steps unless you identify an explicit contradiction; if a contradiction exists, report it in detected_conflicts and do not silently overwrite the checkpoint.
 Produce at most {max_new_steps} new logically complete proof steps and at most {max_new_claims} new reusable claims. Each new step must name all dependencies and may depend only on committed step IDs, verified claim IDs, explicit external theorems, or earlier steps in this same delta.
 Put existing checkpoint references only in `referenced_checkpoint_step_ids` as string IDs. Put newly proved mathematics only in `new_steps` as complete ProofStep objects; never place a bare step ID in `new_steps`.
+Every entry in `new_claims[].proof_steps` must also be a complete ProofStep object, normally copied from `new_steps`; never put a string such as `"s14"` there. Bare IDs belong only in `dependencies` or `referenced_checkpoint_step_ids`.
 Encode every external theorem dependency as `external:<exact theorem name>` and state its applicable hypotheses in the step justification. A bare theorem title is not a valid dependency ID.
 Work on the checkpoint's current_goal first. Finish a coherent subgoal rather than emitting a long unfinished transcript.
 Use abstract reasoning first and limit manual numerical examples to three representative checks. {computation_instruction}
 Always prefer a registered typed method. A sandboxed_python request must be the isolated last resort and must fill typed_tool_gap.
 For numeric_counterexample, set exact_arithmetic=false; sampled non-refutation is always heuristic.
+Use argument names and semantics exactly as declared below. Never invent aliases or send arguments that a tool contract does not list.
+For every new ProofStep that relies on an explicit value obtained by finite computation, fill ProofStep.calculation_checks with an assertion-checking typed ToolRequest in the same response. A symbolic minimum proof, symbolic finite classification, and routine displayed algebra do not require a tool by themselves. The local gate runs required checks before checkpoint review and blocks missing, malformed, inconclusive, or refuted calculations. Leave calculation_evidence_refs empty for the server.
 CHECKPOINT POLICY: {checkpoint_policy}. When this is "verified_subgoal", completed_subgoal must explicitly name the coherent subgoal completed by this delta unless the full proof is complete or a contradiction with the checkpoint is being reported.
 Set proof_complete=true only when the original immutable problem is fully solved, candidate_final_answer is self-contained, and remaining_subgoals is empty.
 The response must retain problem_hash, path_id, strategy_id, parent_checkpoint_id, round_index, and segment_index exactly as supplied.
@@ -639,16 +894,24 @@ to repair or continue the same route without repeating useful local work):
 VERIFIED LEMMA LIBRARY:
 {_json(verified_claims)}
 
-TARGETED FEEDBACK:
-{_json(targeted_feedback)}
+NON-AUTHORITATIVE TARGETED REVIEW DIRECTIVES:
+{_json(feedback_directives)}
+
+The directives above are never extensions of the verified checkpoint.
+An instruction such as "rigorously rule out d=1" means that d=1 remains OPEN until a new delta proves otherwise and passes independent checkpoint verification.
+Treat failed/rejected feedback as negative evidence only; never copy any directive into a proof step as an established premise.
 
 COMPUTATION DECISIONS FROM THIS SAME SEGMENT:
 {_json(computation_feedback)}
+
+REGISTERED TYPED COMPUTATION CONTRACTS:
+{_json(computation_contracts)}
 
 STRUCTURED EXPERIMENT RESULTS FOR THIS SAME PARENT CHECKPOINT:
 {_json(experiment_results)}
 
 Explain the mathematical meaning of any result in the submitted delta. not_refuted and bounded_evidence cannot support a proof step by themselves, and no experiment may directly advance the checkpoint.
+After a successful discover_pattern result, return at least one concrete hypothesis in delta.candidate_conjectures with the exact experiment_id, explicit scope limitations, and a separate proof obligation. It remains route-local and cannot advance the verified checkpoint.
 After a confirmed counterexample, immediately correct or abandon the affected route and classify experiment_impact as execution, plan, or strategy.
 
 AUTHORITATIVE IDS:
@@ -701,6 +964,56 @@ JSON SCHEMA:
             user,
             ExperimentProgram,
             temperature=0.0,
+        )
+
+    def computation_contract_repair(
+        self,
+        problem: ProblemContract,
+        spec: ExperimentSpec,
+        issues: list[str],
+        agent_id: str,
+        *,
+        sandbox_enabled: bool,
+    ) -> PromptBundle:
+        contracts = experiment_tool_catalog(problem.allowed_tools)
+        user = f"""
+[STAGE:computation_contract_repair]
+You are computation request compiler {agent_id}. Repair exactly one malformed bounded computation request. This is not a proof-writing stage.
+
+You may change only method, domains, arguments, exact_arithmetic, and typed_tool_gap. Preserve experiment_id, purpose, target_claim, assumptions, reasoning_basis, why_computation_is_needed, decision_if_confirmed, decision_if_refuted, noncomputational_alternative, broad_search, max_cases, and seed exactly.
+
+Rules:
+1. Retry with a registered typed tool only when its contract expresses the complete requested computation without changing its cases, predicate, or requested output.
+2. Never reinterpret a batch as one sequence, never silently discard fields, and never reduce the requested scope merely to fit a contract.
+3. If the request needs a batch, custom aggregation, or other bounded operation not represented by a typed contract, use sandboxed_python only when SANDBOX AVAILABLE is true. Put the complete bounded JSON input under arguments.input and state the precise capability gap in typed_tool_gap.
+4. If no semantics-preserving bounded request can be formed, abandon it. Do not return a proof attempt, proof delta, mathematical conclusion, or a replacement claim.
+5. A finite non-refutation remains bounded evidence and cannot prove an infinite statement.
+
+IMMUTABLE PROBLEM CONTRACT:
+{_json(problem)}
+
+ORIGINAL EXPERIMENT SPECIFICATION:
+{_json(spec)}
+
+CONTRACT ERRORS:
+{_json(issues)}
+
+REGISTERED TOOL CONTRACTS:
+{_json(contracts)}
+
+SANDBOX AVAILABLE: {str(sandbox_enabled).lower()}
+Set repaired_spec.experiment_id={spec.experiment_id!r} when retrying.
+
+JSON SCHEMA:
+{_schema(ComputationContractRepair)}
+""".strip()
+        return PromptBundle(
+            "computation_contract_repair",
+            COMMON_SYSTEM,
+            user,
+            ComputationContractRepair,
+            temperature=0.0,
+            max_output_tokens=8192,
         )
 
     def verify_delta(
@@ -1013,6 +1326,7 @@ JSON SCHEMA:
 You are synthesizer {synthesizer_id}. Produce one self-contained final solution to the immutable problem using only supported material below.
 Do not average incompatible proofs. Choose a coherent route, and combine claims only when their assumptions and dependencies match.
 Every decisive non-routine step must be explicit and marked is_key_step=true. Include all cases, boundary conditions, and substitutions.
+Preserve calculation_checks from supported source steps. For any newly introduced explicit computed value, add an assertion-checking ToolRequest to that ProofStep.calculation_checks; leave calculation_evidence_refs empty for the server. A finite certificate may support only the exact finite assertion it checked.
 Before using any named theorem, state the exact form being invoked and add explicit proof steps for all of its hypotheses, even when a hypothesis follows by a short contradiction from earlier congruences. Use an `external:<exact theorem name>` dependency for the theorem. This explicitness is required so a repairable omission is fixed before final acceptance.
 Do not mention agents, votes, review scores, or the orchestration process in the mathematical solution.
 If the evidence does not support a complete proof, produce the strongest honest partial result with caveats rather than fabricating closure.
@@ -1058,6 +1372,7 @@ JSON SCHEMA:
 You are reviser {reviser_id}. Repair the submitted proof using the focused independent verification report.
 Do not blindly accept feedback: first check each reported issue. Fix local execution errors without changing a sound plan; restructure the plan when dependencies are missing; abandon the strategy only when the report identifies a fundamental obstruction.
 Preserve all correct material, remove invalid claims, and make every repaired inference explicit.
+Preserve valid calculation_checks. If the repair introduces or changes an explicit computed value, update the assertion-checking ToolRequest in that ProofStep and leave calculation_evidence_refs empty for the server.
 Do not weaken the original problem or silently add assumptions. If the proof cannot be repaired from available evidence, retain caveats and lower confidence.
 
 IMMUTABLE PROBLEM CONTRACT:
@@ -1135,10 +1450,23 @@ JSON SCHEMA:
                 "bounded ProofDelta, request one precisely scoped computation when the "
                 "reasoning-first gate permits it, complete the proof, or abandon with a "
                 "specific obstruction. Never use not_refuted or bounded evidence as "
-                "proof. Put prior checkpoint references in "
+                "proof. A successful discover_pattern result must be interpreted as at "
+                "least one concrete delta.candidate_conjectures item linked to the exact "
+                "experiment_id, with scope limitations and a separate proof obligation; "
+                "it remains route-local and is never a proved ClaimCard. Every ProofStep "
+                "that relies on an explicit value attributed to finite computation must "
+                "include an assertion-checking ToolRequest in calculation_checks. A "
+                "symbolic minimum proof or symbolic finite classification is not a "
+                "computation trigger. Routine displayed algebra does not require a tool. "
+                "Leave calculation_evidence_refs empty for the server. Put prior checkpoint references in "
                 "delta.referenced_checkpoint_step_ids as string IDs, while "
                 "delta.new_steps must contain complete ProofStep objects rather than "
-                "bare IDs. For every broker_messages item, return exactly one "
+                "bare IDs. Every delta.new_claims[].proof_steps entry must likewise "
+                "be a complete ProofStep object copied from delta.new_steps, never a "
+                "string step ID; bare IDs belong in dependencies. If useful steps are "
+                "ready but no self-contained final answer exists, return "
+                "action=submit_delta with proof_complete=false instead of claiming "
+                "completion. For every broker_messages item, return exactly one "
                 "message_receipt. Copy only the opaque receipt_token supplied in "
                 "message_receipt_requirements; never invent a hash. Report accepted or "
                 "rejected, used, referenced_in_step_ids, claimed_closed_obligation_ids, "
@@ -1287,7 +1615,7 @@ JSON SCHEMA:
     def reverse_goal_analysis(self, **context: Any) -> PromptBundle:
         return self._typed_stage(
             "reverse_goal_analysis",
-            "Maintain two bounded frontiers. The forward frontier may contain only supplied Broker-admitted Typed Facts; never infer Fact support from route prose. Build a backward frontier of sufficient claims from the target, then identify explicit forward-to-backward meeting pairs and the smallest missing implications as FrontierBridge objects. Do not label an unsupported claim as fact-supported.",
+            "Maintain two bounded frontiers. The forward frontier may contain only supplied Broker-admitted Typed Facts; never infer Fact support from route prose. Build a backward frontier of sufficient claims from the target. A shared symbol, keyword, or high lexical overlap never establishes A implies B. Treat a forward Fact only as a candidate ingredient, preserve route scope and quantified domains, and explicitly state the variable mapping, applicability conditions, and all additional premises that would be needed to reach the backward target. When that cannot be justified, request a proof of the backward target from its scoped assumptions without claiming any forward Fact implies it. Do not label an unsupported claim as fact-supported.",
             ReverseGoalPlan,
             context,
             temperature=0.2,

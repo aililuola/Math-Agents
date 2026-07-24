@@ -6,6 +6,7 @@ from typing import Any
 
 from .schemas import RunResult
 from .store import ArtifactStore
+from .reasoning_trace import TRACE_FILE_NAME
 
 
 def _mermaid_id(value: str) -> str:
@@ -188,7 +189,16 @@ def write_hierarchical_reports(
     )
     metrics = {
         "route_count": len(routes),
-        "active_route_count": sum(item.get("status") == "active" for item in routes),
+        "active_route_count": sum(
+            item.get("status") in {"active", "repair_once"} for item in routes
+        ),
+        "repair_route_count": sum(
+            item.get("status") == "repair_once" for item in routes
+        ),
+        "frozen_stalled_route_count": sum(
+            item.get("status") == "frozen_stalled" for item in routes
+        ),
+        "refuted_route_count": sum(item.get("status") == "refuted" for item in routes),
         "merged_route_count": sum(item.get("status") == "merged" for item in routes),
         # Keep fact_count for metric compatibility, but make its semantics the
         # v0.7 global Fact gate rather than a raw TypedMemory tier count.
@@ -347,28 +357,68 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
     lines = [
         f"# {store.run_id}：MathProofMesh 运行报告",
         "",
-        "## 问题",
+        "## 用户原题",
         "",
-        result.problem.exact_statement,
-        "",
-        f"- 完整性哈希：`{result.problem.integrity_hash}`",
-        f"- 运行状态：**{result.status.value}**",
-        f"- 数学状态：**{result.math_status.value}**",
-        f"- 执行状态：**{result.execution_status.value}**",
-        f"- API 调用数：{result.total_calls}",
-        f"- Token：{result.total_usage.total_tokens}",
-        f"- 估算费用：${result.total_usage.estimated_cost_usd:.4f}",
-        f"- 验证报告：{dict(verdict_counts)}",
-        f"- 已提交证明检查点：{len(result.proof_checkpoints)}",
-        f"- 路线私有 Working checkpoint：{len(working_checkpoints)}",
-        f"- 本次是否为恢复运行：{'是' if result.resumed else '否'}",
-        f"- 恢复起点：`{result.resumed_from_checkpoint_id or '无'}`",
-        "- 运行时间线：`activity_timeline.md`（仅含阶段状态与结构化摘要，不含模型原始思考链）",
-        "",
-        "## 最终结果",
+        result.problem.original_statement,
         "",
     ]
-    if result.final_proof is None or result.math_status.value != "verified":
+    if result.problem.canonical_statement != result.problem.original_statement:
+        lines.extend(
+            [
+                "## 已确认的规范化目标",
+                "",
+                result.problem.canonical_statement,
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            f"- 解释来源：`{result.problem.interpretation_source}`",
+            f"- 解释置信度：{result.problem.interpretation_confidence:.3f}",
+            f"- 目标哈希：`{result.problem.goal_hash}`",
+            (
+                "- 结论适用范围：仅对自动采用的最高置信度解释成立，不视为原题的无条件证明"
+                if result.problem.interpretation_source == "auto_assumed"
+                else "- 结论适用范围：已冻结目标"
+            ),
+            f"- 完整性哈希：`{result.problem.integrity_hash}`",
+            f"- 运行状态：**{result.status.value}**",
+            f"- 任务交付状态：**{result.task_status.value}**",
+            f"- 数学状态：**{result.math_status.value}**",
+            f"- 执行状态：**{result.execution_status.value}**",
+            f"- API 调用数：{result.total_calls}",
+            f"- Token：{result.total_usage.total_tokens}",
+            f"- 估算费用：${result.total_usage.estimated_cost_usd:.4f}",
+            f"- 验证报告：{dict(verdict_counts)}",
+            f"- 已提交证明检查点：{len(result.proof_checkpoints)}",
+            f"- 路线私有 Working checkpoint：{len(working_checkpoints)}",
+            f"- 本次是否为恢复运行：{'是' if result.resumed else '否'}",
+            f"- 恢复起点：`{result.resumed_from_checkpoint_id or '无'}`",
+            "- 运行时间线：`activity_timeline.md`（仅含阶段状态与结构化摘要，不含模型原始思考链）",
+            "",
+            "## 最终结果",
+            "",
+        ]
+    )
+    if (
+        result.task_status.value == "completed"
+        and result.math_status.value != "verified"
+    ):
+        lines.extend(
+            [
+                "本次用户明确要求的交付物已经完成；候选规律仍按其真实资格标记为未证明，不构成任务失败。",
+                "",
+                "### 交付物验收",
+                "",
+            ]
+        )
+        for assessment in result.deliverable_assessments:
+            lines.append(
+                f"- `{assessment.requirement.value}`："
+                f"**{assessment.status.value}**；{assessment.summary}"
+            )
+        lines.append("")
+    elif result.final_proof is None or result.math_status.value != "verified":
         lines.extend(["未形成可提交的最终证明。", ""])
         if result.final_proof is not None:
             lines.extend(
@@ -460,6 +510,7 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
             f"- `{attempt.attempt_id}` / `{attempt.strategy_id}` / {attempt.agent_id}："
             f"{attempt.status.value}，"
             f"步骤 {len(attempt.proof_steps)}，证明段 {attempt.segment_count}，"
+            f"候选规律 {len(attempt.candidate_conjectures)}，"
             f"未解缺口 {len(attempt.unresolved_gaps)}，"
             f"最新检查点 `{attempt.latest_checkpoint_id or '无'}`"
         )
@@ -468,6 +519,28 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
                 f"  - API-key/Agent 接力链：{' → '.join(attempt.failover_chain)}"
             )
     lines.append("")
+    candidate_conjectures = {
+        candidate.content_hash: candidate
+        for attempt in result.attempts
+        for candidate in attempt.candidate_conjectures
+    }
+    if candidate_conjectures:
+        lines.extend(
+            [
+                "### 未证明候选规律",
+                "",
+                "以下规律由定向计算启发，仅作为待证明假设；不会进入全局事实库。",
+            ]
+        )
+        for candidate in candidate_conjectures.values():
+            lines.append(f"- **候选**：{candidate.statement}")
+            lines.append(
+                "  - 支持实验："
+                + "、".join(f"`{item}`" for item in candidate.supporting_experiment_ids)
+            )
+            lines.append("  - 待证明义务：" + "；".join(candidate.proof_obligations))
+            lines.append("  - 适用限制：" + "；".join(candidate.scope_limitations))
+        lines.append("")
     if hierarchical_report:
         lines.append(f"Broker 准入的全局 Fact 数：{len(admitted_facts)}")
         for fact in admitted_facts:
@@ -558,6 +631,19 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
             "",
         ]
     )
+
+    reasoning_trace_path = store.root / "reports" / TRACE_FILE_NAME
+    if reasoning_trace_path.exists():
+        lines.extend(
+            [
+                "## 本地模型推理归档",
+                "",
+                f"- 文件：`reports/{TRACE_FILE_NAME}`",
+                "- 仅记录模型 API 实际返回的 reasoning_content；不包含 API Key、请求头或未返回的隐藏推理。",
+                "- 普通运行时间线仍只包含阶段状态与结构化摘要。",
+                "",
+            ]
+        )
 
     lines.extend(["## Agent 使用情况", ""])
     for metric in result.agent_metrics:

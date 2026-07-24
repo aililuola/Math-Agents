@@ -7,20 +7,29 @@ from mathproofmesh.computation.handlers.sequence import (
     run_candidate_period_check,
 )
 from mathproofmesh.computation.broker import ToolBroker
+from mathproofmesh.computation.policy import ComputationContext
 from mathproofmesh.mock_demo import build_demo_config
 from mathproofmesh.orchestrator import ProofMeshOrchestrator
+from mathproofmesh.prompts import PromptFactory
 from mathproofmesh.schemas import (
+    ComputationDecisionStatus,
     ComputationMethod,
     EvidenceStrength,
     ExperimentOutcome,
     ExperimentSpec,
+    ProblemContract,
     StrategyCard,
     ToolRequest,
 )
 from mathproofmesh.store import ArtifactStore
 
 
-def _spec(method: ComputationMethod, arguments: dict) -> ExperimentSpec:
+def _spec(
+    method: ComputationMethod,
+    arguments: dict,
+    *,
+    domains: dict | None = None,
+) -> ExperimentSpec:
     return ExperimentSpec(
         target_claim="The declared finite sequence behavior is correct.",
         reasoning_basis="An abstract route produced one precise finite prediction.",
@@ -29,6 +38,7 @@ def _spec(method: ComputationMethod, arguments: dict) -> ExperimentSpec:
         decision_if_refuted="Reject the numerical premise.",
         noncomputational_alternative="Continue a symbolic derivation without this hint.",
         method=method,
+        domains=domains or {},
         arguments=arguments,
         max_cases=1000,
     )
@@ -92,6 +102,101 @@ def test_matching_candidate_period_is_only_bounded_not_refuted() -> None:
     )
     assert evidence.outcome == ExperimentOutcome.NOT_REFUTED
     assert evidence.evidence_strength == EvidenceStrength.BOUNDED_EVIDENCE
+
+
+def test_bounded_greedy_sequence_supports_gcd_overlap_with_every_prior_term() -> None:
+    evidence = run_bounded_greedy_sequence(
+        _spec(
+            ComputationMethod.BOUNDED_GREEDY_SEQUENCE,
+            {
+                "initial_values": [6],
+                "length": 5,
+                "candidate_min": 2,
+                "candidate_max": 30,
+                "rule": "gcd_overlap_all_prior",
+            },
+        )
+    )
+
+    assert evidence.outcome == ExperimentOutcome.NOT_REFUTED
+    assert evidence.certificate["values"] == [6, 8, 10, 12, 14]
+    assert evidence.certificate["rule"] == "gcd_overlap_all_prior"
+
+
+def test_malformed_bounded_greedy_request_is_rejected_before_execution(
+    tmp_path: Path,
+) -> None:
+    config = build_demo_config(str(tmp_path / "runs"))
+    config.computation.enabled = True
+    config.computation.typed_tools_enabled = True
+    store = ArtifactStore(config.runtime.run_root, "bad-sequence-contract")
+    broker = ToolBroker(config, store)
+    spec = _spec(
+        ComputationMethod.BOUNDED_GREEDY_SEQUENCE,
+        {"a1": 6, "max_n": 2000},
+    )
+
+    decision = broker.decide(
+        spec,
+        ComputationContext(path_id="path-bad", remaining_llm_calls=5),
+    )
+
+    assert decision.decision == ComputationDecisionStatus.REJECT
+    assert decision.rule_id == "request.invalid_tool_contract"
+    assert "unsupported arguments: a1, max_n" in decision.reason
+    assert "initial_values must be a non-empty list" in decision.reason
+    assert "length is required" in decision.reason
+    assert broker.ledger.count_for_path("path-bad") == 0
+
+
+def test_bounded_greedy_rejects_domain_sweeps_and_control_aliases(
+    tmp_path: Path,
+) -> None:
+    config = build_demo_config(str(tmp_path / "runs"))
+    config.computation.enabled = True
+    config.computation.typed_tools_enabled = True
+    store = ArtifactStore(config.runtime.run_root, "bad-sequence-sweep")
+    broker = ToolBroker(config, store)
+    spec = _spec(
+        ComputationMethod.BOUNDED_GREEDY_SEQUENCE,
+        {
+            "check_early_dn_one": True,
+            "max_terms": 1000,
+            "report_dn": True,
+        },
+        domains={"a1_min": 2, "a1_max": 100},
+    )
+
+    decision = broker.decide(
+        spec,
+        ComputationContext(path_id="path-sweep", remaining_llm_calls=5),
+    )
+
+    assert decision.decision == ComputationDecisionStatus.REJECT
+    assert decision.rule_id == "request.invalid_tool_contract"
+    assert "does not accept domains" in decision.reason
+    assert "check_early_dn_one" in decision.reason
+
+
+def test_explorer_receives_exact_bounded_greedy_argument_contract() -> None:
+    problem = ProblemContract(
+        exact_statement="Generate a bounded prefix of the declared greedy sequence.",
+        normalized_statement="generate a bounded greedy sequence prefix",
+        allowed_tools=["bounded_greedy_sequence"],
+    )
+
+    bundle = PromptFactory(computation_enabled=True).explore(
+        problem,
+        strategy={},
+        agent_id="explorer-a",
+        round_index=0,
+        verified_claims=[],
+    )
+
+    assert "REGISTERED TYPED COMPUTATION CONTRACTS" in bundle.user
+    assert '"initial_values"' in bundle.user
+    assert '"gcd_overlap_all_prior"' in bundle.user
+    assert "Unknown aliases such as a1, max_n, max_terms" in bundle.user
 
 
 def test_planner_numerical_language_becomes_an_inert_computation_hint(

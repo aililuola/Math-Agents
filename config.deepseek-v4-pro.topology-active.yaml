@@ -17,7 +17,7 @@ agents:
     temperature: 0.0
     # Keep the provider ceiling separate from the normal per-call operating budget.
     provider_max_output_tokens: 384000
-    max_output_tokens: 128000
+    max_output_tokens: 384000
     timeout_seconds: 1920
     trust_prior: 0.55
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
@@ -99,8 +99,8 @@ agents:
     pricing: {input_per_million: 0.435, output_per_million: 0.87}
 
 budget:
-  max_total_calls: 150
-  max_rounds: 8
+  max_total_calls: 450
+  max_rounds: 24
   initial_paths: 6
   # Leave room for active inspiration and surprise routes after initialization.
   max_paths: 12
@@ -112,7 +112,7 @@ budget:
   high_risk_threshold: 0.45
   verification_pass_threshold: 0.80
   synthesis_threshold: 0.74
-  max_total_tokens: 10000000
+  max_total_tokens: 30000000
   max_cost_usd: 10.0
   breadth_share: 0.30
   depth_share: 0.35
@@ -120,6 +120,11 @@ budget:
   synthesis_share: 0.10
 
 scheduler:
+  hard_stagnation_enabled: true
+  max_normal_attempts_per_signature: 1
+  max_repair_attempts_per_signature: 1
+  global_no_progress_rounds_before_meta_pivot: 2
+  global_no_progress_rounds_before_stop: 3
   # All values are policy controls, not assumptions tied to a particular theorem.
   max_actions_per_round: 2
   widen_paths_per_action: 2
@@ -183,9 +188,13 @@ topology:
   inspiration:
     enabled: true
     mode: active
-    # Generate a small independent population per admitted inspiration task:
-    # two bounded warm-context candidates plus one de-anchored cold candidate.
+    # Generate up to three candidates per admitted task. With three eligible
+    # agents this is two warm candidates plus one de-anchored cold candidate.
     active_proposals_per_task: 3
+    # The proposer pool is derived from every enabled agent carrying one of
+    # these roles; it is not tied to a fixed number of API keys.
+    proposer_generalist_roles: [explorer, route_prover]
+    max_single_agent_proposals_per_task: 2
     max_reviewed_proposals_per_task: 2
     max_materialized_proposals_per_trigger: 1
     cold_context_proposals_per_task: 1
@@ -214,6 +223,7 @@ topology:
     frontier_max_forward_claims: 8
     frontier_max_backward_claims: 8
     frontier_max_bridge_candidates: 3
+    frontier_min_candidate_overlap: 0.35
     # Complementary reviewed proposals may be composed, but the composition is
     # independently reviewed on a later scheduler turn before materialization.
     inspiration_composer_enabled: true
@@ -276,7 +286,8 @@ continuation:
   max_new_claims_per_call: 3
   max_output_tokens_per_segment: 128000
   # Keep each scheduler action small enough to preserve breadth and final-audit calls.
-  segments_per_explore_call: 1
+  # Two consecutive segments may advance, but every delta is independently reviewed.
+  segments_per_explore_call: 2
   max_segments_per_path: 20
   verify_each_delta: true
   delta_verifier_replicas: 1
@@ -286,33 +297,24 @@ continuation:
   max_failover_agents: 2
   process_resume_enabled: true
   retain_rejected_deltas: true
-  # One small public-state diagnosis is allowed after a reasoning-only failure.
+  # Fallback/highest public-state diagnostic limit; tier failures use 8K/12K/16K.
   post_failure_bottleneck_enabled: true
-  post_failure_bottleneck_max_output_tokens: 12000
+  post_failure_bottleneck_max_output_tokens: 16000
   post_failure_bottleneck_once_per_checkpoint: true
   post_failure_trigger_inspiration: true
 
 deep_exploration_policy:
   enabled: true
-  # Distinct mathematical signatures may use 96K/128K concurrently. There is no
-  # global high-tier semaphore beyond runtime.max_parallel_calls and agent limits.
+  # New routes start at 96K/max. The 64K tier is retained only for one bounded
+  # same-signature repair or an ambiguous-novelty repair. Distinct signatures
+  # may use 96K/128K concurrently without a global high-tier semaphore.
   tiers:
-    - output_tokens: 32000
-      no_content_timeout_seconds: 480
-      wall_timeout_seconds: 720
-      answer_reserve_tokens: 8000
     - output_tokens: 64000
-      no_content_timeout_seconds: 720
-      wall_timeout_seconds: 1080
-      answer_reserve_tokens: 8000
+      artifact_recovery_tokens: 8000
     - output_tokens: 96000
-      no_content_timeout_seconds: 1080
-      wall_timeout_seconds: 1500
-      answer_reserve_tokens: 12000
+      artifact_recovery_tokens: 12000
     - output_tokens: 128000
-      no_content_timeout_seconds: 1500
-      wall_timeout_seconds: 1920
-      answer_reserve_tokens: 16000
+      artifact_recovery_tokens: 16000
   high_tier_threshold_tokens: 96000
   partial_repair_max_output_tokens: 64000
   max_partial_repairs_per_signature: 1
@@ -341,10 +343,17 @@ computation:
   sandbox_cpus: 1
   sandbox_pids_limit: 32
   execute_planner_hints_immediately: false
+  critical_calculation_gate_enabled: true
+  critical_calculation_require_declarations: true
+  critical_calculation_max_checks_per_artifact: 8
   targeted_falsification_fast_path: true
+  bounded_typed_probe_fast_path: true
+  bounded_typed_probe_max_cases: 25000
   soft_experiments_per_path: 2
   hard_experiments_per_path: 6
   max_compute_cycles_per_segment: 1
+  max_contract_repairs_per_segment: 1
+  contract_repair_max_output_tokens: 8192
   max_total_cpu_seconds: 120
   max_cases_per_experiment: 1000000
   max_output_chars: 20000
@@ -368,17 +377,44 @@ runtime:
   activity_persist: true
   activity_include_agent_calls: true
   activity_heartbeat_seconds: 20
-  # Bound the whole SSE request, not only the provider socket's idle read time.
-  agent_call_wall_timeout_seconds: 1200
-  # Abort a stream that spends twelve minutes in reasoning without starting JSON.
-  reasoning_only_abort_seconds: 720
-  reasoning_only_min_characters: 4096
+  # Token limits govern normal reasoning. Time only detects a dead SSE stream or
+  # provides a common two-hour emergency ceiling for a broken provider call.
+  stream_first_chunk_timeout_seconds: 90
+  stream_idle_timeout_seconds: 300
+  agent_call_wall_timeout_seconds: 7200
   json_repair_max_output_tokens: 8192
   # Compatibility mirror; admission is controlled by deep_exploration_policy.
-  exploration_output_token_tiers: [32000, 64000, 96000, 128000]
+  exploration_output_token_tiers: [64000, 96000, 128000]
+  # Routine structured stages should not spend their entire output budget on
+  # private reasoning. Strategy generation is the deliberate 384K/max exception;
+  # deep route calls keep max only after 96K admission.
+  stage_thinking_modes:
+    goal_normalization: disabled
+    triage: disabled
+    claim_extraction: disabled
+    post_failure_bottleneck: disabled
+    computation_contract_repair: disabled
+    pattern_conjecture_completion: disabled
+    strategy_generation: max
+    independent_exploration: tiered
+    proof_continuation: tiered
+    route_prove: tiered
+    structural_verification: high
+    checkpoint_verification: high
+    detailed_verification: high
+    final_verification: high
+    blind_structural_verification: high
+    blind_detailed_verification: high
+    meta_review: high
+    route_skeptic: high
+    route_referee: high
+    route_tool_audit: high
+    synthesis: high
+    final_revision: high
   stage_output_token_limits:
+    goal_normalization: 4096
     triage: 12000
-    strategy_generation: 24000
+    strategy_generation: 384000
     claim_extraction: 12000
     structural_verification: 16000
     checkpoint_verification: 24000
@@ -398,14 +434,18 @@ runtime:
     persistent_meta_strategy: 24000
     surprise_exploration: 24000
     inspiration_referee: 16000
-    post_failure_bottleneck: 12000
+    post_failure_bottleneck: 16000
     synthesis: 64000
     final_revision: 64000
     experiment_codegen: 12000
+    computation_contract_repair: 8192
+    pattern_conjecture_completion: 4096
   # Two distinct keys failing in one short window identify a shared transport fault.
   provider_circuit_breaker_enabled: true
   provider_circuit_failure_threshold: 2
   provider_circuit_window_seconds: 90
   provider_circuit_cooldown_seconds: 300
+  provider_terminal_http_statuses: [402]
+  provider_shared_auth_http_statuses: [401, 403]
   log_level: INFO
   random_seed: 20260719

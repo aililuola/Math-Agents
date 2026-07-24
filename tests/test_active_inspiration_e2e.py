@@ -98,7 +98,8 @@ async def test_active_inspiration_builds_llm_prompts_and_materializes_proposals(
     assert any(payload["proposals"] for payload in payloads)
     assert typed_inspiration_outputs
     assert len(generation_contracts) >= 3
-    assert {item["proposal_slot"] for item in generation_contracts} >= {0, 1, 2}
+    assert {item["proposal_slot"] for item in generation_contracts} >= {0, 1}
+    assert all(item["proposal_slot"] < 2 for item in generation_contracts)
     assert {item["context_mode"] for item in generation_contracts} >= {
         "warm",
         "cold",
@@ -108,7 +109,20 @@ async def test_active_inspiration_builds_llm_prompts_and_materializes_proposals(
         (root / "structured" / "inspiration_engine.json").read_text(encoding="utf-8")
     )
     assert checkpoint["proposals"]
+    assert checkpoint["proposal_assignment_plans"]
+    for plan in checkpoint["proposal_assignment_plans"].values():
+        assignments = plan["assignments"]
+        if len(plan["eligible_agent_ids"]) >= 2:
+            assert len({item["proposer_agent_id"] for item in assignments}) == len(
+                assignments
+            )
+            assert len(assignments) <= len(plan["eligible_agent_ids"])
     assert checkpoint["reviews"]
+    for proposal_id, review in checkpoint["reviews"].items():
+        assert (
+            review["reviewer_agent_id"]
+            != checkpoint["proposals"][proposal_id]["source_agent_id"]
+        )
     assert checkpoint["materializations"]
     assert checkpoint["compositions"]
     composed_proposals = {

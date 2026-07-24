@@ -99,6 +99,8 @@ class ProviderCircuitBreaker:
         self.threshold = runtime.provider_circuit_failure_threshold
         self.window_seconds = runtime.provider_circuit_window_seconds
         self.cooldown_seconds = runtime.provider_circuit_cooldown_seconds
+        self.terminal_http_statuses = set(runtime.provider_terminal_http_statuses)
+        self.shared_auth_http_statuses = set(runtime.provider_shared_auth_http_statuses)
         self._failures: dict[str, deque[tuple[float, str, str]]] = defaultdict(deque)
         self._open_until: dict[str, float] = {}
 
@@ -142,6 +144,37 @@ class ProviderCircuitBreaker:
             return
         opened_until = now + self.cooldown_seconds
         self._open_until[scope] = opened_until
+        raise ProviderCircuitOpenError(
+            scope,
+            sorted(distinct_agents),
+            retry_after_seconds=self.cooldown_seconds,
+            cause=error,
+        ) from error
+
+    def record_http_failure(
+        self,
+        scope: str,
+        agent_id: str,
+        status_code: int,
+        error: Exception,
+    ) -> None:
+        """Open immediately for account-wide failures, or after distinct keys agree."""
+
+        if not self.enabled:
+            return
+        is_terminal = status_code in self.terminal_http_statuses
+        is_shared_candidate = (
+            status_code in self.shared_auth_http_statuses or status_code >= 500
+        )
+        if not is_terminal and not is_shared_candidate:
+            return
+        now = time.time()
+        self._prune(scope, now)
+        self._failures[scope].append((now, agent_id, f"http_{status_code}"))
+        distinct_agents = {item[1] for item in self._failures[scope]}
+        if not is_terminal and len(distinct_agents) < self.threshold:
+            return
+        self._open_until[scope] = now + self.cooldown_seconds
         raise ProviderCircuitOpenError(
             scope,
             sorted(distinct_agents),
@@ -267,6 +300,8 @@ class AgentRuntime:
         json_mode: bool = False,
         schema_name: str | None = None,
         schema: dict[str, Any] | None = None,
+        thinking_enabled: bool | None = None,
+        reasoning_effort: str | None = None,
     ) -> LLMResponse:
         self.provider_circuit.assert_available(self.provider_scope)
         await self.rate_limiter.acquire()
@@ -279,7 +314,7 @@ class AgentRuntime:
                 for attempt in range(self.request_retries + 1):
                     self.provider_circuit.assert_available(self.provider_scope)
                     try:
-                        response = await self.client.complete(
+                        response = await self.client.complete_with_policy(
                             messages,
                             temperature=self.config.temperature
                             if temperature is None
@@ -292,6 +327,8 @@ class AgentRuntime:
                             json_mode=json_mode,
                             schema_name=schema_name,
                             schema=schema,
+                            thinking_enabled=thinking_enabled,
+                            reasoning_effort=reasoning_effort,
                         )
                         self._record(response)
                         self.provider_circuit.record_success(self.provider_scope)
@@ -309,6 +346,18 @@ class AgentRuntime:
                             or last_status == 429
                             or last_status >= 500
                         )
+                        if (
+                            last_status in self.provider_circuit.terminal_http_statuses
+                            or last_status
+                            in self.provider_circuit.shared_auth_http_statuses
+                            or (last_status >= 500 and attempt >= self.request_retries)
+                        ):
+                            self.provider_circuit.record_http_failure(
+                                self.provider_scope,
+                                self.id,
+                                last_status,
+                                exc,
+                            )
                         if not last_retryable or attempt >= self.request_retries:
                             break
                     except (

@@ -1,5 +1,6 @@
 """Auditable mechanism-changing search for stalled mathematical proofs."""
 
+from .assignment import InspirationAssignmentPlanner
 from .composer import InspirationComposer
 from .cross_run_learning import CrossRunLearningStore
 from .domain_operators import DomainOperatorRegistry
@@ -18,6 +19,7 @@ __all__ = [
     "ControlledMutationPlanner",
     "CrossRunLearningStore",
     "DomainOperatorRegistry",
+    "InspirationAssignmentPlanner",
     "InspirationEngine",
     "InspirationComposer",
     "InspirationSnapshot",

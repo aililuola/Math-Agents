@@ -73,3 +73,37 @@ def test_low_risk_route_does_not_spend_a_skeptic_call(tmp_path) -> None:
     assert plan.skeptic is None
     assert plan.tool_specialist is None
     assert plan.referee.agent_id != "explorer-a"
+
+
+def test_salvaged_partial_delta_requires_an_independent_skeptic(tmp_path) -> None:
+    config = make_v07_config(tmp_path / "runs")
+    registry = RouteRegistry(config, problem_hash=PROBLEM_HASH)
+    registry.register_route(make_strategy(0), route_id="route-a")
+    pool = AgentPool(config, mock_responders=demo_responders(config))
+    team = RouteTeam(config, RoleRunner(pool, registry))
+
+    plan = team.plan(
+        "route-a",
+        "explorer-a",
+        {
+            "new_steps": [
+                {
+                    "step_id": "s14",
+                    "statement": "A candidate proof prefix.",
+                    "justification": "Subject to independent review.",
+                }
+            ],
+            "normalization_notes": ["missing_final_answer_downgraded_to_partial"],
+            "self_confidence": 0.9,
+        },
+        round_index=0,
+    )
+
+    assert plan.risk.needs_skeptic is True
+    assert plan.skeptic is not None
+    assert plan.skeptic.agent_id not in {None, "explorer-a"}
+    assert plan.referee.agent_id not in {
+        None,
+        "explorer-a",
+        plan.skeptic.agent_id,
+    }

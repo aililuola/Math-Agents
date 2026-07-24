@@ -91,7 +91,11 @@ class DuplicateRouteDetector:
         obligations_by_route = obligations_by_route or {}
         fact_ids_by_route = fact_ids_by_route or {}
         progress_by_route = progress_by_route or {}
-        active = [item for item in routes if item.status == RouteStatus.ACTIVE]
+        active = [
+            item
+            for item in routes
+            if item.status in {RouteStatus.ACTIVE, RouteStatus.REPAIR_ONCE}
+        ]
         matches: list[DuplicateRouteMatch] = []
         threshold = self.config.topology.broker.duplicate_strategy_threshold
         for index, left in enumerate(active):

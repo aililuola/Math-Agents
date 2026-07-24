@@ -94,6 +94,32 @@ def test_active_inspiration_reserves_the_complete_first_cycle(tmp_path) -> None:
     assert engine.surprise_explorer.state.reserved_calls == 0
 
 
+def test_assignment_count_drives_exact_inspiration_reservation(tmp_path) -> None:
+    _config, _engine, _ledger, allocator = _runtime(tmp_path)
+
+    two_proposers = allocator.inspiration_call_breakdown(
+        proposer_calls=2,
+        review_candidates=2,
+    )
+    deterministic_composition = allocator.inspiration_call_breakdown(
+        proposer_calls=0,
+        review_candidates=1,
+    )
+
+    assert two_proposers == {
+        "proposer_calls": 2,
+        "referee_calls": 2,
+        "skeptic_calls": 2,
+        "route_attempt_calls": 3,
+    }
+    assert deterministic_composition == {
+        "proposer_calls": 0,
+        "referee_calls": 1,
+        "skeptic_calls": 1,
+        "route_attempt_calls": 3,
+    }
+
+
 def test_resume_reconciles_charged_calls_and_releases_orphaned_reserve(
     tmp_path,
 ) -> None:

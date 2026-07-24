@@ -18,3 +18,6 @@ class HandlerEvidence:
     independently_verified: bool = False
     verification_notes: list[str] = field(default_factory=list)
     raw_output: dict[str, Any] | None = None
+    process_exit_code: int | None = None
+    process_stdout: str = ""
+    process_stderr: str = ""

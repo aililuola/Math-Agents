@@ -17,6 +17,7 @@ from .llm.deepseek import DeepSeekClient
 from .llm.pool import AgentPool
 from .mock_demo import build_demo_config, demo_responders
 from .orchestrator import ProofMeshOrchestrator
+from .schemas import GoalClarificationDecision, GoalClarificationRequest
 
 app = typer.Typer(
     name="mathproofmesh",
@@ -95,6 +96,7 @@ def _run_solver_with_activity(
     run_id: str | None,
     mode: ActivityMode,
     mock_responders=None,
+    interactive_clarification: bool = True,
 ):
     config.runtime.activity_mode = mode
     view = ConsoleActivityView(
@@ -104,12 +106,59 @@ def _run_solver_with_activity(
         console=activity_console,
     )
     listener = view.handle if mode != "off" else None
+
+    async def clarify(
+        request: GoalClarificationRequest,
+    ) -> GoalClarificationDecision:
+        candidates = [
+            request.assessment.recommended_statement,
+            *(
+                item.statement
+                for item in request.assessment.alternative_interpretations
+            ),
+        ]
+        activity_console.print(
+            Panel.fit(
+                "\n".join(
+                    [
+                        f"原题：{request.original_statement}",
+                        *(
+                            f"{index}. {statement}"
+                            for index, statement in enumerate(candidates, start=1)
+                        ),
+                        f"{len(candidates) + 1}. 输入自定义规范化目标",
+                    ]
+                ),
+                title="题意存在歧义，请确认规范化目标",
+                border_style="yellow",
+            )
+        )
+        selected = typer.prompt(
+            "选择",
+            type=int,
+        )
+        if not 1 <= selected <= len(candidates) + 1:
+            raise typer.BadParameter("选择超出候选范围")
+        if selected <= len(candidates):
+            statement = candidates[selected - 1]
+            candidate_index: int | None = selected - 1
+        else:
+            statement = typer.prompt("规范化目标").strip()
+            candidate_index = None
+        return GoalClarificationDecision(
+            request_id=request.request_id,
+            canonical_statement=statement,
+            source="user_confirmed",
+            selected_candidate_index=candidate_index,
+        )
+
     with view:
         return asyncio.run(
             ProofMeshOrchestrator(
                 config,
                 mock_responders=mock_responders,
                 activity_listener=listener,
+                clarification_resolver=clarify if interactive_clarification else None,
             ).solve(problem, run_id=run_id)
         )
 
@@ -173,7 +222,13 @@ def solve(
     _configure_logging(cfg.runtime.log_level)
     mode = _resolve_activity_mode(cfg, activity, json_output=json_output)
     text = problem.read_text(encoding="utf-8")
-    result = _run_solver_with_activity(cfg, text, run_id=run_id, mode=mode)
+    result = _run_solver_with_activity(
+        cfg,
+        text,
+        run_id=run_id,
+        mode=mode,
+        interactive_clarification=not json_output,
+    )
     if json_output:
         console.print_json(
             json.dumps(result.model_dump(mode="json"), ensure_ascii=False)

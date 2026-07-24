@@ -24,6 +24,7 @@ class ConfigModel(BaseModel):
 
 ProviderName = Literal["openai_compatible", "deepseek", "anthropic", "gemini", "mock"]
 ReasoningEffort = Literal["high", "max"]
+StageThinkingMode = Literal["agent_default", "disabled", "high", "max", "tiered"]
 RoleName = Literal[
     "planner",
     "explorer",
@@ -197,6 +198,11 @@ class SchedulerConfig(ConfigModel):
     finish_transition_buffer_calls: int = Field(default=1, ge=0, le=64)
     diagnostics_enabled: bool = True
     diagnostic_candidate_limit: int = Field(default=12, ge=1, le=128)
+    hard_stagnation_enabled: bool = True
+    max_normal_attempts_per_signature: int = Field(default=1, ge=1, le=4)
+    max_repair_attempts_per_signature: int = Field(default=1, ge=0, le=4)
+    global_no_progress_rounds_before_meta_pivot: int = Field(default=2, ge=1, le=32)
+    global_no_progress_rounds_before_stop: int = Field(default=3, ge=2, le=64)
 
     # Hierarchical topology and proof-debt signals. Defaults preserve legacy
     # scheduling because they are only consumed in active graph/topology mode.
@@ -223,6 +229,17 @@ class SchedulerConfig(ConfigModel):
     obligation_shared_route_weight: float = Field(default=0.40, ge=0.0, le=100.0)
     obligation_failure_weight: float = Field(default=0.30, ge=0.0, le=100.0)
     obligation_conflict_weight: float = Field(default=0.75, ge=0.0, le=100.0)
+
+    @model_validator(mode="after")
+    def validate_hard_stagnation_limits(self) -> "SchedulerConfig":
+        if (
+            self.global_no_progress_rounds_before_stop
+            <= self.global_no_progress_rounds_before_meta_pivot
+        ):
+            raise ValueError(
+                "global no-progress stop must occur after the meta-pivot round"
+            )
+        return self
 
 
 class TypedCommunicationConfig(ConfigModel):
@@ -341,6 +358,10 @@ class InspirationConfig(ConfigModel):
     max_inspiration_tasks_per_round: int = Field(default=2, ge=0, le=32)
     max_proposals_per_task: int = Field(default=3, ge=1, le=16)
     active_proposals_per_task: int = Field(default=3, ge=1, le=16)
+    proposer_generalist_roles: list[RoleName] = Field(
+        default_factory=lambda: ["explorer", "route_prover"]
+    )
+    max_single_agent_proposals_per_task: int = Field(default=2, ge=1, le=16)
     max_reviewed_proposals_per_task: int = Field(default=2, ge=1, le=16)
     max_materialized_proposals_per_trigger: int = Field(default=1, ge=0, le=16)
     cold_context_proposals_per_task: int = Field(default=1, ge=0, le=16)
@@ -355,6 +376,7 @@ class InspirationConfig(ConfigModel):
     frontier_max_forward_claims: int = Field(default=8, ge=1, le=64)
     frontier_max_backward_claims: int = Field(default=8, ge=1, le=64)
     frontier_max_bridge_candidates: int = Field(default=3, ge=1, le=32)
+    frontier_min_candidate_overlap: float = Field(default=0.35, ge=0.0, le=1.0)
     composer_max_candidates_per_round: int = Field(default=2, ge=0, le=16)
     composer_max_sources: int = Field(default=2, ge=2, le=4)
     composer_max_combined_cost: int = Field(default=4, ge=1, le=32)
@@ -421,6 +443,10 @@ class InspirationConfig(ConfigModel):
                 "cold_context_proposals_per_task cannot exceed "
                 "active_proposals_per_task"
             )
+        if len(set(self.proposer_generalist_roles)) != len(
+            self.proposer_generalist_roles
+        ):
+            raise ValueError("proposer_generalist_roles cannot contain duplicates")
         if self.composer_max_sources > self.max_reviewed_proposals_per_task:
             raise ValueError(
                 "composer_max_sources cannot exceed max_reviewed_proposals_per_task"
@@ -557,7 +583,7 @@ class ContinuationConfig(ConfigModel):
     retain_rejected_deltas: bool = True
     post_failure_bottleneck_enabled: bool = True
     post_failure_bottleneck_max_output_tokens: int = Field(
-        default=12000, ge=512, le=32000
+        default=16000, ge=512, le=32000
     )
     post_failure_bottleneck_once_per_checkpoint: bool = True
     post_failure_trigger_inspiration: bool = True
@@ -567,23 +593,28 @@ class ExplorationTierPolicyConfig(ConfigModel):
     """One server-owned deep-exploration operating tier."""
 
     output_tokens: int = Field(ge=512, le=384000)
-    no_content_timeout_seconds: float = Field(ge=5.0, le=3600.0)
-    wall_timeout_seconds: float = Field(ge=5.0, le=7200.0)
-    answer_reserve_tokens: int = Field(ge=256, le=128000)
+    artifact_recovery_tokens: int = Field(ge=256, le=128000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_elapsed_time_limits(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        normalized.pop("no_content_timeout_seconds", None)
+        normalized.pop("wall_timeout_seconds", None)
+        legacy_reserve = normalized.pop("answer_reserve_tokens", None)
+        if legacy_reserve is not None and "artifact_recovery_tokens" not in normalized:
+            normalized["artifact_recovery_tokens"] = legacy_reserve
+        return normalized
 
     @model_validator(mode="after")
     def validate_tier(self) -> "ExplorationTierPolicyConfig":
-        if self.no_content_timeout_seconds >= self.wall_timeout_seconds:
+        if self.artifact_recovery_tokens >= self.output_tokens:
             raise ValueError(
-                "no_content_timeout_seconds must be lower than wall_timeout_seconds"
+                "artifact_recovery_tokens must be lower than output_tokens"
             )
-        if self.answer_reserve_tokens >= self.output_tokens:
-            raise ValueError("answer_reserve_tokens must be lower than output_tokens")
         return self
-
-    @property
-    def no_content_token_cutoff(self) -> int:
-        return self.output_tokens - self.answer_reserve_tokens
 
 
 class DeepExplorationPolicyConfig(ConfigModel):
@@ -593,28 +624,16 @@ class DeepExplorationPolicyConfig(ConfigModel):
     tiers: list[ExplorationTierPolicyConfig] = Field(
         default_factory=lambda: [
             ExplorationTierPolicyConfig(
-                output_tokens=32000,
-                no_content_timeout_seconds=480,
-                wall_timeout_seconds=720,
-                answer_reserve_tokens=8000,
-            ),
-            ExplorationTierPolicyConfig(
                 output_tokens=64000,
-                no_content_timeout_seconds=720,
-                wall_timeout_seconds=1080,
-                answer_reserve_tokens=8000,
+                artifact_recovery_tokens=8000,
             ),
             ExplorationTierPolicyConfig(
                 output_tokens=96000,
-                no_content_timeout_seconds=1080,
-                wall_timeout_seconds=1500,
-                answer_reserve_tokens=12000,
+                artifact_recovery_tokens=12000,
             ),
             ExplorationTierPolicyConfig(
                 output_tokens=128000,
-                no_content_timeout_seconds=1500,
-                wall_timeout_seconds=1920,
-                answer_reserve_tokens=16000,
+                artifact_recovery_tokens=16000,
             ),
         ],
         min_length=1,
@@ -674,10 +693,17 @@ class ComputationConfig(ConfigModel):
     typed_tools_enabled: bool = True
     sandboxed_python_enabled: bool = False
     execute_planner_hints_immediately: bool = False
+    critical_calculation_gate_enabled: bool = True
+    critical_calculation_require_declarations: bool = True
+    critical_calculation_max_checks_per_artifact: int = Field(default=8, ge=1, le=64)
     targeted_falsification_fast_path: bool = True
+    bounded_typed_probe_fast_path: bool = True
+    bounded_typed_probe_max_cases: int = Field(default=25_000, ge=1, le=1_000_000)
     soft_experiments_per_path: int = Field(default=2, ge=0, le=100)
     hard_experiments_per_path: int = Field(default=6, ge=1, le=100)
     max_compute_cycles_per_segment: int = Field(default=1, ge=0, le=8)
+    max_contract_repairs_per_segment: int = Field(default=1, ge=0, le=2)
+    contract_repair_max_output_tokens: int = Field(default=8192, ge=256, le=32000)
     max_total_cpu_seconds: float = Field(default=120.0, ge=0.1, le=86_400.0)
     max_cases_per_experiment: int = Field(default=1_000_000, ge=1, le=100_000_000)
     max_output_chars: int = Field(default=20_000, ge=256, le=2_000_000)
@@ -710,6 +736,7 @@ class ComputationConfig(ConfigModel):
 
 
 class RuntimeConfig(ConfigModel):
+    project_root: str = "."
     run_root: str = "runs"
     output_language: str = "zh-CN"
     max_parallel_calls: int = Field(default=8, ge=1, le=128)
@@ -723,17 +750,17 @@ class RuntimeConfig(ConfigModel):
     activity_persist: bool = True
     activity_include_agent_calls: bool = True
     activity_heartbeat_seconds: float = Field(default=20.0, ge=0.0, le=600.0)
-    # A provider read timeout only limits an idle socket. These two limits bound
-    # the complete model call and a stream that spends its whole budget in
-    # private reasoning without beginning the requested artifact.
-    agent_call_wall_timeout_seconds: float = Field(default=1200.0, ge=5.0, le=7200.0)
-    reasoning_only_abort_seconds: float = Field(default=720.0, ge=5.0, le=3600.0)
-    reasoning_only_min_characters: int = Field(default=4096, ge=0, le=10_000_000)
+    # Token budgets control normal reasoning. Time only detects a dead SSE stream
+    # or provides one common emergency ceiling for a broken provider call.
+    stream_first_chunk_timeout_seconds: float = Field(default=90.0, ge=5.0, le=3600.0)
+    stream_idle_timeout_seconds: float = Field(default=300.0, ge=5.0, le=3600.0)
+    agent_call_wall_timeout_seconds: float = Field(default=7200.0, ge=5.0, le=7200.0)
     json_repair_max_output_tokens: int = Field(default=8192, ge=256, le=384000)
     # The configured agent limit remains the hard ceiling. Routine stages get a
     # smaller soft ceiling so 96K/128K are reserved for admitted deep route work.
     stage_output_token_limits: dict[str, int] = Field(
         default_factory=lambda: {
+            "goal_normalization": 4096,
             "triage": 12000,
             "strategy_generation": 24000,
             "claim_extraction": 12000,
@@ -755,14 +782,45 @@ class RuntimeConfig(ConfigModel):
             "persistent_meta_strategy": 24000,
             "surprise_exploration": 24000,
             "inspiration_referee": 16000,
-            "post_failure_bottleneck": 12000,
+            "post_failure_bottleneck": 16000,
             "synthesis": 64000,
             "final_revision": 64000,
             "experiment_codegen": 12000,
+            "computation_contract_repair": 8192,
+            "pattern_conjecture_completion": 4096,
+        }
+    )
+    # DeepSeek does not expose an enforceable reasoning-token budget separate
+    # from max_tokens. Routine artifact stages therefore override the agent's
+    # default thinking policy, while admitted route tiers retain deep reasoning.
+    stage_thinking_modes: dict[str, StageThinkingMode] = Field(
+        default_factory=lambda: {
+            "goal_normalization": "disabled",
+            "triage": "disabled",
+            "claim_extraction": "disabled",
+            "post_failure_bottleneck": "disabled",
+            "computation_contract_repair": "disabled",
+            "pattern_conjecture_completion": "disabled",
+            "strategy_generation": "high",
+            "independent_exploration": "tiered",
+            "proof_continuation": "tiered",
+            "route_prove": "tiered",
+            "structural_verification": "high",
+            "checkpoint_verification": "high",
+            "detailed_verification": "high",
+            "final_verification": "high",
+            "blind_structural_verification": "high",
+            "blind_detailed_verification": "high",
+            "meta_review": "high",
+            "route_skeptic": "high",
+            "route_referee": "high",
+            "route_tool_audit": "high",
+            "synthesis": "high",
+            "final_revision": "high",
         }
     )
     exploration_output_token_tiers: list[int] = Field(
-        default_factory=lambda: [32000, 64000, 96000, 128000],
+        default_factory=lambda: [64000, 96000, 128000],
         min_length=1,
         max_length=8,
     )
@@ -770,8 +828,22 @@ class RuntimeConfig(ConfigModel):
     provider_circuit_failure_threshold: int = Field(default=2, ge=2, le=32)
     provider_circuit_window_seconds: float = Field(default=90.0, ge=1.0, le=3600.0)
     provider_circuit_cooldown_seconds: float = Field(default=300.0, ge=1.0, le=86400.0)
+    provider_terminal_http_statuses: list[int] = Field(default_factory=lambda: [402])
+    provider_shared_auth_http_statuses: list[int] = Field(
+        default_factory=lambda: [401, 403]
+    )
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     random_seed: int = 20260719
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_reasoning_time_limits(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        normalized.pop("reasoning_only_abort_seconds", None)
+        normalized.pop("reasoning_only_min_characters", None)
+        return normalized
 
     @field_validator("stage_output_token_limits")
     @classmethod
@@ -786,6 +858,26 @@ class RuntimeConfig(ConfigModel):
                 )
             normalized[str(stage)] = int(limit)
         return normalized
+
+    @field_validator("stage_thinking_modes")
+    @classmethod
+    def validate_stage_thinking_modes(
+        cls, value: dict[str, StageThinkingMode]
+    ) -> dict[str, StageThinkingMode]:
+        if any(not str(stage).strip() for stage in value):
+            raise ValueError("stage_thinking_modes keys must be non-empty")
+        return {str(stage): mode for stage, mode in value.items()}
+
+    @field_validator(
+        "provider_terminal_http_statuses",
+        "provider_shared_auth_http_statuses",
+    )
+    @classmethod
+    def validate_provider_http_statuses(cls, value: list[int]) -> list[int]:
+        statuses = sorted(set(int(item) for item in value))
+        if any(item < 400 or item > 599 for item in statuses):
+            raise ValueError("provider circuit HTTP statuses must be in 400..599")
+        return statuses
 
     @field_validator("exploration_output_token_tiers")
     @classmethod

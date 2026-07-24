@@ -16,3 +16,4 @@ dist/
 *.zip
 .coverage
 htmlcov/
+packaging/windows/output/

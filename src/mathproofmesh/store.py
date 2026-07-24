@@ -4,6 +4,8 @@ import json
 import os
 import re
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +42,7 @@ class ArtifactStore:
     """Run-scoped, append-friendly artifact storage with content hashes and atomic writes."""
 
     def __init__(self, run_root: str | Path, run_id: str) -> None:
+        self._write_lock = threading.RLock()
         self.run_id = _safe_name(run_id)
         self.root = Path(run_root).expanduser().resolve() / self.run_id
         for subdir in [
@@ -60,18 +63,40 @@ class ArtifactStore:
             (self.root / subdir).mkdir(parents=True, exist_ok=True)
         self.events_path = self.root / "events.jsonl"
 
+    @staticmethod
+    def _replace_with_retry(source: str, destination: Path) -> None:
+        """Tolerate brief Windows sharing locks without weakening atomic replacement."""
+
+        attempts = 9
+        for attempt in range(attempts):
+            try:
+                os.replace(source, destination)
+                return
+            except PermissionError:
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(min(0.02 * (2**attempt), 0.5))
+
     def _atomic_write(self, path: Path, content: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_name, path)
-        finally:
-            if os.path.exists(tmp_name):
-                os.unlink(tmp_name)
+        with self._write_lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=f".{path.name}.", dir=str(path.parent)
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(content)
+                    f.flush()
+                    os.fsync(f.fileno())
+                self._replace_with_retry(tmp_name, path)
+            finally:
+                if os.path.exists(tmp_name):
+                    try:
+                        os.unlink(tmp_name)
+                    except OSError:
+                        # Never hide the original replacement failure with a
+                        # secondary best-effort temporary-file cleanup error.
+                        pass
 
     def write_json(self, subdir: str, name: str, value: Any) -> str:
         path = self.root / _safe_name(subdir) / f"{_safe_name(name)}.json"

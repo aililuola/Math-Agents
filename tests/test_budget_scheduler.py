@@ -11,7 +11,9 @@ from mathproofmesh.llm.pool import AgentPool
 from mathproofmesh.schemas import (
     ActionKind,
     AttemptStatus,
+    CandidateAssessment,
     FailureLevel,
+    MetaReview,
     PathStats,
     ProofAttempt,
     ProofStep,
@@ -277,6 +279,203 @@ def test_execution_failure_gets_one_repair_then_configurable_cooldown(
     assert revisit_deepen.eligible is True
 
 
+def test_incomplete_partial_attempt_does_not_invalidate_checked_progress(
+    demo_config,
+) -> None:
+    strategy = _strategy(0)
+    attempt = _attempt(strategy, steps=5, gaps=5)
+    incomplete = VerificationReport(
+        target_id=attempt.attempt_id,
+        target_type="attempt",
+        agent_id="system-aggregate",
+        stage=VerificationStage.DETAILED,
+        verdict=VerificationVerdict.FAIL,
+        issues=[
+            VerificationIssue(
+                phase="structural",
+                severity=Severity.ERROR,
+                description="The partial route has not supplied a complete final proof.",
+            )
+        ],
+        failure_level=FailureLevel.EXECUTION,
+        confidence=0.95,
+        concise_feedback="The checked partial mathematics is incomplete.",
+    )
+
+    stats = AdaptiveBudgetManager(demo_config).build_path_stats(
+        [strategy],
+        [attempt],
+        [incomplete],
+        {attempt.attempt_id: incomplete},
+        route_team_reviews={
+            attempt.attempt_id: [
+                {
+                    "delta_id": "delta-verified",
+                    "checkpoint_status": "accepted",
+                }
+            ]
+        },
+    )
+
+    assert len(stats) == 1
+    assert stats[0].incomplete_only is True
+    assert stats[0].structurally_valid is None
+    assert stats[0].verified_delta_count == 1
+    decision = AdaptiveBudgetManager(demo_config).decide(
+        stats,
+        current_path_count=1,
+        remaining_calls=20,
+        current_round=1,
+    )
+    deepen = next(
+        candidate
+        for candidate in decision.candidates
+        if candidate.action == ActionKind.DEEPEN
+    )
+    assert deepen.eligible is True
+    assert "incomplete" in deepen.reason
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["config.deepseek-v4-pro.smoke.yaml", "config.deepseek-v4-pro.yaml"],
+)
+def test_rejected_delta_and_meta_stop_cannot_outrank_preferred_partial_route(
+    filename: str,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    config = load_config(root / filename)
+    bad_strategy = _strategy(0)
+    good_strategy = _strategy(1)
+    bad_attempt = _attempt(bad_strategy, steps=0, gaps=6)
+    good_attempt = _attempt(good_strategy, steps=5, gaps=5)
+    incomplete = VerificationReport(
+        target_id=good_attempt.attempt_id,
+        target_type="attempt",
+        agent_id="system-aggregate",
+        stage=VerificationStage.DETAILED,
+        verdict=VerificationVerdict.FAIL,
+        issues=[
+            VerificationIssue(
+                phase="structural",
+                severity=Severity.ERROR,
+                description="Only a checked partial lemma is available.",
+            )
+        ],
+        failure_level=FailureLevel.EXECUTION,
+        confidence=0.9,
+        concise_feedback="The proof remains incomplete.",
+    )
+    meta_review = MetaReview(
+        selected_target_id=good_attempt.attempt_id,
+        assessments=[
+            CandidateAssessment(
+                target_id=bad_attempt.attempt_id,
+                score=0.1,
+                weaknesses=["The key implication was independently rejected."],
+                recommended_action=ActionKind.STOP,
+            ),
+            CandidateAssessment(
+                target_id=good_attempt.attempt_id,
+                score=0.7,
+                strengths=["A locally verified lemma remains usable."],
+                recommended_action=ActionKind.DEEPEN,
+            ),
+        ],
+        failure_level=FailureLevel.EXECUTION,
+        can_synthesize=False,
+        confidence=0.9,
+        summary="Stop the rejected route and deepen the checked partial route.",
+    )
+    manager = AdaptiveBudgetManager(config)
+    stats = manager.build_path_stats(
+        [bad_strategy, good_strategy],
+        [bad_attempt, good_attempt],
+        [incomplete],
+        {good_attempt.attempt_id: incomplete},
+        route_team_reviews={
+            bad_attempt.attempt_id: [
+                {
+                    "delta_id": "delta-rejected",
+                    "checkpoint_status": "rejected",
+                    "checkpoint_failure_level": "plan",
+                    "checkpoint_failure_confidence": 0.95,
+                    "checkpoint_first_error_step": "step-3",
+                }
+            ],
+            good_attempt.attempt_id: [
+                {
+                    "delta_id": "delta-verified",
+                    "checkpoint_status": "accepted",
+                }
+            ],
+        },
+        meta_review=meta_review,
+    )
+
+    by_strategy = {item.strategy_id: item for item in stats}
+    assert by_strategy[bad_strategy.strategy_id].latest_delta_rejected is True
+    assert by_strategy[bad_strategy.strategy_id].failure_level == FailureLevel.PLAN
+    assert by_strategy[good_strategy.strategy_id].incomplete_only is True
+    assert by_strategy[good_strategy.strategy_id].verified_delta_count == 1
+
+    decision = manager.decide(
+        stats,
+        current_path_count=2,
+        remaining_calls=30,
+        current_round=1,
+        max_actions=1,
+    )
+    bad_deepen = next(
+        candidate
+        for candidate in decision.candidates
+        if candidate.action == ActionKind.DEEPEN
+        and candidate.strategy_id == bad_strategy.strategy_id
+    )
+    good_deepen = next(
+        candidate
+        for candidate in decision.candidates
+        if candidate.action == ActionKind.DEEPEN
+        and candidate.strategy_id == good_strategy.strategy_id
+    )
+    assert bad_deepen.eligible is False
+    assert "meta-review instructed" in (bad_deepen.blocked_reason or "")
+    assert good_deepen.eligible is True
+    assert good_deepen.selected is True
+
+
+def test_unverified_repair_does_not_erase_prior_delta_rejection(demo_config) -> None:
+    strategy = _strategy(0)
+    rejected_attempt = _attempt(strategy, attempt_index=0, round_index=0)
+    blank_repair = _attempt(
+        strategy,
+        attempt_index=1,
+        round_index=1,
+        steps=0,
+        gaps=8,
+    )
+
+    stats = AdaptiveBudgetManager(demo_config).build_path_stats(
+        [strategy],
+        [rejected_attempt, blank_repair],
+        [],
+        route_team_reviews={
+            rejected_attempt.attempt_id: [
+                {
+                    "delta_id": "delta-rejected",
+                    "checkpoint_status": "rejected",
+                    "checkpoint_failure_level": "execution",
+                    "checkpoint_failure_confidence": 0.9,
+                }
+            ]
+        },
+    )
+
+    assert stats[0].attempt_id == blank_repair.attempt_id
+    assert stats[0].latest_delta_rejected is True
+    assert stats[0].latest_verdict == VerificationVerdict.FAIL
+
+
 def test_successful_candidate_does_not_trigger_failure_widen_guarantee(
     demo_config,
 ) -> None:
@@ -465,38 +664,88 @@ def test_smoke_and_formal_output_limits() -> None:
     formal = load_config(root / "config.deepseek-v4-pro.yaml")
     active = load_config(root / "config.deepseek-v4-pro.topology-active.yaml")
 
-    assert all(agent.max_output_tokens == 50000 for agent in smoke.agents)
-    assert smoke.continuation.max_output_tokens_per_segment == 50000
-    assert all(agent.max_output_tokens == 100000 for agent in formal.agents)
+    smoke_planner = next(agent for agent in smoke.agents if agent.id == "ds-planner")
+    assert smoke_planner.provider_max_output_tokens == 384000
+    assert smoke_planner.max_output_tokens == 128000
+    smoke_route_provers = {
+        agent.id: agent.max_output_tokens
+        for agent in smoke.agents
+        if "route_prover" in agent.roles
+    }
+    assert smoke_route_provers == {
+        "ds-explorer-a": 96000,
+        "ds-explorer-b": 96000,
+    }
+    assert all(
+        agent.max_output_tokens == 50000
+        for agent in smoke.agents
+        if agent.id not in {"ds-planner", *smoke_route_provers}
+    )
+    assert smoke.runtime.stage_thinking_modes["strategy_generation"] == "max"
+    assert smoke.runtime.stage_output_token_limits["strategy_generation"] == 128000
+    assert smoke.budget.max_total_tokens == 500000
+    assert smoke.continuation.max_output_tokens_per_segment == 96000
+    assert smoke.topology.inspiration.enabled is True
+    assert smoke.topology.inspiration.mode == "active"
+    formal_planner = next(agent for agent in formal.agents if agent.id == "ds-planner")
+    assert formal_planner.provider_max_output_tokens == 384000
+    assert formal_planner.max_output_tokens == 384000
+    assert all(
+        agent.max_output_tokens == 100000
+        for agent in formal.agents
+        if agent.id != "ds-planner"
+    )
+    assert formal.runtime.stage_thinking_modes["strategy_generation"] == "max"
+    assert formal.runtime.stage_output_token_limits["strategy_generation"] == 384000
     assert formal.continuation.max_output_tokens_per_segment == 100000
     assert all(agent.provider_max_output_tokens == 384000 for agent in active.agents)
-    assert all(agent.max_output_tokens == 128000 for agent in active.agents)
+    active_planner = next(agent for agent in active.agents if agent.id == "ds-planner")
+    assert active_planner.max_output_tokens == 384000
+    assert all(
+        agent.max_output_tokens == 128000
+        for agent in active.agents
+        if agent.id != "ds-planner"
+    )
+    assert active.runtime.stage_thinking_modes["strategy_generation"] == "max"
+    assert active.runtime.stage_output_token_limits["strategy_generation"] == 384000
     assert active.continuation.max_output_tokens_per_segment == 128000
+    for profile in (smoke, formal, active):
+        assert profile.deep_exploration_policy.high_tier_threshold_tokens == 96000
+        assert profile.runtime.exploration_output_token_tiers[1] == 96000
+        assert profile.continuation.max_output_tokens_per_segment >= 96000
+        assert all(
+            agent.max_output_tokens >= 96000
+            for agent in profile.agents
+            if "route_prover" in agent.roles
+        )
     assert [item.output_tokens for item in active.deep_exploration_policy.tiers] == [
-        32000,
         64000,
         96000,
         128000,
     ]
     assert [
-        item.no_content_token_cutoff for item in active.deep_exploration_policy.tiers
-    ] == [24000, 56000, 84000, 112000]
+        item.artifact_recovery_tokens for item in active.deep_exploration_policy.tiers
+    ] == [8000, 12000, 16000]
+    assert active.runtime.exploration_output_token_tiers == [64000, 96000, 128000]
+    assert active.runtime.stage_thinking_modes["triage"] == "disabled"
+    assert active.runtime.stage_thinking_modes["route_prove"] == "tiered"
     assert active.deep_exploration_policy.allow_parallel_distinct_signatures is True
-    assert active.budget.max_total_tokens == 10000000
-    assert active.budget.max_total_calls == 150
-    assert active.budget.max_rounds == 8
+    assert active.budget.max_total_tokens == 30000000
+    assert active.budget.max_total_calls == 450
+    assert active.budget.max_rounds == 24
     assert active.budget.initial_paths == 6
     assert active.budget.max_paths == 12
     assert active.continuation.max_new_steps_per_call == 20
     assert active.continuation.max_segments_per_path == 20
     assert active.continuation.post_failure_bottleneck_enabled is True
-    assert active.continuation.post_failure_bottleneck_max_output_tokens == 12000
+    assert active.continuation.post_failure_bottleneck_max_output_tokens == 16000
     assert active.continuation.post_failure_bottleneck_once_per_checkpoint is True
     assert active.continuation.post_failure_trigger_inspiration is True
-    assert active.runtime.stage_output_token_limits["post_failure_bottleneck"] == 12000
+    assert active.runtime.stage_output_token_limits["post_failure_bottleneck"] == 16000
     assert active.computation.sandboxed_python_enabled is True
-    assert smoke.continuation.segments_per_explore_call == 1
-    assert formal.continuation.segments_per_explore_call == 1
+    assert smoke.continuation.segments_per_explore_call == 2
+    assert formal.continuation.segments_per_explore_call == 2
+    assert active.continuation.segments_per_explore_call == 2
     assert smoke.budget.max_revisions >= 1
     assert formal.budget.max_revisions >= 1
     assert smoke.scheduler.reserve_revision_cycles >= 1

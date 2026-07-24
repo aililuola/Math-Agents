@@ -192,7 +192,10 @@ class MetaDirectiveController:
             affected: list[str] = []
             for route_id in directive.route_ids:
                 route = self.route_registry.get(route_id)
-                if route.status != RouteStatus.ACTIVE:
+                if route.status not in {
+                    RouteStatus.ACTIVE,
+                    RouteStatus.REPAIR_ONCE,
+                }:
                     continue
                 self.route_registry.mark_cooling(
                     route_id,
@@ -213,7 +216,10 @@ class MetaDirectiveController:
             affected = []
             for route_id in directive.route_ids:
                 route = self.route_registry.get(route_id)
-                if route.status != RouteStatus.ACTIVE:
+                if route.status not in {
+                    RouteStatus.ACTIVE,
+                    RouteStatus.REPAIR_ONCE,
+                }:
                     continue
                 self.route_registry.mark_abandoned(route_id, directive.reason)
                 affected.append(route_id)

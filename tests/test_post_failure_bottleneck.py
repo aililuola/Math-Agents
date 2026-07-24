@@ -173,9 +173,21 @@ async def test_extractor_uses_public_checkpoint_once_and_filters_invented_ids(
         normalized_statement="prove p(k) implies p(k+1)",
     )
     secret = "SECRET PRIVATE REASONING MUST NOT ENTER THE DIAGNOSTIC PROMPT"
+    reservation_id = "artifact-recovery:test"
+    assert runner.ledger.reserve_capacity(
+        reservation_id,
+        calls=1,
+        tokens=16000,
+    )
 
     first = await extractor.extract(
-        ReasoningBudgetExhaustedError(secret),
+        ReasoningBudgetExhaustedError(
+            secret,
+            progress={
+                "artifact_recovery_tokens": 16000,
+                "capacity_reservation_id": reservation_id,
+            },
+        ),
         problem=problem,
         strategy=strategy,
         checkpoint=checkpoint,
@@ -209,7 +221,8 @@ async def test_extractor_uses_public_checkpoint_once_and_filters_invented_ids(
     assert first.diagnostic.private_reasoning_recovered is False
     assert first.diagnostic.exact_failed_internal_step_known is False
     assert client.calls == 1
-    assert client.max_output_tokens == 12000
+    assert client.max_output_tokens == 16000
+    assert runner.ledger.capacity_reservations == {}
     assert secret not in client.messages[1]["content"]
     assert (
         "cannot see, recover, summarize, or continue" in client.messages[1]["content"]

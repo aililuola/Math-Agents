@@ -10,7 +10,9 @@ from .schemas import (
     ActionKind,
     BudgetAction,
     BudgetDecision,
+    ClaimStatus,
     FailureLevel,
+    MetaReview,
     PathStats,
     ProofAttempt,
     StrategyCard,
@@ -37,6 +39,16 @@ class _AttemptEvidence:
     verification_score: float
     uncertainty: float
     structurally_valid: bool | None
+    incomplete_only: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _RouteReviewEvidence:
+    verified_delta_count: int = 0
+    rejected_delta_count: int = 0
+    latest_delta_rejected: bool = False
+    failure_level: FailureLevel = FailureLevel.NONE
+    confidence: float = 0.0
 
 
 class AdaptiveBudgetManager:
@@ -52,6 +64,8 @@ class AdaptiveBudgetManager:
         reports: list[VerificationReport],
         aggregate_reports: Mapping[str, VerificationReport] | None = None,
         graph_signals: Mapping[str, Mapping[str, object]] | None = None,
+        route_team_reviews: Mapping[str, list[Mapping[str, object]]] | None = None,
+        meta_review: MetaReview | None = None,
     ) -> list[PathStats]:
         attempts_by_strategy: dict[str, list[ProofAttempt]] = defaultdict(list)
         for attempt in attempts:
@@ -61,6 +75,12 @@ class AdaptiveBudgetManager:
         for report in reports:
             reports_by_target[report.target_id].append(report)
         aggregate_reports = aggregate_reports or self._infer_aggregates(reports)
+        route_team_reviews = route_team_reviews or {}
+        meta_assessments = (
+            {item.target_id: item for item in meta_review.assessments}
+            if meta_review is not None
+            else {}
+        )
 
         stats: list[PathStats] = []
         for strategy in strategies:
@@ -80,12 +100,32 @@ class AdaptiveBudgetManager:
 
             snapshots = [
                 self._evidence_for_attempt(
-                    attempt.attempt_id,
+                    attempt,
                     reports_by_target,
                     aggregate_reports,
                 )
                 for attempt in path_attempts
             ]
+            route_review = self._route_review_evidence(
+                path_attempts,
+                route_team_reviews,
+            )
+            if (
+                route_review.latest_delta_rejected
+                and snapshots[-1].verdict != VerificationVerdict.PASS
+            ):
+                snapshots[-1] = _AttemptEvidence(
+                    verdict=VerificationVerdict.FAIL,
+                    failure_level=route_review.failure_level,
+                    confidence=route_review.confidence,
+                    verification_score=0.0,
+                    uncertainty=self._verdict_uncertainty(
+                        VerificationVerdict.FAIL,
+                        route_review.confidence,
+                    ),
+                    structurally_valid=snapshots[-1].structurally_valid,
+                    incomplete_only=False,
+                )
             raw_progress = [
                 self._raw_attempt_progress(attempt) for attempt in path_attempts
             ]
@@ -127,6 +167,15 @@ class AdaptiveBudgetManager:
                 backed_progress,
             )
             consecutive_failures = self._consecutive_failures(snapshots)
+            attempt_ids = {item.attempt_id for item in path_attempts}
+            meta_assessment = next(
+                (
+                    meta_assessments[item.attempt_id]
+                    for item in reversed(path_attempts)
+                    if item.attempt_id in meta_assessments
+                ),
+                None,
+            )
 
             stats.append(
                 PathStats(
@@ -153,6 +202,22 @@ class AdaptiveBudgetManager:
                         attempt.usage.total_tokens for attempt in path_attempts
                     ),
                     structurally_valid=latest_evidence.structurally_valid,
+                    incomplete_only=latest_evidence.incomplete_only,
+                    verified_delta_count=route_review.verified_delta_count,
+                    rejected_delta_count=route_review.rejected_delta_count,
+                    latest_delta_rejected=route_review.latest_delta_rejected,
+                    meta_recommended_action=(
+                        meta_assessment.recommended_action
+                        if meta_assessment is not None
+                        else None
+                    ),
+                    meta_preferred=(
+                        meta_review is not None
+                        and meta_review.selected_target_id in attempt_ids
+                    ),
+                    meta_review_confidence=(
+                        meta_review.confidence if meta_review is not None else 0.0
+                    ),
                 )
             )
         graph_signals = graph_signals or {}
@@ -197,10 +262,11 @@ class AdaptiveBudgetManager:
 
     def _evidence_for_attempt(
         self,
-        attempt_id: str,
+        attempt: ProofAttempt,
         reports_by_target: Mapping[str, list[VerificationReport]],
         aggregate_reports: Mapping[str, VerificationReport],
     ) -> _AttemptEvidence:
+        attempt_id = attempt.attempt_id
         target_reports = reports_by_target.get(attempt_id, [])
         aggregate = aggregate_reports.get(attempt_id)
         if aggregate is None:
@@ -213,10 +279,15 @@ class AdaptiveBudgetManager:
             ]
             aggregate = aggregate_candidates[-1] if aggregate_candidates else None
 
+        incomplete_only = bool(
+            aggregate is not None
+            and self._is_incomplete_attempt_report(aggregate, attempt)
+        )
         structural_reports = [
             report
             for report in target_reports
             if report.stage == VerificationStage.STRUCTURAL
+            and not self._is_incomplete_attempt_report(report, attempt)
         ]
         structurally_valid: bool | None = None
         if structural_reports:
@@ -248,6 +319,101 @@ class AdaptiveBudgetManager:
             verification_score=verification_score,
             uncertainty=uncertainty,
             structurally_valid=structurally_valid,
+            incomplete_only=incomplete_only,
+        )
+
+    @staticmethod
+    def _is_incomplete_attempt_report(
+        report: VerificationReport,
+        attempt: ProofAttempt,
+    ) -> bool:
+        if (
+            report.target_type != "attempt"
+            or report.verdict != VerificationVerdict.FAIL
+            or attempt.status.value == "complete"
+            or report.failure_level != FailureLevel.EXECUTION
+            or not report.problem_integrity_ok
+            or report.first_error_step is not None
+        ):
+            return False
+        return not any(
+            issue.step_id is not None
+            or issue.claim_id is not None
+            or issue.counterexample is not None
+            or issue.severity.value == "critical"
+            for issue in report.issues
+        )
+
+    @classmethod
+    def _route_review_evidence(
+        cls,
+        attempts: list[ProofAttempt],
+        reviews_by_attempt: Mapping[str, list[Mapping[str, object]]],
+    ) -> _RouteReviewEvidence:
+        reviews = [
+            review
+            for attempt in attempts
+            for review in reviews_by_attempt.get(attempt.attempt_id, [])
+        ]
+        if not reviews:
+            return _RouteReviewEvidence()
+
+        accepted = [review for review in reviews if cls._route_review_passed(review)]
+        rejected = [review for review in reviews if cls._route_review_rejected(review)]
+        latest = reviews[-1]
+        latest_rejected = cls._route_review_rejected(latest)
+        if not latest_rejected:
+            return _RouteReviewEvidence(
+                verified_delta_count=len(accepted),
+                rejected_delta_count=len(rejected),
+            )
+
+        raw_level = str(
+            latest.get("checkpoint_failure_level")
+            or latest.get("skeptic_failure_level")
+            or FailureLevel.EXECUTION.value
+        )
+        try:
+            failure_level = FailureLevel(raw_level)
+        except ValueError:
+            failure_level = FailureLevel.EXECUTION
+        raw_confidence = latest.get("checkpoint_failure_confidence")
+        if raw_confidence is None:
+            raw_confidence = latest.get("skeptic_confidence", 0.9)
+        try:
+            confidence = max(0.0, min(1.0, float(raw_confidence)))
+        except (TypeError, ValueError):
+            confidence = 0.9
+        return _RouteReviewEvidence(
+            verified_delta_count=len(accepted),
+            rejected_delta_count=len(rejected),
+            latest_delta_rejected=True,
+            failure_level=failure_level,
+            confidence=confidence,
+        )
+
+    @staticmethod
+    def _route_review_passed(review: Mapping[str, object]) -> bool:
+        checkpoint_status = review.get("checkpoint_status")
+        if checkpoint_status == "accepted":
+            return True
+        if checkpoint_status in {"rejected", "uncertain"}:
+            return False
+        return bool(review.get("validation_passed")) and bool(
+            review.get("referee_accepted")
+        )
+
+    @staticmethod
+    def _route_review_rejected(review: Mapping[str, object]) -> bool:
+        checkpoint_status = review.get("checkpoint_status")
+        if checkpoint_status == "rejected":
+            return True
+        if checkpoint_status == "accepted":
+            return False
+        return (
+            review.get("skeptic_verdict") == VerificationVerdict.FAIL.value
+            or review.get("referee_accepted") is False
+            or review.get("validation_passed") is False
         )
 
     @staticmethod
@@ -312,7 +478,11 @@ class AdaptiveBudgetManager:
         evidence: _AttemptEvidence,
     ) -> float:
         cfg = self.config.scheduler
-        if evidence.verdict is None:
+        if evidence.incomplete_only:
+            # A partial attempt can correctly fail the submission gate without
+            # invalidating its already checked mathematics.
+            progress = raw_progress * cfg.unverified_progress_discount
+        elif evidence.verdict is None:
             progress = raw_progress * cfg.unverified_progress_discount
         elif evidence.verdict == VerificationVerdict.PASS:
             progress = raw_progress * (0.75 + 0.25 * evidence.confidence)
@@ -327,9 +497,12 @@ class AdaptiveBudgetManager:
         else:
             progress = raw_progress * 0.25
 
-        if evidence.structurally_valid is False:
+        if evidence.structurally_valid is False and not evidence.incomplete_only:
             progress = min(progress, cfg.structural_failure_progress_cap)
-        if evidence.verdict == VerificationVerdict.FAIL:
+        if (
+            evidence.verdict == VerificationVerdict.FAIL
+            and not evidence.incomplete_only
+        ):
             caps = {
                 FailureLevel.EXECUTION: cfg.execution_failure_progress_cap,
                 FailureLevel.PLAN: cfg.plan_failure_progress_cap,
@@ -351,31 +524,40 @@ class AdaptiveBudgetManager:
         snapshots: list[_AttemptEvidence],
         progress: list[float],
     ) -> int:
+        del progress
         if len(attempts) < 2:
             return 0
-        threshold = self.config.scheduler.meaningful_progress_threshold
         stagnant = 0
         for index in range(len(attempts) - 1, 0, -1):
             previous = attempts[index - 1]
             current = attempts[index]
-            gap_reduction = self._gap_reduction(
-                len(previous.unresolved_gaps),
-                len(current.unresolved_gaps),
+            durable_math_gain = (
+                len(current.proof_steps) > len(previous.proof_steps)
+                or (
+                    bool(current.final_answer)
+                    and current.final_answer != previous.final_answer
+                )
+                or len(
+                    [
+                        claim
+                        for claim in current.proposed_lemmas
+                        if claim.status == ClaimStatus.VERIFIED
+                    ]
+                )
+                > len(
+                    [
+                        claim
+                        for claim in previous.proposed_lemmas
+                        if claim.status == ClaimStatus.VERIFIED
+                    ]
+                )
             )
-            verification_gain = (
-                snapshots[index].verification_score
-                - snapshots[index - 1].verification_score
-            )
-            progress_gain = progress[index] - progress[index - 1]
             became_verified = (
                 snapshots[index].verdict == VerificationVerdict.PASS
                 and snapshots[index - 1].verdict != VerificationVerdict.PASS
             )
-            if (
-                became_verified
-                or progress_gain >= threshold
-                or verification_gain >= threshold
-                or gap_reduction > 0.0
+            if durable_math_gain and (
+                became_verified or snapshots[index].verdict != VerificationVerdict.FAIL
             ):
                 break
             stagnant += 1
@@ -385,7 +567,7 @@ class AdaptiveBudgetManager:
     def _consecutive_failures(snapshots: list[_AttemptEvidence]) -> int:
         failures = 0
         for evidence in reversed(snapshots):
-            if evidence.verdict != VerificationVerdict.FAIL:
+            if evidence.verdict != VerificationVerdict.FAIL or evidence.incomplete_only:
                 break
             failures += 1
         return failures
@@ -458,6 +640,7 @@ class AdaptiveBudgetManager:
             stat
             for stat in evaluated
             if stat.latest_verdict == VerificationVerdict.FAIL
+            and not stat.incomplete_only
         ]
         failure_rate = len(failed) / max(1, len(evaluated))
         all_evaluated_paths_failed = (
@@ -511,6 +694,7 @@ class AdaptiveBudgetManager:
                 stat.verification_score < self.config.budget.verification_pass_threshold
             )
             verify_blocked: str | None = None
+            meta_blocked = self._meta_block_reason(stat)
             if (
                 stat.latest_verdict == VerificationVerdict.FAIL
                 and stat.failure_confidence
@@ -521,6 +705,15 @@ class AdaptiveBudgetManager:
                     "latest independent audit already rejected this path with "
                     "confidence above the configured verification threshold"
                 )
+            if meta_blocked is not None:
+                verify_eligible = False
+                verify_blocked = meta_blocked
+            if (
+                stat.meta_preferred
+                and stat.meta_recommended_action == ActionKind.VERIFY
+                and self._meta_review_is_authoritative(stat)
+            ):
+                verify_score += 0.20
             candidates.append(
                 BudgetAction(
                     action=ActionKind.VERIFY,
@@ -543,7 +736,17 @@ class AdaptiveBudgetManager:
                 + 0.20 * max(0.0, stat.marginal_progress)
                 + 0.12 * repairability
                 + 0.06 * min(1.0, stat.unresolved_gap_count / 3.0) * repairability
+                + 0.18 * min(1.0, stat.verified_delta_count)
             )
+            if stat.latest_delta_rejected:
+                depth_score -= 0.18
+            if (
+                stat.meta_preferred
+                and stat.meta_recommended_action
+                in {ActionKind.DEEPEN, ActionKind.REVISE}
+                and self._meta_review_is_authoritative(stat)
+            ):
+                depth_score += 0.25
             if stat.latest_verdict in {None, VerificationVerdict.UNCERTAIN}:
                 depth_score += 0.08 * stat.uncertainty
             depth_score -= 0.16 * min(3, stat.stagnation_rounds)
@@ -873,11 +1076,16 @@ class AdaptiveBudgetManager:
         *,
         current_round: int,
     ) -> tuple[bool, str | None, float]:
+        meta_blocked = self._meta_block_reason(stat)
+        if meta_blocked is not None:
+            return False, meta_blocked, 0.0
         if (
             stat.complete
             and stat.verification_score >= self.config.budget.synthesis_threshold
         ):
             return False, "candidate is already complete and synthesis-ready", 0.0
+        if stat.incomplete_only:
+            return True, None, 1.0
         if stat.latest_verdict != VerificationVerdict.FAIL:
             return True, None, 0.75
 
@@ -915,7 +1123,7 @@ class AdaptiveBudgetManager:
         return True, None, max(0.15, 0.5 * repairability)
 
     def _failure_penalty(self, stat: PathStats) -> float:
-        if stat.latest_verdict != VerificationVerdict.FAIL:
+        if stat.latest_verdict != VerificationVerdict.FAIL or stat.incomplete_only:
             return 0.0
         cfg = self.config.scheduler
         base = {
@@ -929,12 +1137,34 @@ class AdaptiveBudgetManager:
 
     @staticmethod
     def _depth_reason(stat: PathStats, repairability: float) -> str:
+        if stat.incomplete_only:
+            return (
+                "the submission is incomplete but no localized mathematical error "
+                "invalidated its checked partial progress"
+            )
         if stat.latest_verdict == VerificationVerdict.FAIL:
             return (
                 f"{stat.failure_level.value} failure has repairability {repairability:.2f}; "
                 "deepen only if the configured repair allowance and cooldown permit"
             )
         return "path has evidence-backed marginal progress or a locally repairable gap"
+
+    def _meta_review_is_authoritative(self, stat: PathStats) -> bool:
+        return (
+            stat.meta_review_confidence
+            >= self.config.budget.verification_pass_threshold
+        )
+
+    def _meta_block_reason(self, stat: PathStats) -> str | None:
+        if not self._meta_review_is_authoritative(stat):
+            return None
+        if stat.meta_recommended_action == ActionKind.STOP:
+            return (
+                "authoritative meta-review instructed the scheduler to stop this route"
+            )
+        if stat.meta_recommended_action == ActionKind.COOLDOWN_ROUTE:
+            return "authoritative meta-review placed this route in cooldown"
+        return None
 
 
 class SoftBudgetAllocator:
@@ -1038,7 +1268,9 @@ class SoftBudgetAllocator:
         current_path_count: int,
         has_candidate: bool,
         max_actions: int,
+        estimated_call_overrides: Mapping[str, int] | None = None,
     ) -> BudgetDecision:
+        estimated_call_overrides = estimated_call_overrides or {}
         decision.finish_reserve_calls = self.minimum_finish_reserve
         if not decision.candidates:
             return decision
@@ -1103,6 +1335,11 @@ class SoftBudgetAllocator:
                 current_path_count=projected_paths,
                 widen_path_count=candidate.planned_paths or None,
             )
+            if candidate.target_id in estimated_call_overrides:
+                candidate.estimated_calls = max(
+                    0,
+                    int(estimated_call_overrides[candidate.target_id]),
+                )
             bucket = self.bucket_for_action(candidate.action)
             blocked = self.spend_block_reason(
                 bucket,
@@ -1251,7 +1488,12 @@ class SoftBudgetAllocator:
             return sum(self.inspiration_call_breakdown().values())
         return 0
 
-    def inspiration_call_breakdown(self) -> dict[str, int]:
+    def inspiration_call_breakdown(
+        self,
+        *,
+        proposer_calls: int | None = None,
+        review_candidates: int | None = None,
+    ) -> dict[str, int]:
         """Conservative atomic cost for one admitted inspiration task."""
 
         inspiration = self.config.topology.inspiration
@@ -1262,14 +1504,31 @@ class SoftBudgetAllocator:
                 "skeptic_calls": 0,
                 "route_attempt_calls": 0,
             }
-        proposer_calls = min(
+        configured_proposers = min(
             inspiration.active_proposals_per_task,
             inspiration.max_proposals_per_task,
         )
-        reviewed = min(proposer_calls, inspiration.max_reviewed_proposals_per_task)
-        route_attempts = min(1, inspiration.max_materialized_proposals_per_trigger)
+        planned_proposers = (
+            configured_proposers
+            if proposer_calls is None
+            else max(0, int(proposer_calls))
+        )
+        planned_candidates = (
+            planned_proposers
+            if review_candidates is None
+            else max(0, int(review_candidates))
+        )
+        reviewed = min(
+            planned_candidates,
+            inspiration.max_reviewed_proposals_per_task,
+        )
+        route_attempts = (
+            min(1, inspiration.max_materialized_proposals_per_trigger)
+            if planned_candidates
+            else 0
+        )
         return {
-            "proposer_calls": proposer_calls,
+            "proposer_calls": planned_proposers,
             "referee_calls": reviewed,
             "skeptic_calls": reviewed,
             "route_attempt_calls": route_attempts * self._calls_per_explored_path(),

@@ -10,6 +10,8 @@ MathProofMesh 是面向高难度数学证明、逻辑推演和研究型推理任
 
 0.7.0 在推理优先计算协议之上增加了可选的分层稀疏协作拓扑。跨路线信息不再是自由文本，而是经过证据、作用域、独立审稿、去重、限流和回执门控的数学对象；Proof Obligation Graph 显式记录开放目标、依赖、冲突和 proof debt。
 
+所有 0.7.0 运行现在先经过“题意预检与目标规范化”。本地规则未发现疑点时不调用模型、不改写原题，直接生成并冻结 `goal_hash`；发现缺失模数、参数、占位内容或外部上下文时，Planner 只执行一次禁用 Thinking 的小型结构化检查。候选解释一旦改变或补充数学含义，桌面端和交互式 CLI 必须由用户确认后才开始解题。系统同时保留 `original_statement`、`canonical_statement`、解释来源、置信度和目标哈希，后续 Agent 统一读取规范化目标。
+
 本版本完整加入 P0 `Inspiration Engine`，不是普通 `widen` 的别名：
 
 - `Representation Switchboard` 主动切换数学表示，并记录对象映射、保持条件、损失风险和快速失败测试；
@@ -20,11 +22,13 @@ MathProofMesh 是面向高难度数学证明、逻辑推演和研究型推理任
 - `Surprise Budget Explorer` 保留少量高新颖性预算，但绝不侵占最终综合、审计和修订储备；
 - `Novelty Signature` 识别“换措辞但同机制”，`Inspiration Referee` 独立门控所有提案。
 
-Active 灵感任务现在不是“一种机制只问一次模型”。每个获准任务默认并行生成 3 个独立候选：2 个只读取少量相关 Broker Fact、NegativeMemory 和目标子图的 `warm` 候选，以及 1 个隐藏旧路线证明文本、只保留原题、目标义务和禁止重复机制列表的 `cold` 候选。系统先用规范化数学机制本体和 Novelty Gate 去重，再最多独立审查 2 个候选、最多物化 1 条路线。不同任务和不同数学方向没有新增全局串行锁；限制针对的是同一任务内的候选数量、重复机制和总预算。
+Active 灵感任务现在不是“一种机制只问一次模型”。每个获准任务最多生成 `active_proposals_per_task` 个候选；系统从当前全部已启用 Agent 动态构造 proposer pool，先选该机制的专门角色，再用 `proposer_generalist_roles` 指定的 Explorer/Route Prover 补足，不假定 API key 数量。同一任务有多个可用 Agent 时每个 Agent 最多生成一个候选，不会再由同一 Agent 三连采样；只有一个可用 Agent 时最多保留一组 `warm`/`cold` 双候选。可用 Agent 少于目标数量时不重复填满，省下的调用额度留给其他任务和后续调度轮。候选仍可属于同一数学大方向，只要局部目标、核心机制、表示、辅助构造或不变量确实不同；跨领域不是强制条件。
+
+`warm` 候选只读取少量相关 Broker Fact、NegativeMemory 和目标子图；`cold` 候选隐藏旧路线证明文本，只保留原题、目标义务和禁止重复机制列表。系统先用规范化数学机制本体和 Novelty Gate 去重，再最多独立审查 2 个候选、最多物化 1 条路线。Proposer 分配在调度准入和预算预留之前完成，预算按实际分配数计算；分配计划会进入 Activity 与 checkpoint，新增或移除 API-backed Agent 后会在下一轮自动重新计算。
 
 候选生成、Referee、快速 Skeptic 与首次真实路线尝试在调用前作为一个完整周期预留预算；被拒绝或未使用的调用额度会释放。Checkpoint、Activity 和 `reports/hierarchical_metrics.json` 会记录 warm/cold 数量、候选筛选结果以及预留、消耗、释放和超额调用数。Novelty 标签同时保存模型原始标签、规范化标签与未知扩展标签，未知标签只能提供弱相似度提示，不能单独把新路线判成重复。
 
-通用配置仍默认 `legacy_sparse`。DeepSeek 正式版和冒烟版先以 `proof_graph: shadow`、`inspiration: shadow` 观察诊断；实验配置 `config.deepseek-v4-pro.topology-active.yaml` 才会正式让图和灵感提案改变调度。
+通用配置仍默认 `legacy_sparse`。DeepSeek 正式版继续以 `proof_graph: shadow`、`inspiration: shadow` 观察诊断；冒烟版保留 `proof_graph: shadow`，但启用 `inspiration: active`，让通过 Novelty Gate、独立 Referee、快速 Skeptic 和调度准入的提案真正附加路线或创建新路线。高预算配置 `config.deepseek-v4-pro.topology-active.yaml` 同时启用 Active Proof Graph 与 Active Inspiration。
 
 二次符合性审计指出的运行闭环现已收口：`hierarchical_sparse` 的 Route Prover 不再读取旧 `LemmaMemory` 的跨路线 Claim；Receipt 会独立回传并校验有序量词与变量绑定；Prover、Skeptic、Tool Specialist、Referee 强制相互独立；Active 拓扑强制启用 continuation；Validation Escalation 会执行而不只生成计划；domain-role Capability 参与派工；盲终审包含匿名化的 Typed Fact/Negative provenance；灵感任务在模型调用前经过统一预算准入；消息只有被已验证 Delta 实际引用后才获得 utility；计算证据由真实 Tool Specialist Agent 审计。上述阶段逻辑已分别下沉到 `route_pipeline.py`、`broker_phase.py`、`inspiration_phase.py`、`cross_route_phase.py`、`synthesis_phase.py` 和 `resume_phase.py`。
 
@@ -62,6 +66,7 @@ Active 灵感任务现在不是“一种机制只问一次模型”。每个获�
 - **无正文失败诊断**：若深度调用耗尽推理预算却没有返回结构化正文，系统只从最近已验证检查点执行一次小型 `PostFailureBottleneckExtractor`，将最小卡点登记为路线局部义务并定向触发灵感机制；它不会声称恢复私有思维链，也不会把诊断提升为 Fact。
 - **失败感知调度**：根据执行、计划或策略失败决定修补、拓宽或停止。
 - **推理优先计算**：Explorer 可提交 `ExperimentSpec`，但计算门控、工具执行和证明推进彼此隔离。
+- **关键有限计算证书**：显式数列项、最小值、有限枚举或周期样本成为路线前提前，必须通过本地确定性类型化工具；错误值会在路线或检查点准入前被拦截。
 - **分层稀疏拓扑**：每条路线拥有局部团队、收件箱和检查点；跨路线只共享 Broker 门控后的结构化对象。
 - **三层记忆与证明图**：Fact、Insight、Negative 严格分层，反例可失效依赖事实并重新打开义务。
 - **专门灵感机制**：表示切换、结构类比、辅助构造、不变量、逆向目标、持续元策略和 Surprise Budget 按可观测停滞触发。
@@ -175,35 +180,50 @@ Activity 只显示阶段、任务和结构化结果摘要，不显示原始 `rea
 | 每段最多新增结构化步骤 | 8 | 12 |
 | 每条路线最多分段数 | 4 | 12 |
 | 初始路线 / 最大路线 | 2 / 3 | 3 / 6 |
-| 最大调度轮数 | 2 | 4 |
-| 整个 run 最大模型调用数 | 28 | 42 |
-| 整个 run token 预算 | 300,000 | 2,000,000 |
+| 最大调度轮数 | 3 | 4 |
+| 整个 run 最大模型调用数 | 40 | 60 |
+| 整个 run token 预算 | 500,000 | 2,000,000 |
 | 配置费用上限 | USD 0.75 | USD 5.00 |
 | 强类型计算工具 | 开启 | 开启 |
 | 模型生成 Python 沙箱 | 开启（需 Docker） | 开启（需 Docker） |
 
 “正式版最多 12 步”指 `continuation.max_new_steps_per_call: 12`：一次分段调用最多提交 12 个新的结构化证明步骤。它不表示整道题只能有 12 步。正式版每条路线最多 12 个分段，仍受总调用、总 token、费用和调度预算限制。
 
-高预算 Active 拓扑配置把供应商硬上限与日常运行上限分开：`provider_max_output_tokens: 384000` 只用于校验供应商能力，Agent 与单段证明的最高可准入档位为 `128000`。该配置仍保留 150 次调用和 10,000,000 tokens 的整次运行硬上限，但调度器会保护综合、终审与修订储备。
+高预算 Active 拓扑配置把供应商硬上限与路线运行档位分开：证明路线与单段证明的最高可准入档位为 `128000`；由于初始路线规划决定后续搜索空间，`ds-planner` 的 `strategy_generation` 单独允许使用供应商上限 `384000 + max`。冒烟配置对同一阶段使用 `128000 + max`。Active 配置保留 450 次调用、24 个调度轮和 30,000,000 tokens 的整次运行硬上限，但调度器仍会保护综合、终审与修订储备。
 
 ### 深度探索档位与重复抑制
 
-Active 拓扑使用 `32K / 64K / 96K / 128K` 四档。`provider_max_output_tokens: 384000` 仍只是供应商能力上限；实际每次调用由服务端准入器选择下面的运行档位：
+Active 拓扑保留 `64K / 96K / 128K` 三个执行档，但普通新路线不再从 64K 开始。`provider_max_output_tokens: 384000` 仍只是供应商能力上限；实际每次调用由服务端准入器选择下面的运行档位：
 
-| 档位 | 无正文时间上限 | 整次调用上限 | 答案预留 | 无正文 token 截止 |
-| ---: | ---: | ---: | ---: | ---: |
-| 32K | 8 分钟 | 12 分钟 | 8K | 24K |
-| 64K | 12 分钟 | 18 分钟 | 8K | 56K |
-| 96K | 18 分钟 | 25 分钟 | 12K | 84K |
-| 128K | 25 分钟 | 32 分钟 | 16K | 112K |
+| 深度档位 | Thinking | 用途 | 独立 Artifact Recovery |
+| ---: | --- | --- | ---: |
+| 64K | `high` | 仅用于相同签名无进展后的单次有界修复，或新颖性尚不明确时的修复 | 8K |
+| 96K | `max` | 所有普通初始路线和已明确局部目标的常规深化 | 12K |
+| 128K | `max` | 已在 96K 取得验证进展并通过 Meta 审批的最高档深化 | 16K |
 
-时间与 token 截止是双重保护。若模型长时间只有 `reasoning_content` 而没有结构化正文，运行器会在对应阈值中止本次调用，而不是让它把整个档位全部消耗掉。已产生的 reasoning token 仍计入该路线和全局预算，但不会被误记为证明进展。
+DeepSeek 的 `max_tokens` 同时覆盖 reasoning 与最终正文，当前接口没有可强制执行的独立 reasoning 上限；Anthropic 兼容接口中的 `budget_tokens` 也不能承担这项控制。因此表中的 8K/12K/16K 不再伪装成“同一次调用内的答案预留”，而是一次独立、非思考的恢复调用预算。流式字符估算只用于 Activity 心跳，不参与硬中止；供应商最终 usage 和 `finish_reason` 才是权威计数。
+
+每次深度调用开始前，`CallLedger` 会原子保留“当前整档 + 一次 Artifact Recovery”的 token 容量和两个调用槽。深度调用成功或返回可解析正文后立即释放恢复容量；只有无正文耗尽时才保留并交给瓶颈诊断。这样不会在已经没有恢复预算时先启动一次昂贵探索，也不会让并行路线重复占用同一份容量。进程恢复时，旧进程的在途容量会明确释放，不能伪装成可续接的私有推理。
+
+分阶段 Thinking 策略避免普通结构化任务反复吃满推理预算：`triage`、`claim_extraction`、JSON repair 与 `post_failure_bottleneck` 禁用 Thinking；验证使用 `high`；仅有界修复使用 `64K + high`；普通初始路线与常规深化现在直接使用 `96K + max`，经进一步证据准入的 128K 路线也使用 `max`。初始路线规划是明确例外：冒烟版 `128K + max`，正式版和 Active 正式版 `384K + max`。Inspiration 的创造性 Agent 继续沿用各 Agent 的默认 `max` 配置。
+
+Planner 的高上限体现“先把搜索空间规划好”的优先级，但 DeepSeek 仍可能把整个 `max_tokens` 用于 reasoning 而不返回正文；`max` 不是独立的 reasoning token 配额。此类无正文耗尽仍会被明确记录，且不会自动换 key 重复另一整次 128K/384K 规划调用。
+
+冒烟配置的整次运行 token 硬预算为 `500000`。冒烟与两个正式配置共用同一套按验证作用域更新 Claim 的逻辑：某条路线整体尚未完成或后续步骤失败，不会再把此前已经通过独立 delta 审核、Route Referee 和已提交 ProofCheckpoint 的局部引理整批降入 NegativeMemory。只有审核报告明确指向该 `claim_id`、该 Claim 的证明步骤，或题目完整性本身失败时，局部 Claim 才会被拒绝；未经局部验证的其他候选只降为 `uncertain`。Fact Gate 还会按 `source_delta_id` 读取对应 Route Team 审核，另一 delta 的失败不能污染已通过的局部引理。
+
+调度器同样按 delta 和路线保存失败证据：被独立审稿拒绝的最新 ProofDelta 不会因为随后一次空白或无正文 Attempt 而恢复成“高不确定、可继续深化”的路线。只因尚未给出完整最终证明而失败、且没有定位到错误步骤或错误 Claim 的 Attempt 会标记为 `incomplete_only`，保留其已通过 checkpoint 的局部进展；它不会和数学上被否定的路线受到同样惩罚。高置信度 Meta-Review 的 `STOP` / `COOLDOWN_ROUTE` 会真正进入 RouteRegistry 和下一轮预算准入，Meta 选中的 `DEEPEN` / `REVISE` 路线获得明确优先级。该逻辑由冒烟版和正式版共用，不依赖某一个 YAML 的临时权重。
+
+DeepSeek 冒烟、正式和 Active 配置现在允许一次编排动作连续推进两个证明段。第二段只能建立在第一段已经通过本地完整性、Route Team 和独立 checkpoint 审核后；任一段失败都会立即停止该路线的连续推进。这样接近完成的正确路线可以从已验证引理继续完成后续子目标，而不必在每一个小段之间重新经历全局 Meta Review 和 Inspiration 周期。
+
+Reverse Goal 的 Frontier Bridge 不再把词法相似度解释为数学蕴含。Broker-admitted Fact 只能作为候选工具；系统必须保留目标义务的假设与量词作用域，并显式要求变量映射、适用性和全部缺失前提。相关度不足时，桥接请求只要求从原作用域证明目标，不再生成未经证明的 `A implies B`。
+
+时间只承担传输和进程安全职责：连续 300 秒完全没有任何 SSE 数据才记为连接停滞并进入 key failover；所有档位和其他 Agent 调用共用 7200 秒紧急硬上限。该两小时上限不是数学调度信号，不会因为模型持续正常输出 reasoning 而提前缩短。
 
 档位不再按 `segment_index` 自动增长，而是按证据逐级准入：
 
-1. 新路线或尚无已验证检查点的路线从 32K 开始。
-2. 已有已验证检查点，但当前机制尚无本轮已验证推进时，通常准入 64K。
-3. 同一机制已经产生已验证推进，且当前给出明确的关键局部目标时，才可准入 96K。
+1. 新路线或尚无已验证检查点的路线，只要具有明确的当前目标，就从 `96K + max` 开始。
+2. 已有已验证检查点、但当前机制尚无本轮验证推进时，仍使用 `96K + max` 深化。
+3. 64K 不再是正常探索起点；它只保留给相同数学状态无进展后的单次有界修复或等待新颖性确认的修复。
 4. 同一机制先在 96K 取得已验证推进，同时通过 Meta-Strategist 审批，并保留至少 8 次调用和 256K tokens 的收尾预算后，才可准入 128K。
 5. 新检查点、已验证反例或 Referee 确认的机制转向可以形成新的有效状态；单纯“再想一次”不能升级档位。
 
@@ -225,7 +245,7 @@ Active 拓扑使用 `32K / 64K / 96K / 128K` 四档。`provider_max_output_token
 
 若路线已经推进到一个已验证检查点，只是当前小步长期无法解决，系统保留父检查点，并可将最小卡点登记为 route-local Proof Obligation。经 Referee 确认的新机制会登记为 `BottleneckPivotRecord`，由 Inspiration Engine 针对这一个小步尝试表示切换、类比、辅助构造、不变量或逆向目标，而不是丢弃整条路线重新开始。
 
-若深度调用因达到长度或时间上限而完全没有正文，系统不会假装恢复模型的私有思维过程。它只允许从调用前的已验证外部检查点进行一次 32K 恢复；仍失败时再执行一次最多 12K 的 `PostFailureBottleneckExtractor`。该诊断只提取可审计的 `current_goal`、最小阻塞命题、依赖、已尝试机制和备选机制，并定向触发 Inspiration。诊断结果保持路线局部状态，不会直接进入 FactMemory、关闭 ProofCheckpoint 或让最终证明通过。
+若深度调用最终以 `finish_reason=length` 结束且正文为空，系统不会让另一个 Explorer 重新消耗同一整档，也不会假装恢复模型的私有思维过程。它从调用前的已验证外部检查点执行一次 8K/12K/16K 的非思考 `PostFailureBottleneckExtractor`，只提取可审计的 `current_goal`、最小阻塞命题、依赖、已尝试机制和备选机制，并定向触发 Inspiration。诊断结果保持路线局部状态，不会直接进入 FactMemory、关闭 ProofCheckpoint 或让最终证明通过。SSE 空闲和两小时紧急中止属于传输故障，仍可走 key failover；只有传输故障允许完整请求换 key 重试。
 
 ### 持久化与审计
 
@@ -241,11 +261,11 @@ Active 拓扑使用 `32K / 64K / 96K / 128K` 四档。`provider_max_output_token
 
 | 位置 | 具体变化 |
 | --- | --- |
-| `src/mathproofmesh/deep_exploration.py` | 新增数学状态签名、四档准入、原子 lease、近重复检测、高档无进展锁、路线 token 归因和局部机制 pivot |
+| `src/mathproofmesh/deep_exploration.py` | 新增数学状态签名、三档准入、原子 lease、近重复检测、高档无进展锁、路线 token 归因和局部机制 pivot |
 | `src/mathproofmesh/stall_recovery.py` | 新增无正文失败后的单次瓶颈提取与检查点级幂等保护 |
-| `src/mathproofmesh/agents.py` | 按档位执行无正文时间、整次调用时间和答案 token 预留；保留网络断线与 key failover 行为 |
+| `src/mathproofmesh/agents.py` | 分阶段覆盖 DeepSeek Thinking；按供应商最终 usage 判定耗尽；语义耗尽禁止整档 failover，传输故障保留 key failover |
 | `src/mathproofmesh/orchestrator.py` | 将准入、结束判定、局部义务、Inspiration 触发、恢复和 Activity 接入正式路线闭环 |
-| `src/mathproofmesh/config.py` 与 Active YAML | 增加 32K/64K/96K/128K 策略、128K 审批与收尾储备、重复修复上限和 12K 瓶颈诊断配置 |
+| `src/mathproofmesh/config.py` 与 Active YAML | 初始路线使用 96K/max，64K 仅作有界修复，并保留 128K 审批、重复修复上限和分档恢复预算 |
 | `src/mathproofmesh/resume_phase.py` 与 `report.py` | checkpoint 持久化 deep-exploration 状态，并生成独立审计报告和汇总指标 |
 | `tests/test_deep_exploration_*.py` 与 `tests/test_post_failure_bottleneck.py` | 覆盖并行不同签名、阻止相同高档重复、逐档升级、128K 门控、局部换向、无正文恢复、resume 和报告 |
 
@@ -257,7 +277,7 @@ hierarchical 报告把 `Broker-admitted global Fact` 与 `Legacy ClaimMemory his
 
 Blind packet 不再暴露 `artifact://` 原始路径，只携带实际文件内容的 SHA-256、证书类型和 replay 状态。这样不会通过文件名泄漏 Agent/Route，同时保留可审计证据身份。
 
-本轮离线验收基线为：安装 `.[dev,server]`（包含 `z3-solver`）后 `226 passed`、Ruff check 通过、Ruff format check 通过、`compileall` 通过、topology component-contract Mock benchmark 通过且真实 provider 调用数为 0。该 Mock benchmark 验证组件契约和消融开关，不代表真实 IMO 求解性能。
+本轮离线验收基线为：安装 `.[dev,server]`（包含 `z3-solver`）后 `345 passed`、Ruff check 通过、Ruff format check 通过、`compileall` 通过、topology component-contract Mock benchmark 通过且真实 provider 调用数为 0。该 Mock benchmark 验证组件契约和消融开关，不代表真实 IMO 求解性能。
 
 ## 推理优先计算流程
 
@@ -291,6 +311,16 @@ flowchart TD
 - 相同请求和相同工具环境已执行：读取缓存，不重复计算。
 - 没有足够模型预算解释计算结果：`defer`。
 - 超过路径软配额：等待 Meta-Reviewer；超过硬配额：`reject`。
+
+#### 关键有限计算门控
+
+`ComputationHint` 仍然只是不可执行的规划提示。与之不同，`StrategyCard.calculation_checks` 和 `ProofStep.calculation_checks` 用于核验已经被策略或证明步骤采用的承重有限计算。
+
+- 明确列出的数列项、声称的最小值、有限枚举结果或周期样本必须在当前结构化响应中附带断言式 `ToolRequest`。
+- 服务器在路线启动、`ProofCheckpoint` 审查和最终证明审计之前执行注册的确定性工具；模型不能自行填写 `calculation_evidence_refs`。
+- 缺少声明、参数契约错误、工具无结论或反例都会阻止该前提进入已验证状态，并把精确原因交回原路线修正。
+- 正确的类型化请求只使用本地计算，不新增 API 调用；Schema 字段只会带来很小的提示和结构化输出开销。
+- `bounded_evidence` 只核验声明的有限区间。即使所有样本都通过，也不能单独证明一个无限命题、最终周期或普遍规律。
 
 ### 证据等级
 

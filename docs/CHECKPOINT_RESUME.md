@@ -143,7 +143,7 @@ continuation:
   max_new_steps_per_call: 3
   max_new_claims_per_call: 3
   max_output_tokens_per_segment: 12000
-  segments_per_explore_call: 1
+  segments_per_explore_call: 2
   max_segments_per_path: 12
   verify_each_delta: true
   delta_verifier_replicas: 1
@@ -159,7 +159,7 @@ continuation:
 
 - `checkpoint_policy=verified_subgoal`：只有明确完成一个连贯子目标的 Delta 才能推进检查点；
 - `verified_delta`：允许更小但完整可验证的增量；
-- `segments_per_explore_call`：一次编排动作最多提交多少个连续段，默认 1 可降低断线损失；
+- `segments_per_explore_call`：一次编排动作最多提交多少个连续段；DeepSeek 运行配置使用 2，并且每个 Delta 仍须独立验证后才能进入下一段；
 - `max_segments_per_path`：单一路线的持久化深度上限；
 - `verify_each_delta`：关闭后仅保留本地完整性守卫，不建议用于高风险证明；
 - `delta_verifier_replicas`：每个 Delta 的独立 Reviewer 数；

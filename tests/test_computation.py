@@ -5,7 +5,9 @@ from typing import Any
 
 import pytest
 
+from mathproofmesh.activity import ActivityStream, collapse_activity_events
 from mathproofmesh.computation.broker import ToolBroker
+from mathproofmesh.computation.handlers.base import HandlerEvidence
 from mathproofmesh.computation.policy import ComputationContext
 from mathproofmesh.computation.sandbox import (
     UnsafeProgramError,
@@ -24,6 +26,7 @@ from mathproofmesh.mock_demo import build_demo_config, demo_responder
 from mathproofmesh.orchestrator import ProofMeshOrchestrator
 from mathproofmesh.schemas import (
     AttemptStatus,
+    ComputationPlan,
     ComputationDecisionStatus,
     ContinuationTurn,
     EvidenceStrength,
@@ -48,6 +51,7 @@ def _spec(
     broad_search: bool = False,
     exact_arithmetic: bool = True,
     max_cases: int = 1000,
+    typed_tool_gap: str | None = None,
 ) -> ExperimentSpec:
     return ExperimentSpec(
         purpose=purpose,
@@ -69,6 +73,7 @@ def _spec(
         broad_search=broad_search,
         max_cases=max_cases,
         seed=20260719,
+        typed_tool_gap=typed_tool_gap,
     )
 
 
@@ -85,10 +90,37 @@ def test_exact_relation_and_impact_classification_fail_closed() -> None:
         ContinuationTurn(action="abandon", experiment_impact="none")
 
 
+def test_computation_plan_preserves_both_decisions_and_exact_bounds() -> None:
+    spec = _spec(
+        "bounded_greedy_sequence",
+        arguments={
+            "initial_values": [6],
+            "length": 12,
+            "rule": "gcd_overlap_all_prior",
+        },
+        purpose="discover_pattern",
+        broad_search=True,
+        max_cases=10000,
+    )
+
+    plan = ComputationPlan.from_spec(spec)
+
+    assert spec.decision_if_confirmed in plan.decision_use
+    assert spec.decision_if_refuted in plan.decision_use
+    assert plan.bounded_scope == {
+        "domains": {},
+        "arguments": spec.arguments,
+        "max_cases": 10000,
+    }
+
+
 def test_gate_rejects_vague_initial_search_and_fast_tracks_precise_refutation(
     demo_config, artifact_store
 ) -> None:
-    broker = _enabled_broker(demo_config, artifact_store)
+    config = demo_config.model_copy(deep=True)
+    config.computation.enabled = True
+    activity = ActivityStream(artifact_store, persist=False)
+    broker = ToolBroker(config, artifact_store, activity)
     context = ComputationContext(path_id="path-a", remaining_llm_calls=5)
     vague = _spec(
         "modular_exhaustive",
@@ -110,6 +142,134 @@ def test_gate_rejects_vague_initial_search_and_fast_tracks_precise_refutation(
     assert vague_decision.rule_id == "request.vague_target"
     assert precise_decision.decision == ComputationDecisionStatus.ALLOW
     assert precise_decision.rule_id == "fast_path.targeted_falsification"
+
+
+def test_computation_gate_updates_one_stable_topology_node(
+    demo_config, artifact_store
+) -> None:
+    config = demo_config.model_copy(deep=True)
+    config.computation.enabled = True
+    activity = ActivityStream(artifact_store, persist=False)
+    broker = ToolBroker(config, artifact_store, activity)
+    spec = _spec(
+        "modular_exhaustive",
+        target="枚举看看规律",
+        purpose="discover_pattern",
+        broad_search=True,
+        arguments={"lhs": "x", "rhs": "x", "modulus": 5},
+    )
+
+    decision = broker.decide(
+        spec,
+        ComputationContext(path_id="stable-rejected", remaining_llm_calls=5),
+    )
+
+    assert decision.decision == ComputationDecisionStatus.REJECT
+    assert {event.task_id for event in activity.events} == {
+        broker.activity_task_id(spec)
+    }
+    assert [event.event_type for event in activity.events] == [
+        "computation_experiment",
+        "computation_not_executed",
+    ]
+    collapsed = collapse_activity_events(activity.events)
+    assert len(collapsed) == 1
+    assert collapsed[0].status.value == "warning"
+    assert collapsed[0].progress == 1.0
+    assert collapsed[0].metrics["phase"] == "reject"
+
+
+def test_sandbox_execution_uses_one_live_node_and_persists_process_record(
+    demo_config,
+    artifact_store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = demo_config.model_copy(deep=True)
+    config.computation.enabled = True
+    config.computation.sandbox_image = (
+        f"registry.example/mathproofmesh@sha256:{'a' * 64}"
+    )
+    config.computation.sandboxed_python_enabled = True
+    activity = ActivityStream(artifact_store, persist=False)
+    broker = ToolBroker(config, artifact_store, activity)
+    spec = _spec(
+        "sandboxed_python",
+        target="The isolated program checks the declared finite predicate.",
+        arguments={"input": {}},
+        typed_tool_gap=(
+            "No configured typed handler represents this finite custom predicate."
+        ),
+    )
+    program = ExperimentProgram(
+        experiment_id=spec.experiment_id,
+        source=(
+            "def run(data):\n"
+            "    return {'outcome': 'not_refuted', 'cases_checked': 3, "
+            "'scope': {}, 'exact_arithmetic': True}\n"
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"seed": {"type": "integer"}},
+            "required": ["seed"],
+        },
+        output_schema={
+            "type": "object",
+            "properties": {
+                "outcome": {"type": "string"},
+                "cases_checked": {"type": "integer"},
+                "scope": {"type": "object"},
+                "exact_arithmetic": {"type": "boolean"},
+            },
+            "required": [
+                "outcome",
+                "cases_checked",
+                "scope",
+                "exact_arithmetic",
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        broker,
+        "_dispatch",
+        lambda _spec, _program: HandlerEvidence(
+            outcome=ExperimentOutcome.NOT_REFUTED,
+            evidence_strength=EvidenceStrength.BOUNDED_EVIDENCE,
+            exact_arithmetic=True,
+            cases_checked=3,
+            raw_output={"outcome": "not_refuted", "cases_checked": 3},
+            process_exit_code=0,
+            process_stdout='{"outcome":"not_refuted","cases_checked":3}',
+            process_stderr="",
+        ),
+    )
+
+    context = ComputationContext(
+        path_id="stable-python",
+        remaining_llm_calls=5,
+    )
+    decision = broker.decide(spec, context)
+    result = broker.run_experiment(spec, decision, program=program)
+
+    task_id = broker.activity_task_id(spec)
+    assert {event.task_id for event in activity.events} == {task_id}
+    assert [event.event_type for event in activity.events] == [
+        "python_experiment",
+        "computation_admitted",
+        "computation_executing",
+        "computation_completed",
+    ]
+    collapsed = collapse_activity_events(activity.events)
+    assert len(collapsed) == 1
+    assert collapsed[0].status.value == "completed"
+    assert collapsed[0].metrics["phase"] == "completed"
+    assert collapsed[0].metrics["process_exit_code"] == 0
+    assert result.outcome == ExperimentOutcome.NOT_REFUTED
+    execution = broker.cache.load_execution(spec.request_hash)
+    assert execution["output"]["process"] == {
+        "exit_code": 0,
+        "stdout": '{"outcome":"not_refuted","cases_checked":3}',
+        "stderr": "",
+    }
 
 
 def test_gate_rejects_missing_decision_use_and_false_precision_claim(
@@ -148,6 +308,7 @@ def test_broad_search_requires_stall_and_meta_review(
     demo_config, artifact_store
 ) -> None:
     broker = _enabled_broker(demo_config, artifact_store)
+    broker.config.computation.bounded_typed_probe_fast_path = False
     spec = _spec(
         "bounded_integer_search",
         target="Determine whether a structured family contains a violating integer tuple.",
@@ -179,6 +340,96 @@ def test_broad_search_requires_stall_and_meta_review(
     assert stalled.decision == ComputationDecisionStatus.DEFER
     assert stalled.rule_id == "reasoning_first.meta_required"
     assert approved.decision == ComputationDecisionStatus.ALLOW
+
+
+def test_low_cost_exact_pattern_probe_runs_before_route_stagnation(
+    demo_config, artifact_store
+) -> None:
+    broker = _enabled_broker(demo_config, artifact_store)
+    spec = _spec(
+        "bounded_greedy_sequence",
+        target=(
+            "The first 40 terms of the declared greedy sequence provide a "
+            "finite candidate pattern."
+        ),
+        purpose="discover_pattern",
+        broad_search=True,
+        arguments={
+            "initial_values": [15],
+            "length": 40,
+            "rule": "gcd_overlap_all_prior",
+            "strictly_increasing": True,
+        },
+        max_cases=10_000,
+    )
+
+    decision = broker.decide(
+        spec,
+        ComputationContext(
+            path_id="typed-probe",
+            stalled_rounds=0,
+            meta_review_approved=False,
+            remaining_llm_calls=5,
+        ),
+    )
+    result = broker.run_experiment(spec, decision)
+
+    assert decision.decision == ComputationDecisionStatus.ALLOW
+    assert decision.rule_id == "fast_path.bounded_typed_probe"
+    assert result.outcome == ExperimentOutcome.NOT_REFUTED
+    assert result.evidence_strength == EvidenceStrength.BOUNDED_EVIDENCE
+    assert result.certificate["values"][0] == 15
+
+
+def test_expensive_deferred_request_survives_resume_and_retries(
+    demo_config, artifact_store
+) -> None:
+    config = demo_config.model_copy(deep=True)
+    config.computation.enabled = True
+    config.computation.bounded_typed_probe_fast_path = False
+    config.computation.broad_search_requires_meta_review = False
+    spec = _spec(
+        "bounded_greedy_sequence",
+        target=(
+            "A finite prefix is generated to identify one candidate recurrence "
+            "for a later symbolic proof."
+        ),
+        purpose="discover_pattern",
+        broad_search=True,
+        arguments={
+            "initial_values": [6],
+            "length": 12,
+            "rule": "gcd_overlap_all_prior",
+            "strictly_increasing": True,
+        },
+        max_cases=10_000,
+    )
+    first = ToolBroker(config, artifact_store)
+
+    deferred = first.decide(
+        spec,
+        ComputationContext(path_id="durable-path", remaining_llm_calls=5),
+    )
+
+    assert deferred.decision == ComputationDecisionStatus.DEFER
+    assert len(first.deferred_for_path("durable-path")) == 1
+
+    resumed = ToolBroker(config, artifact_store)
+    pending = resumed.deferred_for_path("durable-path")
+    assert len(pending) == 1
+    admitted = resumed.decide(
+        pending[0].spec,
+        ComputationContext(
+            path_id="durable-path",
+            stalled_rounds=1,
+            remaining_llm_calls=5,
+        ),
+    )
+    result = resumed.run_experiment(pending[0].spec, admitted)
+
+    assert admitted.decision == ComputationDecisionStatus.ALLOW
+    assert result.evidence_strength == EvidenceStrength.BOUNDED_EVIDENCE
+    assert resumed.deferred_for_path("durable-path") == []
 
 
 def test_not_refuted_is_never_promoted_to_verified(demo_config, artifact_store) -> None:
@@ -300,6 +551,64 @@ def test_semantic_cache_preserves_canonical_artifacts_and_reuses_across_paths(
     )
     assert broker.results_for_path("cache-b")[0].request_hash == first_spec.request_hash
     assert broker.audit_key_results()[0]["valid"] is True
+
+
+def test_execution_identity_reuses_computation_across_narrative_variants(
+    demo_config, artifact_store
+) -> None:
+    config = demo_config.model_copy(deep=True)
+    config.computation.enabled = True
+    activity = ActivityStream(artifact_store, persist=False)
+    broker = ToolBroker(config, artifact_store, activity)
+    arguments = {
+        "lhs": "x^2",
+        "rhs": "x",
+        "relation": "eq",
+        "variables": ["x"],
+        "ranges": {"x": [2, 2]},
+        "samples": 1,
+    }
+    first_spec = _spec(
+        "numeric_counterexample",
+        target="Check the first route's finite identity.",
+        arguments=arguments,
+        exact_arithmetic=False,
+    )
+    first = broker.run_experiment(
+        first_spec,
+        broker.decide(
+            first_spec,
+            ComputationContext(path_id="narrative-a", remaining_llm_calls=5),
+        ),
+    )
+    second_spec = _spec(
+        "numeric_counterexample",
+        target="Recheck the same executable inputs under different prose.",
+        arguments=arguments,
+        exact_arithmetic=False,
+        max_cases=2000,
+    )
+    second_decision = broker.decide(
+        second_spec,
+        ComputationContext(path_id="narrative-b", remaining_llm_calls=5),
+    )
+    second = broker.run_experiment(second_spec, second_decision)
+
+    assert first_spec.request_hash != second_spec.request_hash
+    assert first_spec.execution_hash == second_spec.execution_hash
+    assert second_decision.cache_hit is True
+    assert second_decision.canonical_request_hash == first.request_hash
+    assert second.cached is True
+    assert second.request_hash == first.request_hash
+    assert second.experiment_id == second_spec.experiment_id
+    assert (
+        broker.cache.resolve_identifier(second_spec.experiment_id) == first.request_hash
+    )
+    assert len(artifact_store.list_experiment_results()) == 1
+    computation_task_ids = {
+        event.task_id for event in activity.events if event.stage == "computation"
+    }
+    assert computation_task_ids == {f"computation:{first_spec.experiment_id}"}
 
 
 def test_final_audit_rejects_tampered_execution_record(
@@ -439,7 +748,7 @@ def test_typed_modular_integer_graph_recurrence_and_geometry_tools(
     assert geometry_result.exact_arithmetic is True
 
 
-def test_tool_exception_is_inconclusive_not_a_math_failure(
+def test_contract_errors_are_rejected_before_execution_and_runtime_errors_are_inconclusive(
     demo_config, artifact_store
 ) -> None:
     broker = _enabled_broker(demo_config, artifact_store)
@@ -451,11 +760,10 @@ def test_tool_exception_is_inconclusive_not_a_math_failure(
     decision = broker.decide(
         malformed, ComputationContext(path_id="error-path", remaining_llm_calls=5)
     )
-    result = broker.run_experiment(malformed, decision)
-
-    assert result.outcome == ExperimentOutcome.INCONCLUSIVE
-    assert result.evidence_strength == EvidenceStrength.HEURISTIC
-    assert "not a mathematical refutation" in result.verification_notes[0]
+    assert decision.decision == ComputationDecisionStatus.REJECT
+    assert decision.rule_id == "request.invalid_tool_contract"
+    assert "initial_values must be a non-empty list" in decision.reason
+    assert broker.ledger.count_for_path("error-path") == 0
 
     limited_config = demo_config.model_copy(deep=True)
     limited_config.computation.enabled = True

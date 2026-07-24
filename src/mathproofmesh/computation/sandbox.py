@@ -65,6 +65,21 @@ class UnsafeProgramError(ValueError):
     pass
 
 
+class SandboxExecutionError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        exit_code: int | None,
+        stdout: str,
+        stderr: str,
+    ) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
+        self.stdout = stdout
+        self.stderr = stderr
+
+
 def _find_docker_executable() -> str | None:
     discovered = shutil.which("docker")
     if discovered:
@@ -340,24 +355,45 @@ def run_sandboxed_python(
         program_path.chmod(0o644)
         command = build_docker_command(config, workdir)
         command[0] = docker_path
-        completed = subprocess.run(
-            command,
-            input=json.dumps(input_payload, ensure_ascii=True),
-            capture_output=True,
-            text=True,
-            timeout=config.sandbox_timeout_seconds,
-            check=False,
-            env={},
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                input=json.dumps(input_payload, ensure_ascii=True),
+                capture_output=True,
+                text=True,
+                timeout=config.sandbox_timeout_seconds,
+                check=False,
+                env={},
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = _bounded_process_text(exc.stdout, config.max_output_chars)
+            stderr = _bounded_process_text(exc.stderr, config.max_output_chars)
+            raise SandboxExecutionError(
+                f"sandbox timed out after {config.sandbox_timeout_seconds} seconds",
+                exit_code=None,
+                stdout=stdout,
+                stderr=stderr,
+            ) from exc
     stdout = completed.stdout[: config.max_output_chars]
     stderr = completed.stderr[: config.max_output_chars]
     if completed.returncode != 0:
-        raise RuntimeError(
-            f"sandbox exited with code {completed.returncode}: {stderr or stdout}"
+        raise SandboxExecutionError(
+            f"sandbox exited with code {completed.returncode}: {stderr or stdout}",
+            exit_code=completed.returncode,
+            stdout=stdout,
+            stderr=stderr,
         )
-    payload = _validate_json_object(
-        json.loads(stdout), program.output_schema, label="output"
-    )
+    try:
+        payload = _validate_json_object(
+            json.loads(stdout), program.output_schema, label="output"
+        )
+    except ValueError as exc:
+        raise SandboxExecutionError(
+            f"sandbox output was rejected: {exc}",
+            exit_code=completed.returncode,
+            stdout=stdout,
+            stderr=stderr,
+        ) from exc
     raw_outcome = str(payload.get("outcome", "inconclusive"))
     if raw_outcome == ExperimentOutcome.COUNTEREXAMPLE_FOUND.value:
         counterexample = payload.get("counterexample")
@@ -365,7 +401,7 @@ def run_sandboxed_python(
             raise ValueError(
                 "counterexample_found output requires counterexample object"
             )
-        return HandlerEvidence(
+        evidence = HandlerEvidence(
             outcome=ExperimentOutcome.COUNTEREXAMPLE_FOUND,
             evidence_strength=EvidenceStrength.COUNTEREXAMPLE,
             counterexample=counterexample,
@@ -378,11 +414,11 @@ def run_sandboxed_python(
             ],
             raw_output=payload,
         )
-    if raw_outcome in {
+    elif raw_outcome in {
         ExperimentOutcome.NOT_REFUTED.value,
         ExperimentOutcome.CERTIFIED.value,
     }:
-        return HandlerEvidence(
+        evidence = HandlerEvidence(
             outcome=ExperimentOutcome.NOT_REFUTED,
             evidence_strength=EvidenceStrength.BOUNDED_EVIDENCE,
             certificate=payload.get("certificate"),
@@ -394,12 +430,25 @@ def run_sandboxed_python(
             ],
             raw_output=payload,
         )
-    return HandlerEvidence(
-        outcome=ExperimentOutcome.INCONCLUSIVE,
-        evidence_strength=EvidenceStrength.HEURISTIC,
-        scope=dict(payload.get("scope", {})),
-        verification_notes=[
-            str(payload.get("note", "Sandbox result was inconclusive."))
-        ],
-        raw_output=payload,
-    )
+    else:
+        evidence = HandlerEvidence(
+            outcome=ExperimentOutcome.INCONCLUSIVE,
+            evidence_strength=EvidenceStrength.HEURISTIC,
+            scope=dict(payload.get("scope", {})),
+            verification_notes=[
+                str(payload.get("note", "Sandbox result was inconclusive."))
+            ],
+            raw_output=payload,
+        )
+    evidence.process_exit_code = completed.returncode
+    evidence.process_stdout = stdout
+    evidence.process_stderr = stderr
+    return evidence
+
+
+def _bounded_process_text(value: str | bytes | None, limit: int) -> str:
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace")
+    else:
+        text = value or ""
+    return text[:limit]

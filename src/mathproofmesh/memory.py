@@ -46,6 +46,8 @@ class LemmaMemory:
                 existing.scope_limitations = sorted(
                     set(existing.scope_limitations) | set(claim.scope_limitations)
                 )
+                if existing.source_delta_id is None and claim.source_delta_id:
+                    existing.source_delta_id = claim.source_delta_id
                 continue
             self._claims[claim.claim_id] = claim
             self._hash_to_id[claim.content_hash] = claim.claim_id
@@ -57,7 +59,28 @@ class LemmaMemory:
     def mark_attempt_verified(
         self, attempt_id: str, report: VerificationReport
     ) -> list[ClaimCard]:
+        """Apply an attempt audit without erasing narrower verified evidence.
+
+        An incomplete or otherwise failed proof attempt does not refute every
+        independently audited lemma produced along that route. A child Claim is
+        rejected only when the report explicitly identifies that Claim (or one
+        of its proof steps), or when problem integrity itself failed. Untargeted
+        candidate Claims become uncertain; already verified Claims keep their
+        narrower checkpoint verdict.
+        """
+
         changed: list[ClaimCard] = []
+        issue_claim_ids = {
+            issue.claim_id for issue in report.issues if issue.claim_id is not None
+        }
+        issue_step_ids = {
+            issue.step_id for issue in report.issues if issue.step_id is not None
+        }
+        if report.first_error_step is not None:
+            issue_step_ids.add(report.first_error_step)
+        preserved_verified_ids: list[str] = []
+        explicitly_rejected_ids: list[str] = []
+        uncertain_ids: list[str] = []
         for claim in self._claims.values():
             if claim.source_attempt_id != attempt_id:
                 continue
@@ -65,12 +88,42 @@ class LemmaMemory:
                 claim.status = ClaimStatus.VERIFIED
                 claim.verification_confidence = report.confidence
             elif report.verdict == VerificationVerdict.FAIL:
-                claim.status = ClaimStatus.REJECTED
-                claim.verification_confidence = report.confidence
+                claim_step_ids = {step.step_id for step in claim.proof_steps}
+                explicitly_rejected = (
+                    not report.problem_integrity_ok
+                    or claim.claim_id in issue_claim_ids
+                    or bool(claim_step_ids & issue_step_ids)
+                )
+                if explicitly_rejected:
+                    claim.status = ClaimStatus.REJECTED
+                    claim.verification_confidence = report.confidence
+                    explicitly_rejected_ids.append(claim.claim_id)
+                elif claim.status == ClaimStatus.VERIFIED:
+                    preserved_verified_ids.append(claim.claim_id)
+                else:
+                    claim.status = ClaimStatus.UNCERTAIN
+                    claim.verification_confidence = report.confidence
+                    uncertain_ids.append(claim.claim_id)
             else:
-                claim.status = ClaimStatus.UNCERTAIN
-                claim.verification_confidence = report.confidence
+                if claim.status == ClaimStatus.VERIFIED:
+                    preserved_verified_ids.append(claim.claim_id)
+                else:
+                    claim.status = ClaimStatus.UNCERTAIN
+                    claim.verification_confidence = report.confidence
+                    uncertain_ids.append(claim.claim_id)
             changed.append(claim)
+        if preserved_verified_ids or explicitly_rejected_ids or uncertain_ids:
+            self.store.append_event(
+                "attempt_claim_scope_reconciled",
+                {
+                    "attempt_id": attempt_id,
+                    "report_id": report.report_id,
+                    "attempt_verdict": report.verdict.value,
+                    "preserved_verified_claim_ids": preserved_verified_ids,
+                    "explicitly_rejected_claim_ids": explicitly_rejected_ids,
+                    "uncertain_claim_ids": uncertain_ids,
+                },
+            )
         self._downgrade_invalid_dependency_cycles()
         self._persist()
         return changed

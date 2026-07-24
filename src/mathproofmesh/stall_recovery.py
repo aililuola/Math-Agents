@@ -80,7 +80,9 @@ class PostFailureBottleneckExtractor:
     ) -> BottleneckExtractionResult | None:
         cfg = self.config.continuation
         failure_type = classify_no_artifact_failure(error)
+        capacity_reservation_id = self._capacity_reservation_id(error)
         if not cfg.post_failure_bottleneck_enabled or failure_type is None:
+            self.runner.ledger.release_capacity(capacity_reservation_id)
             return None
 
         recovery_key = stable_hash(
@@ -97,6 +99,7 @@ class PostFailureBottleneckExtractor:
 
         reused = self._load_completed(diagnostic_name)
         if reused is not None:
+            self.runner.ledger.release_capacity(capacity_reservation_id)
             self.store.append_event(
                 "post_failure_bottleneck_reused",
                 {
@@ -115,6 +118,7 @@ class PostFailureBottleneckExtractor:
             cfg.post_failure_bottleneck_once_per_checkpoint
             and self.store.has_named_json("structured", attempt_name)
         ):
+            self.runner.ledger.release_capacity(capacity_reservation_id)
             self.store.append_event(
                 "post_failure_bottleneck_duplicate_suppressed",
                 {
@@ -125,14 +129,17 @@ class PostFailureBottleneckExtractor:
             )
             return None
 
-        allocator = SoftBudgetAllocator(self.config, self.runner.ledger)
-        blocked_reason = allocator.spend_block_reason(
-            "depth",
-            1,
-            protect_finish=True,
-            has_candidate=has_candidate,
-        )
+        blocked_reason = None
+        if capacity_reservation_id is None:
+            allocator = SoftBudgetAllocator(self.config, self.runner.ledger)
+            blocked_reason = allocator.spend_block_reason(
+                "depth",
+                1,
+                protect_finish=True,
+                has_candidate=has_candidate,
+            )
         if blocked_reason is not None:
+            self.runner.ledger.release_capacity(capacity_reservation_id)
             self.store.write_json(
                 "structured",
                 attempt_name,
@@ -195,10 +202,11 @@ class PostFailureBottleneckExtractor:
                 "failure_type": failure_type,
             }
         )
+        recovery_output_tokens = self._recovery_output_tokens(error)
         try:
             bundle = self.prompts.post_failure_bottleneck(
                 problem,
-                max_output_tokens=cfg.post_failure_bottleneck_max_output_tokens,
+                max_output_tokens=recovery_output_tokens,
                 strategy=strategy,
                 verified_checkpoint=checkpoint,
                 non_authoritative_working_checkpoint=previous_working_checkpoint,
@@ -207,6 +215,7 @@ class PostFailureBottleneckExtractor:
                     "type": failure_type,
                     "statement": "the provider returned no usable structured artifact",
                     "failure_fingerprint": failure_fingerprint,
+                    "artifact_recovery_tokens": recovery_output_tokens,
                 },
             )
             result = await self.runner.call(
@@ -214,6 +223,7 @@ class PostFailureBottleneckExtractor:
                 bundle,
                 specialty_hints=["failure_diagnosis", *strategy.tags],
                 budget_bucket="depth",
+                capacity_reservation_id=capacity_reservation_id,
             )
             diagnostic = result.value
             diagnostic.diagnostic_id = f"bottleneck_{recovery_key[:12]}"
@@ -286,9 +296,11 @@ class PostFailureBottleneckExtractor:
                 artifact_ref=artifact_ref,
             )
         except (BudgetExhaustedError, ProviderCircuitOpenError) as exc:
+            self.runner.ledger.release_capacity(capacity_reservation_id)
             self._record_failure(attempt_name, checkpoint, route_id, failure_type, exc)
             return None
         except Exception as exc:
+            self.runner.ledger.release_capacity(capacity_reservation_id)
             self._record_failure(attempt_name, checkpoint, route_id, failure_type, exc)
             return None
 
@@ -336,6 +348,28 @@ class PostFailureBottleneckExtractor:
 
     def _artifact_ref(self, subdir: str, name: str) -> str:
         return self.store.ref(self.store.root / subdir / f"{name}.json")
+
+    def _recovery_output_tokens(self, error: Exception) -> int:
+        progress = getattr(error, "progress", None)
+        configured = self.config.continuation.post_failure_bottleneck_max_output_tokens
+        if not isinstance(progress, dict):
+            return configured
+        proposed = progress.get("artifact_recovery_tokens")
+        if proposed is None:
+            return configured
+        try:
+            tokens = int(proposed)
+        except (TypeError, ValueError):
+            return configured
+        return max(512, min(tokens, 32000))
+
+    @staticmethod
+    def _capacity_reservation_id(error: Exception) -> str | None:
+        progress = getattr(error, "progress", None)
+        if not isinstance(progress, dict):
+            return None
+        value = progress.get("capacity_reservation_id")
+        return str(value) if value else None
 
     @staticmethod
     def _diagnostic_context(context: dict[str, Any]) -> dict[str, Any]:

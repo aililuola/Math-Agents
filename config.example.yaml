@@ -88,6 +88,11 @@ budget:
   synthesis_share: 0.10
 
 scheduler:
+  hard_stagnation_enabled: true
+  max_normal_attempts_per_signature: 1
+  max_repair_attempts_per_signature: 1
+  global_no_progress_rounds_before_meta_pivot: 2
+  global_no_progress_rounds_before_stop: 3
   # The scheduler is generic: change these values for different problems and budgets.
   max_actions_per_round: 2
   widen_paths_per_action: 2
@@ -130,6 +135,11 @@ topology:
   max_context_chars: 90000
   max_verified_claims_per_context: 24
   preserve_raw_evidence: true
+  inspiration:
+    # Active candidate assignment scans all enabled agents with these roles.
+    # Add or remove API-backed agents freely; no key count is hard-coded.
+    proposer_generalist_roles: [explorer, route_prover]
+    max_single_agent_proposals_per_task: 2
 
 verification:
   structural_first: true
@@ -151,7 +161,7 @@ continuation:
   max_new_steps_per_call: 3
   max_new_claims_per_call: 3
   max_output_tokens_per_segment: 12000
-  segments_per_explore_call: 1
+  segments_per_explore_call: 2
   max_segments_per_path: 12
   verify_each_delta: true
   delta_verifier_replicas: 1
@@ -170,12 +180,13 @@ deep_exploration_policy:
   # Route IDs or broad domains never define duplicates. Admission uses the
   # verified checkpoint, target obligation, mechanism, representation,
   # construction, invariant, transformations, and assumptions.
+  # Normal routes start at high_tier_threshold_tokens (96K below). The lower
+  # tier remains available only for bounded repair of a repeated signature.
   enabled: true
   tiers:
-    - {output_tokens: 32000, no_content_timeout_seconds: 480, wall_timeout_seconds: 720, answer_reserve_tokens: 8000}
-    - {output_tokens: 64000, no_content_timeout_seconds: 720, wall_timeout_seconds: 1080, answer_reserve_tokens: 8000}
-    - {output_tokens: 96000, no_content_timeout_seconds: 1080, wall_timeout_seconds: 1500, answer_reserve_tokens: 12000}
-    - {output_tokens: 128000, no_content_timeout_seconds: 1500, wall_timeout_seconds: 1920, answer_reserve_tokens: 16000}
+    - {output_tokens: 64000, artifact_recovery_tokens: 8000}
+    - {output_tokens: 96000, artifact_recovery_tokens: 12000}
+    - {output_tokens: 128000, artifact_recovery_tokens: 16000}
   high_tier_threshold_tokens: 96000
   partial_repair_max_output_tokens: 64000
   max_partial_repairs_per_signature: 1
@@ -201,10 +212,20 @@ computation:
   typed_tools_enabled: true
   sandboxed_python_enabled: false
   execute_planner_hints_immediately: false
+  # Require exact typed checks before explicit computed values can become premises.
+  critical_calculation_gate_enabled: true
+  critical_calculation_require_declarations: true
+  critical_calculation_max_checks_per_artifact: 8
   targeted_falsification_fast_path: true
+  # Low-cost exact typed probes may run before route stagnation. Their results
+  # remain bounded evidence and cannot certify an infinite pattern.
+  bounded_typed_probe_fast_path: true
+  bounded_typed_probe_max_cases: 25000
   soft_experiments_per_path: 2
   hard_experiments_per_path: 6
   max_compute_cycles_per_segment: 1
+  max_contract_repairs_per_segment: 1
+  contract_repair_max_output_tokens: 8192
   max_total_cpu_seconds: 120
   max_cases_per_experiment: 1000000
   max_output_chars: 20000
@@ -229,5 +250,33 @@ runtime:
   activity_persist: true
   activity_include_agent_calls: true
   activity_heartbeat_seconds: 20
+  # Active SSE data may continue until the token limit. Five idle minutes means
+  # the transport stalled; two hours is only an emergency whole-call ceiling.
+  stream_first_chunk_timeout_seconds: 90
+  stream_idle_timeout_seconds: 300
+  agent_call_wall_timeout_seconds: 7200
+  stage_thinking_modes:
+    goal_normalization: disabled
+    triage: disabled
+    claim_extraction: disabled
+    post_failure_bottleneck: disabled
+    computation_contract_repair: disabled
+    pattern_conjecture_completion: disabled
+    strategy_generation: high
+    independent_exploration: tiered
+    proof_continuation: tiered
+    route_prove: tiered
+    structural_verification: high
+    checkpoint_verification: high
+    detailed_verification: high
+    final_verification: high
+    blind_structural_verification: high
+    blind_detailed_verification: high
+    meta_review: high
+    route_skeptic: high
+    route_referee: high
+    route_tool_audit: high
+    synthesis: high
+    final_revision: high
   log_level: INFO
   random_seed: 20260719

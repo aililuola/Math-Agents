@@ -4,6 +4,11 @@ from collections import defaultdict, deque
 from typing import Any, Iterable
 
 from ..config import SchedulerConfig, SystemConfig
+from ..proof_identity import (
+    canonical_obligation_statement,
+    is_feedback_only_statement,
+    normalize_text,
+)
 from ..schemas import (
     ClaimStatus,
     EvidenceType,
@@ -33,6 +38,8 @@ class ProofGraphStore:
         self.store = store
         self.problem_hash = problem_hash
         self._obligations: dict[str, ProofObligation] = {}
+        self._obligation_content_index: dict[str, list[str]] = {}
+        self._obligation_aliases: dict[str, str] = {}
         self._claim_nodes: dict[str, MessageEnvelope] = {}
         self._edges: dict[str, ProofGraphEdge] = {}
         self._frozen = False
@@ -74,6 +81,33 @@ class ProofGraphStore:
             if "problem_hash" not in fields:
                 fields["problem_hash"] = self.problem_hash
             obligation = ProofObligation.model_validate(fields)
+        canonical_statement = canonical_obligation_statement(
+            obligation.normalized_statement or obligation.statement
+        )
+        if not canonical_statement:
+            raise ValueError("obligation statement is empty after canonicalization")
+        normalized_assumptions = sorted(
+            {
+                normalize_text(item)
+                for item in obligation.assumptions
+                if normalize_text(item)
+            }
+        )
+        if (
+            obligation.statement != canonical_statement
+            or obligation.normalized_statement != canonical_statement
+            or obligation.assumptions != normalized_assumptions
+        ):
+            payload = obligation.model_dump(mode="python")
+            payload.update(
+                {
+                    "statement": canonical_statement,
+                    "normalized_statement": canonical_statement,
+                    "assumptions": normalized_assumptions,
+                    "content_hash": "",
+                }
+            )
+            obligation = ProofObligation.model_validate(payload)
         if self.problem_hash and obligation.problem_hash != self.problem_hash:
             raise ValueError("obligation problem_hash mismatch")
         if not self.problem_hash:
@@ -83,10 +117,75 @@ class ProofGraphStore:
             if existing.content_hash != obligation.content_hash:
                 raise ValueError("obligation ID collision")
             return existing
+        obligation_routes = set(obligation.route_ids)
+        canonical_id = next(
+            (
+                candidate_id
+                for candidate_id in self._obligation_content_index.get(
+                    obligation.content_hash, []
+                )
+                if obligation_routes & set(self._obligations[candidate_id].route_ids)
+            ),
+            None,
+        )
+        if canonical_id is not None:
+            canonical = self._obligations[canonical_id]
+            canonical.route_ids = list(
+                dict.fromkeys([*canonical.route_ids, *obligation.route_ids])
+            )
+            canonical.dependency_ids = list(
+                dict.fromkeys(
+                    [
+                        *canonical.dependency_ids,
+                        *(
+                            self._obligation_aliases.get(item, item)
+                            for item in obligation.dependency_ids
+                        ),
+                    ]
+                )
+            )
+            canonical.evidence_message_ids = list(
+                dict.fromkeys(
+                    [
+                        *canonical.evidence_message_ids,
+                        *obligation.evidence_message_ids,
+                    ]
+                )
+            )
+            canonical.priority = max(canonical.priority, obligation.priority)
+            canonical.centrality = max(canonical.centrality, obligation.centrality)
+            canonical.first_error_fingerprint = (
+                canonical.first_error_fingerprint or obligation.first_error_fingerprint
+            )
+            status_order = {
+                "open": 0,
+                "tentative": 1,
+                "blocked": 2,
+                "closed": 3,
+                "refuted": 4,
+            }
+            merged_status = max(
+                (canonical.status, obligation.status),
+                key=lambda item: status_order[item],
+            )
+            canonical.status = merged_status
+            self._obligation_aliases[obligation.obligation_id] = canonical_id
+            self._record(
+                "obligation_duplicate_collapsed",
+                {
+                    "duplicate_obligation_id": obligation.obligation_id,
+                    "canonical_obligation_id": canonical_id,
+                    "content_hash": obligation.content_hash,
+                },
+            )
+            return canonical
         max_nodes, _ = self._limits()
         if len(self._obligations) + len(self._claim_nodes) >= max_nodes:
             raise RuntimeError("proof graph node limit reached")
         self._obligations[obligation.obligation_id] = obligation
+        self._obligation_content_index.setdefault(obligation.content_hash, []).append(
+            obligation.obligation_id
+        )
         self._record("obligation_opened", obligation)
         for dependency_id in obligation.dependency_ids:
             if dependency_id in self._obligations or dependency_id in self._claim_nodes:
@@ -122,6 +221,12 @@ class ProofGraphStore:
     ) -> ProofGraphEdge:
         self._ensure_mutable()
         edge = edge or ProofGraphEdge.model_validate(fields)
+        source_id = self._obligation_aliases.get(edge.source_id, edge.source_id)
+        target_id = self._obligation_aliases.get(edge.target_id, edge.target_id)
+        if source_id != edge.source_id or target_id != edge.target_id:
+            edge = edge.model_copy(
+                update={"source_id": source_id, "target_id": target_id}
+            )
         if edge.source_id == edge.target_id:
             raise ValueError("self edges are not permitted")
         valid_nodes = set(self._obligations) | set(self._claim_nodes)
@@ -175,6 +280,7 @@ class ProofGraphStore:
         confidence: float = 1.0,
     ) -> ProofObligation:
         self._ensure_mutable()
+        obligation_id = self._obligation_aliases.get(obligation_id, obligation_id)
         obligation = self._obligations[obligation_id]
         threshold = (
             self.config.topology.proof_graph.close_obligation_threshold
@@ -211,6 +317,7 @@ class ProofGraphStore:
         self, obligation_id: str, *, evidence_message_id: str | None = None
     ) -> ProofObligation:
         self._ensure_mutable()
+        obligation_id = self._obligation_aliases.get(obligation_id, obligation_id)
         obligation = self._obligations[obligation_id]
         obligation.status = "refuted"
         if evidence_message_id:
@@ -225,6 +332,7 @@ class ProofGraphStore:
 
     def reopen_obligation(self, obligation_id: str) -> ProofObligation:
         self._ensure_mutable()
+        obligation_id = self._obligation_aliases.get(obligation_id, obligation_id)
         obligation = self._obligations[obligation_id]
         obligation.status = "open"
         obligation.evidence_message_ids = []
@@ -232,6 +340,7 @@ class ProofGraphStore:
         return obligation
 
     def get_obligation(self, obligation_id: str) -> ProofObligation:
+        obligation_id = self._obligation_aliases.get(obligation_id, obligation_id)
         return self._obligations[obligation_id]
 
     def record_event(self, event_type: str, payload: Any) -> None:
@@ -269,6 +378,7 @@ class ProofGraphStore:
         ]
 
     def find_dependents(self, node_id: str) -> list[ProofObligation]:
+        node_id = self._obligation_aliases.get(node_id, node_id)
         dependent_ids = {
             edge.source_id
             for edge in self._edges.values()
@@ -372,8 +482,10 @@ class ProofGraphStore:
                         )
                     ),
                     kind=kind,
-                    statement=message.statement,
-                    normalized_statement=message.normalized_statement,
+                    statement=canonical_obligation_statement(message.statement),
+                    normalized_statement=canonical_obligation_statement(
+                        message.normalized_statement
+                    ),
                     assumptions=message.assumptions,
                     quantifiers=message.quantifiers,
                     dependency_ids=message.dependencies,
@@ -439,6 +551,7 @@ class ProofGraphStore:
                 key: value.model_dump(mode="json") for key, value in self._edges.items()
             },
             "events": list(self._events),
+            "obligation_aliases": dict(self._obligation_aliases),
         }
 
     @classmethod
@@ -449,25 +562,70 @@ class ProofGraphStore:
         config: SystemConfig | None = None,
         store: ArtifactStore | None = None,
     ) -> "ProofGraphStore":
-        graph = cls(config, store, problem_hash=str(state.get("problem_hash", "")))
-        graph._obligations = {
-            str(key): ProofObligation.model_validate(value)
-            for key, value in dict(state.get("obligations", {})).items()
-        }
+        graph = cls(config, None, problem_hash=str(state.get("problem_hash", "")))
+        skipped_feedback_ids: list[str] = []
+        for key, value in dict(state.get("obligations", {})).items():
+            payload = dict(value)
+            payload["obligation_id"] = str(key)
+            obligation = ProofObligation.model_validate(payload)
+            if is_feedback_only_statement(obligation.statement):
+                skipped_feedback_ids.append(str(key))
+                continue
+            graph.add_obligation(obligation)
         graph._claim_nodes = {
             str(key): MessageEnvelope.model_validate(value)
             for key, value in dict(state.get("claim_nodes", {})).items()
         }
-        graph._edges = {
-            str(key): ProofGraphEdge.model_validate(value)
-            for key, value in dict(state.get("edges", {})).items()
+        persisted_aliases = {
+            str(key): str(value)
+            for key, value in dict(state.get("obligation_aliases", {})).items()
         }
+        for alias, target in persisted_aliases.items():
+            resolved = graph._obligation_aliases.get(target, target)
+            if resolved in graph._obligations:
+                graph._obligation_aliases[alias] = resolved
+        graph._edges = {}
+        valid_nodes = set(graph._obligations) | set(graph._claim_nodes)
+        edge_keys: set[tuple[str, str, GraphEdgeType, str | None]] = set()
+        for key, value in dict(state.get("edges", {})).items():
+            edge = ProofGraphEdge.model_validate(value)
+            source_id = graph._obligation_aliases.get(edge.source_id, edge.source_id)
+            target_id = graph._obligation_aliases.get(edge.target_id, edge.target_id)
+            if (
+                source_id == target_id
+                or source_id not in valid_nodes
+                or target_id not in valid_nodes
+            ):
+                continue
+            edge_key = (
+                source_id,
+                target_id,
+                edge.edge_type,
+                edge.evidence_message_id,
+            )
+            if edge_key in edge_keys:
+                continue
+            edge_keys.add(edge_key)
+            graph._edges[str(key)] = edge.model_copy(
+                update={"source_id": source_id, "target_id": target_id}
+            )
         graph._events = [dict(item) for item in state.get("events", [])]
+        if skipped_feedback_ids:
+            graph._events.append(
+                {
+                    "event_type": "feedback_only_obligations_removed_on_resume",
+                    "payload": {
+                        "count": len(skipped_feedback_ids),
+                        "obligation_ids": skipped_feedback_ids[:200],
+                    },
+                }
+            )
         graph._frozen = bool(state.get("frozen", False))
+        graph.store = store
         return graph
 
     def minimal_subgraph(self, obligation_ids: Iterable[str]) -> dict[str, Any]:
-        selected = set(obligation_ids)
+        selected = {self._obligation_aliases.get(item, item) for item in obligation_ids}
         for item_id in list(selected):
             selected.update(
                 edge.target_id

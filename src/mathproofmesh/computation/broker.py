@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -22,6 +23,7 @@ from ..schemas import (
     ComputationDecisionStatus,
     ComputationMethod,
     ComputationPlan,
+    DeferredExperimentRequest,
     EvidenceRef,
     EvidenceStrength,
     ExperimentOutcome,
@@ -31,9 +33,14 @@ from ..schemas import (
     ToolRequest,
     ToolResult,
     stable_hash,
+    utc_now_iso,
 )
 from ..store import ArtifactStore
 from .cache import ComputationLedger, ExperimentCache
+from .contracts import (
+    computation_contract_mode,
+    normalize_exploratory_contract,
+)
 from .handlers.base import HandlerEvidence
 from .handlers.geometry import run_exact_geometry
 from .handlers.graph import run_graph_certificate
@@ -52,7 +59,7 @@ from .handlers.symbolic import (
     sympy_simplify_payload,
 )
 from .policy import ComputationContext, ComputationGate
-from .sandbox import run_sandboxed_python
+from .sandbox import SandboxExecutionError, run_sandboxed_python
 
 
 TOOL_VERSION = "mathproofmesh-computation/0.7.0"
@@ -73,6 +80,11 @@ class ComputationBroker:
         self.cache = ExperimentCache(store)
         self.ledger = ComputationLedger(store)
         self.gate = ComputationGate(config, self.cache, self.ledger)
+        self._deferred_lock = threading.RLock()
+        self._deferred_requests: dict[str, DeferredExperimentRequest] = {}
+        self._activity_identity_lock = threading.RLock()
+        self._activity_identity_by_execution: dict[str, str] = {}
+        self._load_deferred_requests()
 
     @property
     def results(self) -> list[ExperimentResult]:
@@ -93,11 +105,218 @@ class ComputationBroker:
             results.append(ExperimentResult.model_validate(payload))
         return results
 
+    def _load_deferred_requests(self) -> None:
+        if not self.store.has_named_json("experiments", "deferred_queue"):
+            return
+        payload = self.store.read_named_json("experiments", "deferred_queue")
+        for item in payload.get("requests", []):
+            request = DeferredExperimentRequest.model_validate(item)
+            self._deferred_requests[request.spec.request_hash] = request
+
+    def _persist_deferred_requests(self) -> None:
+        self.store.write_json(
+            "experiments",
+            "deferred_queue",
+            {
+                "requests": [
+                    item.model_dump(mode="json")
+                    for item in sorted(
+                        self._deferred_requests.values(),
+                        key=lambda request: (
+                            request.first_deferred_at,
+                            request.spec.request_hash,
+                        ),
+                    )
+                ]
+            },
+        )
+
+    def deferred_for_path(self, path_id: str) -> list[DeferredExperimentRequest]:
+        with self._deferred_lock:
+            return [
+                item.model_copy(deep=True)
+                for item in self._deferred_requests.values()
+                if item.path_id == path_id
+            ]
+
+    def _enqueue_deferred(
+        self,
+        spec: ExperimentSpec,
+        decision: ComputationDecision,
+    ) -> None:
+        path_id = spec.path_id or ""
+        with self._deferred_lock:
+            existing = self._deferred_requests.get(spec.request_hash)
+            if existing is None:
+                request = DeferredExperimentRequest(
+                    path_id=path_id,
+                    spec=spec.model_copy(deep=True),
+                    latest_decision=decision.model_copy(deep=True),
+                )
+            else:
+                request = existing.model_copy(
+                    update={
+                        "path_id": path_id,
+                        "spec": spec.model_copy(deep=True),
+                        "latest_decision": decision.model_copy(deep=True),
+                        "defer_count": existing.defer_count + 1,
+                        "last_evaluated_at": utc_now_iso(),
+                    },
+                    deep=True,
+                )
+            self._deferred_requests[spec.request_hash] = request
+            self._persist_deferred_requests()
+        self.store.append_event(
+            "computation_deferred_queued",
+            {
+                "path_id": path_id,
+                "experiment_id": spec.experiment_id,
+                "request_hash": spec.request_hash,
+                "rule_id": decision.rule_id,
+                "defer_count": request.defer_count,
+            },
+        )
+
+    def resolve_deferred(self, request_hash: str, *, reason: str) -> None:
+        with self._deferred_lock:
+            request = self._deferred_requests.pop(request_hash, None)
+            if request is None:
+                return
+            self._persist_deferred_requests()
+        self.store.append_event(
+            "computation_deferred_resolved",
+            {
+                "path_id": request.path_id,
+                "experiment_id": request.spec.experiment_id,
+                "request_hash": request_hash,
+                "reason": reason,
+                "defer_count": request.defer_count,
+            },
+        )
+
+    def activity_task_id(self, spec: ExperimentSpec) -> str:
+        """Return the stable timeline/topology identity for one experiment."""
+
+        with self._activity_identity_lock:
+            existing = self._activity_identity_by_execution.get(spec.execution_hash)
+            if existing is not None:
+                return existing
+            experiment_id = spec.experiment_id
+            canonical_request_hash = self.cache.canonical_request_hash(spec)
+            if canonical_request_hash is not None:
+                try:
+                    experiment_id = self.cache.load_spec(
+                        canonical_request_hash
+                    ).experiment_id
+                except (FileNotFoundError, OSError, ValueError):
+                    pass
+            task_id = f"computation:{experiment_id}"
+            self._activity_identity_by_execution[spec.execution_hash] = task_id
+            return task_id
+
+    def update_experiment_activity(
+        self,
+        spec: ExperimentSpec,
+        *,
+        phase: str,
+        detail: str,
+        status: ActivityStatus = ActivityStatus.RUNNING,
+        event_type: str = "computation_updated",
+        progress: float | None = None,
+        metrics: dict[str, Any] | None = None,
+    ) -> None:
+        """Update one experiment in place instead of creating timeline duplicates."""
+        if self.activity is None:
+            return
+        payload = self._activity_metrics(spec, phase=phase)
+        payload.update(metrics or {})
+        self.activity.update_task(
+            self.activity_task_id(spec),
+            status=status,
+            event_type=event_type,
+            title=self._activity_title(spec),
+            detail=f"{spec.target_claim} · {detail}",
+            stage="computation",
+            agent_id=spec.requested_by,
+            importance=ActivityImportance.NORMAL,
+            progress=progress,
+            metrics=payload,
+        )
+
+    def _start_experiment_activity(self, spec: ExperimentSpec) -> None:
+        if self.activity is None:
+            return
+        event_type = (
+            "python_experiment"
+            if spec.method == ComputationMethod.SANDBOXED_PYTHON
+            else "computation_experiment"
+        )
+        self.activity.start_task(
+            event_type,
+            task_id=self.activity_task_id(spec),
+            title=self._activity_title(spec),
+            detail=(
+                f"{spec.target_claim} · "
+                + self.activity.text(
+                    "正在检查计算请求与执行策略",
+                    "Checking the computation request and execution policy",
+                )
+            ),
+            stage="computation",
+            agent_id=spec.requested_by,
+            importance=ActivityImportance.NORMAL,
+            metrics=self._activity_metrics(spec, phase="gate"),
+        )
+
+    def _activity_title(self, spec: ExperimentSpec) -> str:
+        if spec.method == ComputationMethod.SANDBOXED_PYTHON:
+            return (
+                self.activity.text("Python 沙箱实验", "Sandboxed Python experiment")
+                if self.activity is not None
+                else "Sandboxed Python experiment"
+            )
+        return (
+            self.activity.text("定向计算实验", "Targeted computation experiment")
+            if self.activity is not None
+            else "Targeted computation experiment"
+        )
+
+    @staticmethod
+    def _activity_metrics(spec: ExperimentSpec, *, phase: str) -> dict[str, Any]:
+        return {
+            "experiment_id": spec.experiment_id,
+            "request_hash": spec.request_hash,
+            "execution_hash": spec.execution_hash,
+            "contract_mode": computation_contract_mode(spec),
+            "method": spec.method.value,
+            "path_id": spec.path_id,
+            "checkpoint_id": spec.parent_checkpoint_id,
+            "phase": phase,
+        }
+
     def decide(
         self, spec: ExperimentSpec, context: ComputationContext
     ) -> ComputationDecision:
         if spec.path_id is None:
             spec.path_id = context.path_id
+        normalized_to_discovery = (
+            not context.mandatory_calculation_gate
+            and normalize_exploratory_contract(spec)
+        )
+        if normalized_to_discovery:
+            self.store.append_event(
+                "computation_contract_mode_normalized",
+                {
+                    "experiment_id": spec.experiment_id,
+                    "path_id": spec.path_id,
+                    "method": spec.method.value,
+                    "contract_mode": "discovery",
+                    "reason": (
+                        "No claimed_values assertion was supplied; the request was "
+                        "safely downgraded to scoped discovery evidence."
+                    ),
+                },
+            )
         tool_name, tool_version = self._tool_identity(spec.method)
         spec.bind_runtime_fingerprint(
             {
@@ -114,7 +333,9 @@ class ComputationBroker:
                 "seed": spec.seed,
             }
         )
+        self._start_experiment_activity(spec)
         completed_request = self.cache.has_result(spec.request_hash)
+        self.cache.register_aliases(spec.request_hash, spec.experiment_id)
         if not completed_request:
             self.cache.save_spec(spec)
         decision = self.gate.decide(spec, context)
@@ -127,26 +348,40 @@ class ComputationBroker:
             )
             self.store.append_event("computation_plan_created", plan)
         self.store.append_event("computation_decision", decision)
-        if self.activity is not None:
-            status = (
-                ActivityStatus.INFO
-                if decision.decision == ComputationDecisionStatus.ALLOW
-                else ActivityStatus.WARNING
+        if decision.decision == ComputationDecisionStatus.DEFER:
+            self._enqueue_deferred(spec, decision)
+        elif decision.decision == ComputationDecisionStatus.REJECT:
+            self.resolve_deferred(
+                spec.request_hash,
+                reason=f"terminal gate decision: {decision.rule_id}",
             )
-            self.activity.emit(
-                "computation_decision",
-                status=status,
-                title=self.activity.text(
-                    "计算请求已完成门控", "Computation request gated"
-                ),
+        if decision.decision == ComputationDecisionStatus.ALLOW:
+            self.update_experiment_activity(
+                spec,
+                phase="cache" if decision.cache_hit else "admitted",
                 detail=decision.reason,
-                stage="computation_gate",
-                agent_id=spec.requested_by,
-                importance=ActivityImportance.NORMAL,
+                event_type="computation_admitted",
+                progress=0.2,
                 metrics={
-                    "request_hash": spec.request_hash,
                     "decision": decision.decision.value,
+                    "decision_reason": decision.reason,
                     "rule_id": decision.rule_id,
+                    "cache_hit": decision.cache_hit,
+                },
+            )
+        else:
+            self.update_experiment_activity(
+                spec,
+                phase=decision.decision.value,
+                detail=decision.reason,
+                status=ActivityStatus.WARNING,
+                event_type="computation_not_executed",
+                progress=1.0,
+                metrics={
+                    "decision": decision.decision.value,
+                    "decision_reason": decision.reason,
+                    "rule_id": decision.rule_id,
+                    "cache_hit": decision.cache_hit,
                 },
             )
         return decision
@@ -159,6 +394,50 @@ class ComputationBroker:
         program: ExperimentProgram | None = None,
         use_cache: bool = True,
         persist: bool = True,
+        track_activity: bool = True,
+    ) -> ExperimentResult:
+        try:
+            result = self._run_experiment(
+                spec,
+                decision,
+                program=program,
+                use_cache=use_cache,
+                persist=persist,
+                track_activity=track_activity,
+            )
+            self.resolve_deferred(
+                spec.request_hash,
+                reason="experiment completed",
+            )
+            return result
+        except Exception as exc:
+            if track_activity:
+                self.update_experiment_activity(
+                    spec,
+                    phase="failed",
+                    detail=f"{type(exc).__name__}: {exc}",
+                    status=ActivityStatus.FAILED,
+                    event_type="computation_failed",
+                    progress=1.0,
+                    metrics={
+                        "decision": decision.decision.value,
+                        "decision_reason": decision.reason,
+                        "rule_id": decision.rule_id,
+                        "cache_hit": decision.cache_hit,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                )
+            raise
+
+    def _run_experiment(
+        self,
+        spec: ExperimentSpec,
+        decision: ComputationDecision,
+        *,
+        program: ExperimentProgram | None = None,
+        use_cache: bool = True,
+        persist: bool = True,
+        track_activity: bool = True,
     ) -> ExperimentResult:
         if decision.decision != ComputationDecisionStatus.ALLOW:
             raise RuntimeError(
@@ -172,8 +451,14 @@ class ComputationBroker:
                 "computation decision does not match its experiment specification"
             )
         if use_cache and self.config.computation.cache_results:
-            cached = self.cache.get(spec.request_hash)
+            cache_request_hash = decision.canonical_request_hash or spec.request_hash
+            cached = self.cache.get(cache_request_hash)
             if cached is not None:
+                self.cache.register_aliases(
+                    cached.request_hash,
+                    spec.request_hash,
+                    spec.experiment_id,
+                )
                 payload = cached.model_dump(mode="json")
                 payload.update(
                     {
@@ -187,11 +472,34 @@ class ComputationBroker:
                 self.ledger.record_cache_use(spec.path_id or "unassigned", reused)
                 certificate = ComputationCertificate.from_result(reused)
                 self.store.write_experiment_artifact(
-                    spec.request_hash,
+                    reused.request_hash,
                     "computation_certificate.json",
                     certificate,
                 )
                 self.store.append_event("experiment_cache_hit", reused)
+                if track_activity:
+                    self.update_experiment_activity(
+                        spec,
+                        phase="completed",
+                        detail=(
+                            f"{reused.outcome.value}; "
+                            f"evidence={reused.evidence_strength.value}; cache hit"
+                        ),
+                        status=ActivityStatus.COMPLETED,
+                        event_type="computation_completed",
+                        progress=1.0,
+                        metrics={
+                            "decision": decision.decision.value,
+                            "decision_reason": decision.reason,
+                            "rule_id": decision.rule_id,
+                            "cache_hit": True,
+                            "outcome": reused.outcome.value,
+                            "evidence_strength": reused.evidence_strength.value,
+                            "cases_checked": reused.cases_checked,
+                            "runtime_seconds": round(reused.runtime_seconds, 6),
+                            "result_hash": reused.result_hash,
+                        },
+                    )
                 return reused
         if program is not None:
             if program.experiment_id != spec.experiment_id:
@@ -201,10 +509,40 @@ class ComputationBroker:
             if persist:
                 self.cache.save_program(spec.request_hash, program)
 
+        if track_activity:
+            self.update_experiment_activity(
+                spec,
+                phase="executing",
+                detail=(
+                    self.activity.text(
+                        "正在隔离沙箱中执行 Python 程序",
+                        "Running the Python program in the isolated sandbox",
+                    )
+                    if self.activity is not None
+                    and spec.method == ComputationMethod.SANDBOXED_PYTHON
+                    else "Executing admitted computation"
+                ),
+                event_type="computation_executing",
+                progress=0.55,
+                metrics={
+                    "decision": decision.decision.value,
+                    "decision_reason": decision.reason,
+                    "rule_id": decision.rule_id,
+                    "cache_hit": False,
+                    "program_hash": self._program_identity(program),
+                },
+            )
         started = time.perf_counter()
         error: str | None = None
+        process_record: dict[str, Any] | None = None
         try:
             evidence = self._dispatch(spec, program)
+            if spec.method == ComputationMethod.SANDBOXED_PYTHON:
+                process_record = {
+                    "exit_code": evidence.process_exit_code,
+                    "stdout": evidence.process_stdout,
+                    "stderr": evidence.process_stderr,
+                }
             if (
                 evidence.outcome == ExperimentOutcome.COUNTEREXAMPLE_FOUND
                 and evidence.independently_verified
@@ -237,6 +575,20 @@ class ComputationBroker:
                     "The candidate was not accepted because no typed checker independently reproduced it."
                 )
             self._enforce_output_limit(evidence)
+        except SandboxExecutionError as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            process_record = {
+                "exit_code": exc.exit_code,
+                "stdout": exc.stdout,
+                "stderr": exc.stderr,
+            }
+            evidence = HandlerEvidence(
+                outcome=ExperimentOutcome.INCONCLUSIVE,
+                evidence_strength=EvidenceStrength.HEURISTIC,
+                verification_notes=[
+                    "Sandbox failure is inconclusive and is not a mathematical refutation."
+                ],
+            )
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             evidence = HandlerEvidence(
@@ -278,6 +630,7 @@ class ComputationBroker:
                     if evidence.raw_output is not None
                     else self._handler_evidence_payload(evidence)
                 ),
+                "process": process_record,
                 "accepted_result": result.model_dump(
                     mode="json",
                     exclude={
@@ -342,33 +695,51 @@ class ComputationBroker:
             path_id = spec.path_id or "unassigned"
             self.ledger.record_result(path_id, result)
             self.store.append_event("experiment_completed", result)
-            if self.activity is not None:
-                status = (
-                    ActivityStatus.FAILED
-                    if result.outcome == ExperimentOutcome.COUNTEREXAMPLE_FOUND
-                    else ActivityStatus.WARNING
-                    if result.outcome
-                    in {ExperimentOutcome.ERROR, ExperimentOutcome.INCONCLUSIVE}
-                    else ActivityStatus.COMPLETED
-                )
-                self.activity.emit(
-                    "experiment_completed",
-                    status=status,
-                    title=self.activity.text(
-                        "定向计算已完成", "Targeted computation completed"
+        if track_activity:
+            status = (
+                ActivityStatus.FAILED
+                if error is not None
+                else ActivityStatus.WARNING
+                if result.outcome
+                in {
+                    ExperimentOutcome.COUNTEREXAMPLE_FOUND,
+                    ExperimentOutcome.ERROR,
+                    ExperimentOutcome.INCONCLUSIVE,
+                }
+                else ActivityStatus.COMPLETED
+            )
+            self.update_experiment_activity(
+                spec,
+                phase="failed" if error is not None else "completed",
+                detail=(
+                    f"{result.outcome.value}; evidence={result.evidence_strength.value}"
+                ),
+                status=status,
+                event_type=(
+                    "computation_failed"
+                    if error is not None
+                    else "computation_completed"
+                ),
+                progress=1.0,
+                metrics={
+                    "decision": decision.decision.value,
+                    "decision_reason": decision.reason,
+                    "rule_id": decision.rule_id,
+                    "cache_hit": False,
+                    "outcome": result.outcome.value,
+                    "evidence_strength": result.evidence_strength.value,
+                    "cases_checked": result.cases_checked,
+                    "runtime_seconds": round(result.runtime_seconds, 6),
+                    "error": result.error,
+                    "program_hash": result.program_hash,
+                    "result_hash": result.result_hash,
+                    "process_exit_code": (
+                        process_record.get("exit_code")
+                        if process_record is not None
+                        else None
                     ),
-                    detail=(
-                        f"{result.outcome.value}; evidence={result.evidence_strength.value}"
-                    ),
-                    stage="computation",
-                    agent_id=spec.requested_by,
-                    importance=ActivityImportance.NORMAL,
-                    metrics={
-                        "request_hash": result.request_hash,
-                        "cases_checked": result.cases_checked,
-                        "runtime_seconds": round(result.runtime_seconds, 6),
-                    },
-                )
+                },
+            )
         return result
 
     def _enforce_output_limit(self, evidence: HandlerEvidence) -> None:
@@ -470,6 +841,7 @@ class ComputationBroker:
             program=program,
             use_cache=False,
             persist=False,
+            track_activity=False,
         )
         return actual.result_hash == expected.result_hash, actual
 
@@ -686,7 +1058,7 @@ class ComputationBroker:
             python_version = ".".join(str(item) for item in sys.version_info[:3])
             return (
                 method.value,
-                f"python-stdlib/{python_version};sequence-v1;{TOOL_VERSION}",
+                f"python-stdlib/{python_version};sequence-v2;{TOOL_VERSION}",
             )
         if method.value.startswith("sympy") or method in {
             ComputationMethod.POLYNOMIAL_FACTOR,
@@ -765,6 +1137,9 @@ class ComputationBroker:
                 payload = self._lean_check(request.arguments)
             else:
                 method = ComputationMethod(request.kind)
+                arguments = dict(request.arguments)
+                legacy_domains = arguments.pop("domains", {})
+                legacy_max_cases = arguments.pop("max_cases", request.max_cases)
                 spec = ExperimentSpec(
                     purpose="falsify_claim",
                     target_claim=request.purpose,
@@ -775,11 +1150,11 @@ class ComputationBroker:
                     decision_if_refuted="Fail the affected inference after independent rechecking.",
                     noncomputational_alternative="Manual recomputation remains available to the reviewer.",
                     method=method,
-                    domains=request.arguments.get("domains", {}),
-                    arguments=request.arguments,
+                    domains=request.domains or legacy_domains,
+                    arguments=arguments,
                     exact_arithmetic=method != ComputationMethod.NUMERIC_COUNTEREXAMPLE,
                     max_cases=min(
-                        int(request.arguments.get("max_cases", 100_000)),
+                        int(legacy_max_cases),
                         self.config.computation.max_cases_per_experiment,
                     ),
                     seed=self.config.runtime.random_seed,

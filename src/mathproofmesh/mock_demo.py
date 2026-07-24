@@ -324,6 +324,16 @@ def demo_responder(
             },
             "dependencies": [],
         }
+    if schema_name == "ComputationContractRepair":
+        return {
+            "action": "abandon_as_unrepresentable",
+            "repaired_spec": None,
+            "reason": (
+                "The mock provider does not synthesize executable computation "
+                "contract repairs."
+            ),
+            "semantic_equivalence": None,
+        }
     if schema_name == "RepresentationCandidate":
         obligation_ids = re.findall(r'"obligation_id"\s*:\s*"([^"]+)"', text)
         target = obligation_ids[0] if obligation_ids else "obl_mock"

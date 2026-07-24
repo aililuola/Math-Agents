@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 from ..config import InspirationConfig
@@ -21,13 +22,31 @@ def _normalized(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
+def _symbolic_anchors(value: str) -> set[str]:
+    math_fragments = " ".join(re.findall(r"\$([^$]+)\$", value))
+    math_fragments = re.sub(r"\\[A-Za-z]+", " ", math_fragments)
+    anchors = {
+        token.casefold()
+        for token in re.findall(r"\b[A-Za-z][A-Za-z0-9_]*\b", math_fragments)
+    }
+    anchors.update(
+        token.casefold()
+        for token in re.findall(r"\b[A-Za-z]\b", value)
+        if token.casefold() not in {"a", "i"}
+    )
+    return anchors
+
+
 class ReverseGoalAnalyzer:
-    """Maintain forward and backward frontiers and expose their smallest gap."""
+    """Maintain frontiers without inventing implication edges from similarity."""
 
     def __init__(self, config: InspirationConfig | None = None) -> None:
         self.max_forward = config.frontier_max_forward_claims if config else 8
         self.max_backward = config.frontier_max_backward_claims if config else 8
         self.max_bridges = config.frontier_max_bridge_candidates if config else 3
+        self.min_candidate_overlap = (
+            config.frontier_min_candidate_overlap if config else 0.35
+        )
 
     def analyze(
         self,
@@ -44,9 +63,9 @@ class ReverseGoalAnalyzer:
         backward = self._backward_frontier(obligation, proposed_backward_claims)
         bridges, supported = self._meet_frontiers(forward, backward)
         if not bridges:
-            assumption = forward[0]
+            source = forward[0]
             target = backward[0]
-            bridges = [self._bridge(assumption, target, 0.0)]
+            bridges = [self._bridge(source, target, 0.0, use_candidate=False)]
         gaps = [item.missing_implication for item in bridges]
         requests = [
             (
@@ -168,6 +187,8 @@ class ReverseGoalAnalyzer:
                     statement=statement,
                     source_ref=fact.message_id,
                     assumptions=list(fact.assumptions),
+                    quantifiers=list(fact.quantifiers),
+                    scope_limitations=list(fact.scope_limitations),
                     supported=True,
                 )
             )
@@ -187,18 +208,31 @@ class ReverseGoalAnalyzer:
                     supported=True,
                 )
             )
-        if not claims:
-            statement = (
-                " and ".join(obligation.assumptions)
-                if obligation.assumptions
-                else "the original hypotheses"
-            )
+        statement = (
+            " and ".join(obligation.assumptions)
+            if obligation.assumptions
+            else "the original hypotheses"
+        )
+        normalized_scope = _normalized(statement)
+        if len(claims) < self.max_forward and normalized_scope not in seen:
             claims.append(
                 FrontierClaim(
-                    frontier_id=f"frontier_assumptions_{obligation.obligation_id}",
+                    frontier_id=f"frontier_scope_{obligation.obligation_id}",
                     direction="forward",
                     statement=statement,
                     assumptions=list(obligation.assumptions),
+                    quantifiers=list(obligation.quantifiers),
+                    supported=True,
+                )
+            )
+        if not claims:
+            claims.append(
+                FrontierClaim(
+                    frontier_id=f"frontier_scope_{obligation.obligation_id}",
+                    direction="forward",
+                    statement=statement,
+                    assumptions=list(obligation.assumptions),
+                    quantifiers=list(obligation.quantifiers),
                     supported=True,
                 )
             )
@@ -233,6 +267,7 @@ class ReverseGoalAnalyzer:
                 statement=statement,
                 source_ref=obligation.obligation_id,
                 assumptions=list(obligation.assumptions),
+                quantifiers=list(obligation.quantifiers),
                 supported=False,
             )
             for index, statement in enumerate(statements)
@@ -244,47 +279,138 @@ class ReverseGoalAnalyzer:
         backward: list[FrontierClaim],
     ) -> tuple[list[FrontierBridge], list[str]]:
         supported: list[str] = []
-        candidates: list[tuple[float, FrontierClaim, FrontierClaim]] = []
+        bridges: list[FrontierBridge] = []
+        scope = next(
+            (
+                source
+                for source in forward
+                if source.frontier_id.startswith("frontier_scope_")
+            ),
+            None,
+        )
         for target in backward:
             exact = next(
                 (
                     source
                     for source in forward
                     if _normalized(source.statement) == _normalized(target.statement)
+                    and self._scope_compatible_for_closure(source, target)
                 ),
                 None,
             )
             if exact is not None:
                 supported.append(target.statement)
                 continue
-            for source in forward:
-                score = jaccard_similarity(source.statement, target.statement)
-                candidates.append((score, source, target))
-        candidates.sort(
-            key=lambda item: (
-                -item[0],
-                item[1].frontier_id,
-                item[2].frontier_id,
+            candidates = sorted(
+                (
+                    (jaccard_similarity(source.statement, target.statement), source)
+                    for source in forward
+                    if not source.frontier_id.startswith("frontier_scope_")
+                    and self._semantic_candidate_compatible(source, target)
+                ),
+                key=lambda item: (-item[0], item[1].frontier_id),
             )
-        )
-        bridges: list[FrontierBridge] = []
-        used_targets: set[str] = set()
-        for score, source, target in candidates:
-            if target.frontier_id in used_targets:
-                continue
-            bridges.append(self._bridge(source, target, score))
-            used_targets.add(target.frontier_id)
+            if candidates and candidates[0][0] >= self.min_candidate_overlap:
+                score, source = candidates[0]
+                bridges.append(self._bridge(source, target, score, use_candidate=True))
+            else:
+                fallback = scope or (candidates[0][1] if candidates else forward[0])
+                score = candidates[0][0] if candidates else 0.0
+                bridges.append(
+                    self._bridge(fallback, target, score, use_candidate=False)
+                )
             if len(bridges) >= self.max_bridges:
                 break
         return bridges, supported
+
+    @staticmethod
+    def _semantic_candidate_compatible(
+        source: FrontierClaim,
+        target: FrontierClaim,
+    ) -> bool:
+        source_assumptions = {
+            _normalized(value) for value in source.assumptions if value.strip()
+        }
+        target_assumptions = {
+            _normalized(value) for value in target.assumptions if value.strip()
+        }
+        if not source_assumptions.issubset(target_assumptions):
+            return False
+        source_limitations = {
+            _normalized(value) for value in source.scope_limitations if value.strip()
+        }
+        if not source_limitations.issubset(target_assumptions):
+            return False
+        source_anchors = _symbolic_anchors(source.statement)
+        target_anchors = _symbolic_anchors(target.statement)
+        return (
+            not source_anchors
+            or not target_anchors
+            or bool(source_anchors & target_anchors)
+        )
+
+    @staticmethod
+    def _scope_compatible_for_closure(
+        source: FrontierClaim,
+        target: FrontierClaim,
+    ) -> bool:
+        if not ReverseGoalAnalyzer._semantic_candidate_compatible(source, target):
+            return False
+        source_quantifiers = [
+            (
+                item.order,
+                item.kind,
+                _normalized(item.variable_id),
+                _normalized(item.domain),
+                tuple(_normalized(value) for value in item.restrictions),
+            )
+            for item in source.quantifiers
+        ]
+        target_quantifiers = [
+            (
+                item.order,
+                item.kind,
+                _normalized(item.variable_id),
+                _normalized(item.domain),
+                tuple(_normalized(value) for value in item.restrictions),
+            )
+            for item in target.quantifiers
+        ]
+        return source_quantifiers == target_quantifiers
 
     @staticmethod
     def _bridge(
         source: FrontierClaim,
         target: FrontierClaim,
         score: float,
+        *,
+        use_candidate: bool,
     ) -> FrontierBridge:
-        missing = f"({source.statement}) implies ({target.statement})"
+        required_conditions = [
+            "retain the target obligation's original assumptions and quantifier domains",
+            "prove every additional premise rather than importing it from lexical overlap",
+        ]
+        if use_candidate:
+            required_conditions.extend(
+                [
+                    "provide an explicit variable and object mapping for the admitted Fact",
+                    "prove that the admitted Fact is applicable in the target scope",
+                ]
+            )
+            missing = (
+                f"Prove ({target.statement}) from the scoped assumptions. "
+                f"The admitted Fact ({source.statement}) is only a candidate ingredient; "
+                "independently establish its variable mapping, applicability, and every "
+                "additional premise before using it."
+            )
+            relationship = "candidate_ingredient"
+        else:
+            missing = (
+                f"Prove ({target.statement}) from the scoped assumptions. "
+                "No admitted frontier Fact is assumed to imply this target; derive all "
+                "missing intermediate claims explicitly."
+            )
+            relationship = "scope_only"
         identifier = (
             "frontier_bridge_"
             + stable_hash((source.frontier_id, target.frontier_id, missing))[:12]
@@ -297,8 +423,12 @@ class ReverseGoalAnalyzer:
             compatibility_conditions=[
                 "the forward claim and backward target use the same scoped assumptions",
                 "all quantified variables retain their original domains",
+                "lexical similarity is not evidence of logical implication",
             ],
             lexical_overlap=score,
+            semantic_relationship=relationship,
+            source_sufficiency_assumed=False,
+            required_supporting_conditions=required_conditions,
         )
 
 

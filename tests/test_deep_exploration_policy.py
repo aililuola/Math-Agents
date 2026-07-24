@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from mathproofmesh.config import DeepExplorationPolicyConfig
+from mathproofmesh.config import (
+    DeepExplorationPolicyConfig,
+    ExplorationTierPolicyConfig,
+    RuntimeConfig,
+)
 from mathproofmesh.deep_exploration import (
     DeepExplorationRegistry,
     ExplorationEvidence,
@@ -52,33 +56,49 @@ def _evidence(**updates: bool) -> ExplorationEvidence:
     return ExplorationEvidence(**values)
 
 
-def test_four_tiers_preserve_answer_budget_and_time_limits() -> None:
+def test_three_tiers_use_separate_recovery_budgets_and_transport_timeouts() -> None:
     config = DeepExplorationPolicyConfig()
+    runtime = RuntimeConfig()
 
     assert [item.output_tokens for item in config.tiers] == [
-        32000,
         64000,
         96000,
         128000,
     ]
-    assert [item.no_content_timeout_seconds for item in config.tiers] == [
-        480,
-        720,
-        1080,
-        1500,
+    assert all(not hasattr(item, "no_content_timeout_seconds") for item in config.tiers)
+    assert all(not hasattr(item, "wall_timeout_seconds") for item in config.tiers)
+    assert [item.artifact_recovery_tokens for item in config.tiers] == [
+        8000,
+        12000,
+        16000,
     ]
-    assert [item.wall_timeout_seconds for item in config.tiers] == [
-        720,
-        1080,
-        1500,
-        1920,
-    ]
-    assert [item.no_content_token_cutoff for item in config.tiers] == [
-        24000,
-        56000,
-        84000,
-        112000,
-    ]
+    assert runtime.exploration_output_token_tiers == [64000, 96000, 128000]
+    assert runtime.stream_idle_timeout_seconds == 300
+    assert runtime.agent_call_wall_timeout_seconds == 7200
+
+
+def test_legacy_elapsed_time_fields_load_but_are_discarded() -> None:
+    tier = ExplorationTierPolicyConfig.model_validate(
+        {
+            "output_tokens": 64000,
+            "answer_reserve_tokens": 8000,
+            "no_content_timeout_seconds": 480,
+            "wall_timeout_seconds": 720,
+        }
+    )
+    runtime = RuntimeConfig.model_validate(
+        {
+            "reasoning_only_abort_seconds": 720,
+            "reasoning_only_min_characters": 4096,
+        }
+    )
+
+    assert not hasattr(tier, "no_content_timeout_seconds")
+    assert not hasattr(tier, "wall_timeout_seconds")
+    assert not hasattr(tier, "answer_reserve_tokens")
+    assert tier.artifact_recovery_tokens == 8000
+    assert not hasattr(runtime, "reasoning_only_abort_seconds")
+    assert not hasattr(runtime, "reasoning_only_min_characters")
 
 
 def test_checkpoint_segment_index_no_longer_selects_route_tier() -> None:
@@ -100,11 +120,33 @@ def test_checkpoint_segment_index_no_longer_selects_route_tier() -> None:
     admitted_bundle = PromptFactory().route_prove(
         problem,
         checkpoint=checkpoint,
-        authorized_output_tier=2,
+        authorized_output_tier=1,
     )
 
     assert default_bundle.output_tier == 0
-    assert admitted_bundle.output_tier == 2
+    assert admitted_bundle.output_tier == 1
+
+
+def test_new_route_starts_at_96k_instead_of_the_bounded_repair_tier() -> None:
+    registry = DeepExplorationRegistry(
+        DeepExplorationPolicyConfig(), problem_hash="problem-hash"
+    )
+
+    admission = registry.admit(
+        _signature("initial abstract route"),
+        route_id="route-a",
+        round_index=0,
+        evidence=_evidence(
+            has_verified_checkpoint=False,
+            meta_approved=False,
+            referee_confirmed_mechanism_change=False,
+        ),
+    )
+
+    assert admission.allowed
+    assert admission.granted_tier == 1
+    assert admission.max_output_tokens == 96000
+    assert admission.recovery_only is False
 
 
 def test_distinct_high_tier_signatures_run_in_parallel() -> None:
@@ -118,7 +160,7 @@ def test_distinct_high_tier_signatures_run_in_parallel() -> None:
             route_id=f"route-{index}",
             round_index=2,
             evidence=_evidence(),
-            requested_tier=2,
+            requested_tier=1,
         )
         for index, mechanism in enumerate(
             ["cyclotomic factorization", "graph parity", "descent invariant"]
@@ -141,14 +183,14 @@ def test_same_signature_has_one_atomic_running_lease() -> None:
         route_id="route-a",
         round_index=1,
         evidence=_evidence(),
-        requested_tier=2,
+        requested_tier=1,
     )
     second = registry.admit(
         signature,
         route_id="route-a",
         round_index=1,
         evidence=_evidence(),
-        requested_tier=2,
+        requested_tier=1,
     )
 
     assert first.allowed
@@ -166,7 +208,7 @@ def test_high_tier_no_progress_locks_only_that_mathematical_signature() -> None:
         route_id="route-a",
         round_index=3,
         evidence=_evidence(),
-        requested_tier=2,
+        requested_tier=1,
     )
     assert first.lease_id is not None
     registry.finish(
@@ -180,7 +222,7 @@ def test_high_tier_no_progress_locks_only_that_mathematical_signature() -> None:
         route_id="route-a",
         round_index=4,
         evidence=_evidence(),
-        requested_tier=3,
+        requested_tier=2,
     )
     assert repair.allowed
     assert repair.recovery_only
@@ -195,14 +237,14 @@ def test_high_tier_no_progress_locks_only_that_mathematical_signature() -> None:
         route_id="route-a",
         round_index=5,
         evidence=_evidence(),
-        requested_tier=3,
+        requested_tier=2,
     )
     distinct = registry.admit(
         _signature("local generating-function pivot"),
         route_id="route-a",
         round_index=5,
         evidence=_evidence(),
-        requested_tier=2,
+        requested_tier=1,
     )
 
     assert not exhausted.allowed
@@ -220,7 +262,7 @@ def test_same_domain_subdirections_and_local_pivot_are_allowed() -> None:
         route_id="route-a",
         round_index=1,
         evidence=_evidence(),
-        requested_tier=2,
+        requested_tier=1,
     )
     assert old_admission.lease_id is not None
     registry.finish(old_admission.lease_id, ExplorationOutcome.NO_ARTIFACT)
@@ -237,7 +279,7 @@ def test_same_domain_subdirections_and_local_pivot_are_allowed() -> None:
         route_id="route-a",
         round_index=2,
         evidence=_evidence(),
-        requested_tier=2,
+        requested_tier=1,
     )
 
     assert pivot is not None
@@ -255,7 +297,7 @@ def test_128k_requires_96k_verified_progress_meta_approval_and_reserve() -> None
         route_id="route-a",
         round_index=1,
         evidence=_evidence(),
-        requested_tier=3,
+        requested_tier=2,
     )
     assert first.max_output_tokens == 96000
     assert first.lease_id is not None
@@ -270,7 +312,7 @@ def test_128k_requires_96k_verified_progress_meta_approval_and_reserve() -> None
         route_id="route-a",
         round_index=2,
         evidence=_evidence(meta_approved=False),
-        requested_tier=3,
+        requested_tier=2,
     )
     assert no_meta.max_output_tokens == 96000
     assert no_meta.lease_id is not None
@@ -281,7 +323,7 @@ def test_128k_requires_96k_verified_progress_meta_approval_and_reserve() -> None
         route_id="route-a",
         round_index=2,
         evidence=_evidence(),
-        requested_tier=3,
+        requested_tier=2,
     )
     assert admitted.max_output_tokens == 128000
 
@@ -296,7 +338,7 @@ def test_new_mechanism_does_not_inherit_old_128k_progression() -> None:
         route_id="route-a",
         round_index=1,
         evidence=_evidence(),
-        requested_tier=2,
+        requested_tier=1,
     )
     assert old.lease_id is not None
     registry.finish(
@@ -340,7 +382,7 @@ def test_resume_persists_strikes_pivots_and_route_usage() -> None:
         route_id="route-a",
         round_index=1,
         evidence=_evidence(),
-        requested_tier=2,
+        requested_tier=1,
     )
     assert admission.lease_id is not None
     registry.finish(

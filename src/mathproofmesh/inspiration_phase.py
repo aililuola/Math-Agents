@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -39,7 +40,30 @@ def admit_inspiration_tasks(
     *,
     current_path_count: int,
     has_candidate: bool,
+    task_call_breakdowns: Mapping[str, Mapping[str, int]] | None = None,
 ) -> InspirationAdmission:
+    call_overrides: dict[str, int] = {}
+    breakdown = allocator.inspiration_call_breakdown()
+    maximum_reviews = (
+        allocator.config.topology.inspiration.max_reviewed_proposals_per_task
+    )
+    for task in tasks:
+        planned = (
+            task_call_breakdowns.get(task.task_id)
+            if task_call_breakdowns is not None
+            else None
+        )
+        if planned is not None:
+            call_overrides[task.task_id] = sum(
+                max(0, int(value)) for value in planned.values()
+            )
+            continue
+        if task.mechanism != InspirationMechanism.INSPIRATION_COMPOSITION:
+            continue
+        reviewed = min(task.max_proposals, maximum_reviews)
+        call_overrides[task.task_id] = (
+            reviewed + reviewed + breakdown["route_attempt_calls"]
+        )
     candidates = [
         BudgetAction(
             action=MECHANISM_ACTION[task.mechanism],
@@ -47,9 +71,12 @@ def admit_inspiration_tasks(
             score=max(0.0, 1.0 - 0.05 * index),
             rank=index + 1,
             reason=task.reason,
-            estimated_calls=allocator.estimate_action_calls(
-                MECHANISM_ACTION[task.mechanism],
-                current_path_count=current_path_count,
+            estimated_calls=call_overrides.get(
+                task.task_id,
+                allocator.estimate_action_calls(
+                    MECHANISM_ACTION[task.mechanism],
+                    current_path_count=current_path_count,
+                ),
             ),
         )
         for index, task in enumerate(tasks)
@@ -66,6 +93,7 @@ def admit_inspiration_tasks(
         current_path_count=current_path_count,
         has_candidate=has_candidate,
         max_actions=len(tasks),
+        estimated_call_overrides=call_overrides,
     )
     admitted_ids = {
         action.target_id

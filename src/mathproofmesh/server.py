@@ -12,12 +12,15 @@ from pydantic import BaseModel, Field
 from .activity import ActivityEvent
 from . import __version__
 from .config import SystemConfig, load_config
+from .goal_preflight import GoalClarificationRequired
 from .orchestrator import ProofMeshOrchestrator
+from .schemas import GoalClarificationDecision, GoalClarificationRequest
 
 
 class SolveRequest(BaseModel):
     problem: str = Field(min_length=1)
     run_id: str | None = None
+    canonical_statement: str | None = Field(default=None, min_length=1)
 
 
 class ResumeRequest(BaseModel):
@@ -48,6 +51,28 @@ def create_app(config_path: str | None = None):
     server_token = os.getenv("MATHPROOFMESH_SERVER_TOKEN")
 
     app = FastAPI(title="MathProofMesh", version=__version__)
+
+    def solve_orchestrator(
+        request: SolveRequest,
+        *,
+        activity_listener=None,
+    ) -> ProofMeshOrchestrator:
+        async def clarify(
+            clarification: GoalClarificationRequest,
+        ) -> GoalClarificationDecision:
+            if request.canonical_statement is None:
+                raise GoalClarificationRequired(clarification)
+            return GoalClarificationDecision(
+                request_id=clarification.request_id,
+                canonical_statement=request.canonical_statement,
+                source="user_confirmed",
+            )
+
+        return ProofMeshOrchestrator(
+            config,
+            activity_listener=activity_listener,
+            clarification_resolver=clarify,
+        )
 
     def authorize(authorization: str | None) -> None:
         if not server_token:
@@ -80,11 +105,16 @@ def create_app(config_path: str | None = None):
         authorize(authorization)
         try:
             async with run_semaphore:
-                result = await ProofMeshOrchestrator(config).solve(
+                result = await solve_orchestrator(request).solve(
                     request.problem,
                     run_id=request.run_id,
                 )
             return result.model_dump(mode="json")
+        except GoalClarificationRequired as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=exc.request.model_dump(mode="json"),
+            ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -119,13 +149,20 @@ def create_app(config_path: str | None = None):
         async def run_job() -> None:
             try:
                 async with run_semaphore:
-                    result = await ProofMeshOrchestrator(
-                        config,
+                    result = await solve_orchestrator(
+                        request,
                         activity_listener=activity_listener,
                     ).solve(request.problem, run_id=request.run_id)
                 await queue.put(("result", result.model_dump(mode="json")))
             except asyncio.CancelledError:
                 raise
+            except GoalClarificationRequired as exc:
+                await queue.put(
+                    (
+                        "clarification_required",
+                        exc.request.model_dump(mode="json"),
+                    )
+                )
             except Exception as exc:  # Defensive guard around service-level failures.
                 await queue.put(
                     (

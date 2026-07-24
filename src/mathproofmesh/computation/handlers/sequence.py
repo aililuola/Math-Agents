@@ -47,9 +47,14 @@ def _greedy_predicate(
         return rule, lambda candidate, prior: all(
             gcd(abs(candidate), abs(value)) == 1 for value in prior if value != 0
         )
+    if rule == "gcd_overlap_all_prior":
+        return rule, lambda candidate, prior: all(
+            gcd(abs(candidate), abs(value)) > 1 for value in prior
+        )
     raise ValueError(
         "rule must be avoid_forbidden_differences, "
-        "avoid_three_term_arithmetic_progression, or coprime_to_all"
+        "avoid_three_term_arithmetic_progression, coprime_to_all, "
+        "or gcd_overlap_all_prior"
     )
 
 

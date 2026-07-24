@@ -25,6 +25,7 @@ from mathproofmesh.schemas import (
     ObligationKind,
     ProblemContract,
     ProofObligation,
+    QuantifierSpec,
     RepresentationCandidate,
     RouteRole,
 )
@@ -266,9 +267,17 @@ def test_reverse_goal_meets_only_admitted_forward_facts(tmp_path) -> None:
         round_index=2,
     )
 
-    assert [item.source_ref for item in plan.forward_frontier] == ["fact-admitted"]
+    assert plan.forward_frontier[0].source_ref == "fact-admitted"
+    assert any(
+        item.frontier_id.startswith("frontier_scope_") for item in plan.forward_frontier
+    )
     assert plan.frontier_bridges
-    assert all("implies" in item.missing_implication for item in plan.frontier_bridges)
+    candidate = plan.frontier_bridges[0]
+    assert candidate.semantic_relationship == "candidate_ingredient"
+    assert candidate.source_sufficiency_assumed is False
+    assert candidate.required_supporting_conditions
+    assert ") implies (" not in candidate.missing_implication
+    assert "candidate ingredient" in candidate.missing_implication
     created = analyzer.materialize(plan, graph)
     assert created
     assert all(item.kind == ObligationKind.LEMMA for item in created)
@@ -278,6 +287,94 @@ def test_reverse_goal_meets_only_admitted_forward_facts(tmp_path) -> None:
         referee_agent_id="referee-b",
     )
     assert engine._admitted_inspiration_facts() == []
+
+
+def test_reverse_goal_does_not_turn_lexical_overlap_into_false_implication(
+    tmp_path,
+) -> None:
+    config, problem, _graph, _registry, _engine, _snapshot = _runtime(tmp_path)
+    target = ProofObligation(
+        obligation_id="coprimality-goal",
+        problem_hash=problem.integrity_hash,
+        route_ids=["route-a"],
+        kind=ObligationKind.LEMMA,
+        statement=(
+            "For N=(2P)^2+1 and every prime p dividing P, prove N is congruent "
+            "to 1 modulo p."
+        ),
+        normalized_statement="constructed n congruent one modulo p",
+    )
+    admitted = _fact(
+        problem,
+        "quadratic-residue-fact",
+        "If q is an odd prime dividing a^2+1, then q is congruent to 1 modulo 4.",
+    )
+    analyzer = ReverseGoalAnalyzer(config.topology.inspiration)
+
+    plan = analyzer.analyze(
+        target,
+        facts=[admitted],
+        proposed_backward_claims=[target.statement],
+        round_index=2,
+    )
+
+    bridge = plan.frontier_bridges[0]
+    assert bridge.semantic_relationship == "scope_only"
+    assert bridge.source_sufficiency_assumed is False
+    assert bridge.forward_frontier_id.startswith("frontier_scope_")
+    assert admitted.statement not in bridge.missing_implication
+    assert ") implies (" not in bridge.missing_implication
+    assert "derive all missing intermediate claims explicitly" in (
+        bridge.missing_implication
+    )
+
+
+def test_reverse_goal_exact_text_cannot_bypass_scope_compatibility(tmp_path) -> None:
+    config, problem, _graph, _registry, _engine, _snapshot = _runtime(tmp_path)
+    statement = "Every object in the current domain has property P."
+    target = ProofObligation(
+        obligation_id="scoped-goal",
+        problem_hash=problem.integrity_hash,
+        route_ids=["route-a"],
+        kind=ObligationKind.LEMMA,
+        statement=statement,
+        normalized_statement=statement.casefold(),
+        assumptions=["x belongs to the target domain"],
+        quantifiers=[
+            QuantifierSpec(
+                order=0,
+                kind="forall",
+                variable_id="x",
+                display_name="x",
+                domain="target domain",
+            )
+        ],
+    )
+    admitted = _fact(problem, "wrong-scope-fact", statement).model_copy(
+        update={
+            "assumptions": ["x belongs to a restricted source domain"],
+            "quantifiers": [
+                QuantifierSpec(
+                    order=0,
+                    kind="exists",
+                    variable_id="x",
+                    display_name="x",
+                    domain="source domain",
+                )
+            ],
+        }
+    )
+
+    plan = ReverseGoalAnalyzer(config.topology.inspiration).analyze(
+        target,
+        facts=[admitted],
+        proposed_backward_claims=[statement],
+        round_index=2,
+    )
+
+    assert statement not in plan.fact_supported_claims
+    assert plan.frontier_bridges[0].semantic_relationship == "scope_only"
+    assert plan.frontier_bridges[0].source_sufficiency_assumed is False
 
 
 def test_composer_queues_a_separately_reviewed_next_round_proposal(tmp_path) -> None:

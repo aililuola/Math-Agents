@@ -14,6 +14,7 @@ from ..schemas import (
     ComposedInspiration,
     ConstructionProposal,
     EvidenceType,
+    InspirationAssignmentPlan,
     InspirationCallReservation,
     InspirationCandidateDecision,
     InspirationContextMode,
@@ -47,6 +48,7 @@ from ..schemas import (
 )
 from ..store import ArtifactStore
 from .analogy_agent import AnalogyAgent
+from .assignment import InspirationAssignmentPlanner
 from .composer import InspirationComposer
 from .construction_inventor import AuxiliaryConstructionInventor
 from .cross_run_learning import CrossRunLearningStore
@@ -166,8 +168,10 @@ class InspirationEngine:
         self.novelty_gate = NoveltyGate(self.inspiration_config)
         self.referee = InspirationReferee(self.inspiration_config)
         self.mechanism_normalizer = MechanismNormalizer()
+        self.assignment_planner = InspirationAssignmentPlanner(self.inspiration_config)
         self.triggers: dict[str, InspirationTrigger] = {}
         self.tasks: dict[str, InspirationTask] = {}
+        self.proposal_assignment_plans: dict[str, InspirationAssignmentPlan] = {}
         self.proposals: dict[str, InspirationProposal] = {}
         self.reviews: dict[str, InspirationReview] = {}
         self.materializations: dict[str, InspirationMaterialization] = {}
@@ -817,6 +821,20 @@ class InspirationEngine:
         self._checkpoint()
         return selected_all
 
+    def register_assignment_plan(
+        self, plan: InspirationAssignmentPlan
+    ) -> InspirationAssignmentPlan:
+        self.proposal_assignment_plans[plan.task_id] = plan
+        self._event(
+            "inspiration_proposer_assignment_planned",
+            "Inspiration proposer population assigned",
+            plan.deferred_reason
+            or "Distinct live agents were assigned before budget admission.",
+            plan.model_dump(mode="json"),
+        )
+        self._checkpoint()
+        return plan
+
     def reserve_task_calls(
         self,
         task: InspirationTask,
@@ -1300,14 +1318,9 @@ class InspirationEngine:
                 }
             )
             self.compositions[item.composition_id] = item
-            self.proposals[proposal.proposal_id] = proposal
             self.pending_composed_proposals[task.task_id] = proposal
             if self.inspiration_config.mode == "active":
                 self.pending_directive_tasks[task.task_id] = task
-            self._register_outcome(proposal, snapshot)
-            self.mechanism_stats[InspirationMechanism.INSPIRATION_COMPOSITION.value][
-                "proposal_count"
-            ] += 1
             self._event(
                 "inspiration_composition_queued",
                 "Complementary inspiration composition queued",
@@ -1344,8 +1357,54 @@ class InspirationEngine:
             updated.append(review)
         return updated
 
-    def pending_composition_for_task(self, task_id: str) -> InspirationProposal | None:
-        return self.pending_composed_proposals.get(task_id)
+    def pending_composition_for_task(
+        self,
+        task_id: str,
+        state: InspirationSnapshot | dict[str, Any] | None = None,
+    ) -> InspirationProposal | None:
+        proposal = self.pending_composed_proposals.get(task_id)
+        if proposal is None or proposal.proposal_id in self.proposals:
+            return proposal
+        snapshot = self._coerce_snapshot(state)
+        self.proposals[proposal.proposal_id] = proposal
+        self._register_outcome(proposal, snapshot)
+        self.mechanism_stats[InspirationMechanism.INSPIRATION_COMPOSITION.value][
+            "proposal_count"
+        ] += 1
+        self._event(
+            "inspiration_composition_admitted",
+            "Composed inspiration admitted for independent review",
+            proposal.statement,
+            {
+                "task_id": task_id,
+                "proposal_id": proposal.proposal_id,
+            },
+        )
+        self._checkpoint()
+        return proposal
+
+    def requeue_tasks(
+        self,
+        tasks: Iterable[InspirationTask],
+        *,
+        reasons: dict[str, str] | None = None,
+    ) -> None:
+        changed = False
+        reasons = reasons or {}
+        for task in tasks:
+            if task.task_id not in self.tasks:
+                continue
+            self.tasks.pop(task.task_id, None)
+            self.pending_directive_tasks[task.task_id] = task
+            changed = True
+            self._event(
+                "inspiration_task_deferred",
+                "Inspiration task deferred before model execution",
+                reasons.get(task.task_id, "scheduler capacity was unavailable"),
+                task.model_dump(mode="json"),
+            )
+        if changed:
+            self._checkpoint()
 
     def materialize(
         self,
@@ -2556,6 +2615,10 @@ class InspirationEngine:
             "tasks": {
                 key: value.model_dump(mode="json") for key, value in self.tasks.items()
             },
+            "proposal_assignment_plans": {
+                key: value.model_dump(mode="json")
+                for key, value in self.proposal_assignment_plans.items()
+            },
             "proposals": {
                 key: value.model_dump(mode="json")
                 for key, value in self.proposals.items()
@@ -2657,6 +2720,10 @@ class InspirationEngine:
         self.tasks = {
             str(key): InspirationTask.model_validate(value)
             for key, value in dict(state.get("tasks", {})).items()
+        }
+        self.proposal_assignment_plans = {
+            str(key): InspirationAssignmentPlan.model_validate(value)
+            for key, value in dict(state.get("proposal_assignment_plans", {})).items()
         }
         self.proposals = {
             str(key): InspirationProposal.model_validate(value)

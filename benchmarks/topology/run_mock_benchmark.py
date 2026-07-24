@@ -12,6 +12,7 @@ from mathproofmesh.communication.policies import validate_evidence_tier
 from mathproofmesh.communication.route_registry import RouteRegistry
 from mathproofmesh.config import SystemConfig
 from mathproofmesh.inspiration.analogy_agent import AnalogyAgent
+from mathproofmesh.inspiration.assignment import InspirationAssignmentPlanner
 from mathproofmesh.inspiration.construction_inventor import (
     AuxiliaryConstructionInventor,
 )
@@ -33,6 +34,7 @@ from mathproofmesh.inspiration.reverse_goal import ReverseGoalAnalyzer
 from mathproofmesh.inspiration.surprise_mutation import ControlledMutationPlanner
 from mathproofmesh.inspiration.trigger_policy import InspirationSnapshot, TriggerPolicy
 from mathproofmesh.memory import TypedMemory
+from mathproofmesh.llm.pool import AgentPool
 from mathproofmesh.mock_demo import build_demo_config
 from mathproofmesh.proof_graph.bridges import BridgeBroker
 from mathproofmesh.proof_graph.contradictions import ContradictionBroker
@@ -45,6 +47,7 @@ from mathproofmesh.schemas import (
     InspirationMechanism,
     InspirationProposal,
     InspirationReview,
+    InspirationTask,
     MemoryTier,
     MessageEnvelope,
     MessageType,
@@ -416,6 +419,21 @@ def _run_component_contracts(
         },
     )
     triggers = TriggerPolicy(config.topology.inspiration).detect(inspiration_snapshot)
+    assignment_task = InspirationTask(
+        task_id="benchmark-assignment-task",
+        trigger_id=triggers[0].trigger_id,
+        mechanism=InspirationMechanism.REVERSE_GOAL_ANALYSIS,
+        target_route_ids=["route-a"],
+        target_obligation_ids=[inspiration_obligation.obligation_id],
+        reason="measure dynamic proposer assignment",
+        max_proposals=3,
+    )
+    assignment_plan = InspirationAssignmentPlanner(config.topology.inspiration).plan(
+        assignment_task,
+        proposer_role="reverse_goal_analyzer",
+        pool=AgentPool(config),
+        round_index=inspiration_snapshot.round_index,
+    )
 
     meta_decision = PersistentMetaStrategist(config.topology.inspiration).decide(
         inspiration_snapshot
@@ -623,6 +641,13 @@ def _run_component_contracts(
             and config.topology.inspiration.max_materialized_proposals_per_trigger == 1
             and config.topology.inspiration.cold_context_proposals_per_task == 1
         ),
+        "dynamic_proposer_assignment": (
+            bool(assignment_plan.assignments)
+            and len({item.proposer_agent_id for item in assignment_plan.assignments})
+            == len(assignment_plan.assignments)
+            and len(assignment_plan.assignments)
+            <= len(assignment_plan.eligible_agent_ids)
+        ),
         "meta_directive_control": (
             meta_audit.accepted
             and meta_execution.status == "executed"
@@ -646,9 +671,13 @@ def _run_component_contracts(
             and bool(first_mutation.reversibility_requirements)
         ),
         "bidirectional_frontier": (
-            [item.source_ref for item in reverse_plan.forward_frontier]
-            == [experience_fact.message_id]
+            experience_fact.message_id
+            in [item.source_ref for item in reverse_plan.forward_frontier]
             and bool(reverse_plan.frontier_bridges)
+            and all(
+                not item.source_sufficiency_assumed
+                for item in reverse_plan.frontier_bridges
+            )
         ),
         "inspiration_composer": bool(compositions)
         and len(compositions[0].source_proposal_ids) == 2

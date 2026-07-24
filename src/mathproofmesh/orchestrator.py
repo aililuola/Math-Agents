@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterable, Sequence, TypeVar
 
@@ -26,6 +26,7 @@ from .budget import AdaptiveBudgetManager, SoftBudgetAllocator
 from .communication.broker import MessageBroker
 from .communication.route_registry import RouteRegistry
 from .config import SystemConfig
+from .computation.contracts import validate_experiment_contract
 from .computation.policy import ComputationContext
 from .context_policy import (
     ContextPurpose,
@@ -41,6 +42,7 @@ from .continuation import (
     merge_verified_delta,
     normalize_delta_claims,
 )
+from .critical_calculations import CriticalCalculationGate
 from .deep_exploration import (
     DeepExplorationRegistry,
     ExplorationAdmission,
@@ -54,16 +56,38 @@ from .inspiration.engine import InspirationEngine
 from .inspiration.context import build_inspiration_prompt_context
 from .inspiration.trigger_policy import InspirationSnapshot
 from .memory import LemmaMemory, TypedMemory
+from .goal_preflight import (
+    ClarificationResolver,
+    GoalClarificationRequired,
+    GoalNormalizationError,
+    decision_confidence,
+    deterministic_goal_precheck,
+    requires_confirmation,
+    validate_clarification_decision,
+)
 from .prompts import PromptBundle, PromptFactory
 from .report import write_hierarchical_reports, write_run_report
 from .stall_recovery import (
     PostFailureBottleneckExtractor,
     classify_no_artifact_failure,
 )
+from .task_contracts import (
+    apply_task_contract,
+    assess_task_deliverables,
+    deliverable_instructions,
+    infer_task_requirements,
+)
 from .proof_graph.bridges import BridgeBroker
 from .proof_graph.contradictions import ContradictionBroker
 from .proof_graph.matching import DuplicateRouteDetector
 from .proof_graph.store import ProofGraphStore
+from .proof_identity import (
+    attempt_content_fingerprint,
+    canonical_obligation_statement,
+    checkpoint_math_fingerprint,
+    is_feedback_only_statement,
+    progress_signature,
+)
 from .schemas import (
     ActionKind,
     AgentMetric,
@@ -72,9 +96,15 @@ from .schemas import (
     BlindVerificationReport,
     BrokerDecision,
     CandidateAssessment,
+    CandidateConjecture,
+    CandidateConjectureBatch,
+    CalculationGateVerdict,
     ClaimBatch,
     ClaimCard,
     ClaimStatus,
+    ComputationContractRepair,
+    ComputationContractRepairAction,
+    ComputationContractRepairStatus,
     ComputationDecision,
     ComputationDecisionStatus,
     ComputationHint,
@@ -93,12 +123,15 @@ from .schemas import (
     ExecutionStatus,
     FailureLevel,
     FinalProof,
+    GoalClarificationRequest,
     InitialExplorationAction,
     InitialExplorationTurn,
+    InspirationAssignmentPlan,
     InspirationMechanism,
     InspirationContextMode,
     InspirationProposal,
     InspirationReview,
+    InspirationTask,
     MetaReview,
     MemoryTier,
     MessageEnvelope,
@@ -118,9 +151,12 @@ from .schemas import (
     RunResult,
     RunStatus,
     RouteRole,
+    RouteStatus,
     Severity,
     StrategyCard,
     StrategySet,
+    TaskRequirement,
+    TaskStatus,
     TriageResult,
     ToolAuditReport,
     UsageRecord,
@@ -203,6 +239,10 @@ class SolveState:
     execution_status: ExecutionStatus = ExecutionStatus.COMPLETED
     research_progress_report: ResearchProgressReport | None = None
     deep_exploration_registry: DeepExplorationRegistry | None = None
+    global_no_progress_rounds: int = 0
+    global_meta_pivot_used: bool = False
+    last_progress_signature: str | None = None
+    certified_counterexample_hashes: list[str] = field(default_factory=list)
 
 
 class ProofMeshOrchestrator:
@@ -223,10 +263,12 @@ class ProofMeshOrchestrator:
         *,
         mock_responders: dict[str, MockResponder] | None = None,
         activity_listener: ActivityListener | None = None,
+        clarification_resolver: ClarificationResolver | None = None,
     ) -> None:
         self.config = config
         self.mock_responders = mock_responders or {}
         self.activity_listener = activity_listener
+        self.clarification_resolver = clarification_resolver
 
     async def solve(self, problem_text: str, *, run_id: str | None = None) -> RunResult:
         if not problem_text or not problem_text.strip():
@@ -252,44 +294,64 @@ class ProofMeshOrchestrator:
         memory = LemmaMemory(store)
         tools = ToolBroker(self.config, store, activity)
 
-        problem = ProblemContract(
-            exact_statement=problem_text,
-            normalized_statement=self._normalize_statement(problem_text),
-            problem_kind=ProblemKind.UNKNOWN,
-            deliverables=[
-                "Give a correct answer and an explicit, auditable derivation or proof."
-            ],
-            hard_constraints=[
-                "Do not change hypotheses, quantifiers, domains, or requested conclusions.",
-                "Distinguish proved claims from conjectures and unresolved gaps.",
-            ],
-            allowed_tools=self._allowed_tools(),
-            output_language=self.config.runtime.output_language,
-        )
-        store.write_json("structured", "problem_contract", problem)
         store.write_json("structured", "config_redacted", self.config.redacted_dict())
-        store.append_event(
-            "run_started",
-            {
-                "problem_id": problem.problem_id,
-                "problem_hash": problem.integrity_hash,
-                "system_name": self.config.system_name,
-            },
-        )
         run_activity_task = activity.start_task(
             "run",
             title=activity.text(
                 "启动多 Agent 数学求解", "Starting the multi-agent mathematics run"
             ),
             detail=activity.text(
-                f"已冻结原题；启用 {len(pool.agents)} 个隔离子 Agent",
-                f"Problem contract frozen; {len(pool.agents)} isolated sub-agents are available",
+                "先执行本地题意预检；确认目标后才允许解题调用",
+                "Running local goal preflight before any solving call",
+            ),
+            stage="run",
+            importance=ActivityImportance.MAJOR,
+            metrics={
+                "agent_count": len(pool.agents),
+                "original_statement_hash": stable_hash(problem_text.strip()),
+            },
+        )
+        try:
+            problem = await self._prepare_problem_contract(
+                problem_text,
+                runner=runner,
+                prompts=prompts,
+                store=store,
+                activity=activity,
+                parent_task_id=run_activity_task,
+            )
+        except BaseException:
+            activity.finalize()
+            await pool.aclose()
+            raise
+
+        store.write_json("structured", "problem_contract", problem)
+        store.append_event(
+            "run_started",
+            {
+                "problem_id": problem.problem_id,
+                "problem_hash": problem.integrity_hash,
+                "goal_hash": problem.goal_hash,
+                "interpretation_source": problem.interpretation_source,
+                "system_name": self.config.system_name,
+            },
+        )
+        activity.update_task(
+            run_activity_task,
+            title=activity.text(
+                "启动多 Agent 数学求解", "Starting the multi-agent mathematics run"
+            ),
+            detail=activity.text(
+                f"已冻结规范化目标；启用 {len(pool.agents)} 个隔离子 Agent",
+                f"Canonical goal frozen; {len(pool.agents)} isolated sub-agents are available",
             ),
             stage="run",
             importance=ActivityImportance.MAJOR,
             metrics={
                 "agent_count": len(pool.agents),
                 "problem_hash": problem.integrity_hash,
+                "goal_hash": problem.goal_hash,
+                "interpretation_source": problem.interpretation_source,
             },
         )
         activity.info(
@@ -340,6 +402,8 @@ class ProofMeshOrchestrator:
             )
             state.triage = await self._triage(problem, runner, prompts, store)
             problem.problem_kind = state.triage.problem_kind
+            apply_task_contract(problem, state.triage)
+            store.write_json("structured", "problem_contract", problem)
             state.capability_domain = infer_capability_domain(
                 problem.exact_statement,
                 state.triage.rationale,
@@ -362,6 +426,9 @@ class ProofMeshOrchestrator:
                 importance=ActivityImportance.MAJOR,
                 metrics={
                     "problem_kind": state.triage.problem_kind.value,
+                    "task_requirements": [
+                        item.value for item in problem.task_requirements
+                    ],
                     "difficulty": state.triage.difficulty.value,
                     "suggested_paths": state.triage.suggested_paths,
                 },
@@ -456,7 +523,7 @@ class ProofMeshOrchestrator:
                 store,
                 tools,
             )
-            state.attempts.extend(initial_attempts)
+            initial_attempts = self._record_attempts(state, initial_attempts, store)
             complete_count = sum(
                 a.status == AttemptStatus.COMPLETE for a in initial_attempts
             )
@@ -522,6 +589,77 @@ class ProofMeshOrchestrator:
                 },
             )
             self._checkpoint(store, "initial_exploration", state, memory, runner)
+
+            initial_task_status, _initial_deliverables = assess_task_deliverables(
+                problem,
+                state,
+                store.list_experiment_results(),
+                verification_threshold=self.config.budget.verification_pass_threshold,
+            )
+            early_finish_requirements = set(problem.task_requirements)
+            if (
+                initial_task_status == TaskStatus.COMPLETED
+                and TaskRequirement.CONJECTURE in early_finish_requirements
+                and early_finish_requirements
+                <= {
+                    TaskRequirement.COMPUTATION,
+                    TaskRequirement.CONJECTURE,
+                }
+            ):
+                state.execution_status = ExecutionStatus.COMPLETED
+                self._checkpoint(
+                    store,
+                    "requested_deliverables_completed",
+                    state,
+                    memory,
+                    runner,
+                )
+                result = self._build_result(
+                    run_id,
+                    RunStatus.COMPLETED,
+                    problem,
+                    state,
+                    pool.metrics(),
+                    runner,
+                    pool,
+                    store,
+                    memory,
+                )
+                router.export()
+                store.write_json("structured", "run_result", result)
+                store.append_event(
+                    "run_completed",
+                    {
+                        "status": result.status.value,
+                        "task_status": result.task_status.value,
+                        "completion_reason": "requested_nonproof_deliverables_complete",
+                        "total_calls": result.total_calls,
+                        "total_tokens": result.total_usage.total_tokens,
+                    },
+                )
+                activity.complete_task(
+                    run_activity_task,
+                    title=activity.text(
+                        "用户要求的交付物已完成",
+                        "Requested deliverables completed",
+                    ),
+                    detail=activity.text(
+                        "定向计算与候选规律已保存；未把另行证明的义务当成本次失败",
+                        "The computation and scoped conjecture were saved without treating a separate proof obligation as failure",
+                    ),
+                    event_type="run_completed",
+                    stage="run",
+                    importance=ActivityImportance.MAJOR,
+                    metrics={
+                        "status": result.status.value,
+                        "task_status": result.task_status.value,
+                        "total_calls": result.total_calls,
+                        "total_tokens": result.total_usage.total_tokens,
+                    },
+                )
+                activity.finalize()
+                write_run_report(store, result)
+                return result
 
             candidates = self._rank_attempts(state.attempts)[
                 : self.config.budget.candidates_to_verify
@@ -623,6 +761,8 @@ class ProofMeshOrchestrator:
                     },
                 )
             self._checkpoint(store, "initial_verification", state, memory, runner)
+            if state.last_progress_signature is None:
+                state.last_progress_signature = self._global_progress_signature(state)
 
             # Adaptive breadth/depth loop. Actions are selected from verified progress,
             # novelty, uncertainty, gaps, stagnation, and protected future call reserves.
@@ -691,6 +831,8 @@ class ProofMeshOrchestrator:
                     state.reports,
                     state.aggregate_reports,
                     graph_signals=graph_signals,
+                    route_team_reviews=state.route_team_reviews,
+                    meta_review=state.meta_reviews[-1] if state.meta_reviews else None,
                 )
                 decision = budget_manager.decide(
                     stats,
@@ -845,17 +987,20 @@ class ProofMeshOrchestrator:
                             tools,
                         )
                         if attempt is not None:
-                            state.attempts.append(attempt)
-                            await self._extract_claims_many(
-                                problem,
-                                [attempt],
-                                runner,
-                                prompts,
-                                memory,
-                                store,
-                                budget_bucket="depth",
+                            accepted_attempts = self._record_attempts(
+                                state, [attempt], store
                             )
-                            performed = True
+                            if accepted_attempts:
+                                await self._extract_claims_many(
+                                    problem,
+                                    accepted_attempts,
+                                    runner,
+                                    prompts,
+                                    memory,
+                                    store,
+                                    budget_bucket="depth",
+                                )
+                                performed = True
                     elif action.action == ActionKind.WIDEN:
                         new_attempts = await self._widen(
                             problem,
@@ -871,17 +1016,20 @@ class ProofMeshOrchestrator:
                             requested_count=action.planned_paths or None,
                         )
                         if new_attempts:
-                            state.attempts.extend(new_attempts)
-                            await self._extract_claims_many(
-                                problem,
-                                new_attempts,
-                                runner,
-                                prompts,
-                                memory,
-                                store,
-                                budget_bucket="breadth",
+                            accepted_attempts = self._record_attempts(
+                                state, new_attempts, store
                             )
-                            performed = True
+                            if accepted_attempts:
+                                await self._extract_claims_many(
+                                    problem,
+                                    accepted_attempts,
+                                    runner,
+                                    prompts,
+                                    memory,
+                                    store,
+                                    budget_bucket="breadth",
+                                )
+                                performed = True
                     elif action.action == ActionKind.VERIFY and action.target_id:
                         target = next(
                             (
@@ -992,6 +1140,12 @@ class ProofMeshOrchestrator:
                     current_round=round_index,
                     store=store,
                 )
+                hard_stagnation_stop = self._apply_global_progress_gate(
+                    state,
+                    round_index=round_index,
+                    store=store,
+                    activity=activity,
+                )
 
                 self._checkpoint(
                     store, f"adaptive_round_{round_index}", state, memory, runner
@@ -1015,7 +1169,7 @@ class ProofMeshOrchestrator:
                     importance=ActivityImportance.MAJOR,
                     metrics={"round_index": round_index, "performed": performed},
                 )
-                if not performed:
+                if hard_stagnation_stop or not performed:
                     break
 
             if (
@@ -1340,7 +1494,7 @@ class ProofMeshOrchestrator:
                     state.execution_status = ExecutionStatus.BUDGET_EXHAUSTED
 
             self._checkpoint(store, "final", state, memory, runner)
-            status = self._run_status(state)
+            status = self._run_status(problem, state, store)
             result = self._build_result(
                 run_id,
                 status,
@@ -1615,6 +1769,8 @@ class ProofMeshOrchestrator:
         tools = ToolBroker(self.config, store, activity)
 
         state = self._restore_state_from_checkpoint(payload, store)
+        apply_task_contract(problem, state.triage)
+        store.write_json("structured", "problem_contract", problem)
         self._initialize_hierarchical_runtime(
             state,
             problem=problem,
@@ -1671,6 +1827,15 @@ class ProofMeshOrchestrator:
                 runtime_payload.get("reservation_calls") or {}
             ).items()
         }
+        stale_capacity = dict(runtime_payload.get("capacity_reservations") or {})
+        # Capacity belonged to an in-process call/recovery pair. No private call
+        # can be resumed after a process restart, so stale capacity is released.
+        runner.ledger.capacity_reservations = {}
+        if stale_capacity:
+            store.append_event(
+                "artifact_recovery_capacity_released_on_resume",
+                {"reservation_count": len(stale_capacity)},
+            )
         if state.inspiration_engine is not None:
             state.inspiration_engine.reconcile_call_reservations(
                 runner.ledger.reservation_calls
@@ -1810,6 +1975,8 @@ class ProofMeshOrchestrator:
             )
 
             max_resume_rounds = max(1, self.config.budget.max_rounds)
+            if state.last_progress_signature is None:
+                state.last_progress_signature = self._global_progress_signature(state)
             for resume_round in range(max_resume_rounds):
                 state.current_round = resume_round
                 updated_attempts: list[ProofAttempt] = []
@@ -1828,6 +1995,16 @@ class ProofMeshOrchestrator:
                         previous is not None
                         and previous.status == AttemptStatus.COMPLETE
                     ):
+                        continue
+                    route = (
+                        state.route_registry.route_for_strategy(strategy.strategy_id)
+                        if state.route_registry is not None
+                        else None
+                    )
+                    if route is not None and route.status not in {
+                        RouteStatus.ACTIVE,
+                        RouteStatus.REPAIR_ONCE,
+                    }:
                         continue
                     if runner.ledger.remaining_calls <= 0:
                         break
@@ -1869,13 +2046,9 @@ class ProofMeshOrchestrator:
                             for review in state.meta_reviews[-1:]
                         ),
                     )
-                    state.attempts = [
-                        item
-                        for item in state.attempts
-                        if item.attempt_id != updated.attempt_id
-                    ]
-                    state.attempts.append(updated)
-                    updated_attempts.append(updated)
+                    updated_attempts.extend(
+                        self._record_attempts(state, [updated], store)
+                    )
 
                 if updated_attempts:
                     await self._extract_claims_many(
@@ -1933,6 +2106,12 @@ class ProofMeshOrchestrator:
                     )
                     state.meta_reviews.append(review)
                     self._apply_meta_route_controls(state, review, resume_round, store)
+                hard_stagnation_stop = self._apply_global_progress_gate(
+                    state,
+                    round_index=resume_round,
+                    store=store,
+                    activity=activity,
+                )
                 self._checkpoint(
                     store,
                     f"resume_round_{resume_round}",
@@ -1942,7 +2121,7 @@ class ProofMeshOrchestrator:
                 )
                 if self._has_synthesis_ready_candidate(state):
                     break
-                if not updated_attempts:
+                if hard_stagnation_stop or not updated_attempts:
                     break
 
             if (
@@ -1998,7 +2177,7 @@ class ProofMeshOrchestrator:
 
             state.checkpoints = store.list_proof_checkpoints()
             self._checkpoint(store, "resume_final", state, memory, runner)
-            status = self._run_status(state)
+            status = self._run_status(problem, state, store)
             result = self._build_result(
                 run_id,
                 status,
@@ -2205,17 +2384,27 @@ class ProofMeshOrchestrator:
                 )
             except (OSError, ValueError):
                 pass
+        deep_policy = self.config.deep_exploration_policy.model_copy(
+            update={
+                "no_progress_high_tier_limit_per_signature": (
+                    self.config.scheduler.max_normal_attempts_per_signature
+                ),
+                "max_partial_repairs_per_signature": (
+                    self.config.scheduler.max_repair_attempts_per_signature
+                ),
+            }
+        )
         state.deep_exploration_registry = (
             DeepExplorationRegistry.from_state(
                 deep_state,
-                self.config.deep_exploration_policy,
+                deep_policy,
                 problem_hash=problem.integrity_hash,
             )
             if self.config.deep_exploration_policy.enabled
             and isinstance(deep_state, dict)
             else (
                 DeepExplorationRegistry(
-                    self.config.deep_exploration_policy,
+                    deep_policy,
                     problem_hash=problem.integrity_hash,
                 )
                 if self.config.deep_exploration_policy.enabled
@@ -2335,7 +2524,7 @@ class ProofMeshOrchestrator:
             broker=state.message_broker,
             store=store,
             activity=activity,
-            project_root=".",
+            project_root=self.config.runtime.project_root,
         )
         inspiration_state = payload.get("inspiration_engine")
         if isinstance(inspiration_state, dict):
@@ -2600,11 +2789,21 @@ class ProofMeshOrchestrator:
                     continue
             report = state.aggregate_reports.get(attempt.attempt_id)
             team_reviews = (state.route_team_reviews or {}).get(attempt.attempt_id, [])
-            team_review = team_reviews[-1] if team_reviews else None
+            scoped_team_reviews = (
+                [
+                    review
+                    for review in team_reviews
+                    if review.get("delta_id") == claim.source_delta_id
+                ]
+                if claim.source_delta_id is not None
+                else team_reviews
+            )
+            team_review = scoped_team_reviews[-1] if scoped_team_reviews else None
             teams_enabled = self.config.topology.route_teams.enabled
             team_global_allowed = team_reviews_allow_global_share(
                 team_reviews,
                 teams_enabled=teams_enabled,
+                delta_id=claim.source_delta_id,
             )
             if teams_enabled:
                 referee_id = (
@@ -2763,8 +2962,17 @@ class ProofMeshOrchestrator:
             ):
                 continue
             for gap in attempt.unresolved_gaps:
+                if is_feedback_only_statement(gap):
+                    continue
+                canonical_gap = canonical_obligation_statement(gap)
+                if not canonical_gap:
+                    continue
                 gap_hash = stable_hash(
-                    (problem.integrity_hash, route_id, self._normalize_statement(gap))
+                    (
+                        problem.integrity_hash,
+                        route_id,
+                        self._normalize_statement(canonical_gap),
+                    )
                 )
                 message = MessageEnvelope(
                     message_id=f"msg_gap_{gap_hash[:12]}",
@@ -2773,9 +2981,9 @@ class ProofMeshOrchestrator:
                     source_route_id=route_id,
                     source_role=RouteRole.PROVER,
                     message_type=MessageType.PROOF_OBLIGATION,
-                    statement=gap,
-                    normalized_statement=self._normalize_statement(gap),
-                    conclusion=gap,
+                    statement=canonical_gap,
+                    normalized_statement=self._normalize_statement(canonical_gap),
+                    conclusion=canonical_gap,
                     evidence_type=EvidenceType.UNVERIFIED_IDEA,
                     memory_tier=MemoryTier.INSIGHT,
                     verification_status=ClaimStatus.PROPOSED,
@@ -3006,7 +3214,7 @@ class ProofMeshOrchestrator:
         signature = ExplorationSignature(
             problem_hash=problem.integrity_hash,
             verified_checkpoint_id=checkpoint.checkpoint_id,
-            verified_checkpoint_hash=checkpoint.content_hash,
+            verified_checkpoint_hash=checkpoint_math_fingerprint(checkpoint),
             target_obligation_id=target_obligation_id,
             target_statement=target_statement,
             mechanism_tags=mechanism_tags,
@@ -3131,7 +3339,7 @@ class ProofMeshOrchestrator:
             admission.lease_id,
             outcome,
             usage=usage,
-            checkpoint_after_hash=checkpoint_after.content_hash,
+            checkpoint_after_hash=checkpoint_math_fingerprint(checkpoint_after),
             proof_debt_changed=(
                 proof_debt_before is not None
                 and proof_debt_after is not None
@@ -3143,6 +3351,27 @@ class ProofMeshOrchestrator:
             ),
             reason=reason,
         )
+        if state.route_registry is not None:
+            if finished.outcome in {
+                ExplorationOutcome.VERIFIED_PROGRESS,
+                ExplorationOutcome.VERIFIED_MECHANISM_CHANGE,
+            }:
+                state.route_registry.mark_progress(
+                    finished.route_id,
+                    checkpoint_math_fingerprint(checkpoint_after),
+                )
+            elif finished.outcome in {
+                ExplorationOutcome.USABLE_PARTIAL,
+                ExplorationOutcome.NO_ARTIFACT,
+                ExplorationOutcome.NO_VERIFIED_PROGRESS,
+                ExplorationOutcome.INTERRUPTED,
+            }:
+                state.route_registry.mark_no_progress(
+                    finished.route_id,
+                    signature=finished.signature.signature_hash,
+                    reason=reason,
+                    recovery_only=finished.recovery_only,
+                )
         event = {
             "lease_id": finished.lease_id,
             "route_id": finished.route_id,
@@ -3164,10 +3393,14 @@ class ProofMeshOrchestrator:
         if state.deep_exploration_registry.locked_signatures.get(
             finished.signature.signature_hash
         ):
+            route_status = None
+            if state.route_registry is not None:
+                route_status = state.route_registry.get(finished.route_id).status.value
             store.append_event(
                 "deep_exploration_signature_locked",
                 {
                     **event,
+                    "route_status": route_status,
                     "next_action": (
                         "use the verified parent checkpoint and request a "
                         "referee-confirmed mechanism pivot"
@@ -3222,9 +3455,7 @@ class ProofMeshOrchestrator:
             progress_rounds = {
                 item.round_index
                 for item in attempts
-                if state.aggregate_reports.get(item.attempt_id) is not None
-                and state.aggregate_reports[item.attempt_id].verdict
-                == VerificationVerdict.PASS
+                if item.proof_steps or item.final_answer
             }
             if typed_memory is not None:
                 progress_rounds.update(
@@ -3251,6 +3482,225 @@ class ProofMeshOrchestrator:
                     route.stagnation_rounds,
                     self.config.topology.inspiration.stagnation_rounds,
                 )
+
+    def _record_attempts(
+        self,
+        state: SolveState,
+        attempts: Iterable[ProofAttempt],
+        store: ArtifactStore,
+    ) -> list[ProofAttempt]:
+        """Write-before-dedupe guard for public mathematical attempt content."""
+
+        existing = {
+            (item.strategy_id, attempt_content_fingerprint(item)): item
+            for item in state.attempts
+        }
+        accepted: list[ProofAttempt] = []
+        for attempt in attempts:
+            fingerprint = attempt_content_fingerprint(attempt)
+            key = (attempt.strategy_id, fingerprint)
+            duplicate = existing.get(key)
+            route = (
+                state.route_registry.route_for_strategy(attempt.strategy_id)
+                if state.route_registry is not None
+                else None
+            )
+            if duplicate is not None:
+                if route is not None:
+                    route.duplicate_attempt_count += 1
+                    route.latest_attempt_id = duplicate.attempt_id
+                    route.latest_checkpoint_id = duplicate.latest_checkpoint_id
+                    if route.status == RouteStatus.ACTIVE:
+                        state.route_registry.mark_no_progress(
+                            route.route_id,
+                            signature=fingerprint,
+                            reason="duplicate public proof state",
+                            recovery_only=False,
+                        )
+                store.append_event(
+                    "duplicate_attempt_collapsed",
+                    {
+                        "attempt_id": attempt.attempt_id,
+                        "canonical_attempt_id": duplicate.attempt_id,
+                        "strategy_id": attempt.strategy_id,
+                        "content_fingerprint": fingerprint,
+                    },
+                )
+                continue
+            state.attempts.append(attempt)
+            existing[key] = attempt
+            accepted.append(attempt)
+            if route is not None:
+                route.latest_attempt_id = attempt.attempt_id
+                route.latest_checkpoint_id = attempt.latest_checkpoint_id
+        return accepted
+
+    @staticmethod
+    def _global_progress_signature(state: SolveState) -> str:
+        facts = state.typed_memory.facts if state.typed_memory is not None else []
+        negatives = (
+            state.typed_memory.negatives if state.typed_memory is not None else []
+        )
+        obligations = (
+            state.proof_graph.obligations if state.proof_graph is not None else []
+        )
+        certified_attempts = [
+            attempt
+            for attempt in state.attempts
+            if attempt.latest_checkpoint_id is not None
+            or (
+                state.aggregate_reports.get(attempt.attempt_id) is not None
+                and state.aggregate_reports[attempt.attempt_id].verdict
+                == VerificationVerdict.PASS
+            )
+        ]
+        return stable_hash(
+            {
+                "base_progress_signature": progress_signature(
+                    attempts=certified_attempts,
+                    facts=facts,
+                    obligations=obligations,
+                    negatives=negatives,
+                    final_proof=state.final_proof,
+                ),
+                "certified_counterexamples": sorted(
+                    set(state.certified_counterexample_hashes)
+                ),
+            }
+        )
+
+    def _apply_global_progress_gate(
+        self,
+        state: SolveState,
+        *,
+        round_index: int,
+        store: ArtifactStore,
+        activity: ActivityStream | None = None,
+    ) -> bool:
+        """Return True when the run must stop after a certified progress plateau."""
+
+        current = self._global_progress_signature(state)
+        prior = state.last_progress_signature
+        changed = prior is not None and current != prior
+        if prior is None or changed:
+            state.global_no_progress_rounds = 0
+            state.global_meta_pivot_used = False
+        else:
+            state.global_no_progress_rounds += 1
+        state.last_progress_signature = current
+
+        certificate = {
+            "round_index": round_index,
+            "progress_signature": current,
+            "previous_progress_signature": prior,
+            "verified_progress": changed,
+            "consecutive_no_progress_rounds": state.global_no_progress_rounds,
+            "attempt_count": len(state.attempts),
+            "verified_fact_count": (
+                len(state.typed_memory.facts) if state.typed_memory is not None else 0
+            ),
+            "resolved_obligation_count": (
+                sum(
+                    item.status == "closed"
+                    or (item.status == "refuted" and bool(item.evidence_message_ids))
+                    for item in state.proof_graph.obligations
+                )
+                if state.proof_graph is not None
+                else 0
+            ),
+        }
+        store.write_json(
+            "structured",
+            f"progress_certificate_round_{round_index}",
+            certificate,
+        )
+        store.append_event("progress_certificate_recorded", certificate)
+
+        scheduler = self.config.scheduler
+        if not scheduler.hard_stagnation_enabled:
+            return False
+        if (
+            state.global_no_progress_rounds
+            >= scheduler.global_no_progress_rounds_before_meta_pivot
+            and not state.global_meta_pivot_used
+        ):
+            state.global_meta_pivot_used = True
+            if state.route_registry is not None:
+                for route in state.route_registry.active_routes(round_index):
+                    route.stagnation_rounds = max(
+                        route.stagnation_rounds,
+                        self.config.topology.inspiration.stagnation_rounds,
+                    )
+            store.append_event(
+                "global_stagnation_meta_pivot_requested",
+                {
+                    "round_index": round_index,
+                    "progress_signature": current,
+                    "consecutive_no_progress_rounds": (state.global_no_progress_rounds),
+                    "next_action": "one inspiration/meta-replan pivot",
+                },
+            )
+            if activity is not None:
+                activity.info(
+                    "global_stagnation_meta_pivot",
+                    title=activity.text(
+                        "全局停滞，启动一次元策略转向",
+                        "Global plateau: one meta-strategy pivot requested",
+                    ),
+                    detail=activity.text(
+                        "连续两轮没有可验证的数学进展；下一轮只允许一次新机制转向。",
+                        "Two rounds produced no certified mathematical progress; one new-mechanism pivot is allowed next.",
+                    ),
+                    stage="adaptive_round",
+                    importance=ActivityImportance.MAJOR,
+                    metrics={
+                        "round_index": round_index,
+                        "progress_signature": current,
+                    },
+                )
+        if (
+            state.global_no_progress_rounds
+            < scheduler.global_no_progress_rounds_before_stop
+        ):
+            return False
+        if state.route_registry is not None:
+            for route in state.route_registry.active_routes(round_index):
+                state.route_registry.mark_stalled(
+                    route.route_id,
+                    signature=current,
+                    reason="global certified-progress plateau",
+                )
+        store.append_event(
+            "global_stagnation_hard_stop",
+            {
+                "round_index": round_index,
+                "progress_signature": current,
+                "consecutive_no_progress_rounds": state.global_no_progress_rounds,
+                "reason": (
+                    "No new verified checkpoint content, admitted fact, resolved "
+                    "obligation, or independently checked counterexample."
+                ),
+            },
+        )
+        if activity is not None:
+            activity.info(
+                "global_stagnation_hard_stop",
+                title=activity.text(
+                    "连续无有效进展，已停止重复求解",
+                    "Repeated solving stopped after a certified plateau",
+                ),
+                detail=activity.text(
+                    "未新增已验证检查点、全局事实、已关闭义务或独立反例；当前状态已完整保留。",
+                    "No verified checkpoint, admitted fact, closed obligation, or independent counterexample was added; state was preserved.",
+                ),
+                stage="adaptive_round",
+                importance=ActivityImportance.MAJOR,
+                metrics={
+                    "round_index": round_index,
+                    "consecutive_no_progress_rounds": (state.global_no_progress_rounds),
+                },
+            )
+        return True
 
     def _hierarchical_graph_signals(
         self, state: SolveState
@@ -3533,46 +3983,78 @@ class ProofMeshOrchestrator:
             return
         triggers = engine.detect_triggers(snapshot)
         tasks = engine.select_tasks(triggers, snapshot)
+        selected_tasks = list(tasks)
+        (
+            tasks,
+            assignment_plans,
+            task_call_breakdowns,
+            assignment_rejected,
+        ) = self._plan_inspiration_proposers(
+            engine,
+            tasks,
+            snapshot=snapshot,
+            problem=problem,
+            runner=runner,
+            allocator=allocator,
+        )
         admission = admit_inspiration_tasks(
             tasks,
             allocator,
             current_path_count=snapshot.current_path_count,
             has_candidate=self._has_synthesis_ready_candidate(state),
+            task_call_breakdowns=task_call_breakdowns or None,
         )
+        rejected_reasons = {**assignment_rejected, **admission.rejected}
         store.append_event(
             "inspiration_scheduler_admission",
             {
                 "admitted_task_ids": [
                     task.task_id for task in admission.admitted_tasks
                 ],
-                "rejected": admission.rejected,
+                "rejected": rejected_reasons,
                 "decision": admission.decision.model_dump(mode="json"),
+                "proposer_assignment_plans": {
+                    task_id: plan.model_dump(mode="json")
+                    for task_id, plan in assignment_plans.items()
+                },
             },
         )
+        rejected_tasks = [
+            task
+            for task in selected_tasks
+            if task.task_id not in {item.task_id for item in admission.admitted_tasks}
+        ]
+        engine.requeue_tasks(rejected_tasks, reasons=rejected_reasons)
         tasks = admission.admitted_tasks
         if not tasks:
             return
         if engine.inspiration_config.mode == "active":
             reserved_tasks = []
+            reservation_rejected: list[InspirationTask] = []
+            reservation_reasons: dict[str, str] = {}
             for task in tasks:
-                breakdown = allocator.inspiration_call_breakdown()
-                if task.mechanism == InspirationMechanism.INSPIRATION_COMPOSITION:
-                    # The composer has already produced a deterministic typed
-                    # proposal. Reserve only its independent review, skeptic,
-                    # and first route-attempt costs.
-                    breakdown = {**breakdown, "proposer_calls": 0}
+                breakdown = task_call_breakdowns.get(
+                    task.task_id,
+                    allocator.inspiration_call_breakdown(),
+                )
                 reservation, reason = engine.reserve_task_calls(
                     task,
                     snapshot=snapshot,
                     **breakdown,
                 )
                 if reservation is None:
+                    reservation_rejected.append(task)
+                    reservation_reasons[task.task_id] = reason
                     store.append_event(
                         "inspiration_task_reservation_rejected",
                         {"task_id": task.task_id, "reason": reason},
                     )
                     continue
                 reserved_tasks.append(task)
+            engine.requeue_tasks(
+                reservation_rejected,
+                reasons=reservation_reasons,
+            )
             tasks = reserved_tasks
             if not tasks:
                 return
@@ -3584,6 +4066,7 @@ class ProofMeshOrchestrator:
                 problem=problem,
                 runner=runner,
                 prompts=prompts,
+                assignment_plans=assignment_plans,
             )
         except Exception:
             self._finish_inspiration_reservations(engine, tasks, interrupted=True)
@@ -3748,7 +4231,7 @@ class ProofMeshOrchestrator:
                     calls=1,
                     tokens=attempt.usage.total_tokens,
                 )
-            state.attempts.extend(attempts)
+            attempts = self._record_attempts(state, attempts, store)
             store.append_event(
                 "inspiration_route_attempted",
                 {
@@ -3773,6 +4256,90 @@ class ProofMeshOrchestrator:
         )
         self._finish_inspiration_reservations(engine, tasks)
 
+    def _plan_inspiration_proposers(
+        self,
+        engine: InspirationEngine,
+        tasks: Sequence[InspirationTask],
+        *,
+        snapshot: InspirationSnapshot,
+        problem: ProblemContract,
+        runner: StructuredAgentRunner,
+        allocator: SoftBudgetAllocator,
+    ) -> tuple[
+        list[InspirationTask],
+        dict[str, InspirationAssignmentPlan],
+        dict[str, dict[str, int]],
+        dict[str, str],
+    ]:
+        if engine.inspiration_config.mode != "active":
+            return list(tasks), {}, {}, {}
+
+        ready: list[InspirationTask] = []
+        plans: dict[str, InspirationAssignmentPlan] = {}
+        call_breakdowns: dict[str, dict[str, int]] = {}
+        rejected: dict[str, str] = {}
+        for task in tasks:
+            if task.mechanism == InspirationMechanism.INSPIRATION_COMPOSITION:
+                ready.append(task)
+                call_breakdowns[task.task_id] = allocator.inspiration_call_breakdown(
+                    proposer_calls=0,
+                    review_candidates=1,
+                )
+                continue
+
+            requested = (
+                1
+                if task.mechanism == InspirationMechanism.META_REPLAN
+                else min(
+                    engine.inspiration_config.active_proposals_per_task,
+                    task.max_proposals,
+                )
+            )
+            if (
+                task.mechanism == InspirationMechanism.STRUCTURAL_ANALOGY
+                and not self._analogy_records_for_task(
+                    engine,
+                    task,
+                    snapshot=snapshot,
+                    problem=problem,
+                )
+            ):
+                plan = InspirationAssignmentPlan(
+                    task_id=task.task_id,
+                    mechanism=task.mechanism,
+                    round_index=snapshot.round_index,
+                    requested_proposals=requested,
+                    deferred_reason=(
+                        "no applicable verified local analogy records are available"
+                    ),
+                )
+            else:
+                role = self._inspiration_role_for_mechanism(task.mechanism)
+                plan = engine.assignment_planner.plan(
+                    task,
+                    proposer_role=role,
+                    pool=runner.pool,
+                    round_index=snapshot.round_index,
+                    specialty_hints=(snapshot.domain, task.mechanism.value),
+                    allow_generalists=(
+                        task.mechanism != InspirationMechanism.META_REPLAN
+                    ),
+                    requested_proposals=requested,
+                )
+            plans[task.task_id] = engine.register_assignment_plan(plan)
+            if not plan.assignments:
+                rejected[task.task_id] = (
+                    plan.deferred_reason
+                    or "no inspiration proposer assignment was available"
+                )
+                continue
+            ready.append(task)
+            call_breakdowns[task.task_id] = allocator.inspiration_call_breakdown(
+                proposer_calls=len(plan.assignments),
+                review_candidates=len(plan.assignments),
+            )
+        return ready, plans, call_breakdowns, rejected
+
     @staticmethod
     def _finish_inspiration_reservations(
         engine: InspirationEngine,
@@ -3789,20 +4356,19 @@ class ProofMeshOrchestrator:
     async def _generate_inspiration_proposals(
         self,
         engine: InspirationEngine,
-        tasks: Sequence[Any],
+        tasks: Sequence[InspirationTask],
         *,
         snapshot: InspirationSnapshot,
         problem: ProblemContract,
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
+        assignment_plans: dict[str, InspirationAssignmentPlan],
     ) -> list[InspirationProposal]:
         if engine.inspiration_config.mode != "active":
             return await engine.generate(tasks)
-        final_reserve = snapshot.finalization_reserve_calls
-        configured_calls = engine.inspiration_config.active_proposals_per_task
 
         async def generate_one(
-            task: Any,
+            task: InspirationTask,
             *,
             proposal_slot: int,
             context_mode: InspirationContextMode,
@@ -3861,61 +4427,55 @@ class ProofMeshOrchestrator:
         deterministic_proposals: list[InspirationProposal] = []
         for task in tasks:
             if task.mechanism == InspirationMechanism.INSPIRATION_COMPOSITION:
-                proposal = engine.pending_composition_for_task(task.task_id)
+                proposal = engine.pending_composition_for_task(
+                    task.task_id,
+                    state=snapshot,
+                )
                 if proposal is not None:
                     deterministic_proposals.append(proposal)
                 continue
-            calls_per_task = (
-                1
-                if task.mechanism == InspirationMechanism.META_REPLAN
-                else min(configured_calls, task.max_proposals)
-            )
-            cold_calls = min(
-                engine.inspiration_config.cold_context_proposals_per_task,
-                calls_per_task,
-            )
-            if (
-                task.mechanism == InspirationMechanism.STRUCTURAL_ANALOGY
-                and not engine.analogy_library.records
-            ):
+            plan = assignment_plans.get(task.task_id)
+            if plan is None or not plan.assignments:
                 continue
-            if runner.ledger.remaining_calls - final_reserve < calls_per_task:
-                continue
-            role = self._inspiration_role_for_mechanism(task.mechanism)
-            candidates = [
-                agent
-                for agent in runner.pool.agents
-                if agent.supports_role(role) and not agent.in_cooldown
-            ]
-            if not candidates:
-                continue
-            selected_agents: list[AgentRuntime] = []
-            excluded: set[str] = set()
-            for _index in range(min(calls_per_task, len(candidates))):
-                selected = runner.pool.select(role, exclude=excluded)
-                selected_agents.append(selected)
-                excluded.add(selected.id)
-            cold_start = calls_per_task - cold_calls
             population = []
-            for proposal_slot in range(calls_per_task):
-                context_mode = (
-                    InspirationContextMode.COLD
-                    if proposal_slot >= cold_start
-                    else InspirationContextMode.WARM
-                )
-                agent = selected_agents[proposal_slot % len(selected_agents)]
+            for assignment in plan.assignments:
+                try:
+                    agent = runner.pool.get(assignment.proposer_agent_id)
+                except KeyError:
+                    if engine.store is not None:
+                        engine.store.append_event(
+                            "inspiration_proposer_assignment_unavailable",
+                            {
+                                "task_id": task.task_id,
+                                "agent_id": assignment.proposer_agent_id,
+                                "reason": "assigned agent is no longer in the live pool",
+                            },
+                        )
+                    continue
+                if agent.in_cooldown:
+                    if engine.store is not None:
+                        engine.store.append_event(
+                            "inspiration_proposer_assignment_unavailable",
+                            {
+                                "task_id": task.task_id,
+                                "agent_id": agent.id,
+                                "reason": "assigned agent entered cooldown",
+                            },
+                        )
+                    continue
                 population.append(
                     {
-                        "proposal_slot": proposal_slot,
-                        "context_mode": context_mode.value,
+                        "proposal_slot": assignment.proposal_slot,
+                        "context_mode": assignment.context_mode.value,
                         "agent_id": agent.id,
+                        "specialist_match": assignment.specialist_match,
                     }
                 )
                 pending.append(
                     generate_one(
                         task,
-                        proposal_slot=proposal_slot,
-                        context_mode=context_mode,
+                        proposal_slot=assignment.proposal_slot,
+                        context_mode=assignment.context_mode,
                         agent=agent,
                     )
                 )
@@ -3926,6 +4486,7 @@ class ProofMeshOrchestrator:
                         "task_id": task.task_id,
                         "mechanism": task.mechanism.value,
                         "population": population,
+                        "eligible_agent_ids": plan.eligible_agent_ids,
                         "parallel_generation": True,
                     },
                 )
@@ -3980,33 +4541,11 @@ class ProofMeshOrchestrator:
                 prompts.representation_switchboard(problem, **context),
             )
         if mechanism == InspirationMechanism.STRUCTURAL_ANALOGY:
-            records = engine.analogy_library.search(
-                query_text=problem.normalized_statement,
-                object_tags=problem.definitions,
-                mechanism_tags=[
-                    tag
-                    for item in snapshot.route_signatures
-                    for tag in item.mechanism_tags
-                ],
-                obligation_kinds=[
-                    snapshot.obligation_kinds[item]
-                    for item in task.target_obligation_ids
-                    if item in snapshot.obligation_kinds
-                ],
-                mechanism_chain=[
-                    tag
-                    for item in snapshot.route_signatures
-                    for tag in [
-                        *item.representation_tags,
-                        *item.mechanism_tags,
-                        *item.key_transformations,
-                    ]
-                ],
-                graph_motif_tags=(
-                    ["shared_bottleneck"] if snapshot.shared_bottleneck_ids else []
-                ),
-                problem_hash=problem.integrity_hash,
-                top_k=engine.inspiration_config.analogy_top_k,
+            records = self._analogy_records_for_task(
+                engine,
+                task,
+                snapshot=snapshot,
+                problem=problem,
             )
             return (
                 "analogy_agent",
@@ -4046,6 +4585,41 @@ class ProofMeshOrchestrator:
         return (
             "representation_switchboard",
             prompts.surprise_exploration(problem=problem, **context),
+        )
+
+    @staticmethod
+    def _analogy_records_for_task(
+        engine: InspirationEngine,
+        task: InspirationTask,
+        *,
+        snapshot: InspirationSnapshot,
+        problem: ProblemContract,
+    ) -> list[dict[str, Any]]:
+        return engine.analogy_library.search(
+            query_text=problem.normalized_statement,
+            object_tags=problem.definitions,
+            mechanism_tags=[
+                tag for item in snapshot.route_signatures for tag in item.mechanism_tags
+            ],
+            obligation_kinds=[
+                snapshot.obligation_kinds[item]
+                for item in task.target_obligation_ids
+                if item in snapshot.obligation_kinds
+            ],
+            mechanism_chain=[
+                tag
+                for item in snapshot.route_signatures
+                for tag in [
+                    *item.representation_tags,
+                    *item.mechanism_tags,
+                    *item.key_transformations,
+                ]
+            ],
+            graph_motif_tags=(
+                ["shared_bottleneck"] if snapshot.shared_bottleneck_ids else []
+            ),
+            problem_hash=problem.integrity_hash,
+            top_k=engine.inspiration_config.analogy_top_k,
         )
 
     async def _review_inspiration_proposals(
@@ -4325,7 +4899,8 @@ class ProofMeshOrchestrator:
                 tools,
             )
             if attempts:
-                state.attempts.extend(attempts)
+                attempts = self._record_attempts(state, attempts, store)
+            if attempts:
                 await self._extract_claims_many(
                     problem,
                     attempts,
@@ -4713,6 +5288,141 @@ class ProofMeshOrchestrator:
             if member.role == RouteRole.PROVER
         }
 
+    def _apply_confirmed_counterexample_impact(
+        self,
+        state: SolveState | None,
+        strategy: StrategyCard,
+        *,
+        route_id: str | None,
+        impact: FailureLevel,
+        experiment_results: Sequence[dict[str, Any]],
+        current_round: int,
+        store: ArtifactStore,
+    ) -> None:
+        confirmed = [
+            item
+            for item in experiment_results
+            if item.get("outcome") == ExperimentOutcome.COUNTEREXAMPLE_FOUND.value
+            and item.get("evidence_strength") == EvidenceStrength.COUNTEREXAMPLE.value
+            and bool(item.get("independently_verified"))
+        ]
+        if not confirmed:
+            return
+        if state is not None:
+            state.certified_counterexample_hashes = list(
+                dict.fromkeys(
+                    [
+                        *state.certified_counterexample_hashes,
+                        *(
+                            str(
+                                item.get("result_hash")
+                                or item.get("request_hash")
+                                or item.get("experiment_id")
+                            )
+                            for item in confirmed
+                        ),
+                    ]
+                )
+            )
+        refuted_required: list[str] = []
+        for result in confirmed:
+            target = canonical_obligation_statement(str(result.get("target_claim", "")))
+            if not target:
+                continue
+            for claim in strategy.critical_claims:
+                if canonical_obligation_statement(claim.statement) != target:
+                    continue
+                claim.status = "refuted"
+                evidence_ref = (
+                    f"experiment:{result.get('experiment_id', 'unknown')}:"
+                    f"{result.get('result_hash', result.get('request_hash', ''))}"
+                )
+                claim.evidence_refs = list(
+                    dict.fromkeys([*claim.evidence_refs, evidence_ref])
+                )
+                if claim.necessity == "required":
+                    refuted_required.append(claim.claim_id)
+
+        route_action = "recorded"
+        if (
+            state is not None
+            and state.route_registry is not None
+            and route_id is not None
+        ):
+            if impact == FailureLevel.STRATEGY or refuted_required:
+                state.route_registry.mark_refuted(
+                    route_id,
+                    "independently checked counterexample refuted a required claim",
+                )
+                route_action = "refuted"
+            elif impact == FailureLevel.PLAN:
+                state.route_registry.mark_cooling(
+                    route_id,
+                    current_round + self.config.scheduler.failed_path_cooldown_rounds,
+                    "confirmed counterexample requires a new route plan",
+                    requires_revision=True,
+                )
+                route_action = "repair_required"
+        store.append_event(
+            "confirmed_counterexample_propagated",
+            {
+                "strategy_id": strategy.strategy_id,
+                "route_id": route_id,
+                "failure_level": impact.value,
+                "route_action": route_action,
+                "refuted_required_claim_ids": refuted_required,
+                "experiment_ids": [
+                    str(item.get("experiment_id", "")) for item in confirmed
+                ],
+            },
+        )
+
+    @staticmethod
+    def _deduplicate_restored_attempts(
+        raw_attempts: Iterable[dict[str, Any]],
+        store: ArtifactStore,
+    ) -> list[ProofAttempt]:
+        canonical: dict[tuple[str, str], ProofAttempt] = {}
+        collapsed: list[dict[str, str]] = []
+        for raw in raw_attempts:
+            attempt = ProofAttempt.model_validate(raw)
+            key = (attempt.strategy_id, attempt_content_fingerprint(attempt))
+            previous = canonical.get(key)
+            if previous is None or (
+                attempt.round_index,
+                attempt.attempt_id,
+            ) > (
+                previous.round_index,
+                previous.attempt_id,
+            ):
+                if previous is not None:
+                    collapsed.append(
+                        {
+                            "duplicate_attempt_id": previous.attempt_id,
+                            "canonical_attempt_id": attempt.attempt_id,
+                        }
+                    )
+                canonical[key] = attempt
+            else:
+                collapsed.append(
+                    {
+                        "duplicate_attempt_id": attempt.attempt_id,
+                        "canonical_attempt_id": previous.attempt_id,
+                    }
+                )
+        if collapsed:
+            store.append_event(
+                "restored_attempt_duplicates_collapsed",
+                {
+                    "duplicate_count": len(collapsed),
+                    "aliases": collapsed[:200],
+                },
+            )
+        return sorted(
+            canonical.values(),
+            key=lambda item: (item.round_index, item.strategy_id, item.attempt_id),
+        )
+
     def _restore_state_from_checkpoint(
         self,
         payload: dict[str, Any],
@@ -4726,10 +5436,9 @@ class ProofMeshOrchestrator:
                 StrategyCard.model_validate(item)
                 for item in payload.get("strategies", [])
             ],
-            attempts=[
-                ProofAttempt.model_validate(item)
-                for item in payload.get("attempts", [])
-            ],
+            attempts=self._deduplicate_restored_attempts(
+                payload.get("attempts", []), store
+            ),
             reports=[
                 VerificationReport.model_validate(item)
                 for item in payload.get("reports", [])
@@ -4780,7 +5489,218 @@ class ProofMeshOrchestrator:
                 for key, value in dict(payload.get("route_team_reviews", {})).items()
             },
             capability_domain=str(payload.get("capability_domain", "algebra")),
+            global_no_progress_rounds=int(payload.get("global_no_progress_rounds", 0)),
+            global_meta_pivot_used=bool(payload.get("global_meta_pivot_used", False)),
+            last_progress_signature=payload.get("last_progress_signature"),
+            certified_counterexample_hashes=[
+                str(item) for item in payload.get("certified_counterexample_hashes", [])
+            ],
         )
+
+    async def _prepare_problem_contract(
+        self,
+        problem_text: str,
+        *,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        store: ArtifactStore,
+        activity: ActivityStream,
+        parent_task_id: str,
+    ) -> ProblemContract:
+        original = problem_text.strip()
+        task_id = activity.start_task(
+            "goal_preflight",
+            task_id="goal-preflight",
+            title=activity.text(
+                "题意预检与目标规范化",
+                "Problem preflight and goal normalization",
+            ),
+            detail=activity.text(
+                "正在本地检查缺失模数、参数、占位内容与外部上下文",
+                "Checking locally for missing parameters, placeholders, and context",
+            ),
+            stage="goal_preflight",
+            parent_task_id=parent_task_id,
+            importance=ActivityImportance.MAJOR,
+            metrics={"api_call": False, "phase": "local_precheck"},
+        )
+        local_precheck = deterministic_goal_precheck(original)
+        store.write_json("structured", "goal_preflight", local_precheck)
+
+        canonical = original
+        interpretation_source = "original"
+        interpretation_confidence = 1.0
+        interpretation_reasons: list[str] = []
+        interpretation_agent_id: str | None = None
+        interpretation_raw_ref: str | None = None
+
+        if local_precheck.status == "model_review_required":
+            activity.update_task(
+                task_id,
+                title=activity.text(
+                    "发现题意疑点，正在生成候选解释",
+                    "Goal warning found; generating candidate interpretations",
+                ),
+                detail=activity.text(
+                    "仅调用一次小型、禁用 Thinking 的结构化检查；不会开始解题",
+                    "Running one small non-thinking structured review; solving has not started",
+                ),
+                stage="goal_preflight",
+                parent_task_id=parent_task_id,
+                importance=ActivityImportance.MAJOR,
+                metrics={
+                    "api_call": True,
+                    "phase": "model_review",
+                    "rule_ids": local_precheck.rule_ids,
+                },
+            )
+            result = await self._safe_call(
+                runner,
+                "planner",
+                prompts.goal_normalization(original, local_precheck),
+                budget_bucket="other",
+            )
+            if result is None:
+                activity.fail_task(
+                    task_id,
+                    title=activity.text(
+                        "题意规范化失败",
+                        "Goal normalization failed",
+                    ),
+                    detail=activity.text(
+                        "题目存在疑点且无法获得可靠的结构化解释，已在解题前停止",
+                        "The goal is unclear and no reliable structured interpretation was available",
+                    ),
+                    event_type="goal_normalization_failed",
+                    stage="goal_preflight",
+                    parent_task_id=parent_task_id,
+                    importance=ActivityImportance.MAJOR,
+                )
+                raise GoalNormalizationError(
+                    "goal normalization failed before solving; the original statement was not changed"
+                )
+
+            assessment = result.value
+            interpretation_agent_id = result.agent.id
+            interpretation_raw_ref = result.raw_ref
+            store.write_json("structured", "goal_normalization", assessment)
+            interpretation_reasons = [
+                *local_precheck.reasons,
+                *assessment.ambiguity_reasons,
+            ]
+
+            if requires_confirmation(assessment):
+                request = GoalClarificationRequest(
+                    original_statement=original,
+                    local_precheck=local_precheck,
+                    assessment=assessment,
+                )
+                store.write_json("structured", "goal_clarification_request", request)
+                activity.warn_task(
+                    task_id,
+                    title=activity.text(
+                        "等待确认规范化目标",
+                        "Waiting for canonical-goal confirmation",
+                    ),
+                    detail=activity.text(
+                        "候选解释会改变或补充数学含义；确认前不会启动后续 Agent",
+                        "The candidate changes or completes the meaning; no solver agent will start before confirmation",
+                    ),
+                    event_type="goal_clarification_required",
+                    stage="goal_preflight",
+                    parent_task_id=parent_task_id,
+                    importance=ActivityImportance.MAJOR,
+                    metrics={
+                        "request_id": request.request_id,
+                        "recommendation_confidence": (
+                            assessment.recommendation_confidence
+                        ),
+                    },
+                )
+                if self.clarification_resolver is None:
+                    raise GoalClarificationRequired(request)
+                decision = validate_clarification_decision(
+                    request,
+                    await self.clarification_resolver(request),
+                )
+                if decision.canonical_statement == original:
+                    raise ValueError(
+                        "the confirmed statement must resolve the detected ambiguity"
+                    )
+                store.write_json("structured", "goal_clarification_decision", decision)
+                canonical = decision.canonical_statement
+                interpretation_source = decision.source
+                interpretation_confidence = decision_confidence(request, decision)
+            else:
+                # A negative model review is not permission to polish or paraphrase.
+                canonical = original
+                interpretation_source = "original"
+                interpretation_confidence = assessment.recommendation_confidence
+
+        task_requirements = infer_task_requirements(canonical)
+        problem = ProblemContract(
+            exact_statement=canonical,
+            normalized_statement=self._normalize_statement(canonical),
+            original_statement=original,
+            canonical_statement=canonical,
+            interpretation_source=interpretation_source,
+            interpretation_confidence=interpretation_confidence,
+            interpretation_reasons=list(dict.fromkeys(interpretation_reasons)),
+            interpretation_agent_id=interpretation_agent_id,
+            interpretation_raw_ref=interpretation_raw_ref,
+            problem_kind=ProblemKind.UNKNOWN,
+            task_requirements=task_requirements,
+            deliverables=deliverable_instructions(task_requirements),
+            hard_constraints=[
+                "Do not change hypotheses, quantifiers, domains, or requested conclusions.",
+                "Distinguish proved claims from conjectures and unresolved gaps.",
+                "Every downstream artifact must retain the frozen goal hash.",
+            ],
+            allowed_tools=self._allowed_tools(),
+            output_language=self.config.runtime.output_language,
+        )
+        store.write_json(
+            "structured",
+            "goal_interpretation",
+            {
+                "original_statement": problem.original_statement,
+                "canonical_statement": problem.canonical_statement,
+                "interpretation_source": problem.interpretation_source,
+                "interpretation_confidence": problem.interpretation_confidence,
+                "interpretation_reasons": problem.interpretation_reasons,
+                "interpretation_agent_id": problem.interpretation_agent_id,
+                "goal_hash": problem.goal_hash,
+            },
+        )
+        activity.complete_task(
+            task_id,
+            title=activity.text(
+                "题意预检完成，目标已冻结",
+                "Problem preflight completed; goal frozen",
+            ),
+            detail=activity.text(
+                (
+                    "未发现歧义，原题原样保留且未调用模型"
+                    if local_precheck.status == "clear"
+                    else f"已按 {problem.interpretation_source} 冻结规范化目标"
+                ),
+                (
+                    "No ambiguity found; the original statement was preserved without a model call"
+                    if local_precheck.status == "clear"
+                    else f"Canonical goal frozen from {problem.interpretation_source}"
+                ),
+            ),
+            event_type="goal_preflight_completed",
+            stage="goal_preflight",
+            parent_task_id=parent_task_id,
+            importance=ActivityImportance.MAJOR,
+            metrics={
+                "api_call": local_precheck.status == "model_review_required",
+                "interpretation_source": problem.interpretation_source,
+                "goal_hash": problem.goal_hash,
+            },
+        )
+        return problem
 
     async def _triage(
         self,
@@ -4825,9 +5745,21 @@ class ProofMeshOrchestrator:
         router: SparseTopologyRouter,
         store: ArtifactStore,
     ) -> list[StrategyCard]:
-        requested = min(
-            self.config.budget.strategies_to_generate,
-            max(self.config.budget.initial_paths, triage.suggested_paths),
+        scoped_discovery_task = (
+            TaskRequirement.CONJECTURE in problem.task_requirements
+            and set(problem.task_requirements)
+            <= {
+                TaskRequirement.COMPUTATION,
+                TaskRequirement.CONJECTURE,
+            }
+        )
+        requested = (
+            1
+            if scoped_discovery_task
+            else min(
+                self.config.budget.strategies_to_generate,
+                max(self.config.budget.initial_paths, triage.suggested_paths),
+            )
         )
         result = await self._safe_call(
             runner,
@@ -4840,7 +5772,7 @@ class ProofMeshOrchestrator:
             if result is not None
             else self._fallback_strategy_set(problem, requested)
         )
-        target = self.config.budget.initial_paths
+        target = 1 if scoped_discovery_task else self.config.budget.initial_paths
         candidates = self._deduplicate_strategy_cards(
             self._attach_planner_computation_hints(strategy_set.strategies)
         )
@@ -5043,6 +5975,320 @@ class ProofMeshOrchestrator:
                 attempts.append(result)
         return attempts
 
+    @staticmethod
+    def _computation_stalled_rounds(
+        state: SolveState | None,
+        strategy: StrategyCard,
+        *,
+        round_index: int,
+    ) -> int:
+        if state is None or state.route_registry is None:
+            return max(0, round_index)
+        route = state.route_registry.route_for_strategy(strategy.strategy_id)
+        if route is None:
+            return 0
+        return max(route.stagnation_rounds, route.no_progress_strikes)
+
+    async def _retry_deferred_computations(
+        self,
+        problem: ProblemContract,
+        strategy: StrategyCard,
+        author: AgentRuntime,
+        *,
+        state: SolveState | None,
+        round_index: int,
+        path_id: str,
+        parent_checkpoint_id: str | None,
+        meta_review_approved: bool,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        tools: ToolBroker,
+        budget_bucket: str,
+        max_experiments: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, bool]:
+        feedback: list[dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
+        executed = 0
+        still_deferred = False
+        stalled_rounds = self._computation_stalled_rounds(
+            state,
+            strategy,
+            round_index=round_index,
+        )
+        pending_requests = tools.deferred_for_path(path_id)
+        if max_experiments <= 0:
+            return feedback, results, executed, bool(pending_requests)
+        for pending in pending_requests:
+            if executed >= max_experiments:
+                break
+            spec = pending.spec.model_copy(deep=True)
+            spec.path_id = path_id
+            spec.parent_checkpoint_id = parent_checkpoint_id
+            tools.update_experiment_activity(
+                spec,
+                phase="deferred_retry",
+                detail=(
+                    "The saved request is being re-evaluated against current "
+                    "route progress and Meta-Reviewer state."
+                ),
+                event_type="computation_deferred_retry",
+                progress=0.1,
+                metrics={
+                    "defer_count": pending.defer_count,
+                    "stalled_rounds": stalled_rounds,
+                    "meta_review_approved": meta_review_approved,
+                },
+            )
+            decision, experiment = await self._run_requested_computation(
+                problem,
+                spec,
+                author,
+                path_id=path_id,
+                parent_checkpoint_id=parent_checkpoint_id,
+                stalled_rounds=stalled_rounds,
+                meta_review_approved=meta_review_approved,
+                runner=runner,
+                prompts=prompts,
+                tools=tools,
+                budget_bucket=budget_bucket,
+            )
+            feedback.append(decision.model_dump(mode="json"))
+            if experiment is not None:
+                results.append(experiment.model_dump(mode="json"))
+                executed += 1
+            elif decision.decision == ComputationDecisionStatus.DEFER:
+                still_deferred = True
+                break
+        return feedback, results, executed, still_deferred
+
+    @staticmethod
+    def _successful_pattern_results(
+        tools: ToolBroker,
+        experiment_results: Sequence[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        successful: list[dict[str, Any]] = []
+        for payload in experiment_results:
+            if payload.get("outcome") not in {
+                ExperimentOutcome.NOT_REFUTED.value,
+                ExperimentOutcome.CERTIFIED.value,
+            }:
+                continue
+            request_hash = str(payload.get("request_hash") or "")
+            if not request_hash:
+                continue
+            try:
+                spec = tools.cache.load_spec(request_hash)
+            except (FileNotFoundError, OSError, ValueError):
+                continue
+            if spec.purpose == ComputationPurpose.DISCOVER_PATTERN:
+                successful.append(payload)
+        return successful
+
+    @staticmethod
+    def _attach_pattern_evidence(
+        candidates: Sequence[CandidateConjecture],
+        results_by_id: dict[str, dict[str, Any]],
+        *,
+        proposal_raw_ref: str | None,
+    ) -> None:
+        for candidate in candidates:
+            candidate.evidence_refs = []
+            for experiment_id in candidate.supporting_experiment_ids:
+                payload = results_by_id.get(experiment_id)
+                if payload is None:
+                    continue
+                for raw_ref in payload.get("artifact_refs", []):
+                    try:
+                        evidence = (
+                            EvidenceRef(artifact_ref=raw_ref)
+                            if isinstance(raw_ref, str)
+                            else EvidenceRef.model_validate(raw_ref)
+                        )
+                    except (TypeError, ValueError):
+                        continue
+                    if not any(
+                        item.artifact_ref == evidence.artifact_ref
+                        for item in candidate.evidence_refs
+                    ):
+                        candidate.evidence_refs.append(evidence)
+            if proposal_raw_ref and not any(
+                item.artifact_ref == proposal_raw_ref
+                for item in candidate.evidence_refs
+            ):
+                candidate.evidence_refs.append(
+                    EvidenceRef(
+                        artifact_ref=proposal_raw_ref,
+                        summary=(
+                            "Raw structured response that proposed this unproved "
+                            "candidate conjecture."
+                        ),
+                    )
+                )
+
+    @staticmethod
+    def _canonicalize_candidate_experiment_ids(
+        candidate: CandidateConjecture,
+        alias_to_experiment_id: dict[str, str],
+    ) -> CandidateConjecture | None:
+        canonical_ids: list[str] = []
+        for identifier in candidate.supporting_experiment_ids:
+            canonical = alias_to_experiment_id.get(identifier)
+            if canonical is None:
+                return None
+            if canonical not in canonical_ids:
+                canonical_ids.append(canonical)
+        payload = candidate.model_dump(mode="json")
+        payload["supporting_experiment_ids"] = canonical_ids
+        payload["content_hash"] = ""
+        return CandidateConjecture.model_validate(payload)
+
+    async def _ensure_pattern_conjectures(
+        self,
+        problem: ProblemContract,
+        candidates: Sequence[CandidateConjecture],
+        experiment_results: Sequence[dict[str, Any]],
+        *,
+        agent: AgentRuntime,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        tools: ToolBroker,
+        store: ArtifactStore,
+        budget_bucket: str,
+    ) -> tuple[list[CandidateConjecture], UsageRecord, set[str]]:
+        pattern_results = self._successful_pattern_results(tools, experiment_results)
+        if not pattern_results:
+            return list(candidates), UsageRecord(), set()
+
+        results_by_id: dict[str, dict[str, Any]] = {}
+        alias_to_id: dict[str, str] = {}
+        ambiguous_aliases: set[str] = set()
+        for payload in pattern_results:
+            observed_experiment_id = str(payload.get("experiment_id") or "")
+            request_hash = str(payload.get("request_hash") or "")
+            if not observed_experiment_id or not request_hash:
+                continue
+            canonical_result = tools.cache.get(request_hash)
+            experiment_id = (
+                canonical_result.experiment_id
+                if canonical_result is not None
+                else observed_experiment_id
+            )
+            canonical_payload = dict(payload)
+            canonical_payload["experiment_id"] = experiment_id
+            results_by_id[experiment_id] = canonical_payload
+            aliases = {
+                experiment_id,
+                observed_experiment_id,
+                request_hash,
+                *tools.cache.aliases_for(request_hash),
+            }
+            for alias in aliases:
+                previous = alias_to_id.get(alias)
+                if previous is not None and previous != experiment_id:
+                    ambiguous_aliases.add(alias)
+                    continue
+                alias_to_id[alias] = experiment_id
+        for alias in ambiguous_aliases:
+            alias_to_id.pop(alias, None)
+
+        allowed_ids = set(results_by_id)
+        accepted: list[CandidateConjecture] = []
+        seen_hashes: set[str] = set()
+        for raw_candidate in candidates:
+            candidate = self._canonicalize_candidate_experiment_ids(
+                raw_candidate, alias_to_id
+            )
+            if candidate is None:
+                continue
+            referenced = set(candidate.supporting_experiment_ids)
+            if not referenced or not referenced.issubset(allowed_ids):
+                continue
+            if candidate.content_hash in seen_hashes:
+                continue
+            seen_hashes.add(candidate.content_hash)
+            accepted.append(candidate)
+
+        covered = {
+            experiment_id
+            for candidate in accepted
+            for experiment_id in candidate.supporting_experiment_ids
+        }
+        missing = allowed_ids - covered
+        repair_usage = UsageRecord()
+        proposal_raw_ref: str | None = None
+        if missing:
+            bundle = prompts.complete_pattern_conjectures(
+                problem,
+                [results_by_id[experiment_id] for experiment_id in sorted(missing)],
+                [item.model_dump(mode="json") for item in accepted],
+            )
+            try:
+                completion = await self._safe_call(
+                    runner,
+                    "explorer",
+                    bundle,
+                    fixed_agent=agent,
+                    budget_bucket=budget_bucket,
+                )
+            except (BudgetExhaustedError, ProviderCircuitOpenError) as exc:
+                store.append_event(
+                    "pattern_conjecture_completion_failed",
+                    {
+                        "agent_id": agent.id,
+                        "missing_experiment_ids": sorted(missing),
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                completion = None
+            if completion is not None:
+                repair_usage = completion.usage
+                proposal_raw_ref = completion.raw_ref
+                batch = completion.value
+                if isinstance(batch, CandidateConjectureBatch):
+                    for raw_candidate in batch.candidate_conjectures:
+                        candidate = self._canonicalize_candidate_experiment_ids(
+                            raw_candidate, alias_to_id
+                        )
+                        if candidate is None:
+                            continue
+                        referenced = set(candidate.supporting_experiment_ids)
+                        if (
+                            not referenced
+                            or not referenced.issubset(allowed_ids)
+                            or not referenced.intersection(missing)
+                            or candidate.content_hash in seen_hashes
+                        ):
+                            continue
+                        seen_hashes.add(candidate.content_hash)
+                        accepted.append(candidate)
+
+        self._attach_pattern_evidence(
+            accepted,
+            results_by_id,
+            proposal_raw_ref=proposal_raw_ref,
+        )
+        covered = {
+            experiment_id
+            for candidate in accepted
+            for experiment_id in candidate.supporting_experiment_ids
+        }
+        missing = allowed_ids - covered
+        store.append_event(
+            (
+                "pattern_conjecture_completion_failed"
+                if missing
+                else "pattern_conjecture_completed"
+            ),
+            {
+                "agent_id": agent.id,
+                "experiment_ids": sorted(allowed_ids),
+                "candidate_count": len(accepted),
+                "missing_experiment_ids": sorted(missing),
+                "repair_call_used": bool(proposal_raw_ref),
+            },
+        )
+        return accepted, repair_usage, missing
+
     async def _run_requested_computation(
         self,
         problem: ProblemContract,
@@ -5070,11 +6316,49 @@ class ProofMeshOrchestrator:
             remaining_llm_calls=runner.ledger.remaining_calls,
         )
         decision = tools.decide(spec, context)
+        if decision.rule_id in {
+            "request.invalid_tool_contract",
+            "request.invalid_precision_claim",
+            "sandbox.typed_tool_first",
+            "sandbox.disabled",
+            "tool.unavailable",
+        }:
+            decision, repaired_spec = await self._repair_computation_contract(
+                problem,
+                spec,
+                decision,
+                author,
+                context=context,
+                runner=runner,
+                prompts=prompts,
+                tools=tools,
+                budget_bucket=budget_bucket,
+            )
+            if repaired_spec is None:
+                return decision, None
+            spec = repaired_spec
         if decision.decision != ComputationDecisionStatus.ALLOW:
             return decision, None
 
         program: ExperimentProgram | None = None
-        if spec.method == ComputationMethod.SANDBOXED_PYTHON:
+        if spec.method == ComputationMethod.SANDBOXED_PYTHON and not decision.cache_hit:
+            tools.update_experiment_activity(
+                spec,
+                phase="code_generation",
+                detail=(
+                    "正在生成受约束的 Python 实验程序"
+                    if self.config.runtime.output_language.lower().startswith("zh")
+                    else "Generating the constrained Python experiment program"
+                ),
+                event_type="computation_code_generation",
+                progress=0.35,
+                metrics={
+                    "decision": decision.decision.value,
+                    "decision_reason": decision.reason,
+                    "rule_id": decision.rule_id,
+                    "cache_hit": decision.cache_hit,
+                },
+            )
             try:
                 code_agent = runner.pool.select("experimenter", exclude={author.id})
             except RuntimeError:
@@ -5094,9 +6378,447 @@ class ProofMeshOrchestrator:
             if code_result is not None:
                 program = code_result.value
                 program.experiment_id = spec.experiment_id
+            else:
+                failed_decision = decision.model_copy(deep=True)
+                failed_decision.decision = ComputationDecisionStatus.REJECT
+                failed_decision.reason = (
+                    "The bounded sandbox fallback was admitted, but no valid "
+                    "ExperimentProgram was generated. Nothing was executed."
+                )
+                failed_decision.rule_id = "sandbox.codegen_failed"
+                tools.cache.save_decision(failed_decision)
+                tools.update_experiment_activity(
+                    spec,
+                    phase="code_generation_failed",
+                    detail=failed_decision.reason,
+                    status=ActivityStatus.FAILED,
+                    event_type="computation_code_generation_failed",
+                    progress=1.0,
+                    metrics={
+                        "decision": failed_decision.decision.value,
+                        "decision_reason": failed_decision.reason,
+                        "rule_id": failed_decision.rule_id,
+                        "cache_hit": False,
+                        "contract_repair_status": (
+                            failed_decision.contract_repair_status.value
+                        ),
+                        "original_request_hash": (
+                            failed_decision.original_request_hash
+                        ),
+                        "contract_repair_reason": (
+                            failed_decision.contract_repair_reason
+                        ),
+                    },
+                )
+                return failed_decision, None
 
-        result = tools.run_experiment(spec, decision, program=program)
+        # Sandbox execution is blocking. Run it off the event loop so the desktop
+        # can receive and render the already-created computation node immediately.
+        result = await asyncio.to_thread(
+            tools.run_experiment,
+            spec,
+            decision,
+            program=program,
+        )
         return decision, result
+
+    async def _repair_computation_contract(
+        self,
+        problem: ProblemContract,
+        original_spec: ExperimentSpec,
+        original_decision: ComputationDecision,
+        author: AgentRuntime,
+        *,
+        context: ComputationContext,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        tools: ToolBroker,
+        budget_bucket: str,
+    ) -> tuple[ComputationDecision, ExperimentSpec | None]:
+        issues = validate_experiment_contract(original_spec)
+        if not issues:
+            issues = [original_decision.reason]
+        if self.config.computation.max_contract_repairs_per_segment <= 0:
+            return (
+                self._finish_computation_contract_repair(
+                    original_spec,
+                    original_decision,
+                    tools=tools,
+                    status=ComputationContractRepairStatus.DISABLED,
+                    reason=(
+                        "The request was not executed because bounded contract "
+                        "repair is disabled in this profile."
+                    ),
+                    issues=issues,
+                ),
+                None,
+            )
+        if runner.ledger.remaining_calls <= 0:
+            return (
+                self._finish_computation_contract_repair(
+                    original_spec,
+                    original_decision,
+                    tools=tools,
+                    status=ComputationContractRepairStatus.FAILED,
+                    reason=(
+                        "The request was not executed because no LLM call remained "
+                        "for the bounded contract repair."
+                    ),
+                    issues=issues,
+                ),
+                None,
+            )
+
+        repair_agent = author
+        repair_role = "explorer"
+        for role in ("experimenter", "planner"):
+            try:
+                repair_agent = runner.pool.select(role, exclude={author.id})
+                repair_role = role
+                break
+            except RuntimeError:
+                continue
+        if repair_agent is author:
+            if "planner" in author.config.roles:
+                repair_role = "planner"
+            elif "experimenter" in author.config.roles:
+                repair_role = "experimenter"
+
+        sandbox_enabled = (
+            self.config.computation.sandboxed_python_enabled
+            and ComputationMethod.SANDBOXED_PYTHON.value in problem.allowed_tools
+        )
+        base_bundle = prompts.computation_contract_repair(
+            problem,
+            original_spec,
+            issues,
+            repair_agent.id,
+            sandbox_enabled=sandbox_enabled,
+        )
+        bundle = PromptBundle(
+            base_bundle.stage,
+            base_bundle.system,
+            base_bundle.user,
+            base_bundle.response_model,
+            temperature=0.0,
+            max_output_tokens=min(
+                self.config.computation.contract_repair_max_output_tokens,
+                repair_agent.config.max_output_tokens,
+            ),
+            output_tier=base_bundle.output_tier,
+        )
+        tools.update_experiment_activity(
+            original_spec,
+            phase="contract_repair",
+            detail=(
+                "The request failed pre-execution validation; compiling one "
+                "semantics-preserving replacement."
+            ),
+            event_type="computation_contract_repair_started",
+            progress=0.12,
+            metrics={
+                "decision": original_decision.decision.value,
+                "decision_reason": original_decision.reason,
+                "rule_id": original_decision.rule_id,
+                "cache_hit": False,
+                "contract_repair_status": "running",
+                "original_request_hash": original_spec.request_hash,
+            },
+        )
+        repair_result = await self._safe_call(
+            runner,
+            repair_role,
+            bundle,
+            fixed_agent=repair_agent,
+            budget_bucket=budget_bucket,
+        )
+        if repair_result is None:
+            return (
+                self._finish_computation_contract_repair(
+                    original_spec,
+                    original_decision,
+                    tools=tools,
+                    status=ComputationContractRepairStatus.FAILED,
+                    reason=(
+                        "The single bounded repair call returned no valid "
+                        "ComputationContractRepair object. Nothing was executed."
+                    ),
+                    issues=issues,
+                    repair_agent_id=repair_agent.id,
+                ),
+                None,
+            )
+
+        repair: ComputationContractRepair = repair_result.value
+        if repair.action == ComputationContractRepairAction.ABANDON_AS_UNREPRESENTABLE:
+            return (
+                self._finish_computation_contract_repair(
+                    original_spec,
+                    original_decision,
+                    tools=tools,
+                    status=ComputationContractRepairStatus.ABANDONED,
+                    reason=repair.reason,
+                    issues=issues,
+                    repair=repair,
+                    repair_agent_id=repair_result.agent.id,
+                    raw_ref=repair_result.raw_ref,
+                ),
+                None,
+            )
+
+        assert repair.repaired_spec is not None
+        repaired_spec = repair.repaired_spec
+        immutable_fields = (
+            "purpose",
+            "target_claim",
+            "assumptions",
+            "reasoning_basis",
+            "why_computation_is_needed",
+            "decision_if_confirmed",
+            "decision_if_refuted",
+            "noncomputational_alternative",
+            "broad_search",
+            "max_cases",
+            "seed",
+        )
+        changed_fields = [
+            name
+            for name in immutable_fields
+            if getattr(repaired_spec, name) != getattr(original_spec, name)
+        ]
+        if changed_fields:
+            return (
+                self._finish_computation_contract_repair(
+                    original_spec,
+                    original_decision,
+                    tools=tools,
+                    status=ComputationContractRepairStatus.FAILED,
+                    reason=(
+                        "The repair attempted to change immutable computation "
+                        f"semantics: {', '.join(changed_fields)}. Nothing was executed."
+                    ),
+                    issues=issues,
+                    repair=repair,
+                    repair_agent_id=repair_result.agent.id,
+                    raw_ref=repair_result.raw_ref,
+                ),
+                None,
+            )
+
+        repaired_payload = repaired_spec.model_dump(
+            mode="json",
+            exclude={"request_hash", "runtime_fingerprint"},
+        )
+        repaired_payload.update(
+            {
+                "experiment_id": original_spec.experiment_id,
+                "requested_by": author.id,
+                "path_id": context.path_id,
+                "parent_checkpoint_id": original_spec.parent_checkpoint_id,
+                "runtime_fingerprint": {},
+                "request_hash": "",
+            }
+        )
+        repaired_spec = ExperimentSpec.model_validate(repaired_payload)
+        if (
+            problem.allowed_tools
+            and repaired_spec.method.value not in problem.allowed_tools
+        ):
+            repaired_issues = [
+                f"method {repaired_spec.method.value} is not enabled for this run"
+            ]
+        else:
+            repaired_issues = validate_experiment_contract(repaired_spec)
+        if repaired_issues:
+            return (
+                self._finish_computation_contract_repair(
+                    original_spec,
+                    original_decision,
+                    tools=tools,
+                    status=ComputationContractRepairStatus.FAILED,
+                    reason=(
+                        "The single replacement request still failed validation: "
+                        + "; ".join(repaired_issues)
+                    ),
+                    issues=[*issues, *repaired_issues],
+                    repair=repair,
+                    repair_agent_id=repair_result.agent.id,
+                    raw_ref=repair_result.raw_ref,
+                ),
+                None,
+            )
+
+        repaired_context = ComputationContext(
+            path_id=context.path_id,
+            stalled_rounds=context.stalled_rounds,
+            meta_review_approved=context.meta_review_approved,
+            remaining_llm_calls=runner.ledger.remaining_calls,
+        )
+        repaired_decision = tools.decide(repaired_spec, repaired_context)
+        repaired_decision.contract_repair_status = (
+            ComputationContractRepairStatus.SUCCEEDED
+        )
+        repaired_decision.original_request_hash = original_spec.request_hash
+        repaired_decision.contract_repair_reason = repair.reason
+        tools.cache.save_decision(repaired_decision)
+        record = self._computation_contract_repair_record(
+            original_spec,
+            repaired_spec,
+            original_decision,
+            repaired_decision,
+            status=ComputationContractRepairStatus.SUCCEEDED,
+            reason=repair.reason,
+            issues=issues,
+            repair=repair,
+            repair_agent_id=repair_result.agent.id,
+            raw_ref=repair_result.raw_ref,
+        )
+        tools.store.write_experiment_artifact(
+            original_spec.request_hash, "contract_repair", record
+        )
+        tools.store.write_experiment_artifact(
+            repaired_spec.request_hash, "contract_repair", record
+        )
+        tools.store.append_event("computation_contract_repaired", record)
+        tools.update_experiment_activity(
+            repaired_spec,
+            phase=(
+                "contract_repaired"
+                if repaired_decision.decision == ComputationDecisionStatus.ALLOW
+                else repaired_decision.decision.value
+            ),
+            detail=(
+                "Contract repair succeeded. " + repaired_decision.reason
+                if repaired_decision.decision == ComputationDecisionStatus.ALLOW
+                else repaired_decision.reason
+            ),
+            status=(
+                ActivityStatus.RUNNING
+                if repaired_decision.decision == ComputationDecisionStatus.ALLOW
+                else ActivityStatus.WARNING
+            ),
+            event_type=(
+                "computation_contract_repaired"
+                if repaired_decision.decision == ComputationDecisionStatus.ALLOW
+                else "computation_not_executed"
+            ),
+            progress=(
+                0.25
+                if repaired_decision.decision == ComputationDecisionStatus.ALLOW
+                else 1.0
+            ),
+            metrics={
+                "decision": repaired_decision.decision.value,
+                "decision_reason": repaired_decision.reason,
+                "rule_id": repaired_decision.rule_id,
+                "cache_hit": repaired_decision.cache_hit,
+                "contract_repair_status": (
+                    repaired_decision.contract_repair_status.value
+                ),
+                "original_request_hash": original_spec.request_hash,
+                "contract_repair_reason": repair.reason,
+            },
+        )
+        return repaired_decision, repaired_spec
+
+    def _finish_computation_contract_repair(
+        self,
+        original_spec: ExperimentSpec,
+        original_decision: ComputationDecision,
+        *,
+        tools: ToolBroker,
+        status: ComputationContractRepairStatus,
+        reason: str,
+        issues: list[str],
+        repair: ComputationContractRepair | None = None,
+        repair_agent_id: str | None = None,
+        raw_ref: str | None = None,
+    ) -> ComputationDecision:
+        final_decision = original_decision.model_copy(deep=True)
+        final_decision.decision = ComputationDecisionStatus.REJECT
+        final_decision.rule_id = {
+            ComputationContractRepairStatus.ABANDONED: (
+                "request.contract_unrepresentable"
+            ),
+            ComputationContractRepairStatus.DISABLED: (
+                "request.contract_repair_disabled"
+            ),
+        }.get(status, "request.contract_repair_failed")
+        final_decision.reason = reason
+        final_decision.contract_repair_status = status
+        final_decision.original_request_hash = original_spec.request_hash
+        final_decision.contract_repair_reason = reason
+        tools.cache.save_decision(final_decision)
+        record = self._computation_contract_repair_record(
+            original_spec,
+            None,
+            original_decision,
+            final_decision,
+            status=status,
+            reason=reason,
+            issues=issues,
+            repair=repair,
+            repair_agent_id=repair_agent_id,
+            raw_ref=raw_ref,
+        )
+        tools.store.write_experiment_artifact(
+            original_spec.request_hash, "contract_repair", record
+        )
+        tools.store.append_event("computation_contract_repair_finished", record)
+        tools.update_experiment_activity(
+            original_spec,
+            phase=final_decision.rule_id,
+            detail=reason,
+            status=ActivityStatus.WARNING,
+            event_type="computation_not_executed",
+            progress=1.0,
+            metrics={
+                "decision": final_decision.decision.value,
+                "decision_reason": final_decision.reason,
+                "rule_id": final_decision.rule_id,
+                "cache_hit": False,
+                "contract_repair_status": status.value,
+                "original_request_hash": original_spec.request_hash,
+                "contract_repair_reason": reason,
+            },
+        )
+        return final_decision
+
+    @staticmethod
+    def _computation_contract_repair_record(
+        original_spec: ExperimentSpec,
+        repaired_spec: ExperimentSpec | None,
+        original_decision: ComputationDecision,
+        final_decision: ComputationDecision,
+        *,
+        status: ComputationContractRepairStatus,
+        reason: str,
+        issues: list[str],
+        repair: ComputationContractRepair | None,
+        repair_agent_id: str | None,
+        raw_ref: str | None,
+    ) -> dict[str, Any]:
+        return {
+            "experiment_id": original_spec.experiment_id,
+            "status": status.value,
+            "issues": issues,
+            "reason": reason,
+            "original_request_hash": original_spec.request_hash,
+            "original_method": original_spec.method.value,
+            "repaired_request_hash": (
+                repaired_spec.request_hash if repaired_spec is not None else None
+            ),
+            "repaired_method": (
+                repaired_spec.method.value if repaired_spec is not None else None
+            ),
+            "original_decision": original_decision.model_dump(mode="json"),
+            "final_decision": final_decision.model_dump(mode="json"),
+            "repair_response": (
+                repair.model_dump(mode="json") if repair is not None else None
+            ),
+            "repair_agent_id": repair_agent_id,
+            "raw_artifact_ref": raw_ref,
+        }
 
     @staticmethod
     def _experiment_context(
@@ -5605,6 +7327,21 @@ class ProofMeshOrchestrator:
                 if isinstance(result.skeptic_result, VerificationReport)
                 else None
             ),
+            "skeptic_failure_level": (
+                result.skeptic_result.failure_level.value
+                if isinstance(result.skeptic_result, VerificationReport)
+                else None
+            ),
+            "skeptic_confidence": (
+                result.skeptic_result.confidence
+                if isinstance(result.skeptic_result, VerificationReport)
+                else None
+            ),
+            "skeptic_first_error_step": (
+                result.skeptic_result.first_error_step
+                if isinstance(result.skeptic_result, VerificationReport)
+                else None
+            ),
             "referee_accepted": (
                 result.referee_result.accepted
                 if isinstance(result.referee_result, BrokerDecision)
@@ -5620,6 +7357,95 @@ class ProofMeshOrchestrator:
         state.route_team_reviews.setdefault(attempt_id, []).append(summary)
         store.append_event("route_local_review_completed", summary)
         return result
+
+    def _record_route_checkpoint_outcome(
+        self,
+        state: SolveState | None,
+        *,
+        attempt_id: str,
+        delta: ProofDelta,
+        reports: Sequence[VerificationReport],
+        accepted: bool,
+        feedback: str,
+        store: ArtifactStore,
+    ) -> None:
+        """Persist delta rejection at route scope so a blank Attempt cannot erase it."""
+
+        if state is None:
+            return
+        if state.route_team_reviews is None:
+            state.route_team_reviews = {}
+        reviews = state.route_team_reviews.setdefault(attempt_id, [])
+        summary = next(
+            (
+                item
+                for item in reversed(reviews)
+                if item.get("delta_id") == delta.delta_id
+            ),
+            None,
+        )
+        if summary is None:
+            summary = {
+                "route_id": self._route_for_strategy(state, delta.strategy_id),
+                "attempt_id": attempt_id,
+                "delta_id": delta.delta_id,
+                "prover_agent_id": delta.agent_id,
+                "diagnostics": [],
+            }
+            reviews.append(summary)
+
+        failed = [
+            report for report in reports if report.verdict == VerificationVerdict.FAIL
+        ]
+        uncertain = [
+            report
+            for report in reports
+            if report.verdict == VerificationVerdict.UNCERTAIN
+        ]
+        failure_order = {
+            FailureLevel.NONE: 0,
+            FailureLevel.EXECUTION: 1,
+            FailureLevel.PLAN: 2,
+            FailureLevel.STRATEGY: 3,
+        }
+        strongest = max(
+            failed or uncertain,
+            key=lambda report: (
+                failure_order[report.failure_level],
+                report.confidence,
+            ),
+            default=None,
+        )
+        summary.update(
+            {
+                "checkpoint_status": (
+                    "accepted" if accepted else "rejected" if failed else "uncertain"
+                ),
+                "checkpoint_failure_level": (
+                    strongest.failure_level.value
+                    if strongest is not None
+                    else FailureLevel.NONE.value
+                ),
+                "checkpoint_failure_confidence": (
+                    strongest.confidence if strongest is not None else 0.0
+                ),
+                "checkpoint_first_error_step": (
+                    strongest.first_error_step if strongest is not None else None
+                ),
+                "checkpoint_feedback": feedback,
+            }
+        )
+        store.append_event(
+            "route_checkpoint_outcome_recorded",
+            {
+                "attempt_id": attempt_id,
+                "delta_id": delta.delta_id,
+                "checkpoint_status": summary["checkpoint_status"],
+                "failure_level": summary["checkpoint_failure_level"],
+                "confidence": summary["checkpoint_failure_confidence"],
+                "first_error_step": summary["checkpoint_first_error_step"],
+            },
+        )
 
     async def _explore_path(
         self,
@@ -5642,6 +7468,45 @@ class ProofMeshOrchestrator:
         deep_exploration_meta_approved: bool = False,
         max_segments_this_call: int | None = None,
     ) -> ProofAttempt:
+        path_id = (
+            previous_attempt.path_id
+            if previous_attempt and previous_attempt.path_id
+            else f"path_{strategy.strategy_id}"
+        )
+        calculation_gate = CriticalCalculationGate(self.config, tools, store)
+        strategy_gate = calculation_gate.evaluate_strategy(
+            strategy,
+            path_id=path_id,
+            requested_by=agent.id,
+        )
+        if not strategy_gate.passed:
+            reason = strategy_gate.concise_failure()
+            store.append_event(
+                "strategy_blocked_by_critical_calculation_gate",
+                {
+                    "strategy_id": strategy.strategy_id,
+                    "path_id": path_id,
+                    "agent_id": agent.id,
+                    "reason": reason,
+                },
+            )
+            blocked = self._failed_attempt(
+                problem,
+                strategy,
+                agent.id,
+                round_index,
+                RuntimeError(f"critical calculation gate blocked the route: {reason}"),
+            )
+            blocked.path_id = path_id
+            blocked.dead_ends = [
+                "Route admission blocked by the deterministic critical calculation "
+                f"gate: {reason}"
+            ]
+            blocked.unresolved_gaps = [
+                "Correct or declare the load-bearing finite calculation before "
+                "exploring this route."
+            ]
+            return blocked
         if self.config.continuation.enabled:
             return await self._explore_path_segmented(
                 problem,
@@ -5666,6 +7531,7 @@ class ProofMeshOrchestrator:
             problem,
             strategy,
             agent,
+            state=state,
             round_index=round_index,
             runner=runner,
             prompts=prompts,
@@ -5778,6 +7644,9 @@ class ProofMeshOrchestrator:
         cumulative_usage = UsageRecord()
         latest_raw_ref: str | None = None
         verified_delta_claims: list[ClaimCard] = []
+        route_candidate_conjectures: list[CandidateConjecture] = list(
+            previous_attempt.candidate_conjectures if previous_attempt else []
+        )
         failover_chain: list[str] = []
 
         segment_limit = cfg.segments_per_explore_call
@@ -5858,9 +7727,10 @@ class ProofMeshOrchestrator:
                     },
                 )
                 if route is not None:
-                    route.stagnation_rounds = max(
-                        route.stagnation_rounds,
-                        self.config.topology.inspiration.stagnation_rounds,
+                    state.route_registry.mark_stalled(
+                        route.route_id,
+                        signature=deep_admission.signature_hash,
+                        reason=deep_admission.reason,
                     )
                 break
             if deep_admission is not None:
@@ -5922,8 +7792,37 @@ class ProofMeshOrchestrator:
             )
             experiment_results: list[dict[str, Any]] = []
             computation_feedback: list[dict[str, Any]] = []
-            compute_cycles = 0
-            confirmed_counterexample_pending = False
+            (
+                deferred_feedback,
+                deferred_results,
+                compute_cycles,
+                deferred_still_blocked,
+            ) = await self._retry_deferred_computations(
+                problem,
+                strategy,
+                agent,
+                state=state,
+                round_index=round_index,
+                path_id=path_id,
+                parent_checkpoint_id=checkpoint.checkpoint_id,
+                meta_review_approved=computation_meta_approved,
+                runner=runner,
+                prompts=prompts,
+                tools=tools,
+                budget_bucket=budget_bucket,
+                max_experiments=(
+                    self.config.computation.max_compute_cycles_per_segment
+                ),
+            )
+            computation_feedback.extend(deferred_feedback)
+            experiment_results.extend(deferred_results)
+            confirmed_counterexample_pending = any(
+                item.get("outcome") == ExperimentOutcome.COUNTEREXAMPLE_FOUND.value
+                and item.get("evidence_strength")
+                == EvidenceStrength.COUNTEREXAMPLE.value
+                and bool(item.get("independently_verified"))
+                for item in deferred_results
+            )
             delta: ProofDelta | None = None
             result: StructuredCallResult[Any] | None = None
             tried_agents: list[str] = []
@@ -5932,6 +7831,25 @@ class ProofMeshOrchestrator:
             segment_usage = UsageRecord()
             deep_outcome: ExplorationOutcome | None = None
             deep_outcome_reason = ""
+
+            if deferred_still_blocked:
+                deep_outcome = ExplorationOutcome.NO_VERIFIED_PROGRESS
+                deep_outcome_reason = (
+                    "a durable computation request remains deferred by its "
+                    "explicit stall or Meta-Reviewer gate"
+                )
+                self._finish_deep_exploration(
+                    state,
+                    deep_admission,
+                    outcome=deep_outcome,
+                    usage=segment_usage,
+                    checkpoint_after=checkpoint,
+                    proof_debt_before=proof_debt_before,
+                    current_goal_before=current_goal_before_segment,
+                    reason=deep_outcome_reason,
+                    store=store,
+                )
+                break
 
             while True:
 
@@ -6179,6 +8097,16 @@ class ProofMeshOrchestrator:
                             "reason": turn.reason,
                         },
                     )
+                    if confirmed_counterexample_pending:
+                        self._apply_confirmed_counterexample_impact(
+                            state,
+                            strategy,
+                            route_id=route_id,
+                            impact=turn.experiment_impact,
+                            experiment_results=experiment_results,
+                            current_round=round_index,
+                            store=store,
+                        )
                 if turn.action in {
                     ContinuationAction.SUBMIT_DELTA,
                     ContinuationAction.COMPLETE,
@@ -6209,16 +8137,48 @@ class ProofMeshOrchestrator:
                     agent,
                     path_id=path_id,
                     parent_checkpoint_id=checkpoint.checkpoint_id,
-                    stalled_rounds=round_index,
+                    stalled_rounds=self._computation_stalled_rounds(
+                        state,
+                        strategy,
+                        round_index=round_index,
+                    ),
                     meta_review_approved=computation_meta_approved,
                     runner=runner,
                     prompts=prompts,
                     tools=tools,
                     budget_bucket=budget_bucket,
                 )
-                compute_cycles += 1
                 computation_feedback.append(decision.model_dump(mode="json"))
+                if decision.decision == ComputationDecisionStatus.DEFER:
+                    deep_outcome = ExplorationOutcome.NO_VERIFIED_PROGRESS
+                    deep_outcome_reason = (
+                        "the requested computation was durably queued until its "
+                        "explicit gate condition is satisfied"
+                    )
+                    targeted_feedback = [
+                        *targeted_feedback,
+                        (
+                            f"Computation {turn.experiment_spec.experiment_id} was "
+                            f"queued: {decision.reason}"
+                        ),
+                    ]
+                    break
+                if experiment is None:
+                    deep_outcome = ExplorationOutcome.NO_VERIFIED_PROGRESS
+                    deep_outcome_reason = (
+                        "the requested computation was rejected and produced no "
+                        "admissible evidence"
+                    )
+                    targeted_feedback = [
+                        *targeted_feedback,
+                        (
+                            f"Computation {turn.experiment_spec.experiment_id} was "
+                            f"not executed: {decision.reason}"
+                        ),
+                    ]
+                    break
                 if experiment is not None:
+                    compute_cycles += 1
                     experiment_results.append(experiment.model_dump(mode="json"))
                     confirmed_counterexample_pending = (
                         confirmed_counterexample_pending
@@ -6264,7 +8224,67 @@ class ProofMeshOrchestrator:
             delta.round_index = round_index
             delta.segment_index = next_segment
             delta.raw_artifact_ref = result.raw_ref
-            delta.usage = result.usage
+            (
+                delta.candidate_conjectures,
+                pattern_completion_usage,
+                missing_pattern_results,
+            ) = await self._ensure_pattern_conjectures(
+                problem,
+                delta.candidate_conjectures,
+                experiment_results,
+                agent=result.agent,
+                runner=runner,
+                prompts=prompts,
+                tools=tools,
+                store=store,
+                budget_bucket=budget_bucket,
+            )
+            cumulative_usage = self._sum_usage(
+                [cumulative_usage, pattern_completion_usage]
+            )
+            segment_usage = self._sum_usage([segment_usage, pattern_completion_usage])
+            delta.usage = self._sum_usage([result.usage, pattern_completion_usage])
+            known_candidate_hashes = {
+                item.content_hash for item in route_candidate_conjectures
+            }
+            for candidate in delta.candidate_conjectures:
+                if candidate.content_hash not in known_candidate_hashes:
+                    known_candidate_hashes.add(candidate.content_hash)
+                    route_candidate_conjectures.append(candidate)
+            if missing_pattern_results:
+                delta.proof_complete = False
+                delta.candidate_final_answer = None
+                delta.ready_for_verification = False
+                delta.remaining_subgoals = self._deduplicate_strings(
+                    [
+                        *delta.remaining_subgoals,
+                        (
+                            "Formulate a concrete candidate conjecture for successful "
+                            "discover_pattern experiments: "
+                            + ", ".join(sorted(missing_pattern_results))
+                        ),
+                    ]
+                )
+                delta.known_risks = self._deduplicate_strings(
+                    [
+                        *delta.known_risks,
+                        "A bounded pattern-discovery result has not yet been "
+                        "interpreted as an explicit unproved conjecture.",
+                    ]
+                )
+            candidate_calculation_steps = [
+                *delta.new_steps,
+                *(step for claim in delta.new_claims for step in claim.proof_steps),
+            ]
+            calculation_gate_result = CriticalCalculationGate(
+                self.config, tools, store
+            ).evaluate_steps(
+                candidate_calculation_steps,
+                scope_type="proof_step",
+                path_id=checkpoint.path_id,
+                parent_checkpoint_id=checkpoint.checkpoint_id,
+                requested_by=result.agent.id,
+            )
             store.save_proof_delta(delta.delta_id, delta)
             working_checkpoint = WorkingProofCheckpoint(
                 parent_verified_checkpoint_id=checkpoint.checkpoint_id,
@@ -6279,6 +8299,28 @@ class ProofMeshOrchestrator:
 
             local_report = local_delta_verification(problem, checkpoint, delta)
             policy_issues: list[VerificationIssue] = []
+            for gate_failure in calculation_gate_result.failures:
+                policy_issues.append(
+                    VerificationIssue(
+                        phase="critical_calculation_gate",
+                        severity=(
+                            Severity.CRITICAL
+                            if gate_failure.verdict == CalculationGateVerdict.REFUTED
+                            else Severity.ERROR
+                        ),
+                        step_id=gate_failure.scope_id,
+                        description=gate_failure.reason,
+                        counterexample=(
+                            gate_failure.reason
+                            if gate_failure.verdict == CalculationGateVerdict.REFUTED
+                            else None
+                        ),
+                        repair_hint=(
+                            "Correct the finite claim and its typed request, or replace "
+                            "the computed premise with a symbolic derivation."
+                        ),
+                    )
+                )
             if len(delta.new_steps) > cfg.max_new_steps_per_call:
                 policy_issues.append(
                     VerificationIssue(
@@ -6417,6 +8459,15 @@ class ProofMeshOrchestrator:
                 )
                 working_checkpoint.feedback = [feedback]
                 store.save_working_checkpoint(working_checkpoint)
+                self._record_route_checkpoint_outcome(
+                    state,
+                    attempt_id=attempt_id,
+                    delta=delta,
+                    reports=reports,
+                    accepted=False,
+                    feedback=feedback,
+                    store=store,
+                )
                 store.append_event(
                     "proof_checkpoint_rejected",
                     {
@@ -6505,6 +8556,15 @@ class ProofMeshOrchestrator:
                 reports,
                 failover_chain=tried_agents,
             )
+            self._record_route_checkpoint_outcome(
+                state,
+                attempt_id=attempt_id,
+                delta=delta,
+                reports=reports,
+                accepted=True,
+                feedback="the proof delta passed checkpoint verification",
+                store=store,
+            )
             store.commit_proof_checkpoint(checkpoint)
             self._finish_deep_exploration(
                 state,
@@ -6572,6 +8632,7 @@ class ProofMeshOrchestrator:
             previous_attempt=previous_attempt,
             attempt_id=attempt_id,
             proposed_lemmas=verified_delta_claims,
+            candidate_conjectures=route_candidate_conjectures,
             raw_artifact_ref=latest_raw_ref,
             usage=cumulative_usage,
             resumed_from_checkpoint_id=resumed_from,
@@ -6698,7 +8759,6 @@ class ProofMeshOrchestrator:
             report.agent_id = result.agent.id
             report.stage = VerificationStage.DETAILED
             if delta.problem_hash != problem.integrity_hash:
-                report.problem_integrity_ok = False
                 report.issues.append(
                     VerificationIssue(
                         phase="problem_integrity_guard",
@@ -6710,6 +8770,7 @@ class ProofMeshOrchestrator:
                     )
                 )
                 report.verdict = VerificationVerdict.FAIL
+                report.problem_integrity_ok = False
             report.raw_artifact_ref = result.raw_ref
             report.usage = result.usage
             if report.tool_requests:
@@ -6787,6 +8848,7 @@ class ProofMeshOrchestrator:
         strategy: StrategyCard,
         agent: AgentRuntime,
         *,
+        state: SolveState | None,
         round_index: int,
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
@@ -6807,8 +8869,45 @@ class ProofMeshOrchestrator:
         )
         experiment_results: list[dict[str, Any]] = []
         computation_feedback: list[dict[str, Any]] = []
-        compute_cycles = 0
-        confirmed_counterexample_pending = False
+        (
+            deferred_feedback,
+            deferred_results,
+            compute_cycles,
+            deferred_still_blocked,
+        ) = await self._retry_deferred_computations(
+            problem,
+            strategy,
+            agent,
+            state=state,
+            round_index=round_index,
+            path_id=path_id,
+            parent_checkpoint_id=None,
+            meta_review_approved=computation_meta_approved,
+            runner=runner,
+            prompts=prompts,
+            tools=tools,
+            budget_bucket=budget_bucket,
+            max_experiments=(self.config.computation.max_compute_cycles_per_segment),
+        )
+        computation_feedback.extend(deferred_feedback)
+        experiment_results.extend(deferred_results)
+        if deferred_still_blocked:
+            return self._failed_attempt(
+                problem,
+                strategy,
+                agent.id,
+                round_index,
+                RuntimeError(
+                    "a durable computation request remains deferred by its "
+                    "stall or Meta-Reviewer gate"
+                ),
+            )
+        confirmed_counterexample_pending = any(
+            item.get("outcome") == ExperimentOutcome.COUNTEREXAMPLE_FOUND.value
+            and item.get("evidence_strength") == EvidenceStrength.COUNTEREXAMPLE.value
+            and bool(item.get("independently_verified"))
+            for item in deferred_results
+        )
         cumulative_usage = UsageRecord()
         latest_raw_ref: str | None = None
         attempt: ProofAttempt | None = None
@@ -6876,6 +8975,16 @@ class ProofMeshOrchestrator:
                         "reason": turn.reason,
                     },
                 )
+                if confirmed_counterexample_pending:
+                    self._apply_confirmed_counterexample_impact(
+                        None,
+                        strategy,
+                        route_id=None,
+                        impact=turn.experiment_impact,
+                        experiment_results=experiment_results,
+                        current_round=round_index,
+                        store=store,
+                    )
             if turn.action == InitialExplorationAction.SUBMIT_ATTEMPT:
                 attempt = turn.attempt
                 break
@@ -6902,16 +9011,41 @@ class ProofMeshOrchestrator:
                 agent,
                 path_id=path_id,
                 parent_checkpoint_id=None,
-                stalled_rounds=round_index,
+                stalled_rounds=self._computation_stalled_rounds(
+                    state,
+                    strategy,
+                    round_index=round_index,
+                ),
                 meta_review_approved=computation_meta_approved,
                 runner=runner,
                 prompts=prompts,
                 tools=tools,
                 budget_bucket=budget_bucket,
             )
-            compute_cycles += 1
             computation_feedback.append(decision.model_dump(mode="json"))
+            if decision.decision == ComputationDecisionStatus.DEFER:
+                return self._failed_attempt(
+                    problem,
+                    strategy,
+                    agent.id,
+                    round_index,
+                    RuntimeError(
+                        "computation was durably queued until its gate condition "
+                        f"is satisfied: {decision.reason}"
+                    ),
+                )
+            if experiment is None:
+                return self._failed_attempt(
+                    problem,
+                    strategy,
+                    agent.id,
+                    round_index,
+                    RuntimeError(
+                        f"computation request was not executed: {decision.reason}"
+                    ),
+                )
             if experiment is not None:
+                compute_cycles += 1
                 experiment_results.append(experiment.model_dump(mode="json"))
                 confirmed_counterexample_pending = confirmed_counterexample_pending or (
                     experiment.outcome == ExperimentOutcome.COUNTEREXAMPLE_FOUND
@@ -6920,6 +9054,30 @@ class ProofMeshOrchestrator:
                 )
 
         assert attempt is not None
+        (
+            attempt.candidate_conjectures,
+            pattern_completion_usage,
+            missing_pattern_results,
+        ) = await self._ensure_pattern_conjectures(
+            problem,
+            attempt.candidate_conjectures,
+            experiment_results,
+            agent=agent,
+            runner=runner,
+            prompts=prompts,
+            tools=tools,
+            store=store,
+            budget_bucket=budget_bucket,
+        )
+        cumulative_usage = self._sum_usage([cumulative_usage, pattern_completion_usage])
+        if missing_pattern_results and attempt.status != AttemptStatus.FAILED:
+            attempt.status = AttemptStatus.PARTIAL
+            attempt.final_answer = None
+            attempt.unresolved_gaps.append(
+                "Formulate a concrete candidate conjecture for successful "
+                "discover_pattern experiments: "
+                + ", ".join(sorted(missing_pattern_results))
+            )
         # Authoritative metadata is assigned by the orchestrator, not trusted from model text.
         attempt.problem_hash = problem.integrity_hash
         attempt.strategy_id = strategy.strategy_id
@@ -6928,6 +9086,30 @@ class ProofMeshOrchestrator:
         attempt.path_id = path_id
         attempt.raw_artifact_ref = latest_raw_ref
         attempt.usage = cumulative_usage
+        attempt_calculation_steps = [
+            *attempt.proof_steps,
+            *(step for claim in attempt.proposed_lemmas for step in claim.proof_steps),
+        ]
+        calculation_gate_result = CriticalCalculationGate(
+            self.config, tools, store
+        ).evaluate_steps(
+            attempt_calculation_steps,
+            scope_type="proof_step",
+            path_id=path_id,
+            parent_checkpoint_id=None,
+            requested_by=agent.id,
+        )
+        if not calculation_gate_result.passed:
+            attempt.status = AttemptStatus.FAILED
+            attempt.final_answer = None
+            attempt.dead_ends.append(
+                "Deterministic critical calculation gate blocked the attempt: "
+                + calculation_gate_result.concise_failure()
+            )
+            attempt.unresolved_gaps.append(
+                "Correct or declare every load-bearing finite calculation before "
+                "resubmitting this route."
+            )
         for lemma in attempt.proposed_lemmas:
             lemma.source_attempt_id = attempt.attempt_id
             lemma.source_agent_id = agent.id
@@ -6949,8 +9131,8 @@ class ProofMeshOrchestrator:
                     "一条证明路线已返回", "A proof route returned"
                 ),
                 detail=runner.activity.text(
-                    f"{strategy.title}：{attempt.status.value}；步骤 {len(attempt.proof_steps)}；未解缺口 {len(attempt.unresolved_gaps)}",
-                    f"{strategy.title}: {attempt.status.value}; {len(attempt.proof_steps)} steps; {len(attempt.unresolved_gaps)} unresolved gaps",
+                    f"{strategy.title}：{attempt.status.value}；步骤 {len(attempt.proof_steps)}；候选规律 {len(attempt.candidate_conjectures)}；未解缺口 {len(attempt.unresolved_gaps)}",
+                    f"{strategy.title}: {attempt.status.value}; {len(attempt.proof_steps)} steps; {len(attempt.candidate_conjectures)} candidate conjectures; {len(attempt.unresolved_gaps)} unresolved gaps",
                 ),
                 stage="independent_exploration",
                 agent_id=agent.id,
@@ -6960,10 +9142,43 @@ class ProofMeshOrchestrator:
                     "strategy_id": strategy.strategy_id,
                     "status": attempt.status.value,
                     "proof_step_count": len(attempt.proof_steps),
+                    "candidate_conjecture_count": len(attempt.candidate_conjectures),
                     "unresolved_gap_count": len(attempt.unresolved_gaps),
                 },
             )
         return attempt
+
+    @staticmethod
+    async def _gather_optional_batch_until_provider_circuit(
+        awaitables: Sequence[Any],
+    ) -> tuple[list[Any], ProviderCircuitOpenError | None]:
+        tasks = [asyncio.create_task(item) for item in awaitables]
+        task_indexes = {task: index for index, task in enumerate(tasks)}
+        results: list[Any] = [None] * len(tasks)
+        pending = set(tasks)
+        while pending:
+            done, pending = await asyncio.wait(
+                pending,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            circuit_error: ProviderCircuitOpenError | None = None
+            for task in done:
+                index = task_indexes[task]
+                try:
+                    results[index] = task.result()
+                except Exception as exc:
+                    results[index] = exc
+                    if isinstance(exc, ProviderCircuitOpenError):
+                        circuit_error = exc
+            if circuit_error is None:
+                continue
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            for task in pending:
+                results[task_indexes[task]] = circuit_error
+            return results, circuit_error
+        return results, None
 
     async def _extract_claims_many(
         self,
@@ -6976,11 +9191,20 @@ class ProofMeshOrchestrator:
         *,
         budget_bucket: str,
     ) -> None:
+        summarizers: dict[str, AgentRuntime] = {}
+        reserved_agents: set[str] = set()
+        for attempt in attempts:
+            if attempt.status == AttemptStatus.FAILED:
+                continue
+            exclude = {attempt.agent_id, *reserved_agents}
+            summarizer = runner.pool.select("summarizer", exclude=exclude)
+            summarizers[attempt.attempt_id] = summarizer
+            reserved_agents.add(summarizer.id)
+
         async def one(attempt: ProofAttempt) -> ClaimBatch | None:
             if attempt.status == AttemptStatus.FAILED:
                 return None
-            exclude = {attempt.agent_id} if len(runner.pool.agents) > 1 else set()
-            summarizer = runner.pool.select("summarizer", exclude=exclude)
+            summarizer = summarizers[attempt.attempt_id]
             bundle = prompts.summarize_claims(
                 problem,
                 attempt,
@@ -7008,10 +9232,23 @@ class ProofMeshOrchestrator:
             store.write_json("structured", f"claim_batch_{attempt.attempt_id}", batch)
             return batch
 
-        results = await asyncio.gather(
-            *(one(a) for a in attempts), return_exceptions=True
+        (
+            results,
+            circuit_error,
+        ) = await self._gather_optional_batch_until_provider_circuit(
+            [one(attempt) for attempt in attempts]
         )
-        self._raise_if_provider_circuit(results)
+        if circuit_error is not None:
+            store.append_event(
+                "claim_extraction_batch_short_circuited",
+                {
+                    "provider_scope": circuit_error.provider_scope,
+                    "agent_ids": circuit_error.agent_ids,
+                    "retry_after_seconds": circuit_error.retry_after_seconds,
+                    "attempt_count": len(attempts),
+                    "fallback": "retain_explorer_proposed_lemmas",
+                },
+            )
         for attempt, result in zip(attempts, results):
             if isinstance(result, Exception):
                 store.append_event(
@@ -7779,6 +10016,25 @@ class ProofMeshOrchestrator:
         )
         if strategy is None:
             return None
+        route = (
+            state.route_registry.route_for_strategy(strategy_id)
+            if state.route_registry is not None
+            else None
+        )
+        if route is not None and route.status not in {
+            RouteStatus.ACTIVE,
+            RouteStatus.REPAIR_ONCE,
+        }:
+            store.append_event(
+                "route_deepening_blocked",
+                {
+                    "route_id": route.route_id,
+                    "strategy_id": strategy_id,
+                    "status": route.status.value,
+                    "reason": route.frozen_reason or route.revision_summary,
+                },
+            )
+            return None
         previous_candidates = [
             a for a in state.attempts if a.strategy_id == strategy_id
         ]
@@ -7840,8 +10096,26 @@ class ProofMeshOrchestrator:
         triage = triage or self._fallback_triage()
         feedback: list[str] = []
         if state.meta_reviews:
-            feedback.extend(state.meta_reviews[-1].unresolved_conflicts)
-            feedback.extend(state.meta_reviews[-1].required_actions)
+            review_index = len(state.meta_reviews) - 1
+            source = f"meta_review:{review_index}"
+            feedback.extend(
+                self._feedback_directive(
+                    item,
+                    kind="unresolved_conflict",
+                    status="open",
+                    source=source,
+                )
+                for item in state.meta_reviews[-1].unresolved_conflicts
+            )
+            feedback.extend(
+                self._feedback_directive(
+                    item,
+                    kind="required_action",
+                    status="open",
+                    source=source,
+                )
+                for item in state.meta_reviews[-1].required_actions
+            )
         count = min(
             requested_count or self.config.scheduler.widen_paths_per_action,
             self.config.budget.max_paths - len(state.strategies),
@@ -8130,6 +10404,58 @@ class ProofMeshOrchestrator:
         state: SolveState | None = None,
     ) -> VerificationBundle:
         reports: list[VerificationReport] = []
+        calculation_gate_result = CriticalCalculationGate(
+            self.config, tools, store
+        ).evaluate_steps(
+            proof.proof_steps,
+            scope_type="final_step",
+            path_id="final_proof",
+            parent_checkpoint_id=None,
+            requested_by=(
+                synthesizer.id if synthesizer is not None else "final-synthesizer"
+            ),
+        )
+        if not calculation_gate_result.passed:
+            reason = calculation_gate_result.concise_failure()
+            issues = [
+                VerificationIssue(
+                    phase="critical_calculation_gate",
+                    severity=(
+                        Severity.CRITICAL
+                        if failure.verdict == CalculationGateVerdict.REFUTED
+                        else Severity.ERROR
+                    ),
+                    step_id=failure.scope_id,
+                    description=failure.reason,
+                    repair_hint=(
+                        "Correct the finite claim and its typed request before final "
+                        "mathematical review."
+                    ),
+                )
+                for failure in calculation_gate_result.failures
+            ]
+            report = VerificationReport(
+                target_id="final_proof",
+                target_type="final_proof",
+                agent_id="local-critical-calculation-gate",
+                stage=VerificationStage.FINAL,
+                verdict=VerificationVerdict.FAIL,
+                first_error_step=(
+                    calculation_gate_result.failures[0].scope_id
+                    if calculation_gate_result.failures
+                    else None
+                ),
+                issues=issues,
+                failure_level=FailureLevel.EXECUTION,
+                confidence=1.0,
+                concise_feedback=(
+                    "Final proof blocked before reviewer calls by the deterministic "
+                    f"critical calculation gate: {reason}"
+                ),
+            )
+            store.write_json("structured", "final_critical_calculation_gate", report)
+            store.append_event("final_critical_calculation_gate_blocked", report)
+            return VerificationBundle(aggregate=report, reports=[report])
         hierarchical = self.config.topology.mode == "hierarchical_sparse"
         if hierarchical and (
             state is None or state.typed_memory is None or state.message_broker is None
@@ -8823,7 +11149,6 @@ class ProofMeshOrchestrator:
     ) -> None:
         target_hash = target.problem_hash
         if target_hash != problem.integrity_hash:
-            report.problem_integrity_ok = False
             report.failure_level = FailureLevel.STRATEGY
             report.issues.append(
                 VerificationIssue(
@@ -8837,6 +11162,7 @@ class ProofMeshOrchestrator:
                 )
             )
             report.verdict = VerificationVerdict.FAIL
+            report.problem_integrity_ok = False
             report.concise_feedback = (
                 "Problem-integrity hash mismatch. " + report.concise_feedback
             )
@@ -9203,17 +11529,77 @@ class ProofMeshOrchestrator:
         feedback: list[str] = []
         report = state.aggregate_reports.get(attempt.attempt_id)
         if report is not None:
+            report_source = f"verification_report:{report.report_id}"
+            report_status = (
+                "rejected"
+                if report.verdict == VerificationVerdict.FAIL
+                else "uncertain"
+            )
             if report.first_error_step:
-                feedback.append(f"First disputed step: {report.first_error_step}")
-            feedback.append(report.concise_feedback)
+                feedback.append(
+                    self._feedback_directive(
+                        f"First disputed step: {report.first_error_step}",
+                        kind="verification_issue",
+                        status=report_status,
+                        source=report_source,
+                    )
+                )
+            if report.concise_feedback:
+                feedback.append(
+                    self._feedback_directive(
+                        report.concise_feedback,
+                        kind="verification_feedback",
+                        status=report_status,
+                        source=report_source,
+                    )
+                )
             feedback.extend(
-                f"{issue.step_id or issue.claim_id or 'global'}: {issue.description}"
+                self._feedback_directive(
+                    f"{issue.step_id or issue.claim_id or 'global'}: "
+                    f"{issue.description}",
+                    kind="verification_issue",
+                    status=report_status,
+                    source=report_source,
+                )
                 for issue in report.issues[:8]
             )
-        feedback.extend(f"Unresolved gap: {gap}" for gap in attempt.unresolved_gaps[:8])
+        feedback.extend(
+            self._feedback_directive(
+                f"Unresolved gap: {canonical_gap}",
+                kind="proof_obligation",
+                status="open",
+                source=f"attempt:{attempt.attempt_id}",
+            )
+            for gap in attempt.unresolved_gaps[:8]
+            if not is_feedback_only_statement(gap)
+            and (canonical_gap := canonical_obligation_statement(gap))
+        )
         if state.meta_reviews:
-            feedback.extend(state.meta_reviews[-1].required_actions[:6])
+            review_index = len(state.meta_reviews) - 1
+            feedback.extend(
+                self._feedback_directive(
+                    item,
+                    kind="required_action",
+                    status="open",
+                    source=f"meta_review:{review_index}",
+                )
+                for item in state.meta_reviews[-1].required_actions[:6]
+            )
         return self._deduplicate_strings(feedback)
+
+    @staticmethod
+    def _feedback_directive(
+        text: str,
+        *,
+        kind: str,
+        status: str,
+        source: str,
+    ) -> str:
+        normalized = " ".join(text.split())
+        return (
+            f"[{kind}][STATUS:{status}][SOURCE:{source}]"
+            f"[PREMISE_ELIGIBLE:false] {normalized}"
+        )
 
     def _apply_meta_route_controls(
         self,
@@ -9227,7 +11613,13 @@ class ProofMeshOrchestrator:
             return
         attempts = {item.attempt_id: item for item in state.attempts}
         for assessment in review.assessments:
-            if assessment.recommended_action != ActionKind.COOLDOWN_ROUTE:
+            action = assessment.recommended_action
+            if action not in {ActionKind.COOLDOWN_ROUTE, ActionKind.STOP}:
+                continue
+            if (
+                action == ActionKind.STOP
+                and review.confidence < self.config.budget.verification_pass_threshold
+            ):
                 continue
             attempt = attempts.get(assessment.target_id)
             if attempt is None:
@@ -9235,7 +11627,10 @@ class ProofMeshOrchestrator:
             route = registry.route_for_strategy(attempt.strategy_id)
             if route is None:
                 continue
-            requires_revision = review.failure_level == FailureLevel.STRATEGY
+            requires_revision = (
+                action == ActionKind.STOP
+                or review.failure_level == FailureLevel.STRATEGY
+            )
             reason = "; ".join(assessment.weaknesses[:3]) or review.summary
             registry.mark_cooling(
                 route.route_id,
@@ -9248,7 +11643,7 @@ class ProofMeshOrchestrator:
                 {
                     "route_id": route.route_id,
                     "strategy_id": attempt.strategy_id,
-                    "action": ActionKind.COOLDOWN_ROUTE.value,
+                    "action": action.value,
                     "until_round": route.cooldown_until_round,
                     "requires_revision": requires_revision,
                     "reason": reason,
@@ -9801,7 +12196,12 @@ class ProofMeshOrchestrator:
             summary=summary,
         )
 
-    def _run_status(self, state: SolveState) -> RunStatus:
+    def _run_status(
+        self,
+        problem: ProblemContract,
+        state: SolveState,
+        store: ArtifactStore,
+    ) -> RunStatus:
         if (
             state.final_verification is not None
             and state.final_verification.verdict == VerificationVerdict.PASS
@@ -9809,6 +12209,14 @@ class ProofMeshOrchestrator:
             >= self.config.budget.verification_pass_threshold
         ):
             return RunStatus.VERIFIED
+        task_status, _assessments = assess_task_deliverables(
+            problem,
+            state,
+            store.list_experiment_results(),
+            verification_threshold=self.config.budget.verification_pass_threshold,
+        )
+        if task_status.value == "completed":
+            return RunStatus.COMPLETED
         if state.budget_exhausted:
             return RunStatus.BUDGET_EXHAUSTED
         return RunStatus.UNVERIFIED
@@ -9829,7 +12237,10 @@ class ProofMeshOrchestrator:
     ) -> RunResult:
         total_usage = self._sum_usage([metric.usage for metric in metrics])
         summary = summary_override or self._result_summary(status, state)
-        if status != RunStatus.VERIFIED and state.research_progress_report is None:
+        if (
+            status not in {RunStatus.VERIFIED, RunStatus.COMPLETED}
+            and state.research_progress_report is None
+        ):
             state.research_progress_report = self._build_research_progress_report(
                 problem,
                 state,
@@ -9846,6 +12257,13 @@ class ProofMeshOrchestrator:
             execution_status = ExecutionStatus.BUDGET_EXHAUSTED
         elif status == RunStatus.FAILED:
             execution_status = ExecutionStatus.FAILED
+        experiment_payloads = store.list_experiment_results()
+        task_status, deliverable_assessments = assess_task_deliverables(
+            problem,
+            state,
+            experiment_payloads,
+            verification_threshold=self.config.budget.verification_pass_threshold,
+        )
         if (
             status == RunStatus.VERIFIED
             and state.final_proof is not None
@@ -9888,6 +12306,8 @@ class ProofMeshOrchestrator:
         return RunResult(
             run_id=run_id,
             status=status,
+            task_status=task_status,
+            deliverable_assessments=deliverable_assessments,
             math_status=math_status,
             execution_status=execution_status,
             problem=problem,
@@ -9901,7 +12321,7 @@ class ProofMeshOrchestrator:
             proof_checkpoints=store.list_proof_checkpoints(),
             experiments=[
                 ExperimentResult.model_validate(payload)
-                for payload in store.list_experiment_results()
+                for payload in experiment_payloads
             ],
             resumed=state.resumed,
             resumed_from_checkpoint_id=state.resumed_from_checkpoint_id,
@@ -9919,6 +12339,12 @@ class ProofMeshOrchestrator:
                 "最终证明已通过独立结构审查和逐步审查。"
                 if zh
                 else "A final proof passed independent structural and step-level verification under the configured threshold."
+            )
+        if status == RunStatus.COMPLETED:
+            return (
+                "用户要求的计算、反例或候选规律等交付物已经完成；未要求的猜想证明不会被伪装成已验证定理。"
+                if zh
+                else "The requested computation, counterexample, or conjecture deliverables were completed; an unrequested proof is not treated as a missing task."
             )
         if status == RunStatus.UNVERIFIED:
             verdict = (
@@ -9979,6 +12405,12 @@ class ProofMeshOrchestrator:
                 "math_status": state.math_status,
                 "execution_status": state.execution_status,
                 "research_progress_report": state.research_progress_report,
+                "global_no_progress_rounds": state.global_no_progress_rounds,
+                "global_meta_pivot_used": state.global_meta_pivot_used,
+                "last_progress_signature": state.last_progress_signature,
+                "certified_counterexample_hashes": (
+                    state.certified_counterexample_hashes
+                ),
                 **export_hierarchical_checkpoint(
                     current_round=state.current_round,
                     graph_frozen=state.graph_frozen,
@@ -10103,6 +12535,11 @@ class ProofMeshOrchestrator:
                     "exact_geometry",
                 ]
             )
+        if (
+            self.config.computation.enabled
+            and self.config.computation.sandboxed_python_enabled
+        ):
+            tools.append("sandboxed_python")
         if self.config.verification.enable_lean:
             tools.append("lean_check")
         return list(dict.fromkeys(tools))

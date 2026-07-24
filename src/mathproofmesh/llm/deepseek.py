@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import time
@@ -8,6 +9,7 @@ from typing import Any, Literal
 
 import httpx
 
+from ..reasoning_trace import ReasoningTraceCall, current_reasoning_trace
 from .base import LLMClient, LLMResponse, Message
 
 
@@ -19,9 +21,10 @@ class DeepSeekClient(LLMClient):
 
     MathProofMesh calls the model with self-contained system/user messages and executes
     deterministic tools locally between model calls. Consequently, provider-side tool-call
-    transcripts are not replayed here. The model's private ``reasoning_content`` is never
-    forwarded to another agent and is not persisted; only the final structured content and
-    non-sensitive reasoning metadata are retained.
+    transcripts are not replayed here. The model's ``reasoning_content`` is never
+    forwarded to another agent. When a run-scoped trace binding is active, the provider-
+    emitted text is persisted locally for the desktop node inspector; provider response
+    metadata still retains only non-sensitive counts and hashes.
 
     ``streaming`` controls only how this adapter reads the provider response. When enabled,
     DeepSeek sends Server-Sent Events (SSE), which are aggregated locally into the same
@@ -56,9 +59,20 @@ class DeepSeekClient(LLMClient):
         headers.update(extra_headers or {})
         self._client = httpx.AsyncClient(timeout=timeout_seconds, headers=headers)
         self._progress: dict[str, Any] = {}
+        self._progress_by_task: dict[int, dict[str, Any]] = {}
 
     def progress_snapshot(self) -> dict[str, Any]:
-        snapshot = dict(self._progress)
+        return self._snapshot(self._progress)
+
+    def progress_snapshot_for(self, request: object) -> dict[str, Any]:
+        return self._snapshot(self._progress_by_task.get(id(request), {}))
+
+    def clear_progress_for(self, request: object) -> None:
+        self._progress_by_task.pop(id(request), None)
+
+    @staticmethod
+    def _snapshot(progress: dict[str, Any]) -> dict[str, Any]:
+        snapshot = dict(progress)
         last_data_at = snapshot.pop("last_data_at_monotonic", None)
         if last_data_at is not None:
             snapshot["last_data_age_seconds"] = max(
@@ -82,7 +96,81 @@ class DeepSeekClient(LLMClient):
         schema_name: str | None = None,
         schema: dict[str, Any] | None = None,
     ) -> LLMResponse:
-        self._progress = {
+        return await self.complete_with_policy(
+            messages,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            json_mode=json_mode,
+            thinking_enabled=self.thinking_enabled,
+            reasoning_effort=self.reasoning_effort,
+        )
+
+    async def complete_with_policy(
+        self,
+        messages: list[Message],
+        *,
+        temperature: float,
+        max_output_tokens: int,
+        json_mode: bool = False,
+        schema_name: str | None = None,
+        schema: dict[str, Any] | None = None,
+        thinking_enabled: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> LLMResponse:
+        enabled = (
+            self.thinking_enabled if thinking_enabled is None else thinking_enabled
+        )
+        effort = self.reasoning_effort if reasoning_effort is None else reasoning_effort
+        if effort not in {"high", "max"}:
+            raise ValueError(f"unsupported DeepSeek reasoning_effort: {effort!r}")
+        binding = current_reasoning_trace()
+        trace_call = (
+            binding.store.begin_call(
+                task_id=binding.task_id,
+                agent_id=binding.agent_id,
+                stage=binding.stage,
+                thinking_enabled=enabled,
+                reasoning_effort=effort if enabled else None,
+            )
+            if binding is not None
+            else None
+        )
+        try:
+            response = await self._complete_with_policy(
+                messages,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+                json_mode=json_mode,
+                thinking_enabled=enabled,
+                reasoning_effort=effort,
+                trace_call=trace_call,
+            )
+        except asyncio.CancelledError:
+            if trace_call is not None:
+                trace_call.finish("cancelled")
+            raise
+        except BaseException as exc:
+            if trace_call is not None:
+                trace_call.finish("failed", error_type=type(exc).__name__)
+            raise
+        if trace_call is not None:
+            trace_call.finish("completed")
+        return response
+
+    async def _complete_with_policy(
+        self,
+        messages: list[Message],
+        *,
+        temperature: float,
+        max_output_tokens: int,
+        json_mode: bool,
+        thinking_enabled: bool,
+        reasoning_effort: str,
+        trace_call: ReasoningTraceCall | None,
+    ) -> LLMResponse:
+        task = asyncio.current_task()
+        task_key = id(task) if task is not None else id(object())
+        progress = {
             "streaming": self.streaming,
             "chunks": 0,
             "reasoning_characters": 0,
@@ -90,15 +178,17 @@ class DeepSeekClient(LLMClient):
             "approx_output_tokens": 0,
             "last_data_at_monotonic": time.monotonic(),
         }
+        self._progress_by_task[task_key] = progress
+        self._progress = progress
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "max_tokens": max_output_tokens,
             "stream": self.streaming,
-            "thinking": {"type": "enabled" if self.thinking_enabled else "disabled"},
+            "thinking": {"type": "enabled" if thinking_enabled else "disabled"},
         }
-        if self.thinking_enabled:
-            payload["reasoning_effort"] = self.reasoning_effort
+        if thinking_enabled:
+            payload["reasoning_effort"] = reasoning_effort
             # DeepSeek V4 thinking mode does not use sampling controls such as temperature.
         else:
             payload["temperature"] = temperature
@@ -110,7 +200,12 @@ class DeepSeekClient(LLMClient):
         started = time.perf_counter()
         if self.streaming:
             payload["stream_options"] = {"include_usage": True}
-            return await self._complete_streaming(payload, started)
+            return await self._complete_streaming(
+                payload,
+                started,
+                progress,
+                trace_call,
+            )
 
         response = await self._client.post(
             f"{self.base_url}/chat/completions", json=payload
@@ -123,6 +218,8 @@ class DeepSeekClient(LLMClient):
         message = choice.get("message") or {}
         content = self._text_value(message.get("content"))
         reasoning_text = self._text_value(message.get("reasoning_content"))
+        if trace_call is not None and reasoning_text:
+            trace_call.append(reasoning_text)
         usage = data.get("usage") or {}
 
         safe_raw: dict[str, Any] = {
@@ -133,6 +230,10 @@ class DeepSeekClient(LLMClient):
             "finish_reason": choice.get("finish_reason"),
             "usage": usage,
             "streaming": False,
+            "request_policy": {
+                "thinking_enabled": thinking_enabled,
+                "reasoning_effort": reasoning_effort if thinking_enabled else None,
+            },
             "reasoning": {
                 "present": bool(reasoning_text),
                 "characters": len(reasoning_text),
@@ -159,6 +260,8 @@ class DeepSeekClient(LLMClient):
         self,
         payload: dict[str, Any],
         started: float,
+        progress: dict[str, Any],
+        trace_call: ReasoningTraceCall | None,
     ) -> LLMResponse:
         content_parts: list[str] = []
         reasoning_hash = hashlib.sha256()
@@ -208,8 +311,8 @@ class DeepSeekClient(LLMClient):
                     raise RuntimeError(f"DeepSeek streaming error: {detail}")
 
                 chunk_count += 1
-                self._progress["chunks"] = chunk_count
-                self._progress["last_data_at_monotonic"] = time.monotonic()
+                progress["chunks"] = chunk_count
+                progress["last_data_at_monotonic"] = time.monotonic()
                 if first_chunk_latency_ms is None:
                     first_chunk_latency_ms = (time.perf_counter() - started) * 1000.0
 
@@ -239,8 +342,8 @@ class DeepSeekClient(LLMClient):
                 content = self._text_value(delta.get("content"))
                 if content:
                     content_parts.append(content)
-                    self._progress["content_characters"] = int(
-                        self._progress.get("content_characters", 0)
+                    progress["content_characters"] = int(
+                        progress.get("content_characters", 0)
                     ) + len(content)
 
                 reasoning = self._text_value(delta.get("reasoning_content"))
@@ -248,11 +351,17 @@ class DeepSeekClient(LLMClient):
                     reasoning_present = True
                     reasoning_characters += len(reasoning)
                     reasoning_hash.update(reasoning.encode("utf-8"))
-                    self._progress["reasoning_characters"] = reasoning_characters
-                total_characters = int(
-                    self._progress.get("reasoning_characters", 0)
-                ) + int(self._progress.get("content_characters", 0))
-                self._progress["approx_output_tokens"] = (total_characters + 3) // 4
+                    progress["reasoning_characters"] = reasoning_characters
+                    if trace_call is not None:
+                        trace_call.append(reasoning)
+                if trace_call is not None:
+                    trace_call.flush_due()
+                total_characters = int(progress.get("reasoning_characters", 0)) + int(
+                    progress.get("content_characters", 0)
+                )
+                # This is deliberately observational only. DeepSeek's final usage
+                # chunk is the sole authoritative output-token count.
+                progress["approx_output_tokens"] = (total_characters + 3) // 4
 
         if not done_received:
             raise RuntimeError("DeepSeek SSE stream ended before data: [DONE]")
@@ -273,6 +382,10 @@ class DeepSeekClient(LLMClient):
             "finish_reason": finish_reason,
             "usage": usage,
             "streaming": True,
+            "request_policy": {
+                "thinking_enabled": payload["thinking"]["type"] == "enabled",
+                "reasoning_effort": payload.get("reasoning_effort"),
+            },
             "stream": {
                 "chunks": chunk_count,
                 "done_received": done_received,

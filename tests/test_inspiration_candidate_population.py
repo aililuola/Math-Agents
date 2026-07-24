@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
+from mathproofmesh.agents import CallLedger
+from mathproofmesh.budget import SoftBudgetAllocator
 from mathproofmesh.communication.route_registry import RouteRegistry
 from mathproofmesh.inspiration.context import build_inspiration_prompt_context
 from mathproofmesh.inspiration.engine import InspirationEngine
 from mathproofmesh.inspiration.trigger_policy import InspirationSnapshot
+from mathproofmesh.llm.pool import AgentPool
 from mathproofmesh.memory import TypedMemory
+from mathproofmesh.mock_demo import demo_responders
+from mathproofmesh.orchestrator import ProofMeshOrchestrator
 from mathproofmesh.proof_graph.store import ProofGraphStore
 from mathproofmesh.schemas import (
     ClaimStatus,
     EvidenceType,
+    InspirationAssignmentPlan,
     InspirationContextMode,
     InspirationMechanism,
     InspirationProposal,
+    InspirationProposalAssignment,
     InspirationTask,
     MemoryTier,
     MessageEnvelope,
@@ -229,6 +237,49 @@ def test_inspiration_context_honors_the_hard_character_budget(tmp_path) -> None:
     assert len(json.dumps(context, ensure_ascii=False, separators=(",", ":"))) <= 1000
 
 
+def test_structural_analogy_is_deferred_when_global_records_do_not_match(
+    tmp_path,
+) -> None:
+    engine, snapshot = _engine(tmp_path)
+    engine.analogy_library.add_verified_record(
+        {
+            "record_id": "irrelevant-experience",
+            "verified": True,
+            "problem_summary": "elliptic curve sheaf cohomology",
+            "proof_summary": "pull back a divisor along an etale cover",
+            "object_tags": ["scheme", "divisor"],
+            "operation_tags": ["pullback"],
+            "mechanism_tags": ["cohomology"],
+        }
+    )
+    task = InspirationTask(
+        task_id="task-analogy-no-match",
+        trigger_id="trigger-analogy-no-match",
+        mechanism=InspirationMechanism.STRUCTURAL_ANALOGY,
+        target_route_ids=["route-a"],
+        target_obligation_ids=["goal-1"],
+        reason="look for an applicable verified structural analogy",
+    )
+    pool = AgentPool(engine.config, mock_responders=demo_responders(engine.config))
+    allocator = SoftBudgetAllocator(engine.config, CallLedger(engine.config, pool))
+
+    ready, plans, call_breakdowns, rejected = ProofMeshOrchestrator(
+        engine.config
+    )._plan_inspiration_proposers(
+        engine,
+        [task],
+        snapshot=snapshot,
+        problem=engine.problem,
+        runner=SimpleNamespace(pool=pool),
+        allocator=allocator,
+    )
+
+    assert ready == []
+    assert call_breakdowns == {}
+    assert plans[task.task_id].assignments == []
+    assert "no applicable verified local analogy" in rejected[task.task_id]
+
+
 def _proposal(
     identifier: str,
     *,
@@ -287,3 +338,40 @@ def test_candidate_population_deduplicates_before_bounded_review(tmp_path) -> No
         not item.selected_for_review and "duplicate" in item.reason
         for item in engine.candidate_decisions.values()
     )
+
+
+def test_proposer_assignment_plan_survives_checkpoint_restore(tmp_path) -> None:
+    engine, _snapshot = _engine(tmp_path / "source")
+    plan = InspirationAssignmentPlan(
+        task_id="task-persisted",
+        mechanism=InspirationMechanism.REVERSE_GOAL_ANALYSIS,
+        round_index=4,
+        requested_proposals=2,
+        eligible_agent_ids=["agent-a", "agent-b"],
+        assignments=[
+            InspirationProposalAssignment(
+                task_id="task-persisted",
+                mechanism=InspirationMechanism.REVERSE_GOAL_ANALYSIS,
+                proposal_slot=0,
+                proposer_agent_id="agent-a",
+                proposer_role="reverse_goal_analyzer",
+                context_mode=InspirationContextMode.WARM,
+                specialist_match=True,
+            ),
+            InspirationProposalAssignment(
+                task_id="task-persisted",
+                mechanism=InspirationMechanism.REVERSE_GOAL_ANALYSIS,
+                proposal_slot=1,
+                proposer_agent_id="agent-b",
+                proposer_role="reverse_goal_analyzer",
+                context_mode=InspirationContextMode.COLD,
+                specialist_match=False,
+            ),
+        ],
+    )
+    engine.register_assignment_plan(plan)
+
+    restored, _snapshot = _engine(tmp_path / "restored")
+    restored.restore_state(engine.export_state())
+
+    assert restored.proposal_assignment_plans["task-persisted"] == plan

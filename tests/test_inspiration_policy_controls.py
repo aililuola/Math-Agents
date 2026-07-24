@@ -136,8 +136,15 @@ def test_inspiration_tasks_are_admitted_before_calls_and_respect_budget(
         allocator,
         current_path_count=1,
         has_candidate=False,
+        task_call_breakdowns={
+            "task-a": allocator.inspiration_call_breakdown(
+                proposer_calls=1,
+                review_candidates=1,
+            )
+        },
     )
     assert [item.task_id for item in admitted.admitted_tasks] == ["task-a"]
+    assert admitted.decision.candidates[0].estimated_calls == 6
 
     ledger.calls_started = config.budget.max_total_calls
     blocked = admit_inspiration_tasks(

@@ -8,6 +8,7 @@ from typing import Any, Iterable
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .config import DeepExplorationPolicyConfig
+from .proof_identity import obligation_identity_text
 from .schemas import UsageRecord, new_id, stable_hash, utc_now_iso
 
 
@@ -55,6 +56,7 @@ def _jaccard(left: set[str], right: set[str]) -> float:
 class ExplorationSignature(ExplorationModel):
     """A mathematical state signature; route IDs and domains are metadata only."""
 
+    signature_version: int = 2
     problem_hash: str
     verified_checkpoint_id: str
     verified_checkpoint_hash: str
@@ -71,11 +73,10 @@ class ExplorationSignature(ExplorationModel):
 
     def canonical_payload(self) -> dict[str, Any]:
         return {
+            "signature_version": self.signature_version,
             "problem_hash": self.problem_hash,
-            "verified_checkpoint_id": self.verified_checkpoint_id,
             "verified_checkpoint_hash": self.verified_checkpoint_hash,
-            "target_obligation_id": self.target_obligation_id,
-            "target_statement": " ".join(self.target_statement.casefold().split()),
+            "target_statement": obligation_identity_text(self.target_statement),
             "mechanism_tags": _normalized(self.mechanism_tags),
             "representation_tags": _normalized(self.representation_tags),
             "construction_tags": _normalized(self.construction_tags),
@@ -179,9 +180,9 @@ class DeepExplorationRegistry:
         ExplorationOutcome.VERIFIED_PROGRESS,
         ExplorationOutcome.VERIFIED_MECHANISM_CHANGE,
         ExplorationOutcome.USEFUL_COUNTEREXAMPLE,
-        ExplorationOutcome.USABLE_PARTIAL,
     }
     _NO_PROGRESS = {
+        ExplorationOutcome.USABLE_PARTIAL,
         ExplorationOutcome.NO_ARTIFACT,
         ExplorationOutcome.NO_VERIFIED_PROGRESS,
         ExplorationOutcome.INTERRUPTED,
@@ -210,23 +211,23 @@ class DeepExplorationRegistry:
         evidence: ExplorationEvidence,
         signature: ExplorationSignature,
     ) -> int:
+        baseline = self.config.tier_index_for_limit(
+            self.config.high_tier_threshold_tokens
+        )
         if not evidence.has_verified_checkpoint:
-            return 0
+            return baseline
         verified_tiers = self._verified_tiers_for_signature(route_id, signature)
         if not verified_tiers:
-            return min(
-                2 if evidence.referee_confirmed_mechanism_change else 1,
-                len(self.config.tiers) - 1,
-            )
+            return baseline
         desired = min(max(verified_tiers) + 1, len(self.config.tiers) - 1)
-        if desired >= 2 and not evidence.explicit_critical_target:
-            desired = 1
-        if desired >= 3 and (
+        if self._is_high_tier(desired) and not evidence.explicit_critical_target:
+            desired = self._highest_tier_below(self.config.high_tier_threshold_tokens)
+        if self._is_128k_tier(desired) and (
             (self.config.require_meta_approval_for_128k and not evidence.meta_approved)
             or not evidence.final_reserve_available
-            or max(verified_tiers) < 2
+            or not any(self._is_96k_tier(index) for index in verified_tiers)
         ):
-            desired = 2
+            desired = self.config.tier_index_for_limit(96000)
         return desired
 
     def admit(
@@ -271,7 +272,7 @@ class DeepExplorationRegistry:
                         requested_tier=requested,
                         reason=(
                             "this exact mathematical state already exhausted its "
-                            "high-tier no-progress allowance"
+                            "normal attempt and one bounded repair"
                         ),
                     )
                 repair_tier = self.config.tier_index_for_limit(
@@ -293,21 +294,26 @@ class DeepExplorationRegistry:
                     "novelty review instead of being globally blocked"
                 )
 
-            if granted >= 2 and not evidence.explicit_critical_target:
-                granted = min(1, maximum)
+            if self._is_high_tier(granted) and not evidence.explicit_critical_target:
+                granted = self._highest_tier_below(
+                    self.config.high_tier_threshold_tokens
+                )
                 reason = "high-tier work requires one explicit critical local target"
-            if granted >= 3 and self.config.require_meta_approval_for_128k:
+            if (
+                self._is_128k_tier(granted)
+                and self.config.require_meta_approval_for_128k
+            ):
                 prior_verified_tiers = self._verified_tiers_for_signature(
                     route_id, signature
                 )
-                if not prior_verified_tiers or max(prior_verified_tiers) < 2:
-                    granted = min(2, maximum)
+                if not any(self._is_96k_tier(index) for index in prior_verified_tiers):
+                    granted = self.config.tier_index_for_limit(96000)
                     reason = "128K requires prior verified progress at the 96K tier"
                 elif not evidence.meta_approved:
-                    granted = min(2, maximum)
+                    granted = self.config.tier_index_for_limit(96000)
                     reason = "128K requires explicit meta-strategy approval"
                 elif not evidence.final_reserve_available:
-                    granted = min(2, maximum)
+                    granted = self.config.tier_index_for_limit(96000)
                     reason = "128K was deferred to preserve finalization calls"
 
             tier = self.config.tiers[granted]
@@ -370,10 +376,7 @@ class DeepExplorationRegistry:
                 self.running_by_signature.pop(record.signature.signature_hash, None)
             self._add_route_usage(record.route_id, record.usage)
 
-            high_tier = (
-                record.max_output_tokens >= self.config.high_tier_threshold_tokens
-            )
-            if high_tier and outcome in self._NO_PROGRESS:
+            if outcome in self._NO_PROGRESS:
                 signature_hash = record.signature.signature_hash
                 self.strikes[signature_hash] = self.strikes.get(signature_hash, 0) + 1
                 if (
@@ -466,26 +469,44 @@ class DeepExplorationRegistry:
         registry = cls(config, problem_hash=problem_hash)
         if str(state.get("problem_hash", problem_hash)) != problem_hash:
             raise ValueError("deep exploration checkpoint belongs to another problem")
-        registry.attempts = {
-            str(key): ExplorationAttemptRecord.model_validate(value)
-            for key, value in dict(state.get("attempts", {})).items()
-        }
-        registry.strikes = {
-            str(key): int(value)
-            for key, value in dict(state.get("strikes", {})).items()
-        }
-        registry.locked_signatures = {
-            str(key): str(value)
-            for key, value in dict(state.get("locked_signatures", {})).items()
-        }
-        registry.partial_repairs = {
-            str(key): int(value)
-            for key, value in dict(state.get("partial_repairs", {})).items()
-        }
-        registry.pivots = {
-            str(key): BottleneckPivotRecord.model_validate(value)
-            for key, value in dict(state.get("pivots", {})).items()
-        }
+        hash_remap: dict[str, str] = {}
+        for key, value in dict(state.get("attempts", {})).items():
+            payload = dict(value)
+            signature_payload = dict(payload.get("signature", {}))
+            legacy_hash = str(signature_payload.get("signature_hash", ""))
+            if int(signature_payload.get("signature_version", 1)) < 2:
+                signature_payload["signature_version"] = 2
+                signature_payload["signature_hash"] = ""
+            payload["signature"] = signature_payload
+            record = ExplorationAttemptRecord.model_validate(payload)
+            registry.attempts[str(key)] = record
+            if legacy_hash:
+                hash_remap[legacy_hash] = record.signature.signature_hash
+
+        def remap_counts(raw: Any) -> dict[str, int]:
+            output: dict[str, int] = {}
+            for key, value in dict(raw).items():
+                mapped = hash_remap.get(str(key), str(key))
+                output[mapped] = output.get(mapped, 0) + int(value)
+            return output
+
+        registry.strikes = remap_counts(state.get("strikes", {}))
+        registry.partial_repairs = remap_counts(state.get("partial_repairs", {}))
+        registry.locked_signatures = {}
+        for key, value in dict(state.get("locked_signatures", {})).items():
+            registry.locked_signatures[hash_remap.get(str(key), str(key))] = str(value)
+        registry.pivots = {}
+        for key, value in dict(state.get("pivots", {})).items():
+            payload = dict(value)
+            payload["parent_signature_hash"] = hash_remap.get(
+                str(payload.get("parent_signature_hash", "")),
+                str(payload.get("parent_signature_hash", "")),
+            )
+            payload["new_signature_hash"] = hash_remap.get(
+                str(payload.get("new_signature_hash", "")),
+                str(payload.get("new_signature_hash", "")),
+            )
+            registry.pivots[str(key)] = BottleneckPivotRecord.model_validate(payload)
         registry.route_usage = {
             str(key): UsageRecord.model_validate(value)
             for key, value in dict(state.get("route_usage", {})).items()
@@ -496,10 +517,9 @@ class DeepExplorationRegistry:
             if record.outcome == ExplorationOutcome.RUNNING:
                 record.outcome = ExplorationOutcome.INTERRUPTED
                 record.finished_at = utc_now_iso()
-                if record.max_output_tokens >= config.high_tier_threshold_tokens:
-                    key = record.signature.signature_hash
-                    registry.strikes[key] = registry.strikes.get(key, 0) + 1
-                    registry.locked_signatures[key] = "interrupted_on_resume"
+                key = record.signature.signature_hash
+                registry.strikes[key] = registry.strikes.get(key, 0) + 1
+                registry.locked_signatures[key] = "interrupted_on_resume"
         registry.running_by_signature = {}
         return registry
 
@@ -549,7 +569,9 @@ class DeepExplorationRegistry:
                 continue
             _, mechanism_similarity = signature.similarity(record.signature)
             if mechanism_similarity >= threshold:
-                tiers.append(record.granted_tier)
+                # max_output_tokens is stable across tier-list migrations (for
+                # example the v0.7 removal of 32K); stored numeric indices are not.
+                tiers.append(self.config.tier_index_for_limit(record.max_output_tokens))
         return tiers
 
     def _latest_by_signature(
@@ -578,3 +600,24 @@ class DeepExplorationRegistry:
         current.total_tokens += usage.total_tokens
         current.estimated_cost_usd += usage.estimated_cost_usd
         current.latency_ms += usage.latency_ms
+
+    def _is_high_tier(self, tier_index: int) -> bool:
+        return (
+            self.config.tiers[tier_index].output_tokens
+            >= self.config.high_tier_threshold_tokens
+        )
+
+    def _is_96k_tier(self, tier_index: int) -> bool:
+        tokens = self.config.tiers[tier_index].output_tokens
+        return 96000 <= tokens < 128000
+
+    def _is_128k_tier(self, tier_index: int) -> bool:
+        return self.config.tiers[tier_index].output_tokens >= 128000
+
+    def _highest_tier_below(self, threshold: int) -> int:
+        eligible = [
+            index
+            for index, tier in enumerate(self.config.tiers)
+            if tier.output_tokens < threshold
+        ]
+        return eligible[-1] if eligible else 0

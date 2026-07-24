@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>MathProofMesh</title>
+    <link rel="icon" href="/assets/app-icon.png" type="image/png">
+    <link rel="stylesheet" href="/assets/styles.css">
+    <script src="/assets/topology.js" defer></script>
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <div id="app" class="app-shell" aria-busy="true">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <img src="/assets/app-icon.png" alt="">
+          </div>
+          <div>
+            <div class="brand-name">MathProofMesh</div>
+            <div id="version-label" class="brand-version">0.7.0</div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <div id="service-status" class="service-status">
+            <span class="status-dot"></span>
+            <span>正在连接</span>
+          </div>
+          <button id="open-data-button" class="button button-quiet" type="button">
+            数据目录
+          </button>
+          <button id="settings-button" class="button button-secondary" type="button">
+            设置
+          </button>
+        </div>
+      </header>
+
+      <div class="app-body">
+        <aside class="sidebar" aria-label="运行导航">
+          <button id="new-run-button" class="button button-primary new-run-button" type="button">
+            新建求解
+          </button>
+          <div class="sidebar-heading">
+            <span>运行历史</span>
+            <button id="refresh-runs-button" class="text-button" type="button" title="刷新运行历史">
+              刷新
+            </button>
+          </div>
+          <div id="run-list" class="run-list" role="list">
+            <div class="empty-list">正在载入</div>
+          </div>
+        </aside>
+
+        <main id="workspace" class="workspace">
+          <section class="workspace-header">
+            <div class="workspace-heading-group">
+              <div class="workspace-title-block">
+                <div class="eyebrow">证明工作台</div>
+                <h1 id="workspace-title">新建求解</h1>
+                <div id="workspace-subtitle" class="workspace-subtitle">
+                  尚未启动
+                </div>
+              </div>
+              <div
+                id="workspace-view-switcher"
+                class="view-switcher hidden"
+                role="tablist"
+                aria-label="工作台视图"
+              >
+                <button
+                  id="detail-view-button"
+                  class="view-option active"
+                  type="button"
+                  role="tab"
+                  aria-selected="true"
+                >
+                  运行详情
+                </button>
+                <button
+                  id="topology-view-button"
+                  class="view-option"
+                  type="button"
+                  role="tab"
+                  aria-selected="false"
+                >
+                  拓扑图
+                </button>
+              </div>
+            </div>
+            <div class="workspace-actions">
+              <button id="resume-button" class="button button-secondary hidden" type="button">
+                恢复运行
+              </button>
+              <button id="cancel-button" class="button button-danger hidden" type="button">
+                停止
+              </button>
+              <button id="open-run-button" class="button button-quiet hidden" type="button">
+                打开目录
+              </button>
+            </div>
+          </section>
+
+          <div id="workspace-detail-view" class="workspace-grid">
+            <div class="primary-column">
+              <section id="editor-panel" class="panel editor-panel">
+                <div class="panel-heading">
+                  <div>
+                    <h2>题目</h2>
+                    <div id="profile-budget" class="panel-meta"></div>
+                  </div>
+                  <div class="editor-controls">
+                    <label class="field compact-field">
+                      <span>运行档位</span>
+                      <select id="profile-select"></select>
+                    </label>
+                    <label class="field run-id-field">
+                      <span>运行 ID</span>
+                      <input
+                        id="run-id-input"
+                        type="text"
+                        maxlength="160"
+                        autocomplete="off"
+                        placeholder="自动生成"
+                      >
+                    </label>
+                  </div>
+                </div>
+                <label class="problem-field">
+                  <span class="sr-only">数学题目</span>
+                  <textarea
+                    id="problem-input"
+                    spellcheck="false"
+                    placeholder="在这里输入需要证明或求解的数学问题"
+                  ></textarea>
+                </label>
+                <div class="editor-footer">
+                  <span id="problem-count" class="character-count">0 字符</span>
+                  <div class="editor-actions">
+                    <label class="button button-quiet file-button">
+                      导入文本
+                      <input id="problem-file-input" type="file" accept=".txt,text/plain">
+                    </label>
+                    <button id="start-button" class="button button-primary" type="button">
+                      开始求解
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section id="activity-panel" class="panel activity-panel">
+                <div class="panel-heading activity-heading">
+                  <div>
+                    <h2>实时进度</h2>
+                    <div id="current-stage" class="panel-meta">等待任务</div>
+                  </div>
+                  <div id="elapsed-time" class="elapsed-time">00:00</div>
+                </div>
+                <div class="progress-track" aria-hidden="true">
+                  <div id="progress-bar" class="progress-bar"></div>
+                </div>
+                <div id="activity-list" class="activity-list" aria-live="polite">
+                  <div class="empty-state">尚无进度事件</div>
+                </div>
+              </section>
+
+              <section id="output-panel" class="panel output-panel">
+                <div class="tab-bar" role="tablist" aria-label="运行输出">
+                  <button class="tab active" data-tab="answer" type="button" role="tab">
+                    结论
+                  </button>
+                  <button class="tab" data-tab="report" type="button" role="tab">
+                    审计报告
+                  </button>
+                  <button class="tab" data-tab="problem" type="button" role="tab">
+                    原题
+                  </button>
+                </div>
+                <div id="answer-view" class="output-view active" data-view="answer">
+                  <div class="empty-state">任务完成后显示证明结果</div>
+                </div>
+                <pre id="report-view" class="output-view document-view" data-view="report"></pre>
+                <pre id="problem-view" class="output-view document-view" data-view="problem"></pre>
+              </section>
+            </div>
+
+            <aside class="inspector" aria-label="运行概览">
+              <section class="inspector-section">
+                <div class="inspector-heading">运行状态</div>
+                <div class="status-summary">
+                  <div id="run-status-badge" class="status-badge status-idle">未运行</div>
+                  <div id="run-status-detail" class="status-detail">等待输入题目</div>
+                </div>
+              </section>
+              <section class="inspector-section metrics-section">
+                <div class="inspector-heading">资源使用</div>
+                <dl class="metric-list">
+                  <div>
+                    <dt>调用</dt>
+                    <dd id="metric-calls">0</dd>
+                  </div>
+                  <div>
+                    <dt>Tokens</dt>
+                    <dd id="metric-tokens">0</dd>
+                  </div>
+                  <div>
+                    <dt>估算费用</dt>
+                    <dd id="metric-cost">$0.0000</dd>
+                  </div>
+                  <div>
+                    <dt>档位</dt>
+                    <dd id="metric-profile">未选择</dd>
+                  </div>
+                </dl>
+              </section>
+              <section class="inspector-section">
+                <div class="inspector-heading">运行环境</div>
+                <div class="environment-row">
+                  <span>API Keys</span>
+                  <span id="key-health" class="environment-value">检查中</span>
+                </div>
+                <div class="environment-row">
+                  <span>Docker</span>
+                  <span id="docker-health" class="environment-value">检查中</span>
+                </div>
+                <div class="environment-row">
+                  <span>数据持久化</span>
+                  <span class="environment-value ok">已启用</span>
+                </div>
+              </section>
+            </aside>
+          </div>
+
+          <section id="topology-view" class="topology-view hidden" aria-label="运行拓扑图">
+            <div class="topology-toolbar">
+              <div class="topology-heading">
+                <strong>运行拓扑</strong>
+                <span id="topology-summary">0 个节点 · 0 条连接</span>
+              </div>
+              <div class="topology-controls">
+                <label class="topology-follow-control">
+                  <input id="topology-follow-toggle" type="checkbox" checked>
+                  <span>跟随最新</span>
+                </label>
+                <button
+                  id="topology-zoom-out-button"
+                  class="topology-icon-button"
+                  type="button"
+                  title="缩小"
+                  aria-label="缩小拓扑图"
+                >
+                  −
+                </button>
+                <button
+                  id="topology-zoom-in-button"
+                  class="topology-icon-button"
+                  type="button"
+                  title="放大"
+                  aria-label="放大拓扑图"
+                >
+                  +
+                </button>
+                <button
+                  id="topology-fit-button"
+                  class="topology-icon-button"
+                  type="button"
+                  title="适应全图"
+                  aria-label="使拓扑图适应画布"
+                >
+                  ⛶
+                </button>
+              </div>
+            </div>
+            <div id="topology-body" class="topology-body">
+              <aside
+                id="reasoning-dock"
+                class="reasoning-dock"
+                aria-label="节点思维链"
+              >
+                <button
+                  id="reasoning-expand-button"
+                  class="reasoning-expand-button"
+                  type="button"
+                  title="展开思维链"
+                  aria-label="展开思维链"
+                >
+                  CoT
+                </button>
+                <div class="reasoning-dock-main">
+                  <header class="reasoning-header">
+                    <div class="reasoning-heading-copy">
+                      <div class="reasoning-heading-row">
+                        <strong id="reasoning-node-title">节点思维链</strong>
+                        <span id="reasoning-status" class="reasoning-status">
+                          等待选择
+                        </span>
+                        <span
+                          id="reasoning-authority"
+                          class="reasoning-authority"
+                          title="模型原始推理，不是检查点、Broker Fact 或独立验证结论"
+                        >
+                          未验证推理
+                        </span>
+                      </div>
+                      <div id="reasoning-node-meta" class="reasoning-node-meta"></div>
+                    </div>
+                    <div class="reasoning-header-actions">
+                      <button
+                        id="reasoning-collapse-button"
+                        class="topology-icon-button reasoning-icon-button"
+                        type="button"
+                        title="折叠思维链面板"
+                        aria-label="折叠思维链面板"
+                      >
+                        &minus;
+                      </button>
+                      <button
+                        id="reasoning-close-button"
+                        class="topology-icon-button reasoning-icon-button"
+                        type="button"
+                        title="关闭思维链面板"
+                        aria-label="关闭思维链面板"
+                      >
+                        &times;
+                      </button>
+                    </div>
+                  </header>
+                  <div id="reasoning-options" class="reasoning-options">
+                    <label>
+                      <input id="reasoning-follow-toggle" type="checkbox" checked>
+                      <span>跟随最新输出</span>
+                    </label>
+                    <span id="reasoning-character-count">0 字符</span>
+                  </div>
+                  <div
+                    id="reasoning-content"
+                    class="reasoning-content"
+                    aria-live="polite"
+                  >
+                    <div class="reasoning-empty">
+                      右键点击拓扑节点，然后选择“展示思维链”
+                    </div>
+                  </div>
+                </div>
+              </aside>
+              <div
+                id="reasoning-resizer"
+                class="reasoning-resizer"
+                role="separator"
+                aria-label="调整思维链面板宽度"
+                aria-orientation="vertical"
+                tabindex="0"
+              ></div>
+              <div
+                id="topology-viewport"
+              class="topology-viewport"
+              tabindex="0"
+              aria-label="可缩放和拖动的运行拓扑画布"
+            >
+              <svg
+                id="topology-canvas"
+                class="topology-canvas"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <defs>
+                  <marker
+                    id="topology-arrow"
+                    markerWidth="4.5"
+                    markerHeight="4.5"
+                    refX="4"
+                    refY="2.25"
+                    orient="auto"
+                    markerUnits="strokeWidth"
+                  >
+                    <path d="M 0 0 L 4.5 2.25 L 0 4.5 z"></path>
+                  </marker>
+                </defs>
+                <g id="topology-scene">
+                  <g id="topology-edges"></g>
+                  <g id="topology-nodes"></g>
+                </g>
+              </svg>
+              <div id="topology-empty" class="topology-empty">
+                等待运行节点
+              </div>
+            </div>
+            </div>
+            <div id="topology-selection" class="topology-selection hidden">
+              <div class="topology-selection-copy">
+                <strong id="topology-selection-title"></strong>
+                <span id="topology-selection-detail"></span>
+              </div>
+              <button
+                id="topology-locate-button"
+                class="button button-secondary"
+                type="button"
+              >
+                定位时间线
+              </button>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <dialog id="clarification-dialog" class="clarification-dialog">
+      <div class="dialog-frame clarification-frame">
+        <div class="dialog-header">
+          <div>
+            <div class="eyebrow">题意预检</div>
+            <h2>确认规范化目标</h2>
+          </div>
+        </div>
+        <div class="dialog-content clarification-content">
+          <section class="clarification-section">
+            <h3>用户原题</h3>
+            <pre id="clarification-original" class="clarification-statement"></pre>
+          </section>
+          <section class="clarification-section">
+            <h3>检测结果</h3>
+            <div id="clarification-reasons" class="clarification-reasons"></div>
+            <div id="clarification-confidence" class="section-meta"></div>
+          </section>
+          <fieldset class="clarification-section clarification-candidates">
+            <legend>候选解释</legend>
+            <div id="clarification-candidates"></div>
+          </fieldset>
+          <label class="field clarification-editor">
+            <span>将要冻结的数学目标</span>
+            <textarea id="clarification-statement" spellcheck="false"></textarea>
+          </label>
+          <div class="clarification-warning">
+            确认后，Planner、Explorer、Synthesizer 和 Verifier 将共同使用同一个目标哈希。
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button id="cancel-clarification-button" class="button button-danger-quiet" type="button">
+            取消运行
+          </button>
+          <div class="dialog-footer-actions">
+            <button id="confirm-clarification-button" class="button button-primary" type="button">
+              确认并继续
+            </button>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="settings-dialog" class="settings-dialog">
+      <form method="dialog" class="dialog-frame">
+        <div class="dialog-header">
+          <div>
+            <div class="eyebrow">本机配置</div>
+            <h2>设置</h2>
+          </div>
+          <button id="close-settings-button" class="close-button" value="cancel" type="submit" title="关闭设置">
+            ×
+          </button>
+        </div>
+        <div class="dialog-content">
+          <section class="settings-section">
+            <div class="settings-section-heading">
+              <h3>默认运行</h3>
+            </div>
+            <label class="field">
+              <span>默认档位</span>
+              <select id="settings-profile-select"></select>
+            </label>
+            <label class="toggle-row">
+              <span>
+                <strong>Docker Python 沙箱</strong>
+                <small id="docker-setting-note">检测本机 Docker 状态</small>
+              </span>
+              <input id="sandbox-toggle" type="checkbox">
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-heading">
+              <div>
+                <h3>DeepSeek API Keys</h3>
+                <div id="credential-summary" class="section-meta"></div>
+              </div>
+              <button id="probe-button" class="button button-secondary" type="button">
+                测试连接
+              </button>
+            </div>
+            <div id="credential-fields" class="credential-fields"></div>
+            <label class="toggle-row">
+              <span>
+                <strong>保存到本机</strong>
+                <small>使用 Windows DPAPI 按当前账户加密</small>
+              </span>
+              <input id="remember-toggle" type="checkbox">
+            </label>
+            <div id="probe-results" class="probe-results hidden"></div>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-heading">
+              <h3>数据位置</h3>
+              <button id="settings-open-data-button" class="text-button" type="button">
+                打开目录
+              </button>
+            </div>
+            <code id="data-root-value" class="data-root"></code>
+          </section>
+        </div>
+        <div class="dialog-footer">
+          <button id="clear-credentials-button" class="button button-danger-quiet" type="button">
+            清除已保存 Key
+          </button>
+          <div class="dialog-footer-actions">
+            <button class="button button-quiet" value="cancel" type="submit">取消</button>
+            <button id="save-settings-button" class="button button-primary" type="button">
+              保存设置
+            </button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="run-context-menu" class="context-menu hidden" role="menu">
+      <button
+        id="delete-run-menu-button"
+        class="context-menu-item danger"
+        type="button"
+        role="menuitem"
+      >
+        删除到回收站
+      </button>
+    </div>
+
+    <div id="topology-context-menu" class="context-menu hidden" role="menu">
+      <button
+        id="show-reasoning-menu-button"
+        class="context-menu-item"
+        type="button"
+        role="menuitem"
+      >
+        展示思维链
+      </button>
+      <button
+        id="show-computation-menu-button"
+        class="context-menu-item hidden"
+        type="button"
+        role="menuitem"
+      >
+        查看执行记录
+      </button>
+    </div>
+
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  </body>
+</html>

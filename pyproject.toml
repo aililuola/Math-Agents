@@ -23,10 +23,21 @@ dependencies = [
 
 [project.optional-dependencies]
 server = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1"]
+desktop = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+  "pywebview>=5.4,<7",
+  "Send2Trash>=1.8.3,<2",
+]
+build = [
+  "Pillow>=11,<13",
+  "pyinstaller>=6.15,<7",
+]
 dev = ["pytest>=8,<10", "pytest-asyncio>=0.23,<1", "ruff>=0.9,<1"]
 
 [project.scripts]
 mathproofmesh = "mathproofmesh.cli:app"
+mathproofmesh-desktop = "mathproofmesh.desktop.main:run"
 
 [tool.hatch.build]
 exclude = [

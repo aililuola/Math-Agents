@@ -1,6 +1,6 @@
 # Reasoning-First Computation Policy
 
-MathProofMesh 0.6.0 将计算定义为“对一个精确数学判断提供可审计证据的受控子流程”，而不是第二个路线规划器。本文是 `schemas.py`、`computation/policy.py`、`computation/broker.py` 和编排器行为的规范。
+MathProofMesh 0.7.0 将计算定义为“对一个精确数学判断提供可审计证据的受控子流程”，而不是第二个路线规划器。本文是 `schemas.py`、`computation/policy.py`、`computation/broker.py` 和编排器行为的规范。
 
 ## 1. 不变量
 
@@ -14,6 +14,7 @@ MathProofMesh 0.6.0 将计算定义为“对一个精确数学判断提供可审
 8. 反例必须独立复现；正面证书必须检查它与原命题之间的数学映射。
 9. Planner 只能写 `ComputationHint`，不能执行提示。
 10. 强类型工具必须先于模型生成 Python。
+11. 已被路线采用的关键有限计算必须先取得服务器生成的类型化证书，才能进入路线、检查点或最终证明。
 
 ## 2. 状态机
 
@@ -132,6 +133,19 @@ seed: 20260719
 
 快速通道只绕过“必须先停滞”，不绕过精确目标、预算、工具安全、缓存和独立复核。
 
+### Route-critical finite calculation gate
+
+该门控与 Explorer 主动申请的 `ExperimentSpec` 不同。它处理的是已经出现在 `StrategyCard` 或 `ProofStep` 中、且将被当作前提使用的显式有限计算：
+
+1. Planner、Explorer 或 Synthesizer 在原有结构化响应里填写 `calculation_checks`，不会为正确请求增加一次模型调用。
+2. 系统只接受能核验所声明答案的断言式类型化工具。只生成一个结果、却不比较声明值的请求不能作为准入证书。
+3. 门控在路线首次调用前、增量检查点审查前和最终 Reviewer 调用前执行。
+4. `missing_declaration`、`invalid_contract`、`inconclusive` 和 `refuted` 都会失败关闭；原因和实验哈希进入结构化审计记录。
+5. `calculation_evidence_refs` 完全由服务器根据实际实验工件写入，模型返回的引用会被清空。
+6. 已确认的反例阻止受影响前提继续使用；精确的有界非反驳只支持声明的有限范围，不升级为无限结论。
+
+默认高精度触发范围是显式数列值、声称的最小值、有限枚举和周期样本。普通的逐行代数展示不会仅因写入 `ProofStep.calculations` 就触发工具，以免把证明本身变成不必要的计算流水线。
+
 ## 5. Handler 契约
 
 ### symbolic
@@ -206,7 +220,15 @@ Docker 命令包含：
 
 沙箱正面结果被强制降为 `bounded_evidence`。沙箱反例在强类型工具复现前保持 `inconclusive`。
 
-## 8. 持久化和恢复
+## 8. 规律发现的语义闭环
+
+成功的 `discover_pattern` 实验不能只停留在有限样本。Explorer 必须同时提交结构化 `CandidateConjecture`，明确写出可证伪的公式、递推式或不变量，并绑定准确的 `experiment_id`、有限证据的适用限制以及后续符号证明义务。
+
+如果主响应漏掉候选规律，编排器最多调用一次禁用 Thinking、输出上限 4096 tokens 的小型补全阶段；它只解释已有结果，不重做证明或再次计算。补全仍失败时，路线强制保持 `partial`，并保留“形成明确候选规律”的开放义务。
+
+证据引用由服务器绑定到 `execution.json`、`result.json` 和原始候选响应。候选规律会进入路线记录和运行报告，但不会进入 ClaimMemory、Broker Fact 或已验证检查点；只有另行完成证明并通过独立审核后，相关命题才可能升级为事实。
+
+## 9. 持久化和恢复
 
 ```text
 runs/<run_id>/experiments/<request_hash>/
@@ -223,7 +245,7 @@ runs/<run_id>/experiments/<request_hash>/
 
 `execution.json` 完整记录规范化执行输入、原始 Handler 输出、系统接受的结构化结果、程序哈希、工具环境以及各自 SHA-256。最终审计会校验 `spec`、`program.py`、`execution`、`result` 和 `evidence` 之间的绑定关系，并重放关键证据。
 
-## 9. Activity
+## 10. Activity
 
 持久化事件包括：
 
@@ -231,12 +253,33 @@ runs/<run_id>/experiments/<request_hash>/
 - `experiment_completed`；
 - `experiment_cache_hit`；
 - `experiment_impact_classified`；
+- `pattern_conjecture_completed` / `pattern_conjecture_completion_failed`；
 - `final_experiment_audit`。
 
 Activity 只显示目标哈希、门控规则、证据等级、案例数和运行时间，不显示模型私有思维链或凭据。
 
-## 10. 测试门槛
+## 11. 测试门槛
 
 自动化回归覆盖门控快慢路径、证据非对称性、Checkpoint 不推进、工具异常、独立反例覆盖、缓存恢复、各强类型 Handler、Docker 安全参数和离线枚举密集代理基准。
 
 真实模型的 token/费用/正确率对比需要用户提供 API key，因此不是默认 CI 的一部分。离线基准只验证：把逐例文本替换为结构化请求能显著降低可见推理文本，同时强类型工具对已知基准保持正确。
+
+## 12. 统一身份、契约模式与任务状态
+
+- `request_hash` 是持久化证据的规范标识；运行内的 `request_id`、
+  `experiment_id` 和缓存复用产生的别名都写入
+  `experiments/computation_identity_index.json`。验证器先解析该索引，
+  标识存在冲突时拒绝猜测。
+- `execution_hash` 只覆盖实际工具、规范化参数、定义域、精度和运行时工具
+  指纹。目标描述或决策说明不同但执行输入相同的确定性请求复用已经成功的
+  结果；错误或 `inconclusive` 结果不参与复用。
+- 发现模式与断言模式分离。`discover_pattern` 可生成有限样本但只能支持
+  `CandidateConjecture`；断言模式必须携带可核验的声明值。未携带
+  `claimed_values` 的非关键数列请求会降级为发现模式，不能取得定理资格。
+- 关键计算触发器只识别带明确计算来源的数值结果或明确生成的数列前缀。
+  符号极值证明、正常代数推导和符号化有限分类不会仅因出现“最小值”等词
+  被拦截。
+- `task_status` 与 `math_status` 分开。完成用户要求的计算或提出带范围限制的
+  猜想可以得到 `task_status=completed`，同时猜想仍保持
+  `math_status=inconclusive`；明确要求证明或求全部解时仍必须通过最终独立
+  审计。

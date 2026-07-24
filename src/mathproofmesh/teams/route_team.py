@@ -110,6 +110,14 @@ class RouteTeam:
         if repeated_first_error:
             score += 0.18
             reasons.append("first-error location repeated")
+        recovered_partial = "missing_final_answer_downgraded_to_partial" in payload.get(
+            "normalization_notes", []
+        )
+        if recovered_partial:
+            score += 0.30
+            reasons.append(
+                "structured complete response was salvaged as a partial delta"
+            )
         dependencies = payload.get("dependencies", [])
         if dependencies and isinstance(artifact, MessageEnvelope):
             if artifact.verification_status != ClaimStatus.VERIFIED:
@@ -128,6 +136,7 @@ class RouteTeam:
             or needs_tool
             or structural_verdict in {"uncertain", "fail"}
             or repeated_first_error
+            or recovered_partial
             or entering_global_fact_gate
         )
         needs_skeptic = not self.config.topology.route_teams.skeptic_on_high_risk_only

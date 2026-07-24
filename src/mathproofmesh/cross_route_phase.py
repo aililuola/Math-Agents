@@ -9,9 +9,14 @@ def distinct_agent_exclusions(*agent_ids: str | None) -> set[str]:
 
 
 def team_reviews_allow_global_share(
-    reviews: Iterable[dict[str, Any]], *, teams_enabled: bool
+    reviews: Iterable[dict[str, Any]],
+    *,
+    teams_enabled: bool,
+    delta_id: str | None = None,
 ) -> bool:
     records = list(reviews)
+    if delta_id is not None:
+        records = [record for record in records if record.get("delta_id") == delta_id]
     if not records:
         return not teams_enabled
     return all(
