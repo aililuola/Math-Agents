@@ -33,7 +33,7 @@ build = [
   "Pillow>=11,<13",
   "pyinstaller>=6.15,<7",
 ]
-dev = ["pytest>=8,<10", "pytest-asyncio>=0.23,<1", "ruff>=0.9,<1"]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.23,<1", "ruff==0.15.22"]
 
 [project.scripts]
 mathproofmesh = "mathproofmesh.cli:app"
