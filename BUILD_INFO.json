@@ -190,12 +190,12 @@
     "docs_directory_lines": 2315
   },
   "artifacts": {
-    "status": "WINDOWS DESKTOP BUILD AND INSTALLER VALIDATED; INSTALL DEFERRED WHILE CURRENT APP IS RUNNING",
-    "windows_installer": "packaging/windows/output/MathProofMesh-0.7.0-Setup-x64.exe",
-    "windows_installer_sha256": "CA012DD001C28BD4D70522ECAA082061B64ADC26F735293578A126A6B431B9CE",
-    "portable_exe_sha256": "34DF5E36FB82679855AC88299F21C079D32401930BC7DD758B7F5AC542E3B1FA",
-    "desktop_installer": "C:/Users/yanxinyu/Desktop/MathProofMesh-0.7.0-Setup-x64.exe",
-    "desktop_installer_sha256": "CA012DD001C28BD4D70522ECAA082061B64ADC26F735293578A126A6B431B9CE",
+    "status": "WINDOWS DESKTOP 0.8.0 BUILD AND INSTALLER VALIDATED; INSTALL DEFERRED WHILE CURRENT APP IS RUNNING",
+    "windows_installer": "packaging/windows/output/MathProofMesh-0.8.0-Setup-x64.exe",
+    "windows_installer_sha256": "EE10141E4BEF08D6841ED283B15A129C7650EE3F02469AC14150CAA3370AE87A",
+    "portable_exe_sha256": "86C39181BCEBE50C00441348EA307AFA3F98DD7FADAF81CB097116756454D8D7",
+    "desktop_installer": "C:/Users/yanxinyu/Desktop/MathProofMesh-0.8.0-Setup-x64.exe",
+    "desktop_installer_sha256": "EE10141E4BEF08D6841ED283B15A129C7650EE3F02469AC14150CAA3370AE87A",
     "installed_exe_sha256": "C29F7241618EFE53F595A1A039D0E0D5C27710CA48A466F0070B0D257F4EB455",
     "wheel": "dist/mathproofmesh-0.7.0-py3-none-any.whl",
     "sdist": "dist/mathproofmesh-0.7.0.tar.gz",
