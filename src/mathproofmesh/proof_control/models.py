@@ -69,6 +69,20 @@ class ClaimGoalLink(StrictModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
+class MinimalBridgeProposal(StrictModel):
+    proposal_id: str = Field(default_factory=lambda: new_id("minimal_bridge"))
+    overstrong_subject_id: str
+    target_obligation_id: str
+    candidate_statement: str
+    relation_to_original: Literal[
+        "strictly_weaker", "equivalent", "incomparable", "unknown"
+    ] = "unknown"
+    implication_outline: list[str] = Field(default_factory=list)
+    remaining_obligation_ids: list[str] = Field(default_factory=list)
+    required_bridge_obligation_ids: list[str] = Field(default_factory=list)
+    status: Literal["candidate", "reviewed", "accepted", "rejected"] = "candidate"
+
+
 class IndexScope(StrEnum):
     ALL = "all"
     EVENTUAL = "eventual"

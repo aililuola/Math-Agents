@@ -11,6 +11,11 @@ from typing import Any, Type
 from pydantic import BaseModel
 
 from .computation.contracts import experiment_tool_catalog
+from .proof_control.models import (
+    ClaimGoalLink,
+    InferenceRiskRecord,
+    MinimalBridgeProposal,
+)
 from .schemas import (
     AnalogyMapping,
     BlindReviewPacket,
@@ -1644,5 +1649,51 @@ JSON SCHEMA:
             "inspiration_referee",
             "Independently assess mechanism novelty, relevance, coherence, hidden assumptions, and immediate counterexamples. Novelty is not correctness and the proposal cannot become a Fact.",
             InspirationReview,
+            context,
+        )
+
+    def assess_claim_goal_alignment(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "proof_control_goal_alignment",
+            (
+                "Assess only whether the identified strategy, claim, message, or "
+                "obligation is equivalent to, sufficient for, necessary-only for, "
+                "heuristic-only for, unrelated to, or still unknown relative to the "
+                "identified target obligation. Compare quantifier order, domains, "
+                "uniformity, index range, and object scope. Give an implication "
+                "outline and IDs of every bridge still required. Lexical overlap is "
+                "not implication. Do not modify a Fact or close an obligation."
+            ),
+            ClaimGoalLink,
+            context,
+        )
+
+    def find_minimal_sufficient_bridge(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "proof_control_minimal_bridge",
+            (
+                "Given one overstrong target, propose a strictly weaker candidate "
+                "only when it still suffices for the immutable main goal. State the "
+                "strict strength relation, implication outline, remaining open "
+                "obligations, and required bridges. The proposal is control metadata, "
+                "not a Fact and not a replacement goal."
+            ),
+            MinimalBridgeProposal,
+            context,
+            temperature=0.1,
+        )
+
+    def review_inference_risk(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "proof_control_inference_risk",
+            (
+                "Review one ambiguous inference-risk candidate. Preserve premise "
+                "and conclusion IDs, quantifier order, domains, index scope, "
+                "uniformity, and object scope. Clear the risk only with an explicit "
+                "bridge; otherwise leave it open or identify a countermodel task. "
+                "Do not change verification status, promote a Fact, or close an "
+                "obligation."
+            ),
+            InferenceRiskRecord,
             context,
         )

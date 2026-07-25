@@ -15,6 +15,7 @@ from .models import (
     FailureClassificationRecord,
     InductionMeasureProposal,
     InferenceRiskRecord,
+    MinimalBridgeProposal,
     MessageUsageReceipt,
     MessageUtilityContract,
     NearMissRecord,
@@ -39,6 +40,7 @@ class ProofControlState:
         self.scope_signatures: dict[str, ScopeSignature] = {}
         self.proof_roles: dict[str, ProofRole] = {}
         self.inference_risks: dict[str, InferenceRiskRecord] = {}
+        self.minimal_bridge_proposals: dict[str, MinimalBridgeProposal] = {}
         self.abstract_structures: dict[str, AbstractStructureProposal] = {}
         self.realizer_candidates: dict[str, RealizerCandidate] = {}
         self.realizer_repair_tasks: dict[str, RealizerRepairTask] = {}
@@ -69,6 +71,9 @@ class ProofControlState:
                 key: self.proof_roles[key].value for key in sorted(self.proof_roles)
             },
             "inference_risks": self._dump_models(self.inference_risks),
+            "minimal_bridge_proposals": self._dump_models(
+                self.minimal_bridge_proposals
+            ),
             "abstract_structures": self._dump_models(self.abstract_structures),
             "realizer_candidates": self._dump_models(self.realizer_candidates),
             "realizer_repair_tasks": self._dump_models(self.realizer_repair_tasks),
@@ -110,6 +115,7 @@ class ProofControlState:
             ("goal_links", ClaimGoalLink),
             ("scope_signatures", ScopeSignature),
             ("inference_risks", InferenceRiskRecord),
+            ("minimal_bridge_proposals", MinimalBridgeProposal),
             ("abstract_structures", AbstractStructureProposal),
             ("realizer_candidates", RealizerCandidate),
             ("realizer_repair_tasks", RealizerRepairTask),
