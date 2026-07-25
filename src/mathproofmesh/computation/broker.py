@@ -17,6 +17,7 @@ import sympy as sp
 
 from ..activity import ActivityImportance, ActivityStatus, ActivityStream
 from ..config import SystemConfig
+from ..proof_control.falsification import classify_falsification_result
 from ..schemas import (
     ComputationCertificate,
     ComputationDecision,
@@ -348,6 +349,19 @@ class ComputationBroker:
             )
             self.store.append_event("computation_plan_created", plan)
         self.store.append_event("computation_decision", decision)
+        if decision.rule_id == "fast_path.proof_control_falsification":
+            self.store.append_event(
+                "falsification_fast_lane_admitted",
+                {
+                    "experiment_id": spec.experiment_id,
+                    "request_hash": spec.request_hash,
+                    "path_id": context.path_id,
+                    "target_obligation_id": context.target_obligation_id,
+                    "target_claim_id": context.target_claim_id,
+                    "method": spec.method.value,
+                    "max_cases": spec.max_cases,
+                },
+            )
         if decision.decision == ComputationDecisionStatus.DEFER:
             self._enqueue_deferred(spec, decision)
         elif decision.decision == ComputationDecisionStatus.REJECT:
@@ -409,6 +423,29 @@ class ComputationBroker:
                 spec.request_hash,
                 reason="experiment completed",
             )
+            if decision.rule_id == "fast_path.proof_control_falsification":
+                disposition = classify_falsification_result(result)
+                self.store.append_event(
+                    disposition.event_type,
+                    {
+                        "experiment_id": result.experiment_id,
+                        "request_hash": result.request_hash,
+                        "path_id": result.path_id,
+                        "outcome": result.outcome.value,
+                        "memory_tier": (
+                            disposition.memory_tier.value
+                            if disposition.memory_tier is not None
+                            else None
+                        ),
+                        "message_type": (
+                            disposition.message_type.value
+                            if disposition.message_type is not None
+                            else None
+                        ),
+                        "claim_status_changed": disposition.claim_status_changed,
+                        "reason": disposition.reason,
+                    },
+                )
             return result
         except Exception as exc:
             if track_activity:

@@ -33,6 +33,17 @@ from .models import (
     UniformityScope,
 )
 from .state import ProofControlState
+from .falsification import (
+    FastLaneEligibility,
+    FalsificationDisposition,
+    classify_falsification_result,
+    evaluate_fast_lane_eligibility,
+)
+from .gates import (
+    ContinueDeepeningGate,
+    RouteAdmissionGate,
+    SynthesisReadinessGate,
+)
 
 __all__ = [
     "AbstractStructureProposal",
@@ -43,6 +54,8 @@ __all__ = [
     "ContinueGateRecord",
     "CriticalAssumption",
     "FailureClassificationRecord",
+    "FastLaneEligibility",
+    "FalsificationDisposition",
     "GateVerdict",
     "GoalRelation",
     "IndexScope",
@@ -62,8 +75,13 @@ __all__ = [
     "RealizerRepairResult",
     "RealizerRepairTask",
     "RouteAdmissionRecord",
+    "RouteAdmissionGate",
     "ScopeRelation",
     "ScopeSignature",
     "SynthesisReadinessRecord",
+    "SynthesisReadinessGate",
+    "ContinueDeepeningGate",
     "UniformityScope",
+    "classify_falsification_result",
+    "evaluate_fast_lane_eligibility",
 ]
