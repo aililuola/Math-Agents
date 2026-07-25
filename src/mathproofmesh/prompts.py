@@ -12,7 +12,9 @@ from pydantic import BaseModel
 
 from .computation.contracts import experiment_tool_catalog
 from .proof_control.models import (
+    BottleneckCluster,
     ClaimGoalLink,
+    CriticalAssumption,
     InferenceRiskRecord,
     MinimalBridgeProposal,
 )
@@ -1696,4 +1698,33 @@ JSON SCHEMA:
             ),
             InferenceRiskRecord,
             context,
+        )
+
+    def review_bottleneck_cluster(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "proof_control_bottleneck_cluster",
+            (
+                "Decide whether the supplied open obligations are the same "
+                "mathematical bottleneck after accounting for assumptions, "
+                "quantifier order, scope, dependency neighborhoods, and first-error "
+                "fingerprints. Preserve every original node and edge. Select a "
+                "canonical obligation only as sidecar scheduling metadata."
+            ),
+            BottleneckCluster,
+            context,
+        )
+
+    def challenge_critical_assumption(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "proof_control_assumption_challenge",
+            (
+                "Challenge one shared, unverified load-bearing assumption. Seek an "
+                "exact counterexample, a route that avoids it, a weaker sufficient "
+                "condition, or a proof that it is genuinely necessary. Multiple "
+                "routes agreeing is not evidence and must not change verification "
+                "status."
+            ),
+            CriticalAssumption,
+            context,
+            temperature=0.1,
         )

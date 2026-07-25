@@ -2401,6 +2401,12 @@ class PathStats(StrictModel):
     meta_review_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     proof_debt: float = Field(default=0.0, ge=0.0)
     proof_debt_reduction: float = 0.0
+    core_proof_debt: float = Field(default=0.0, ge=0.0)
+    core_proof_debt_reduction: float = 0.0
+    core_open_obligation_count: int = Field(default=0, ge=0)
+    core_verified_bridge_gain: int = Field(default=0, ge=0)
+    goal_alignment_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    common_mode_risk: float = Field(default=0.0, ge=0.0, le=1.0)
     verified_fact_gain: int = Field(default=0, ge=0)
     shared_obligation_count: int = Field(default=0, ge=0)
     high_centrality_obligation_count: int = Field(default=0, ge=0)

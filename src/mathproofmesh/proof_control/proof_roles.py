@@ -2,14 +2,22 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from ..config import CoreDebtControlConfig
 from ..schemas import (
+    ClaimStatus,
     EvidenceType,
     MemoryTier,
     MessageEnvelope,
     MessageType,
     ObligationKind,
 )
-from .models import ClaimGoalLink, GoalRelation, ProofRole
+from .models import (
+    ClaimGoalLink,
+    CriticalAssumption,
+    GoalRelation,
+    InferenceRiskRecord,
+    ProofRole,
+)
 
 if TYPE_CHECKING:
     from ..proof_graph.store import ProofGraphStore
@@ -68,7 +76,51 @@ class ProofRoleClassifier:
         return bool(core_query and target.obligation_id in core_query())
 
 
-def core_proof_debt_placeholder(graph: ProofGraphStore, route_id: str) -> float:
-    """Phase-2 compatibility shim; the weighted implementation lands in Phase 3."""
+def core_proof_debt(
+    graph: ProofGraphStore,
+    route_id: str,
+    *,
+    config: CoreDebtControlConfig | None = None,
+    proof_roles: dict[str, ProofRole] | None = None,
+    inference_risks: dict[str, InferenceRiskRecord] | None = None,
+    critical_assumptions: dict[str, CriticalAssumption] | None = None,
+) -> float:
+    cfg = config or CoreDebtControlConfig()
+    roles = proof_roles or {}
+    core = graph.obligations_in_core_closure(route_id=route_id, open_only=True)
+    core_ids = {item.obligation_id for item in core}
+    debt = 0.0
+    for obligation in core:
+        if obligation.kind == ObligationKind.MAIN_GOAL:
+            weight = cfg.main_goal_weight
+        else:
+            role = roles.get(obligation.obligation_id, ProofRole.CORE_BRIDGE)
+            if role == ProofRole.CORE_BRIDGE:
+                weight = cfg.core_bridge_weight
+            elif role == ProofRole.AUXILIARY_BOUND:
+                weight = cfg.auxiliary_weight
+            elif role == ProofRole.NECESSARY_CONDITION:
+                weight = cfg.necessary_only_weight
+            else:
+                weight = 1.0
+        debt += weight * max(0.01, obligation.priority) * (1.0 + obligation.centrality)
 
-    return graph.proof_debt(route_id)
+    for risk in (inference_risks or {}).values():
+        if (
+            risk.status == "open"
+            and (risk.route_id is None or risk.route_id == route_id)
+            and (
+                risk.subject_id in core_ids
+                or risk.conclusion_id in core_ids
+                or bool(set(risk.premise_ids) & core_ids)
+            )
+        ):
+            debt += cfg.unresolved_scope_risk_weight * max(0.01, risk.confidence)
+
+    for assumption in (critical_assumptions or {}).values():
+        if (
+            route_id in assumption.route_ids
+            and assumption.verification_status != ClaimStatus.VERIFIED
+        ):
+            debt += cfg.common_mode_weight * assumption.common_mode_risk
+    return debt
