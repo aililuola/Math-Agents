@@ -516,6 +516,10 @@ class MessageBroker:
         *,
         referenced_step_ids: list[str] | None = None,
         closed_obligation_ids: list[str] | None = None,
+        refuted_claim_ids: list[str] | None = None,
+        produced_message_ids: list[str] | None = None,
+        blueprint_rewrite_request_ids: list[str] | None = None,
+        cited_by_final_proof: bool = False,
         proof_debt_before: float | None = None,
         proof_debt_after: float | None = None,
     ) -> bool:
@@ -526,18 +530,32 @@ class MessageBroker:
             return False
         step_ids = sorted(set(referenced_step_ids or []))
         obligation_ids = sorted(set(closed_obligation_ids or []))
+        refutation_ids = sorted(set(refuted_claim_ids or []))
+        produced_ids = sorted(set(produced_message_ids or []))
+        rewrite_ids = sorted(set(blueprint_rewrite_request_ids or []))
         debt_reduction = 0.0
         if proof_debt_before is not None and proof_debt_after is not None:
             debt_reduction = max(0.0, proof_debt_before - proof_debt_after)
         # A route-wide debt drop is not, by itself, attributable to this
         # particular message. Require a verified citation or obligation closure;
         # debt reduction then strengthens that already-established use.
-        if not step_ids and not obligation_ids:
+        if not (
+            step_ids
+            or obligation_ids
+            or refutation_ids
+            or produced_ids
+            or rewrite_ids
+            or cited_by_final_proof
+        ):
             return False
         score = min(
             1.0,
-            (0.4 if step_ids else 0.0)
-            + (0.4 if obligation_ids else 0.0)
+            (0.3 if step_ids else 0.0)
+            + (0.3 if obligation_ids else 0.0)
+            + (0.3 if refutation_ids else 0.0)
+            + (0.2 if produced_ids else 0.0)
+            + (0.2 if rewrite_ids else 0.0)
+            + (0.4 if cited_by_final_proof else 0.0)
             + min(0.2, debt_reduction),
         )
         record = {
@@ -545,6 +563,10 @@ class MessageBroker:
             "target_route_id": target_route_id,
             "referenced_step_ids": step_ids,
             "closed_obligation_ids": obligation_ids,
+            "refuted_claim_ids": refutation_ids,
+            "produced_message_ids": produced_ids,
+            "blueprint_rewrite_request_ids": rewrite_ids,
+            "cited_by_final_proof": cited_by_final_proof,
             "proof_debt_reduction": debt_reduction,
             "score": score,
         }

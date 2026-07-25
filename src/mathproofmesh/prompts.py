@@ -13,9 +13,11 @@ from pydantic import BaseModel
 from .computation.contracts import experiment_tool_catalog
 from .proof_control.models import (
     AbstractRealizerExtraction,
+    BlueprintRewriteRequest,
     BottleneckCluster,
     ClaimGoalLink,
     CriticalAssumption,
+    FailureClassificationRecord,
     InferenceRiskRecord,
     InductionMeasureProposal,
     MinimalBridgeProposal,
@@ -1790,4 +1792,34 @@ JSON SCHEMA:
             ),
             NearMissRecord,
             context,
+        )
+
+    def classify_proof_failure(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "proof_control_failure_classification",
+            (
+                "Classify the first mathematical failure as execution, bridge, "
+                "plan, or framing. Local calculation or boundary mistakes are "
+                "execution failures; one explicit missing implication is a bridge "
+                "failure; a route that cannot imply the goal is a plan failure; an "
+                "overstrong target, wrong representation, shared false assumption, "
+                "or fundamental scope mismatch is a framing failure. Preserve the "
+                "legacy failure level and map to an existing ActionKind."
+            ),
+            FailureClassificationRecord,
+            context,
+        )
+
+    def rewrite_proof_blueprint(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "proof_control_blueprint_rewrite",
+            (
+                "Rewrite only the invalid route targets, bridge obligations, "
+                "representation, and plan. Preserve every supplied verified Fact, "
+                "verified proof step, refuted claim, and negative constraint by ID. "
+                "Do not delete route history, promote a Fact, or close an obligation."
+            ),
+            BlueprintRewriteRequest,
+            context,
+            temperature=0.1,
         )
