@@ -114,7 +114,13 @@ def test_desktop_app_requires_session_cookie_and_serves_workbench(
     assert bootstrap.status_code == 200
     body = bootstrap.json()
     assert body["version"] == "0.8.0"
-    assert len(body["profiles"]) == 3
+    assert {profile["id"]: profile["filename"] for profile in body["profiles"]} == {
+        "smoke": "config.deepseek-v4-pro.smoke.yaml",
+        "formal": "config.deepseek-v4-pro.yaml",
+        "active": "config.deepseek-v4-pro.topology-active.yaml",
+        "proof_control_shadow": ("config.deepseek-v4-pro.proof-control-shadow.yaml"),
+        "proof_control_active": ("config.deepseek-v4-pro.proof-control-active.yaml"),
+    }
     assert body["credential_status"]["DEEPSEEK_AGENT_1_KEY"] == "missing"
 
     settings = client.put(

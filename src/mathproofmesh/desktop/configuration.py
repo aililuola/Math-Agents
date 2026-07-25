@@ -15,12 +15,16 @@ PROFILE_FILES: dict[DesktopProfile, str] = {
     "smoke": "config.deepseek-v4-pro.smoke.yaml",
     "formal": "config.deepseek-v4-pro.yaml",
     "active": "config.deepseek-v4-pro.topology-active.yaml",
+    "proof_control_shadow": "config.deepseek-v4-pro.proof-control-shadow.yaml",
+    "proof_control_active": "config.deepseek-v4-pro.proof-control-active.yaml",
 }
 
 PROFILE_LABELS: dict[DesktopProfile, str] = {
     "smoke": "冒烟验证",
     "formal": "正式求解",
-    "active": "Active 高预算",
+    "active": "分层拓扑 Active",
+    "proof_control_shadow": "证明控制 Shadow",
+    "proof_control_active": "证明控制 Active（专项）",
 }
 
 
