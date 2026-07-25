@@ -10,6 +10,7 @@ from ..schemas import (
     ClaimStatus,
     MemoryTier,
     MessageEnvelope,
+    ObligationKind,
     ProofObligation,
     RouteDescriptor,
     RouteStatus,
@@ -126,6 +127,7 @@ class CriticalAssumptionMatrix:
                             route_id=route_id,
                             source_subject_id=obligation.obligation_id,
                             weight=0.8,
+                            verified=obligation.kind == ObligationKind.MAIN_GOAL,
                         )
 
         denominator = max(1.0, float(len(active_route_ids)))

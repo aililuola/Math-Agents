@@ -81,6 +81,8 @@ from .proof_graph.bridges import BridgeBroker
 from .proof_graph.contradictions import ContradictionBroker
 from .proof_graph.matching import DuplicateRouteDetector
 from .proof_graph.store import ProofGraphStore
+from .proof_control.controller import ProofControlLayer
+from .proof_control.models import GateVerdict, ProofRole
 from .proof_identity import (
     attempt_content_fingerprint,
     canonical_obligation_statement,
@@ -239,6 +241,7 @@ class SolveState:
     execution_status: ExecutionStatus = ExecutionStatus.COMPLETED
     research_progress_report: ResearchProgressReport | None = None
     deep_exploration_registry: DeepExplorationRegistry | None = None
+    proof_control: ProofControlLayer | None = None
     global_no_progress_rounds: int = 0
     global_meta_pivot_used: bool = False
     last_progress_signature: str | None = None
@@ -455,6 +458,7 @@ class ProofMeshOrchestrator:
                 prompts,
                 router,
                 store,
+                state=state,
             )
             assignments = router.assign_explorers(state.strategies)
             self._ensure_hierarchical_routes(
@@ -787,7 +791,7 @@ class ProofMeshOrchestrator:
                     # A supported candidate exists; preserve calls for synthesis/final audit.
                     if allocator.should_protect_finish(
                         state.aggregate_reports.values()
-                    ):
+                    ) and self._proof_control_allows_synthesis(state):
                         activity.complete_task(
                             round_task,
                             title=activity.text(
@@ -974,6 +978,31 @@ class ProofMeshOrchestrator:
                     )
 
                     if action.action == ActionKind.DEEPEN and action.strategy_id:
+                        control_route_id = self._route_for_strategy(
+                            state, action.strategy_id
+                        )
+                        if (
+                            state.proof_control is not None
+                            and control_route_id is not None
+                            and not state.proof_control.deepening_currently_allowed(
+                                control_route_id
+                            )
+                        ):
+                            action.selected = False
+                            action.blocked_reason = (
+                                "proof-control Continue Gate requires a route "
+                                "rewrite before further deepening"
+                            )
+                            store.append_event(
+                                "adaptive_action_blocked",
+                                {
+                                    "round_index": round_index,
+                                    "action": action.action.value,
+                                    "strategy_id": action.strategy_id,
+                                    "reason": action.blocked_reason,
+                                },
+                            )
+                            continue
                         attempt = await self._deepen_path(
                             problem,
                             action.strategy_id,
@@ -1183,7 +1212,9 @@ class ProofMeshOrchestrator:
             # Final synthesis is a proof-producing stage, not a generic summarizer.
             # When no candidate meets the evidence gate, preserve the mathematics in
             # a separate research-progress report instead of fabricating closure.
-            if self._can_enter_synthesis(state):
+            if self._can_enter_synthesis(
+                state
+            ) and self._proof_control_allows_synthesis(state):
                 synthesis_task = activity.start_task(
                     "stage",
                     title=activity.text(
@@ -1955,6 +1986,7 @@ class ProofMeshOrchestrator:
                     prompts,
                     router,
                     store,
+                    state=state,
                 )
             self._ensure_hierarchical_routes(
                 state,
@@ -2005,6 +2037,25 @@ class ProofMeshOrchestrator:
                         RouteStatus.ACTIVE,
                         RouteStatus.REPAIR_ONCE,
                     }:
+                        continue
+                    if (
+                        route is not None
+                        and state.proof_control is not None
+                        and not state.proof_control.deepening_currently_allowed(
+                            route.route_id
+                        )
+                    ):
+                        store.append_event(
+                            "resume_deepening_blocked",
+                            {
+                                "route_id": route.route_id,
+                                "strategy_id": strategy.strategy_id,
+                                "reason": (
+                                    "proof-control Continue Gate requires "
+                                    "blueprint revision"
+                                ),
+                            },
+                        )
                         continue
                     if runner.ledger.remaining_calls <= 0:
                         break
@@ -2131,7 +2182,9 @@ class ProofMeshOrchestrator:
             ):
                 state.proof_graph.freeze()
                 state.graph_frozen = True
-            if self._can_enter_synthesis(state):
+            if self._can_enter_synthesis(
+                state
+            ) and self._proof_control_allows_synthesis(state):
                 state.final_proof, synthesizer = await self._synthesize(
                     problem,
                     state,
@@ -2457,6 +2510,63 @@ class ProofMeshOrchestrator:
                 state.typed_memory,
             )
         )
+        proof_control_config = self.config.topology.proof_control
+        if proof_control_config.enabled and proof_control_config.mode != "off":
+            if (
+                not state.proof_graph.main_goal_obligation_ids()
+                and not state.proof_graph.frozen
+            ):
+                state.proof_graph.add_obligation(
+                    ProofObligation(
+                        obligation_id=f"obl_main_{problem.goal_hash[:12]}",
+                        problem_hash=problem.integrity_hash,
+                        route_ids=[],
+                        kind=ObligationKind.MAIN_GOAL,
+                        statement=problem.exact_statement,
+                        normalized_statement=self._normalize_statement(
+                            problem.exact_statement
+                        ),
+                        assumptions=list(problem.hard_constraints),
+                        status="open",
+                        priority=1.0,
+                        centrality=1.0,
+                    )
+                )
+            control_state = payload.get("proof_control_state")
+            state.proof_control = ProofControlLayer.from_state(
+                control_state if isinstance(control_state, dict) else None,
+                config=self.config,
+                store=store,
+                activity=activity,
+                proof_graph=state.proof_graph,
+                typed_memory=state.typed_memory,
+                message_broker=state.message_broker,
+                route_registry=state.route_registry,
+            )
+            for obligation in state.proof_graph.obligations:
+                state.proof_control.register_obligation(obligation)
+            if checkpoint_payload is not None and not isinstance(control_state, dict):
+                migration = {
+                    "event_type": "checkpoint_migrated_to_v0_8",
+                    "payload": {
+                        "initialized_empty_component": "proof_control_state",
+                        "source_schema_version": str(
+                            payload.get("schema_version", "0.7")
+                        ),
+                    },
+                }
+                state.proof_control.state.events.append(migration)
+                store.append_event("checkpoint_migrated_to_v0_8", migration["payload"])
+                activity.info(
+                    "checkpoint_migrated_to_v0_8",
+                    title="Checkpoint migrated to v0.8",
+                    detail=(
+                        "Missing proof-control sidecar state was initialized "
+                        "without changing mathematical artifacts."
+                    ),
+                    stage="run_resume",
+                )
+            state.proof_control.persist()
         bridge_state = payload.get("bridge_broker")
         state.bridge_broker = (
             BridgeBroker.from_state(
@@ -2607,6 +2717,14 @@ class ProofMeshOrchestrator:
                         },
                     )
 
+        if state.proof_control is not None and state.proof_graph is not None:
+            route_ids = [item.route_id for item in registry.routes]
+            for main_goal_id in state.proof_graph.main_goal_obligation_ids():
+                main_goal = state.proof_graph.get_obligation(main_goal_id)
+                main_goal.route_ids = list(
+                    dict.fromkeys([*main_goal.route_ids, *route_ids])
+                )
+
         needs_assignment: list[StrategyCard] = []
         for strategy in state.strategies:
             route = registry.route_for_strategy(strategy.strategy_id)
@@ -2747,6 +2865,7 @@ class ProofMeshOrchestrator:
             "message_broker": state.message_broker,
             "typed_memory": state.typed_memory,
             "proof_graph": state.proof_graph,
+            "proof_control": state.proof_control,
         }
         for name, component in components.items():
             if component is not None:
@@ -2780,6 +2899,8 @@ class ProofMeshOrchestrator:
             route_id = self._route_for_strategy(state, attempt.strategy_id)
             if route_id is None:
                 continue
+            if state.proof_control is not None:
+                state.proof_control.register_claim(claim, route_id=route_id)
             if not registry.owns_agent(route_id, attempt.agent_id, RouteRole.PROVER):
                 try:
                     registry.assign_member(
@@ -3043,6 +3164,11 @@ class ProofMeshOrchestrator:
             )
         if state.contradiction_broker is not None:
             state.contradiction_broker.detect(current_round=current_round)
+        if state.proof_control is not None:
+            state.proof_control.update_after_round(
+                strategies=state.strategies,
+                current_round=current_round,
+            )
 
     def _materialize_post_failure_bottleneck(
         self,
@@ -3530,6 +3656,8 @@ class ProofMeshOrchestrator:
             state.attempts.append(attempt)
             existing[key] = attempt
             accepted.append(attempt)
+            if state.proof_control is not None:
+                state.proof_control.register_attempt(attempt)
             if route is not None:
                 route.latest_attempt_id = attempt.attempt_id
                 route.latest_checkpoint_id = attempt.latest_checkpoint_id
@@ -3804,6 +3932,10 @@ class ProofMeshOrchestrator:
                     else 0
                 ),
             }
+            if state.proof_control is not None:
+                result[route.strategy_id].update(
+                    state.proof_control.route_signals(route.route_id)
+                )
         return result
 
     def _inspiration_snapshot(
@@ -4872,6 +5004,8 @@ class ProofMeshOrchestrator:
                     for attempt in state.attempts
                 )
             ]
+            if state.proof_control is not None and pending:
+                pending, _ = state.proof_control.admit_routes(pending)
             if not pending:
                 return materialized_this_round
             assignments = router.assign_explorers(pending)
@@ -5744,6 +5878,8 @@ class ProofMeshOrchestrator:
         prompts: PromptFactory,
         router: SparseTopologyRouter,
         store: ArtifactStore,
+        *,
+        state: SolveState,
     ) -> list[StrategyCard]:
         scoped_discovery_task = (
             TaskRequirement.CONJECTURE in problem.task_requirements
@@ -5817,6 +5953,64 @@ class ProofMeshOrchestrator:
             selected = router.select_diverse_strategies(
                 candidates, min(target, len(candidates))
             )
+        if state.proof_control is not None:
+            selected, admission_records = state.proof_control.admit_routes(selected)
+            if (
+                state.proof_control.active
+                and not selected
+                and admission_records
+                and self.config.topology.proof_control.route_admission.max_regeneration_attempts
+                > 0
+                and runner.ledger.remaining_calls > 0
+            ):
+                regulator_feedback = [
+                    "Proof-control route admission rejected every initial strategy.",
+                    *[
+                        f"{record.strategy_id}: " + "; ".join(record.reasons)
+                        for record in admission_records
+                    ],
+                    (
+                        "Regenerate genuinely different strategies that target the "
+                        "registered main obligation, state one exact falsification "
+                        "test, avoid necessary-only conclusions, and predict a core "
+                        "obligation reduction."
+                    ),
+                ]
+                regenerated = await self._safe_call(
+                    runner,
+                    "planner",
+                    prompts.strategies(
+                        problem,
+                        triage,
+                        target,
+                        prior_strategy_titles=[
+                            item.title for item in strategy_set.strategies
+                        ],
+                        regulator_feedback=regulator_feedback,
+                    ),
+                    budget_bucket="breadth",
+                )
+                regenerated_candidates = (
+                    regenerated.value.strategies
+                    if regenerated is not None
+                    else self._fallback_strategy_set(problem, target).strategies
+                )
+                regenerated_candidates = self._deduplicate_strategy_cards(
+                    self._attach_planner_computation_hints(regenerated_candidates)
+                )
+                regenerated_selected = router.select_diverse_strategies(
+                    regenerated_candidates,
+                    min(target, len(regenerated_candidates)),
+                )
+                selected, _ = state.proof_control.admit_routes(regenerated_selected)
+                store.append_event(
+                    "proof_control_strategy_regeneration",
+                    {
+                        "attempt": 1,
+                        "candidate_count": len(regenerated_selected),
+                        "admitted_count": len(selected),
+                    },
+                )
         store.write_json("structured", "strategy_set", strategy_set)
         store.write_json("structured", "selected_strategies", selected)
         return selected
@@ -6051,6 +6245,7 @@ class ProofMeshOrchestrator:
                 prompts=prompts,
                 tools=tools,
                 budget_bucket=budget_bucket,
+                state=state,
             )
             feedback.append(decision.model_dump(mode="json"))
             if experiment is not None:
@@ -6303,6 +6498,7 @@ class ProofMeshOrchestrator:
         prompts: PromptFactory,
         tools: ToolBroker,
         budget_bucket: str,
+        state: SolveState | None = None,
     ) -> tuple[ComputationDecision, ExperimentResult | None]:
         # Provenance is authoritative and deliberately excluded from the semantic
         # request hash so the same mathematical request can be reused from cache.
@@ -6314,6 +6510,28 @@ class ProofMeshOrchestrator:
             stalled_rounds=stalled_rounds,
             meta_review_approved=meta_review_approved,
             remaining_llm_calls=runner.ledger.remaining_calls,
+            proof_control_fast_lane=bool(
+                state is not None
+                and state.proof_control is not None
+                and state.proof_control.active
+            ),
+            target_obligation_id=(
+                state.proof_graph.main_goal_obligation_ids()[0]
+                if state is not None
+                and state.proof_control is not None
+                and state.proof_graph is not None
+                and state.proof_graph.main_goal_obligation_ids()
+                else None
+            ),
+            target_claim_id=(
+                f"claim_{stable_hash(spec.target_claim)[:12]}"
+                if state is not None and state.proof_control is not None
+                else None
+            ),
+            fast_lane_tasks_this_round=sum(
+                item.parent_checkpoint_id == parent_checkpoint_id
+                for item in tools.results_for_path(path_id)
+            ),
         )
         decision = tools.decide(spec, context)
         if decision.rule_id in {
@@ -6881,6 +7099,11 @@ class ProofMeshOrchestrator:
             broker=state.message_broker,
             typed_memory=state.typed_memory,
             proof_graph=state.proof_graph,
+            control_hints=(
+                state.proof_control.route_hints(route_id)
+                if state.proof_control is not None
+                else None
+            ),
         )
         return route_id, delivered, context
 
@@ -7681,6 +7904,20 @@ class ProofMeshOrchestrator:
                 and route_id is not None
                 else None
             )
+            proof_control_closed_core_before = (
+                {
+                    item.obligation_id
+                    for item in state.proof_graph.obligations_in_core_closure(
+                        route_id=route_id
+                    )
+                    if item.status == "closed"
+                }
+                if state is not None
+                and state.proof_control is not None
+                and state.proof_graph is not None
+                and route_id is not None
+                else set()
+            )
             next_segment = checkpoint.segment_index + 1
             current_goal_before_segment = checkpoint.current_goal
             prior_working = store.load_latest_working_checkpoint(path_id)
@@ -8147,6 +8384,7 @@ class ProofMeshOrchestrator:
                     prompts=prompts,
                     tools=tools,
                     budget_bucket=budget_bucket,
+                    state=state,
                 )
                 computation_feedback.append(decision.model_dump(mode="json"))
                 if decision.decision == ComputationDecisionStatus.DEFER:
@@ -8297,6 +8535,8 @@ class ProofMeshOrchestrator:
             )
             store.save_working_checkpoint(working_checkpoint)
 
+            if state is not None and state.proof_control is not None:
+                state.proof_control.register_delta(delta)
             local_report = local_delta_verification(problem, checkpoint, delta)
             policy_issues: list[VerificationIssue] = []
             for gate_failure in calculation_gate_result.failures:
@@ -8434,6 +8674,66 @@ class ProofMeshOrchestrator:
                     )
                     and min(report.confidence for report in independent)
                     >= cfg.checkpoint_pass_threshold
+                )
+
+            proof_control_continue = True
+            if (
+                state is not None
+                and state.proof_control is not None
+                and state.proof_graph is not None
+                and route_id is not None
+            ):
+                control_report = next(
+                    (
+                        item
+                        for item in reports
+                        if item.verdict != VerificationVerdict.PASS
+                    ),
+                    max(reports, key=lambda item: item.confidence),
+                )
+                prior_core_history = state.proof_control.state.core_debt_history.get(
+                    route_id, []
+                )
+                prior_core_debt = prior_core_history[-1] if prior_core_history else None
+                state.proof_control.process_verification_report(
+                    control_report,
+                    route_id=route_id,
+                    delta=delta,
+                )
+                current_core_debt = float(
+                    state.proof_control.route_signals(route_id)["core_proof_debt"]
+                )
+                proof_control_closed_core_after = {
+                    item.obligation_id
+                    for item in state.proof_graph.obligations_in_core_closure(
+                        route_id=route_id
+                    )
+                    if item.status == "closed"
+                }
+                proof_control_continue = state.proof_control.allow_deepen(
+                    route_id=route_id,
+                    segment_index=next_segment,
+                    report=control_report,
+                    core_obligation_closed=bool(
+                        proof_control_closed_core_after
+                        - proof_control_closed_core_before
+                    ),
+                    core_debt_reduced=bool(
+                        prior_core_debt is not None
+                        and current_core_debt < prior_core_debt - 1e-9
+                    ),
+                    verified_bridge_gain=bool(
+                        accepted
+                        and any(
+                            state.proof_control.state.proof_roles.get(claim.claim_id)
+                            in {
+                                ProofRole.CORE_BRIDGE,
+                                ProofRole.SUFFICIENT_CONDITION,
+                                ProofRole.EQUIVALENT_REDUCTION,
+                            }
+                            for claim in delta.new_claims
+                        )
+                    ),
                 )
 
             if not accepted:
@@ -8588,7 +8888,7 @@ class ProofMeshOrchestrator:
                 and state.message_broker is not None
                 and acknowledged_receipts
             ):
-                record_verified_message_usage(
+                used_message_ids = record_verified_message_usage(
                     state.message_broker,
                     delivered_messages,
                     acknowledged_receipts,
@@ -8597,6 +8897,12 @@ class ProofMeshOrchestrator:
                     proof_graph=state.proof_graph,
                     proof_debt_before=proof_debt_before,
                 )
+                if state.proof_control is not None:
+                    for message_id in used_message_ids:
+                        state.proof_control.record_message_usage(
+                            message_id,
+                            consumer_route_id=route_id,
+                        )
             store.write_json(
                 "structured",
                 f"proof_checkpoint_{checkpoint.checkpoint_id}",
@@ -8623,6 +8929,8 @@ class ProofMeshOrchestrator:
                         "proof_complete": checkpoint.proof_complete,
                     },
                 )
+            if not proof_control_continue:
+                break
 
         attempt = attempt_from_checkpoint(
             checkpoint,
@@ -9021,6 +9329,7 @@ class ProofMeshOrchestrator:
                 prompts=prompts,
                 tools=tools,
                 budget_bucket=budget_bucket,
+                state=state,
             )
             computation_feedback.append(decision.model_dump(mode="json"))
             if decision.decision == ComputationDecisionStatus.DEFER:
@@ -10161,6 +10470,10 @@ class ProofMeshOrchestrator:
         if not genuinely_new:
             return []
         selected = router.select_diverse_strategies(genuinely_new, count)
+        if state.proof_control is not None:
+            selected, _ = state.proof_control.admit_routes(selected)
+        if not selected:
+            return []
         state.strategies.extend(selected)
         assignments = router.assign_explorers(selected)
         if state.route_registry is not None:
@@ -11391,6 +11704,19 @@ class ProofMeshOrchestrator:
         for bundle in bundles:
             state.reports.extend(bundle.reports)
             state.aggregate_reports[bundle.aggregate.target_id] = bundle.aggregate
+            if state.proof_control is not None:
+                attempt = next(
+                    (
+                        item
+                        for item in state.attempts
+                        if item.attempt_id == bundle.aggregate.target_id
+                    ),
+                    None,
+                )
+                state.proof_control.process_verification_report(
+                    bundle.aggregate,
+                    attempt=attempt,
+                )
             if state.capability_profile is None or state.triage is None:
                 continue
             domain = state.capability_domain
@@ -12059,6 +12385,58 @@ class ProofMeshOrchestrator:
         ranked = self._rank_attempts(state.attempts)
         return bool(self._meta_selected_execution_repairs(state, ranked))
 
+    def _proof_control_allows_synthesis(self, state: SolveState) -> bool:
+        if state.proof_control is None:
+            return True
+        selected = self._select_for_synthesis(state)
+        subject_ids: set[str] = set()
+        unresolved_statements: set[str] = set()
+        raw_dependencies: set[str] = set()
+        for attempt in selected:
+            subject_ids.add(attempt.strategy_id)
+            subject_ids.update(item.step_id for item in attempt.proof_steps)
+            subject_ids.update(item.claim_id for item in attempt.proposed_lemmas)
+            unresolved_statements.update(
+                self._normalize_statement(item) for item in attempt.unresolved_gaps
+            )
+            raw_dependencies.update(
+                dependency
+                for step in attempt.proof_steps
+                for dependency in step.dependencies
+            )
+        obligation_ids = [
+            item.obligation_id
+            for item in (
+                state.proof_graph.obligations if state.proof_graph is not None else []
+            )
+            if item.status != "closed"
+            and self._normalize_statement(item.normalized_statement)
+            in unresolved_statements
+        ]
+        admitted = (
+            state.message_broker.admitted_facts()
+            if state.message_broker is not None
+            else []
+        )
+        candidate_fact_ids = [
+            message.message_id
+            for message in admitted
+            if message.message_id in raw_dependencies
+            or message.content_hash in raw_dependencies
+        ]
+        conflicts = (
+            state.contradiction_broker.unresolved()
+            if state.contradiction_broker is not None
+            else []
+        )
+        record = state.proof_control.synthesis_readiness(
+            conflicts=conflicts,
+            candidate_subject_ids=subject_ids,
+            candidate_dependency_ids=obligation_ids,
+            candidate_fact_ids=candidate_fact_ids,
+        )
+        return record.verdict != GateVerdict.BLOCK
+
     def _build_research_progress_report(
         self,
         problem: ProblemContract,
@@ -12388,7 +12766,7 @@ class ProofMeshOrchestrator:
         store.checkpoint(
             stage,
             {
-                "schema_version": "0.7",
+                "schema_version": "0.8" if state.proof_control is not None else "0.7",
                 "triage": state.triage,
                 "strategies": state.strategies,
                 "attempts": state.attempts,
@@ -12427,6 +12805,7 @@ class ProofMeshOrchestrator:
                     inspiration_engine=state.inspiration_engine,
                     capability_profile=state.capability_profile,
                     deep_exploration_registry=state.deep_exploration_registry,
+                    proof_control=state.proof_control,
                 ),
                 "claims": memory.claims,
                 "calls_started": runner.ledger.calls_started,
@@ -12494,6 +12873,8 @@ class ProofMeshOrchestrator:
                     "deep_exploration_registry",
                     state.deep_exploration_registry.export_state(),
                 )
+            if state.proof_control is not None:
+                state.proof_control.persist()
             write_hierarchical_reports(
                 store,
                 route_registry=route_registry_state,

@@ -6,10 +6,12 @@ from mathproofmesh.schemas import (
     EvidenceType,
     MemoryTier,
     MessageType,
+    ObligationKind,
+    ProofObligation,
     RouteDescriptor,
 )
 
-from v07_helpers import make_message, make_strategy
+from v07_helpers import PROBLEM_HASH, make_message, make_strategy
 
 
 def _routes_and_strategies() -> tuple[list[RouteDescriptor], list[object]]:
@@ -78,6 +80,27 @@ def test_independently_verified_fact_clears_common_mode_risk() -> None:
     )
     matrix = CriticalAssumptionMatrix()
     assumptions = matrix.build(routes, strategies, [fact])
+    shared = next(
+        item for item in assumptions.values() if item.normalized_statement == "h"
+    )
+
+    assert shared.verification_status == ClaimStatus.VERIFIED
+    assert shared not in matrix.risks(list(assumptions.values()))
+
+
+def test_main_goal_hypotheses_are_given_not_unverified_route_votes() -> None:
+    routes, strategies = _routes_and_strategies()
+    goal = ProofObligation(
+        obligation_id="main-goal",
+        problem_hash=PROBLEM_HASH,
+        route_ids=[item.route_id for item in routes],
+        kind=ObligationKind.MAIN_GOAL,
+        statement="Prove G from H.",
+        normalized_statement="prove g from h.",
+        assumptions=["H"],
+    )
+    matrix = CriticalAssumptionMatrix()
+    assumptions = matrix.build(routes, strategies, obligations=[goal])
     shared = next(
         item for item in assumptions.values() if item.normalized_statement == "h"
     )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import secrets
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from ..activity import ActivityStream
@@ -62,6 +63,9 @@ class MessageBroker:
         self._isolation_pending: dict[str, list[str]] = defaultdict(list)
         self._round_route_counts: dict[str, int] = defaultdict(int)
         self._round_global_counts: dict[int, int] = defaultdict(int)
+        self._proof_control_message_gate: (
+            Callable[[MessageEnvelope, int], tuple[bool, str | None]] | None
+        ) = None
 
     @property
     def decisions(self) -> list[BrokerDecision]:
@@ -70,6 +74,24 @@ class MessageBroker:
     @property
     def receipts(self) -> list[MessageReceipt]:
         return list(self._receipts.values())
+
+    @property
+    def messages(self) -> list[MessageEnvelope]:
+        return list(self._messages.values())
+
+    def set_proof_control_message_gate(
+        self,
+        gate: Callable[[MessageEnvelope, int], tuple[bool, str | None]] | None,
+    ) -> None:
+        """Attach an optional additive gate; legacy Broker policy remains authoritative."""
+
+        self._proof_control_message_gate = gate
+
+    def utility_record(
+        self, message_id: str, target_route_id: str
+    ) -> dict[str, Any] | None:
+        record = self._utility_records.get(delivery_key(message_id, target_route_id))
+        return dict(record) if record is not None else None
 
     def delivery_record(
         self, message_id: str, target_route_id: str
@@ -266,6 +288,13 @@ class MessageBroker:
         )
         if not gate.accepted:
             return self._reject(message, gate.reason)
+        if self._proof_control_message_gate is not None:
+            allowed, reason = self._proof_control_message_gate(message, current_round)
+            if not allowed:
+                return self._reject(
+                    message,
+                    reason or "proof-control message admission rejected",
+                )
 
         # 8-12: isolation, global-share gate, matching, and rate limits.
         explicit = list(dict.fromkeys(message.target_route_ids))

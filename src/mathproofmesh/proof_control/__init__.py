@@ -1,5 +1,6 @@
 """Goal-plan-failure-utility proof control sidecar."""
 
+from .controller import ProofControlLayer
 from .models import (
     AbstractStructureProposal,
     AbstractRealizerExtraction,
@@ -68,6 +69,7 @@ __all__ = [
     "NearMissRecord",
     "ObjectScope",
     "ProofControlState",
+    "ProofControlLayer",
     "ProofFailureClass",
     "ProofRole",
     "RealizerCandidate",

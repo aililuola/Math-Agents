@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from collections.abc import Callable
 from typing import Any, Iterable
 
 from ..config import SchedulerConfig, SystemConfig
@@ -44,6 +45,9 @@ class ProofGraphStore:
         self._edges: dict[str, ProofGraphEdge] = {}
         self._frozen = False
         self._events: list[dict[str, Any]] = []
+        self._proof_control_pre_close_policy: (
+            Callable[[MessageEnvelope, ProofObligation], tuple[bool, str | None]] | None
+        ) = None
 
     @property
     def frozen(self) -> bool:
@@ -346,6 +350,16 @@ class ProofGraphStore:
     def record_event(self, event_type: str, payload: Any) -> None:
         self._record(event_type, payload)
 
+    def set_proof_control_pre_close_policy(
+        self,
+        policy: (
+            Callable[[MessageEnvelope, ProofObligation], tuple[bool, str | None]] | None
+        ),
+    ) -> None:
+        """Attach an additive pre-close check without replacing the Fact gate."""
+
+        self._proof_control_pre_close_policy = policy
+
     def find_equivalent_obligations(
         self,
         obligation: ProofObligation | str,
@@ -619,6 +633,21 @@ class ProofGraphStore:
                     obligation.assumptions == message.assumptions
                     and obligation.normalized_statement == message.normalized_statement
                 ):
+                    if self._proof_control_pre_close_policy is not None:
+                        allowed, reason = self._proof_control_pre_close_policy(
+                            message, obligation
+                        )
+                        if not allowed:
+                            self._record(
+                                "proof_control_obligation_close_blocked",
+                                {
+                                    "message_id": message.message_id,
+                                    "obligation_id": obligation.obligation_id,
+                                    "reason": reason
+                                    or "proof-control pre-close policy rejected closure",
+                                },
+                            )
+                            continue
                     self.close_obligation(
                         obligation.obligation_id,
                         message.message_id,

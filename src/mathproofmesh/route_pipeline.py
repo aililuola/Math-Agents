@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .communication.broker import MessageBroker
@@ -23,6 +23,7 @@ def build_route_prompt_context(
     broker: MessageBroker,
     typed_memory: TypedMemory,
     proof_graph: ProofGraphStore | None,
+    control_hints: Mapping[str, Any] | None = None,
 ) -> tuple[list[MessageEnvelope], dict[str, Any]]:
     delivered = broker.inbox(route_id, current_round=current_round)
     open_obligations = (
@@ -54,7 +55,7 @@ def build_route_prompt_context(
                 ],
             }
         )
-    return delivered, {
+    context = {
         "route_id": route_id,
         "broker_messages": delivered,
         "message_receipt_requirements": receipt_requirements,
@@ -64,6 +65,9 @@ def build_route_prompt_context(
         "open_obligations": open_obligations,
         "receipt_required": config.topology.typed_communication.require_receipt,
     }
+    if control_hints is not None:
+        context["non_authoritative_control_hints"] = dict(control_hints)
+    return delivered, context
 
 
 def acknowledge_route_messages(
