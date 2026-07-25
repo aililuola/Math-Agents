@@ -111,6 +111,12 @@ class FailureClassifier:
                 "necessary_to_sufficient",
                 "eventual_to_global",
                 "projection_to_original",
+                "partial_property_to_total_property",
+                "nonempty_intersection_to_subset_containment",
+                "exists_component_to_all_components",
+                "some_witness_to_all_witnesses",
+                "coverage_to_exhaustiveness",
+                "at_least_one_to_only_from_set",
             }
             and item.confidence >= self.config.min_classification_confidence
             for item in open_risks

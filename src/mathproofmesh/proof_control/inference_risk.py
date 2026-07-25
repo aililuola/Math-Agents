@@ -11,7 +11,10 @@ from .models import (
     InferenceRiskRecord,
     InferenceRiskType,
     ObjectScope,
+    PropertyStrength,
+    RelationSignature,
     ScopeSignature,
+    SetRelationKind,
     UniformityScope,
 )
 
@@ -26,6 +29,8 @@ class InferenceRiskScanner:
         premise_scopes: Sequence[ScopeSignature] = (),
         conclusion_scope: ScopeSignature | None = None,
         premise_texts: Sequence[str] = (),
+        premise_relation_signatures: Sequence[RelationSignature] = (),
+        conclusion_relation_signature: RelationSignature | None = None,
         route_id: str | None = None,
     ) -> list[InferenceRiskRecord]:
         return self.deterministic_risks(
@@ -34,6 +39,8 @@ class InferenceRiskScanner:
             conclusion_scope=conclusion_scope,
             premise_texts=premise_texts,
             conclusion_text=f"{step.statement}\n{step.justification}",
+            premise_relation_signatures=premise_relation_signatures,
+            conclusion_relation_signature=conclusion_relation_signature,
             route_id=route_id,
         )
 
@@ -44,6 +51,8 @@ class InferenceRiskScanner:
         premise_scopes: Sequence[ScopeSignature] = (),
         conclusion_scope: ScopeSignature | None = None,
         evidence_type: EvidenceType | None = None,
+        premise_relation_signatures: Sequence[RelationSignature] = (),
+        conclusion_relation_signature: RelationSignature | None = None,
         route_id: str | None = None,
     ) -> list[InferenceRiskRecord]:
         return self.deterministic_risks(
@@ -53,6 +62,8 @@ class InferenceRiskScanner:
             evidence_type=evidence_type,
             premise_texts=claim.assumptions,
             conclusion_text=f"{claim.statement}\n{claim.conclusion}",
+            premise_relation_signatures=premise_relation_signatures,
+            conclusion_relation_signature=conclusion_relation_signature,
             route_id=route_id,
         )
 
@@ -75,6 +86,8 @@ class InferenceRiskScanner:
         goal_link: ClaimGoalLink | None = None,
         premise_texts: Iterable[str] = (),
         conclusion_text: str = "",
+        premise_relation_signatures: Sequence[RelationSignature] = (),
+        conclusion_relation_signature: RelationSignature | None = None,
         route_id: str | None = None,
     ) -> list[InferenceRiskRecord]:
         found: dict[InferenceRiskType, tuple[str, str, float]] = {}
@@ -168,6 +181,14 @@ class InferenceRiskScanner:
                 1.0,
             )
 
+        if conclusion_relation_signature is not None:
+            for premise_relation in premise_relation_signatures:
+                self._add_relation_strengthening_risks(
+                    premise_relation,
+                    conclusion_relation_signature,
+                    add=add,
+                )
+
         premise_text = " ".join(premise_texts).casefold()
         conclusion = conclusion_text.casefold()
         joined = f"{premise_text}\n{conclusion}"
@@ -249,6 +270,61 @@ class InferenceRiskScanner:
                 "Finite tests cannot alone prove a universal assertion.",
                 0.85,
             )
+        if any(
+            marker in premise_text
+            for marker in ("nonempty intersection", "intersects nontrivially")
+        ) and any(
+            marker in conclusion
+            for marker in ("is a subset", "is contained in", "equals the set")
+        ):
+            add(
+                InferenceRiskType.NONEMPTY_INTERSECTION_TO_SUBSET_CONTAINMENT,
+                "relation.nonempty_intersection_to_containment",
+                "Nonempty intersection does not establish set containment.",
+                0.95,
+            )
+        if any(
+            marker in premise_text
+            for marker in ("some component", "there exists a component")
+        ) and any(
+            marker in conclusion for marker in ("all components", "every component")
+        ):
+            add(
+                InferenceRiskType.EXISTS_COMPONENT_TO_ALL_COMPONENTS,
+                "property.exists_component_to_all",
+                "A property of one component does not establish it for all components.",
+                0.95,
+            )
+        if any(
+            marker in premise_text for marker in ("some witness", "a witness exists")
+        ) and any(
+            marker in conclusion for marker in ("all witnesses", "every witness")
+        ):
+            add(
+                InferenceRiskType.SOME_WITNESS_TO_ALL_WITNESSES,
+                "property.some_witness_to_all",
+                "One witness does not establish a property of every witness.",
+                0.95,
+            )
+        if "cover" in premise_text and any(
+            marker in conclusion
+            for marker in ("exhaustive classification", "partition", "only cases")
+        ):
+            add(
+                InferenceRiskType.COVERAGE_TO_EXHAUSTIVENESS,
+                "relation.cover_to_exhaustive",
+                "Coverage alone does not establish an exclusive exhaustive classification.",
+                0.95,
+            )
+        if "at least one" in premise_text and any(
+            marker in conclusion for marker in ("only from", "exactly the set")
+        ):
+            add(
+                InferenceRiskType.AT_LEAST_ONE_TO_ONLY_FROM_SET,
+                "property.at_least_one_to_only_from_set",
+                "Existence of one member does not characterize all possible members.",
+                0.95,
+            )
 
         return [
             InferenceRiskRecord(
@@ -258,11 +334,95 @@ class InferenceRiskScanner:
                 deterministic_rule_id=details[0],
                 explanation=details[1],
                 confidence=details[2],
+                premise_relation_signatures=list(premise_relation_signatures),
+                conclusion_relation_signature=conclusion_relation_signature,
             )
             for risk_type, details in sorted(
                 found.items(), key=lambda item: item[0].value
             )
         ]
+
+    @staticmethod
+    def _add_relation_strengthening_risks(
+        premise: RelationSignature,
+        conclusion: RelationSignature,
+        *,
+        add: Any,
+    ) -> None:
+        if (
+            premise.property_strength == PropertyStrength.PARTIAL
+            and conclusion.property_strength
+            in {PropertyStrength.UNIVERSAL, PropertyStrength.EXHAUSTIVE}
+        ):
+            add(
+                InferenceRiskType.PARTIAL_PROPERTY_TO_TOTAL_PROPERTY,
+                "property.partial_to_total",
+                "A partial property does not establish the property for the total object.",
+                1.0,
+            )
+        if (
+            premise.set_relation == SetRelationKind.NONEMPTY_INTERSECTION
+            and conclusion.set_relation
+            in {
+                SetRelationKind.SUBSET,
+                SetRelationKind.SUPERSET,
+                SetRelationKind.EQUALITY,
+            }
+        ):
+            add(
+                InferenceRiskType.NONEMPTY_INTERSECTION_TO_SUBSET_CONTAINMENT,
+                "relation.nonempty_intersection_to_containment",
+                "Nonempty intersection does not establish set containment.",
+                1.0,
+            )
+        if (
+            premise.semantic_role == "component"
+            and premise.property_strength == PropertyStrength.EXISTENTIAL
+            and conclusion.property_strength
+            in {PropertyStrength.UNIVERSAL, PropertyStrength.EXHAUSTIVE}
+        ):
+            add(
+                InferenceRiskType.EXISTS_COMPONENT_TO_ALL_COMPONENTS,
+                "property.exists_component_to_all",
+                "A property of one component does not establish it for all components.",
+                1.0,
+            )
+        if (
+            premise.semantic_role == "witness"
+            and premise.property_strength == PropertyStrength.EXISTENTIAL
+            and conclusion.property_strength
+            in {PropertyStrength.UNIVERSAL, PropertyStrength.EXHAUSTIVE}
+        ):
+            add(
+                InferenceRiskType.SOME_WITNESS_TO_ALL_WITNESSES,
+                "property.some_witness_to_all",
+                "One witness does not establish a property of every witness.",
+                1.0,
+            )
+        if (
+            premise.semantic_role == "coverage"
+            or premise.set_relation == SetRelationKind.COVER
+        ) and (
+            conclusion.property_strength == PropertyStrength.EXHAUSTIVE
+            or conclusion.set_relation == SetRelationKind.PARTITION
+        ):
+            add(
+                InferenceRiskType.COVERAGE_TO_EXHAUSTIVENESS,
+                "relation.cover_to_exhaustive",
+                "Coverage does not by itself prove an exclusive exhaustive classification.",
+                1.0,
+            )
+        if (
+            premise.semantic_role == "membership"
+            and premise.property_strength == PropertyStrength.EXISTENTIAL
+            and conclusion.property_strength == PropertyStrength.EXHAUSTIVE
+        ):
+            add(
+                InferenceRiskType.AT_LEAST_ONE_TO_ONLY_FROM_SET,
+                "property.at_least_one_to_only_from_set",
+                "At least one admissible member does not identify the only possible members.",
+                1.0,
+            )
 
     async def review_ambiguous(
         self,
