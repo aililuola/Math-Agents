@@ -10,6 +10,7 @@ from .models import (
     BlueprintRewriteRequest,
     BottleneckCluster,
     ClaimGoalLink,
+    ControlActionRecord,
     ContinueGateRecord,
     CriticalAssumption,
     FailureClassificationRecord,
@@ -33,10 +34,11 @@ T = TypeVar("T", bound=BaseModel)
 class ProofControlState:
     """Stable sidecar state that never participates in mathematical hashes."""
 
-    schema_version = "0.8"
+    schema_version = "0.8.1"
 
     def __init__(self) -> None:
         self.goal_links: dict[str, ClaimGoalLink] = {}
+        self.control_actions: dict[str, ControlActionRecord] = {}
         self.scope_signatures: dict[str, ScopeSignature] = {}
         self.proof_roles: dict[str, ProofRole] = {}
         self.inference_risks: dict[str, InferenceRiskRecord] = {}
@@ -67,6 +69,7 @@ class ProofControlState:
         return {
             "schema_version": self.schema_version,
             "goal_links": self._dump_models(self.goal_links),
+            "control_actions": self._dump_models(self.control_actions),
             "scope_signatures": self._dump_models(self.scope_signatures),
             "proof_roles": {
                 key: self.proof_roles[key].value for key in sorted(self.proof_roles)
@@ -118,6 +121,7 @@ class ProofControlState:
         ]
         model_fields: tuple[tuple[str, type[BaseModel]], ...] = (
             ("goal_links", ClaimGoalLink),
+            ("control_actions", ControlActionRecord),
             ("scope_signatures", ScopeSignature),
             ("inference_risks", InferenceRiskRecord),
             ("minimal_bridge_proposals", MinimalBridgeProposal),

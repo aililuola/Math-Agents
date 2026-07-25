@@ -1,5 +1,6 @@
 """Goal-plan-failure-utility proof control sidecar."""
 
+from .action_dispatcher import ControlActionDispatcher
 from .controller import ProofControlLayer
 from .models import (
     AbstractStructureProposal,
@@ -7,6 +8,10 @@ from .models import (
     BlueprintRewriteRequest,
     BottleneckCluster,
     ClaimGoalLink,
+    ControlActionRecord,
+    ControlActionResult,
+    ControlActionStatus,
+    ControlActionType,
     ContinueGateRecord,
     CriticalAssumption,
     FailureClassificationRecord,
@@ -52,6 +57,11 @@ __all__ = [
     "BlueprintRewriteRequest",
     "BottleneckCluster",
     "ClaimGoalLink",
+    "ControlActionDispatcher",
+    "ControlActionRecord",
+    "ControlActionResult",
+    "ControlActionStatus",
+    "ControlActionType",
     "ContinueGateRecord",
     "CriticalAssumption",
     "FailureClassificationRecord",

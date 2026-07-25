@@ -30,6 +30,7 @@ from ..schemas import (
     stable_hash,
 )
 from ..store import ArtifactStore
+from .action_dispatcher import ControlActionDispatcher
 from .bottleneck import BottleneckCompressor
 from .common_mode import CriticalAssumptionMatrix
 from .failure_control import BlueprintRewriter, FailureClassifier
@@ -87,6 +88,15 @@ class ProofControlLayer:
         self.message_broker = message_broker
         self.route_registry = route_registry
         self.state = state or ProofControlState()
+        self.action_dispatcher = ControlActionDispatcher(
+            problem_hash=proof_graph.problem_hash,
+            actions=self.state.control_actions,
+            mode=self.control_config.mode,
+            source_exists=self._control_source_exists,
+            route_exists=self._control_route_exists,
+            obligation_exists=self._control_obligation_exists,
+            checkpoint_writer=lambda _action: self.persist(),
+        )
 
         self.scope_guard = ScopeGuard(self.control_config.scope_guard)
         self.goal_alignment = GoalAlignmentAnalyzer(proof_graph, self.scope_guard)
@@ -1435,6 +1445,66 @@ class ProofControlLayer:
             key = item.control_failure_class.value
             result[key] = result.get(key, 0) + 1
         return dict(sorted(result.items()))
+
+    def _control_source_exists(self, source_id: str) -> bool:
+        state_mappings = (
+            self.state.control_actions,
+            self.state.goal_links,
+            self.state.scope_signatures,
+            self.state.proof_roles,
+            self.state.inference_risks,
+            self.state.minimal_bridge_proposals,
+            self.state.abstract_structures,
+            self.state.realizer_candidates,
+            self.state.realizer_repair_tasks,
+            self.state.induction_measures,
+            self.state.failure_records,
+            self.state.blueprint_rewrites,
+            self.state.bottleneck_clusters,
+            self.state.critical_assumptions,
+            self.state.utility_contracts,
+            self.state.usage_receipts,
+            self.state.near_misses,
+            self.state.route_admissions,
+        )
+        if any(source_id in values for values in state_mappings):
+            return True
+        if any(
+            source_id
+            in {
+                message.message_id,
+                message.content_hash,
+            }
+            for message in self.message_broker.messages
+        ):
+            return True
+        if any(
+            source_id
+            in {
+                obligation.obligation_id,
+                obligation.content_hash,
+            }
+            for obligation in self.proof_graph.obligations
+        ):
+            return True
+        return any(
+            source_id in {route.route_id, route.strategy_id}
+            for route in self.route_registry.routes
+        )
+
+    def _control_route_exists(self, route_id: str) -> bool:
+        try:
+            self.route_registry.get(route_id)
+        except KeyError:
+            return False
+        return True
+
+    def _control_obligation_exists(self, obligation_id: str) -> bool:
+        try:
+            self.proof_graph.get_obligation(obligation_id)
+        except KeyError:
+            return False
+        return True
 
     @staticmethod
     def _history_auc(history: Sequence[float]) -> float:

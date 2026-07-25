@@ -97,7 +97,7 @@ def test_proof_control_sidecar_round_trips_without_changing_v07_state(
         proof_control=None,
     )
 
-    assert checkpoint["proof_control_state"]["schema_version"] == "0.8"
+    assert checkpoint["proof_control_state"]["schema_version"] == "0.8.1"
     assert "proof_control_state" not in legacy_shape
     before = controller.export_state()
     restored = ProofControlLayer.from_state(
@@ -155,8 +155,8 @@ async def test_active_resume_migrates_a_v07_checkpoint_exactly_once(
     assert Path(first.run_directory, "structured", "proof_control.json").exists()
     latest = ArtifactStore(config.runtime.run_root, run_id).latest_stage_checkpoint()
     assert latest is not None
-    assert latest[1]["schema_version"] == "0.8"
-    assert latest[1]["proof_control_state"]["schema_version"] == "0.8"
+    assert latest[1]["schema_version"] == "0.8.1"
+    assert latest[1]["proof_control_state"]["schema_version"] == "0.8.1"
 
     second = await ProofMeshOrchestrator(
         config,

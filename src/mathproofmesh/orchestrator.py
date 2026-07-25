@@ -12772,7 +12772,9 @@ class ProofMeshOrchestrator:
         store.checkpoint(
             stage,
             {
-                "schema_version": "0.8" if state.proof_control is not None else "0.7",
+                "schema_version": (
+                    "0.8.1" if state.proof_control is not None else "0.7"
+                ),
                 "triage": state.triage,
                 "strategies": state.strategies,
                 "attempts": state.attempts,

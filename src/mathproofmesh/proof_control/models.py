@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -42,6 +42,56 @@ class ProofRole(StrEnum):
     TECHNICAL_LEMMA = "technical_lemma"
     SEARCH_HEURISTIC = "search_heuristic"
     COUNTEREXAMPLE = "counterexample"
+
+
+class ControlActionType(StrEnum):
+    CREATE_SUB_OBLIGATION = "create_sub_obligation"
+    BIND_ROUTE_TARGET = "bind_route_target"
+    REWRITE_BLUEPRINT = "rewrite_blueprint"
+    WEAKEN_TARGET = "weaken_target"
+    CREATE_MINIMAL_BRIDGE = "create_minimal_bridge"
+    CREATE_COUNTERMODEL_TASK = "create_countermodel_task"
+    ACTIVATE_INDUCTION_MEASURE = "activate_induction_measure"
+    CREATE_ASSUMPTION_CHALLENGER = "create_assumption_challenger"
+    MATERIALIZE_BOTTLENECK_CLUSTER = "materialize_bottleneck_cluster"
+    MATERIALIZE_FALSIFICATION_TASK = "materialize_falsification_task"
+    SCHEDULE_ROUTE_UPDATE = "schedule_route_update"
+    DEFER_INSPIRATION_REVIEW = "defer_inspiration_review"
+    REASSIGN_INSPIRATION_REVIEW = "reassign_inspiration_review"
+    EXECUTE_META_PIVOT = "execute_meta_pivot"
+    CLOSE_BY_DIRECT_PREMISE = "close_by_direct_premise"
+
+
+class ControlActionStatus(StrEnum):
+    PROPOSED = "proposed"
+    ADMITTED = "admitted"
+    EXECUTING = "executing"
+    EXECUTED = "executed"
+    DEFERRED = "deferred"
+    REJECTED = "rejected"
+    FAILED = "failed"
+
+
+class ControlActionRecord(StrictModel):
+    action_id: str = Field(default_factory=lambda: new_id("control_action"))
+    action_type: ControlActionType
+    source_record_ids: list[str] = Field(default_factory=list)
+    route_ids: list[str] = Field(default_factory=list)
+    target_obligation_ids: list[str] = Field(default_factory=list)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str
+    status: ControlActionStatus = ControlActionStatus.PROPOSED
+    admission_reason: str = ""
+    failure_reason: str = ""
+    created_round: int = Field(default=0, ge=0)
+    executed_round: int | None = Field(default=None, ge=0)
+    result_refs: list[str] = Field(default_factory=list)
+
+
+class ControlActionResult(StrictModel):
+    result_refs: list[str] = Field(default_factory=list)
+    postcondition_met: bool
+    detail: str = ""
 
 
 class ClaimGoalLink(StrictModel):

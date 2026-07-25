@@ -62,6 +62,6 @@ def test_unknown_old_record_is_skipped_with_migration_event() -> None:
 def test_missing_payload_initializes_empty_state() -> None:
     restored = ProofControlState.from_state(None)
 
-    assert restored.export_state()["schema_version"] == "0.8"
+    assert restored.export_state()["schema_version"] == "0.8.1"
     assert restored.goal_links == {}
     assert restored.events == []
