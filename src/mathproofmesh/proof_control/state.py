@@ -56,6 +56,7 @@ class ProofControlState:
         self.continue_gate_records: list[ContinueGateRecord] = []
         self.synthesis_readiness_records: list[SynthesisReadinessRecord] = []
         self.core_debt_history: dict[str, list[float]] = {}
+        self.fast_lane_outcomes: dict[str, str] = {}
         self.events: list[dict[str, Any]] = []
 
     @staticmethod
@@ -96,6 +97,10 @@ class ProofControlState:
             "core_debt_history": {
                 key: [float(item) for item in self.core_debt_history[key]]
                 for key in sorted(self.core_debt_history)
+            },
+            "fast_lane_outcomes": {
+                key: self.fast_lane_outcomes[key]
+                for key in sorted(self.fast_lane_outcomes)
             },
             "events": [dict(item) for item in self.events],
         }
@@ -180,6 +185,17 @@ class ProofControlState:
                     )
         else:
             restored._migration_event("core_debt_history", "expected mapping")
+
+        raw_fast_lane = state.get("fast_lane_outcomes", {})
+        if isinstance(raw_fast_lane, Mapping):
+            restored.fast_lane_outcomes = {
+                str(key): str(value)
+                for key, value in sorted(
+                    raw_fast_lane.items(), key=lambda item: str(item[0])
+                )
+            }
+        else:
+            restored._migration_event("fast_lane_outcomes", "expected mapping")
         return restored
 
     def _restore_list(

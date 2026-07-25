@@ -18,6 +18,8 @@ from ..schemas import (
     MessageEnvelope,
     MessageType,
     ObligationKind,
+    ExperimentOutcome,
+    ExperimentResult,
     ProofAttempt,
     ProofDelta,
     ProofObligation,
@@ -25,6 +27,7 @@ from ..schemas import (
     StrategyCard,
     VerificationReport,
     VerificationVerdict,
+    stable_hash,
 )
 from ..store import ArtifactStore
 from .bottleneck import BottleneckCompressor
@@ -44,6 +47,7 @@ from .models import (
     GateVerdict,
     GoalRelation,
     InferenceRiskRecord,
+    InferenceRiskType,
     MessageExpectedEffect,
     ProofRole,
     RealizerFailureType,
@@ -657,6 +661,10 @@ class ProofControlLayer:
         self._emit("message_usage_verified", receipt.model_dump(mode="json"))
         self.persist()
 
+    def record_falsification_result(self, result: ExperimentResult) -> None:
+        self.state.fast_lane_outcomes[result.experiment_id] = result.outcome.value
+        self.persist()
+
     def export_state(self) -> dict[str, Any]:
         return self.state.export_state()
 
@@ -666,20 +674,103 @@ class ProofControlLayer:
         self.store.write_json("reports", "proof_control_summary", self.summary())
 
     def summary(self) -> dict[str, Any]:
+        links = list(self.state.goal_links.values())
+        aligned_relations = {GoalRelation.EQUIVALENT, GoalRelation.SUFFICIENT}
+        invalid_scopes = {ScopeRelation.CLAIM_WEAKER, ScopeRelation.INCOMPARABLE}
+        alignment_pass = sum(
+            item.relation in aligned_relations
+            and item.scope_relation not in invalid_scopes
+            for item in links
+        )
+        alignment_block = sum(
+            item.relation
+            in {
+                GoalRelation.NECESSARY_ONLY,
+                GoalRelation.HEURISTIC_ONLY,
+                GoalRelation.UNRELATED,
+            }
+            or item.scope_relation in invalid_scopes
+            for item in links
+        )
+        facts = self.message_broker.admitted_facts()
+        core_fact_roles = {
+            ProofRole.CORE_BRIDGE,
+            ProofRole.SUFFICIENT_CONDITION,
+            ProofRole.EQUIVALENT_REDUCTION,
+        }
+        core_fact_count = sum(
+            self.state.proof_roles.get(item.message_id) in core_fact_roles
+            for item in facts
+        )
+        scope_risk_types = {
+            InferenceRiskType.EVENTUAL_TO_GLOBAL,
+            InferenceRiskType.POINTWISE_TO_UNIFORM,
+            InferenceRiskType.PROJECTION_TO_ORIGINAL,
+            InferenceRiskType.LOCAL_TO_GLOBAL,
+            InferenceRiskType.EXISTENCE_TO_UNIFORM_EXISTENCE,
+            InferenceRiskType.PAIRWISE_TO_COMMON_WITNESS,
+        }
+        debt_auc_by_route = {
+            route_id: self._history_auc(history)
+            for route_id, history in sorted(self.state.core_debt_history.items())
+        }
+        clustered_savings = sum(
+            max(0, len(set(item.member_obligation_ids)) - 1)
+            for item in self.state.bottleneck_clusters.values()
+            if item.status != "split"
+        )
+        obligation_count = len(self.proof_graph.obligations)
+        broker_state = self.message_broker.export_state()
+        successful_repairs = sum(
+            any(
+                candidate.structure_id == task.structure_id
+                and candidate.candidate_id != task.failed_candidate_id
+                and candidate.status == "verified"
+                for candidate in self.state.realizer_candidates.values()
+            )
+            for task in self.state.realizer_repair_tasks.values()
+        )
+        fast_lane_total = len(self.state.fast_lane_outcomes)
+        fast_lane_hits = sum(
+            outcome == ExperimentOutcome.COUNTEREXAMPLE_FOUND.value
+            for outcome in self.state.fast_lane_outcomes.values()
+        )
+        route_records = list(self.state.route_admissions.values())
+        continue_records = self.state.continue_gate_records
+        synthesis_records = self.state.synthesis_readiness_records
         return {
             "schema_version": self.state.schema_version,
             "mode": self.control_config.mode,
-            "goal_links": len(self.state.goal_links),
+            "goal_links": len(links),
+            "goal_alignment": {
+                "pass": alignment_pass,
+                "block": alignment_block,
+                "ambiguous": max(0, len(links) - alignment_pass - alignment_block),
+            },
             "overstrong_targets": sum(
-                item.scope_relation == ScopeRelation.CLAIM_STRONGER
-                for item in self.state.goal_links.values()
+                item.scope_relation == ScopeRelation.CLAIM_STRONGER for item in links
             ),
+            "fact_roles": {
+                "core": core_fact_count,
+                "auxiliary": max(0, len(facts) - core_fact_count),
+            },
             "open_inference_risks": sum(
                 item.status == "open" for item in self.state.inference_risks.values()
+            ),
+            "scope_risk_count": sum(
+                item.status == "open" and item.risk_type in scope_risk_types
+                for item in self.state.inference_risks.values()
+            ),
+            "countermodel_task_count": sum(
+                item.countermodel_task_id is not None
+                for item in self.state.inference_risks.values()
             ),
             "failure_classes": self._failure_distribution(),
             "blueprint_rewrites": len(self.state.blueprint_rewrites),
             "bottleneck_clusters": len(self.state.bottleneck_clusters),
+            "bottleneck_compression_ratio": (
+                clustered_savings / obligation_count if obligation_count else 0.0
+            ),
             "common_mode_assumptions": sum(
                 item.verification_status != ClaimStatus.VERIFIED
                 and item.common_mode_risk
@@ -687,20 +778,58 @@ class ProofControlLayer:
                 for item in self.state.critical_assumptions.values()
             ),
             "message_contracts": len(self.state.utility_contracts),
+            "message_delivery": {
+                "contracted": len(self.state.utility_contracts),
+                "delivered": len(broker_state.get("deliveries", {})),
+                "used": sum(
+                    item.verified_use for item in self.state.usage_receipts.values()
+                ),
+            },
             "verified_message_uses": sum(
                 item.verified_use for item in self.state.usage_receipts.values()
             ),
             "near_misses": len(self.state.near_misses),
+            "near_miss_repair_success_rate": (
+                successful_repairs / len(self.state.realizer_repair_tasks)
+                if self.state.realizer_repair_tasks
+                else 0.0
+            ),
+            "fast_lane_counterexample_hit_rate": (
+                fast_lane_hits / fast_lane_total if fast_lane_total else 0.0
+            ),
             "route_admission_records": len(self.state.route_admissions),
+            "route_admission_rejection_rewrite_rate": (
+                sum(
+                    item.verdict in {GateVerdict.BLOCK, GateVerdict.REWRITE}
+                    for item in route_records
+                )
+                / len(route_records)
+                if route_records
+                else 0.0
+            ),
             "continue_gate_blocks": sum(
-                item.verdict == GateVerdict.BLOCK
-                for item in self.state.continue_gate_records
+                item.verdict == GateVerdict.BLOCK for item in continue_records
+            ),
+            "continue_gate_block_rate": (
+                sum(item.verdict == GateVerdict.BLOCK for item in continue_records)
+                / len(continue_records)
+                if continue_records
+                else 0.0
             ),
             "synthesis_readiness_blocks": sum(
-                item.verdict == GateVerdict.BLOCK
-                for item in self.state.synthesis_readiness_records
+                item.verdict == GateVerdict.BLOCK for item in synthesis_records
+            ),
+            "synthesis_readiness_block_rate": (
+                sum(item.verdict == GateVerdict.BLOCK for item in synthesis_records)
+                / len(synthesis_records)
+                if synthesis_records
+                else 0.0
             ),
             "core_debt_history": self.state.core_debt_history,
+            "core_proof_debt_auc": {
+                "by_route": debt_auc_by_route,
+                "total": sum(debt_auc_by_route.values()),
+            },
         }
 
     @classmethod
@@ -740,6 +869,18 @@ class ProofControlLayer:
                 {
                     "subject_id": link.subject_id,
                     "target_obligation_id": link.target_obligation_id,
+                },
+            )
+            self._emit(
+                "minimal_bridge_requested",
+                {
+                    "request_id": (
+                        "minimal_bridge_request_"
+                        + stable_hash((link.subject_id, link.target_obligation_id))[:12]
+                    ),
+                    "overstrong_subject_id": link.subject_id,
+                    "target_obligation_id": link.target_obligation_id,
+                    "status": "pending_audited_candidate",
                 },
             )
         if link.scope_relation in {
@@ -890,9 +1031,40 @@ class ProofControlLayer:
             )
             if key in existing:
                 continue
+            countermodel_count = sum(
+                item.countermodel_task_id is not None
+                for item in self.state.inference_risks.values()
+            )
+            if (
+                risk.status == "open"
+                and risk.countermodel_task_id is None
+                and countermodel_count
+                < self.control_config.scope_guard.max_countermodel_tasks_per_round
+            ):
+                risk.countermodel_task_id = (
+                    "countermodel_"
+                    + stable_hash(
+                        (
+                            risk.subject_id,
+                            risk.risk_type.value,
+                            risk.deterministic_rule_id,
+                        )
+                    )[:12]
+                )
             self.state.inference_risks[risk.risk_id] = risk
             existing.add(key)
             self._emit("inference_risk_opened", risk.model_dump(mode="json"))
+            if risk.countermodel_task_id is not None:
+                self._emit(
+                    "countermodel_task_created",
+                    {
+                        "task_id": risk.countermodel_task_id,
+                        "risk_id": risk.risk_id,
+                        "risk_type": risk.risk_type.value,
+                        "subject_id": risk.subject_id,
+                        "premise_eligible": False,
+                    },
+                )
 
     def _extract_near_miss(
         self,
@@ -979,6 +1151,24 @@ class ProofControlLayer:
             report.concise_feedback,
         )
         self._emit("realizer_failed", failed.model_dump(mode="json"))
+        try:
+            repair = self.realizers.create_repair_task(
+                structure_id=failed.structure_id,
+                failed_candidate_id=failed.candidate_id,
+                repair_operator="replace_realizer_preserve_structure",
+                required_constraints=(
+                    [item.description for item in report.issues]
+                    or [report.concise_feedback]
+                ),
+                targeted_obligation_ids=self._main_goal_ids(),
+            )
+        except ValueError:
+            return
+        self.state.realizer_repair_tasks[repair.task_id] = repair
+        self._emit(
+            "realizer_repair_requested",
+            repair.model_dump(mode="json"),
+        )
 
     def _message_gate(
         self, message: MessageEnvelope, current_round: int
@@ -1245,6 +1435,17 @@ class ProofControlLayer:
             key = item.control_failure_class.value
             result[key] = result.get(key, 0) + 1
         return dict(sorted(result.items()))
+
+    @staticmethod
+    def _history_auc(history: Sequence[float]) -> float:
+        if not history:
+            return 0.0
+        if len(history) == 1:
+            return float(history[0])
+        return sum(
+            (float(left) + float(right)) / 2.0
+            for left, right in zip(history, history[1:])
+        )
 
     def _emit(self, event_type: str, payload: Mapping[str, Any]) -> None:
         event = {"event_type": event_type, "payload": dict(payload)}

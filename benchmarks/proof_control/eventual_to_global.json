@@ -1,0 +1,9 @@
+{
+  "case_id": "eventual_to_global",
+  "premise_scope": "eventual",
+  "target_scope": "all",
+  "claim": "P(n) holds for all sufficiently large n",
+  "invalid_conclusion": "P(n) holds for every n",
+  "expected_risk": "eventual_to_global",
+  "may_close_target": false
+}

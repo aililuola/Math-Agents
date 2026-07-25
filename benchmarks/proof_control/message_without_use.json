@@ -1,0 +1,9 @@
+{
+  "case_id": "message_without_use",
+  "message": "A candidate bridge lemma",
+  "target_obligation_id": "bridge-1",
+  "claimed_step_id": "model-claimed-step",
+  "verified_step_ids": [],
+  "expected_verified_use": false,
+  "expected_utility": 0.0
+}

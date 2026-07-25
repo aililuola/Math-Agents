@@ -1,0 +1,10 @@
+{
+  "case_id": "overstrong_target",
+  "goal": "G",
+  "strong_target": "C_strong",
+  "minimal_target": "C_min",
+  "strong_minimality_score": 0.4,
+  "minimal_minimality_score": 0.9,
+  "expected_preferred_target": "C_min",
+  "expected_active_action": "rewrite"
+}

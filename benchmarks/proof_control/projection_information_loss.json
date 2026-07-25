@@ -1,0 +1,9 @@
+{
+  "case_id": "projection_information_loss",
+  "left_object": [[0, 0], [0, 1]],
+  "right_object": [[0, 2], [0, 3]],
+  "projection_coordinate": 0,
+  "invalid_conclusion": "equal projections imply equal original objects",
+  "expected_risk": "projection_to_original",
+  "may_close_target": false
+}

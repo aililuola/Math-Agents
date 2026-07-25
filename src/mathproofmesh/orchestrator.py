@@ -6638,6 +6638,12 @@ class ProofMeshOrchestrator:
             decision,
             program=program,
         )
+        if (
+            state is not None
+            and state.proof_control is not None
+            and decision.rule_id == "fast_path.proof_control_falsification"
+        ):
+            state.proof_control.record_falsification_result(result)
         return decision, result
 
     async def _repair_computation_contract(
