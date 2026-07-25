@@ -12,11 +12,15 @@ from pydantic import BaseModel
 
 from .computation.contracts import experiment_tool_catalog
 from .proof_control.models import (
+    AbstractRealizerExtraction,
     BottleneckCluster,
     ClaimGoalLink,
     CriticalAssumption,
     InferenceRiskRecord,
+    InductionMeasureProposal,
     MinimalBridgeProposal,
+    NearMissRecord,
+    RealizerRepairResult,
 )
 from .schemas import (
     AnalogyMapping,
@@ -1727,4 +1731,63 @@ JSON SCHEMA:
             CriticalAssumption,
             context,
             temperature=0.1,
+        )
+
+    def extract_abstract_structure_and_realizer(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "proof_control_abstract_realizer",
+            (
+                "Separate the reusable abstract structure from one concrete "
+                "realizer. Identify preserved constraints, removable components, "
+                "candidate-specific admissibility and boundary conditions, a "
+                "well-founded descent measure, and a fast falsification test. A "
+                "failure of this realizer must not refute the abstract structure."
+            ),
+            AbstractRealizerExtraction,
+            context,
+            temperature=0.1,
+        )
+
+    def repair_realizer(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "proof_control_realizer_repair",
+            (
+                "Apply exactly one requested structure-preserving repair operator "
+                "to a failed concrete realizer. Retain the abstract proposal and "
+                "required constraints, change the candidate construction, state "
+                "admissibility and strict descent explicitly, and include a fast "
+                "falsification test. The result is not a Fact."
+            ),
+            RealizerRepairResult,
+            context,
+            temperature=0.2,
+        )
+
+    def select_induction_or_descent_measure(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "proof_control_induction_measure",
+            (
+                "Select one induction or descent measure tied to the supplied "
+                "target obligations. State its well-founded domain, base cases, "
+                "strict decrease, step relation, trigger features, and why ordinary "
+                "induction on the ambient natural index is insufficient. Return a "
+                "proposal, not a proved premise."
+            ),
+            InductionMeasureProposal,
+            context,
+            temperature=0.1,
+        )
+
+    def extract_near_miss(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "proof_control_near_miss",
+            (
+                "Extract only the salvageable mathematical structure from a failed "
+                "or uncertain verified attempt. Record the concrete candidate, "
+                "preserved properties, first failed constraint, repair operators, "
+                "and possible descent measures. The record is non-authoritative "
+                "control memory and cannot be used as a premise."
+            ),
+            NearMissRecord,
+            context,
         )

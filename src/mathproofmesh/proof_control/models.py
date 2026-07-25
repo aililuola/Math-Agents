@@ -207,6 +207,16 @@ class RealizerRepairTask(StrictModel):
     targeted_obligation_ids: list[str]
 
 
+class AbstractRealizerExtraction(StrictModel):
+    structure: AbstractStructureProposal
+    realizer: RealizerCandidate
+
+
+class RealizerRepairResult(StrictModel):
+    task: RealizerRepairTask
+    candidate: RealizerCandidate
+
+
 class InductionMeasureProposal(StrictModel):
     proposal_id: str = Field(default_factory=lambda: new_id("induction"))
     route_id: str

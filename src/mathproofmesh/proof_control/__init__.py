@@ -2,6 +2,7 @@
 
 from .models import (
     AbstractStructureProposal,
+    AbstractRealizerExtraction,
     BlueprintRewriteRequest,
     BottleneckCluster,
     ClaimGoalLink,
@@ -23,6 +24,7 @@ from .models import (
     ProofRole,
     RealizerCandidate,
     RealizerFailureType,
+    RealizerRepairResult,
     RealizerRepairTask,
     RouteAdmissionRecord,
     ScopeRelation,
@@ -34,6 +36,7 @@ from .state import ProofControlState
 
 __all__ = [
     "AbstractStructureProposal",
+    "AbstractRealizerExtraction",
     "BlueprintRewriteRequest",
     "BottleneckCluster",
     "ClaimGoalLink",
@@ -56,6 +59,7 @@ __all__ = [
     "ProofRole",
     "RealizerCandidate",
     "RealizerFailureType",
+    "RealizerRepairResult",
     "RealizerRepairTask",
     "RouteAdmissionRecord",
     "ScopeRelation",
