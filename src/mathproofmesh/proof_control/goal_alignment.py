@@ -1,20 +1,27 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
+from ..config import GoalAlignmentControlConfig, RouteAdmissionControlConfig
 from ..proof_identity import obligation_identity_text
 from ..schemas import (
     ClaimCard,
+    ClaimStatus,
     GraphEdgeType,
+    MemoryTier,
     MessageEnvelope,
     ProofObligation,
     StrategyCard,
 )
 from .models import (
+    AlignmentExceptionCode,
     ClaimGoalLink,
+    GateVerdict,
     GoalRelation,
+    GoalAlignmentContractResult,
     MinimalBridgeProposal,
+    PremiseClosureRecord,
     ScopeRelation,
     ScopeSignature,
 )
@@ -257,6 +264,222 @@ class GoalAlignmentAnalyzer:
                 or target.obligation_id in item.dependency_ids
             )
         )
+
+
+class GoalAlignmentContract:
+    """Apply configured alignment thresholds as fail-closed verdict rules."""
+
+    def __init__(
+        self,
+        goal_config: GoalAlignmentControlConfig | None = None,
+        route_config: RouteAdmissionControlConfig | None = None,
+        *,
+        strict_fail_closed: bool = True,
+    ) -> None:
+        self.goal_config = goal_config or GoalAlignmentControlConfig()
+        self.route_config = route_config or RouteAdmissionControlConfig()
+        self.strict_fail_closed = strict_fail_closed
+
+    def validate(
+        self,
+        link: ClaimGoalLink,
+        *,
+        exception_code: AlignmentExceptionCode | None = None,
+        exception_evidence_ids: Sequence[str] = (),
+        countermodel_action_id: str | None = None,
+    ) -> GoalAlignmentContractResult:
+        threshold = max(
+            self.goal_config.min_alignment_confidence,
+            self.route_config.min_goal_alignment,
+        )
+        passed_min_confidence = link.alignment_confidence >= threshold
+        has_required_outline = not self.goal_config.require_implication_outline or bool(
+            link.implication_outline
+        )
+        unknown_relation_resolved = (
+            link.relation != GoalRelation.UNKNOWN
+            or link.countermodel_status
+            in {
+                "found",
+                "none_found_bounded",
+                "inapplicable",
+                "deferred",
+            }
+        )
+        evidence_ids = sorted(set(exception_evidence_ids))
+        exception_valid = self._valid_exception(
+            link,
+            exception_code=exception_code,
+            evidence_ids=evidence_ids,
+        )
+        if (
+            exception_valid
+            and exception_code == AlignmentExceptionCode.DIRECT_PREMISE_CLOSURE
+        ):
+            unknown_relation_resolved = True
+        reasons: list[str] = []
+        if not passed_min_confidence and not exception_valid:
+            reasons.append("alignment confidence is below the configured threshold")
+        if not has_required_outline and not exception_valid:
+            reasons.append("required implication outline is missing")
+        if link.relation == GoalRelation.UNKNOWN and not exception_valid:
+            reasons.append("unknown relation requires explicit resolution")
+            if (
+                self.goal_config.run_countermodel_on_unknown_relation
+                and countermodel_action_id is None
+                and link.countermodel_status == "not_requested"
+            ):
+                reasons.append("unknown relation has no countermodel action")
+        if link.relation == GoalRelation.UNRELATED:
+            reasons.append("subject is unrelated to the target obligation")
+        if link.relation == GoalRelation.HEURISTIC_ONLY:
+            reasons.append("heuristic-only relation cannot satisfy the target")
+        if link.relation == GoalRelation.NECESSARY_ONLY:
+            reasons.append("necessary-only relation is not a sufficient closure path")
+        if exception_code is not None and not exception_valid:
+            reasons.append("alignment exception lacks matching verified evidence")
+
+        pass_relation = link.relation in {
+            GoalRelation.EQUIVALENT,
+            GoalRelation.SUFFICIENT,
+        }
+        can_pass = (
+            (pass_relation or exception_valid)
+            and (passed_min_confidence or exception_valid)
+            and (has_required_outline or exception_valid)
+            and unknown_relation_resolved
+            and not reasons
+        )
+        if can_pass:
+            verdict = GateVerdict.PASS
+        elif self.route_config.mode == "shadow":
+            verdict = GateVerdict.SHADOW_BLOCK
+        elif link.relation in {GoalRelation.UNRELATED, GoalRelation.HEURISTIC_ONLY}:
+            verdict = GateVerdict.BLOCK
+        elif self.strict_fail_closed or reasons:
+            verdict = GateVerdict.REWRITE
+        else:
+            verdict = GateVerdict.REWRITE
+        return GoalAlignmentContractResult(
+            subject_id=link.subject_id,
+            passed_min_confidence=passed_min_confidence,
+            has_required_outline=has_required_outline,
+            unknown_relation_resolved=unknown_relation_resolved,
+            countermodel_action_id=countermodel_action_id,
+            exception_code=exception_code if exception_valid else None,
+            exception_evidence_ids=evidence_ids if exception_valid else [],
+            final_verdict=verdict,
+            reasons=reasons,
+        )
+
+    @staticmethod
+    def _valid_exception(
+        link: ClaimGoalLink,
+        *,
+        exception_code: AlignmentExceptionCode | None,
+        evidence_ids: Sequence[str],
+    ) -> bool:
+        if exception_code is None or not evidence_ids:
+            return False
+        if exception_code == AlignmentExceptionCode.EXACT_EQUIVALENCE:
+            return (
+                link.relation == GoalRelation.EQUIVALENT
+                and link.scope_relation == ScopeRelation.SAME
+            )
+        if exception_code == AlignmentExceptionCode.VERIFIED_GRAPH_EDGE:
+            return link.relation in {
+                GoalRelation.EQUIVALENT,
+                GoalRelation.SUFFICIENT,
+            }
+        if exception_code == AlignmentExceptionCode.DIRECT_PREMISE_CLOSURE:
+            return link.relation in {
+                GoalRelation.EQUIVALENT,
+                GoalRelation.SUFFICIENT,
+                GoalRelation.UNKNOWN,
+            }
+        return False
+
+
+class PremiseClosureAnalyzer:
+    """Recognize only exact premise, witness, definition, or verified-fact matches."""
+
+    def scan(
+        self,
+        target: ProofObligation,
+        *,
+        given_assumptions: Sequence[str] = (),
+        verified_facts: Sequence[MessageEnvelope] = (),
+        verified_claims: Sequence[ClaimCard] = (),
+        direct_witnesses: Mapping[str, str] | None = None,
+        definition_unfoldings: Mapping[str, str] | None = None,
+    ) -> PremiseClosureRecord:
+        target_text = _exact_identity(target.normalized_statement)
+        for index, assumption in enumerate(given_assumptions):
+            if _exact_identity(assumption) == target_text:
+                return PremiseClosureRecord(
+                    target_obligation_id=target.obligation_id,
+                    closure_type="given_assumption",
+                    supporting_ids=[f"assumption:{index}"],
+                    verified=True,
+                )
+        for statement, supporting_id in sorted(
+            (direct_witnesses or {}).items(), key=lambda item: item[1]
+        ):
+            if _exact_identity(statement) == target_text:
+                return PremiseClosureRecord(
+                    target_obligation_id=target.obligation_id,
+                    closure_type="direct_witness",
+                    supporting_ids=[supporting_id],
+                    verified=True,
+                )
+        for statement, supporting_id in sorted(
+            (definition_unfoldings or {}).items(), key=lambda item: item[1]
+        ):
+            if _exact_identity(statement) == target_text:
+                return PremiseClosureRecord(
+                    target_obligation_id=target.obligation_id,
+                    closure_type="definition_unfolding",
+                    supporting_ids=[supporting_id],
+                    verified=True,
+                )
+        fact_ids = [
+            fact.message_id
+            for fact in verified_facts
+            if fact.memory_tier == MemoryTier.FACT
+            and fact.verification_status == ClaimStatus.VERIFIED
+            and target_text
+            in {
+                _exact_identity(fact.normalized_statement),
+                _exact_identity(fact.conclusion),
+            }
+        ]
+        claim_ids = [
+            claim.claim_id
+            for claim in verified_claims
+            if claim.status == ClaimStatus.VERIFIED
+            and target_text
+            in {
+                _exact_identity(claim.statement),
+                _exact_identity(claim.conclusion),
+            }
+        ]
+        supporting_ids = sorted({*fact_ids, *claim_ids})
+        if supporting_ids:
+            return PremiseClosureRecord(
+                target_obligation_id=target.obligation_id,
+                closure_type="verified_fact_instance",
+                supporting_ids=supporting_ids,
+                verified=True,
+            )
+        return PremiseClosureRecord(
+            target_obligation_id=target.obligation_id,
+            closure_type="none",
+            verified=False,
+        )
+
+
+def _exact_identity(value: str) -> str:
+    return obligation_identity_text(value).strip(" .;:")
 
 
 class MinimalSufficiencyAnalyzer:

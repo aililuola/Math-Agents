@@ -8855,6 +8855,13 @@ class ProofMeshOrchestrator:
                         report.confidence for report in independent
                     )
             memory.add_many(claims)
+            for claim in claims:
+                memory.mark_claim_checkpoint_verified(
+                    claim.claim_id,
+                    report_ids=[item.report_id for item in reports],
+                    confidence=min(item.confidence for item in reports),
+                    independent=bool(independent),
+                )
             verified_delta_claims.extend(claims)
             checkpoint = merge_verified_delta(
                 checkpoint,

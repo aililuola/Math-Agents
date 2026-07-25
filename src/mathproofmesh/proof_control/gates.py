@@ -10,16 +10,24 @@ from ..config import (
 )
 from ..proof_graph.store import ProofGraphStore
 from ..proof_identity import normalize_text
-from ..schemas import ClaimStatus, ObligationKind, ProofObligation, StrategyCard
+from ..schemas import (
+    ClaimStatus,
+    ObligationKind,
+    ProofObligation,
+    StrategyCard,
+    stable_hash,
+)
 from .models import (
     ClaimGoalLink,
     ContinueGateRecord,
     CriticalAssumption,
     GateVerdict,
+    GoalAlignmentContractResult,
     GoalRelation,
     InferenceRiskRecord,
     InferenceRiskType,
     RouteAdmissionRecord,
+    RouteTargetBinding,
     ScopeRelation,
     SynthesisReadinessRecord,
 )
@@ -45,39 +53,68 @@ class RouteAdmissionGate:
         critical_assumptions: Sequence[CriticalAssumption] = (),
         expected_core_obligation_reduction: bool | None = None,
         rewrite_request_id: str | None = None,
+        target_binding: RouteTargetBinding | None = None,
+        alignment_contract: GoalAlignmentContractResult | None = None,
     ) -> RouteAdmissionRecord:
         targets = (
             dict(target_obligations)
             if isinstance(target_obligations, Mapping)
             else {item.obligation_id: item for item in target_obligations}
         )
-        target_ids = [goal_link.target_obligation_id]
+        direct_target_id = (
+            target_binding.direct_target_obligation_id
+            if target_binding is not None
+            else goal_link.target_obligation_id
+        )
+        direct_relation = (
+            target_binding.relation_to_direct_target
+            if target_binding is not None
+            else goal_link.relation
+        )
+        direct_scope = (
+            target_binding.scope_relation_to_direct_target
+            if target_binding is not None
+            else goal_link.scope_relation
+        )
+        target_ids = [direct_target_id]
         hard_reasons: list[str] = []
         rewrite_reasons: list[str] = []
 
-        if goal_link.target_obligation_id not in targets:
+        if direct_target_id not in targets:
             hard_reasons.append("target obligation is not registered")
-        if goal_link.relation == GoalRelation.UNRELATED:
+        if direct_relation == GoalRelation.UNRELATED:
             hard_reasons.append("strategy is unrelated to the target obligation")
         if (
             self.config.reject_heuristic_only_as_main_route
-            and goal_link.relation == GoalRelation.HEURISTIC_ONLY
+            and direct_relation == GoalRelation.HEURISTIC_ONLY
         ):
             hard_reasons.append("heuristic-only evidence cannot define a main route")
         if (
             self.config.reject_necessary_only_as_main_route
-            and goal_link.relation == GoalRelation.NECESSARY_ONLY
+            and direct_relation == GoalRelation.NECESSARY_ONLY
         ):
-            rewrite_reasons.append(
-                "a necessary condition is being used as a sufficient route target"
+            has_bridge = bool(
+                goal_link.required_bridge_obligation_ids
+                or (target_binding is not None and target_binding.bridge_obligation_ids)
             )
-        if goal_link.scope_relation in {
+            reason = "a necessary condition is being used as a sufficient route target"
+            if has_bridge:
+                rewrite_reasons.append(reason)
+            else:
+                hard_reasons.append(reason + " without an explicit bridge")
+        intermediate_weaker = (
+            target_binding is not None
+            and direct_target_id != target_binding.main_goal_obligation_id
+            and direct_relation in {GoalRelation.EQUIVALENT, GoalRelation.SUFFICIENT}
+            and target_binding.blueprint_path_complete
+        )
+        if direct_scope in {
             ScopeRelation.CLAIM_STRONGER,
             ScopeRelation.CLAIM_WEAKER,
             ScopeRelation.INCOMPARABLE,
-        }:
+        } and not (direct_scope == ScopeRelation.CLAIM_WEAKER and intermediate_weaker):
             rewrite_reasons.append(
-                f"strategy scope is {goal_link.scope_relation.value} relative to the goal"
+                f"strategy scope is {direct_scope.value} relative to the direct target"
             )
         if goal_link.alignment_confidence < self.config.min_goal_alignment:
             rewrite_reasons.append(
@@ -103,16 +140,34 @@ class RouteAdmissionGate:
 
         if expected_core_obligation_reduction is None:
             expected_core_obligation_reduction = (
-                goal_link.target_obligation_id in set(core_obligation_ids)
-                and goal_link.relation
+                direct_target_id in set(core_obligation_ids)
+                and direct_relation
                 in {GoalRelation.EQUIVALENT, GoalRelation.SUFFICIENT}
-                and goal_link.scope_relation
-                in {ScopeRelation.SAME, ScopeRelation.CLAIM_STRONGER}
+                and (
+                    direct_scope
+                    in {
+                        ScopeRelation.SAME,
+                        ScopeRelation.CLAIM_STRONGER,
+                    }
+                    or intermediate_weaker
+                )
+                and (target_binding is None or target_binding.blueprint_path_complete)
             )
         if not expected_core_obligation_reduction:
             rewrite_reasons.append(
                 "strategy does not predict reduction of a core obligation"
             )
+        if (
+            alignment_contract is not None
+            and alignment_contract.final_verdict != GateVerdict.PASS
+        ):
+            contract_reasons = alignment_contract.reasons or [
+                "goal-alignment contract did not pass"
+            ]
+            if alignment_contract.final_verdict == GateVerdict.BLOCK:
+                hard_reasons.extend(contract_reasons)
+            else:
+                rewrite_reasons.extend(contract_reasons)
 
         alignment_score = self._alignment_score(goal_link)
         if not self.config.enabled or self.config.mode == "off":
@@ -129,6 +184,18 @@ class RouteAdmissionGate:
         else:
             verdict = GateVerdict.PASS
             reasons = ["strategy satisfies route admission requirements"]
+        if verdict == GateVerdict.REWRITE and rewrite_request_id is None:
+            rewrite_request_id = (
+                "blueprint_rewrite_"
+                + stable_hash(
+                    {
+                        "strategy_id": strategy.strategy_id,
+                        "goal_link_id": goal_link.link_id,
+                        "target_ids": target_ids,
+                        "reasons": sorted(set(rewrite_reasons)),
+                    }
+                )[:16]
+            )
         return RouteAdmissionRecord(
             strategy_id=strategy.strategy_id,
             verdict=verdict,
@@ -137,6 +204,14 @@ class RouteAdmissionGate:
             reasons=reasons,
             rewrite_request_id=(
                 rewrite_request_id if verdict == GateVerdict.REWRITE else None
+            ),
+            target_binding_id=(
+                target_binding.binding_id if target_binding is not None else None
+            ),
+            alignment_contract_id=(
+                alignment_contract.contract_id
+                if alignment_contract is not None
+                else None
             ),
         )
 
@@ -323,6 +398,12 @@ class SynthesisReadinessGate:
         InferenceRiskType.LOCAL_TO_GLOBAL,
         InferenceRiskType.EXISTENCE_TO_UNIFORM_EXISTENCE,
         InferenceRiskType.PAIRWISE_TO_COMMON_WITNESS,
+        InferenceRiskType.PARTIAL_PROPERTY_TO_TOTAL_PROPERTY,
+        InferenceRiskType.NONEMPTY_INTERSECTION_TO_SUBSET_CONTAINMENT,
+        InferenceRiskType.EXISTS_COMPONENT_TO_ALL_COMPONENTS,
+        InferenceRiskType.SOME_WITNESS_TO_ALL_WITNESSES,
+        InferenceRiskType.COVERAGE_TO_EXHAUSTIVENESS,
+        InferenceRiskType.AT_LEAST_ONE_TO_ONLY_FROM_SET,
     }
 
     def __init__(self, config: SynthesisReadinessControlConfig | None = None) -> None:

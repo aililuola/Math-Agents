@@ -41,7 +41,7 @@ def _link(
     )
 
 
-def test_active_admission_rewrites_overstrong_or_necessary_only_route() -> None:
+def test_active_admission_rewrites_overstrong_and_blocks_unbridged_necessary() -> None:
     target = _target()
     strategy = make_strategy(1, tag="strong-mechanism")
     gate = RouteAdmissionGate(
@@ -68,7 +68,7 @@ def test_active_admission_rewrites_overstrong_or_necessary_only_route() -> None:
     )
 
     assert overstrong.verdict == GateVerdict.REWRITE
-    assert necessary.verdict == GateVerdict.REWRITE
+    assert necessary.verdict == GateVerdict.BLOCK
     assert any("necessary condition" in item for item in necessary.reasons)
 
 

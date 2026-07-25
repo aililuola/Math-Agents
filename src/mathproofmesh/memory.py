@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 from .config import SystemConfig
 from .schemas import (
@@ -16,6 +16,10 @@ from .schemas import (
 )
 from .store import ArtifactStore
 
+if TYPE_CHECKING:
+    from .proof_control.claim_lifecycle import ClaimLifecycleController
+    from .proof_control.models import ClaimVerificationLedgerEntry
+
 
 class LemmaMemory:
     """Structured claim store that preserves provenance and never upgrades uncertainty silently."""
@@ -24,6 +28,11 @@ class LemmaMemory:
         self.store = store
         self._claims: dict[str, ClaimCard] = {}
         self._hash_to_id: dict[str, str] = {}
+        from .proof_control.claim_lifecycle import ClaimLifecycleController
+
+        self._claim_lifecycle: ClaimLifecycleController = ClaimLifecycleController(
+            self._claims
+        )
 
     @property
     def claims(self) -> list[ClaimCard]:
@@ -51,6 +60,7 @@ class LemmaMemory:
                 continue
             self._claims[claim.claim_id] = claim
             self._hash_to_id[claim.content_hash] = claim.claim_id
+            self._claim_lifecycle.register_claim(claim)
             added.append(claim)
             self.store.append_event("claim_added", claim)
         self._persist()
@@ -59,69 +69,37 @@ class LemmaMemory:
     def mark_attempt_verified(
         self, attempt_id: str, report: VerificationReport
     ) -> list[ClaimCard]:
-        """Apply an attempt audit without erasing narrower verified evidence.
+        """Record attempt completeness without projecting it onto child Claims."""
 
-        An incomplete or otherwise failed proof attempt does not refute every
-        independently audited lemma produced along that route. A child Claim is
-        rejected only when the report explicitly identifies that Claim (or one
-        of its proof steps), or when problem integrity itself failed. Untargeted
-        candidate Claims become uncertain; already verified Claims keep their
-        narrower checkpoint verdict.
-        """
-
-        changed: list[ClaimCard] = []
-        issue_claim_ids = {
-            issue.claim_id for issue in report.issues if issue.claim_id is not None
+        before = {
+            claim.claim_id: claim.status
+            for claim in self._claims.values()
+            if claim.source_attempt_id == attempt_id
         }
-        issue_step_ids = {
-            issue.step_id for issue in report.issues if issue.step_id is not None
-        }
-        if report.first_error_step is not None:
-            issue_step_ids.add(report.first_error_step)
-        preserved_verified_ids: list[str] = []
-        explicitly_rejected_ids: list[str] = []
-        uncertain_ids: list[str] = []
-        for claim in self._claims.values():
-            if claim.source_attempt_id != attempt_id:
-                continue
-            if report.verdict == VerificationVerdict.PASS:
-                claim.status = ClaimStatus.VERIFIED
-                claim.verification_confidence = report.confidence
-            elif report.verdict == VerificationVerdict.FAIL:
-                claim_step_ids = {step.step_id for step in claim.proof_steps}
-                explicitly_rejected = (
-                    not report.problem_integrity_ok
-                    or claim.claim_id in issue_claim_ids
-                    or bool(claim_step_ids & issue_step_ids)
-                )
-                if explicitly_rejected:
-                    claim.status = ClaimStatus.REJECTED
-                    claim.verification_confidence = report.confidence
-                    explicitly_rejected_ids.append(claim.claim_id)
-                elif claim.status == ClaimStatus.VERIFIED:
-                    preserved_verified_ids.append(claim.claim_id)
-                else:
-                    claim.status = ClaimStatus.UNCERTAIN
-                    claim.verification_confidence = report.confidence
-                    uncertain_ids.append(claim.claim_id)
-            else:
-                if claim.status == ClaimStatus.VERIFIED:
-                    preserved_verified_ids.append(claim.claim_id)
-                else:
-                    claim.status = ClaimStatus.UNCERTAIN
-                    claim.verification_confidence = report.confidence
-                    uncertain_ids.append(claim.claim_id)
-            changed.append(claim)
-        if preserved_verified_ids or explicitly_rejected_ids or uncertain_ids:
+        changed = self._claim_lifecycle.apply_attempt_report(attempt_id, report)
+        preserved_ids = [
+            claim.claim_id
+            for claim in changed
+            if claim.status == before.get(claim.claim_id)
+        ]
+        explicitly_rejected_ids = [
+            claim.claim_id
+            for claim in changed
+            if before.get(claim.claim_id) != ClaimStatus.REJECTED
+            and claim.status == ClaimStatus.REJECTED
+        ]
+        if changed:
             self.store.append_event(
                 "attempt_claim_scope_reconciled",
                 {
                     "attempt_id": attempt_id,
                     "report_id": report.report_id,
                     "attempt_verdict": report.verdict.value,
-                    "preserved_verified_claim_ids": preserved_verified_ids,
+                    "preserved_claim_ids": preserved_ids,
                     "explicitly_rejected_claim_ids": explicitly_rejected_ids,
-                    "uncertain_claim_ids": uncertain_ids,
+                    "source_attempt_incomplete": (
+                        report.verdict != VerificationVerdict.PASS
+                    ),
                 },
             )
         self._downgrade_invalid_dependency_cycles()
@@ -132,16 +110,37 @@ class LemmaMemory:
         claim = self._claims.get(report.target_id)
         if claim is None:
             return None
-        if report.verdict == VerificationVerdict.PASS:
-            claim.status = ClaimStatus.VERIFIED
-        elif report.verdict == VerificationVerdict.FAIL:
-            claim.status = ClaimStatus.REJECTED
-        else:
-            claim.status = ClaimStatus.UNCERTAIN
-        claim.verification_confidence = report.confidence
+        self._claim_lifecycle.apply_claim_report(report)
         self._downgrade_invalid_dependency_cycles()
         self._persist()
         return claim
+
+    def attach_claim_lifecycle(
+        self,
+        ledger: dict[str, ClaimVerificationLedgerEntry],
+    ) -> ClaimLifecycleController:
+        from .proof_control.claim_lifecycle import ClaimLifecycleController
+
+        self._claim_lifecycle = ClaimLifecycleController(self._claims, ledger)
+        return self._claim_lifecycle
+
+    def mark_claim_checkpoint_verified(
+        self,
+        claim_id: str,
+        *,
+        report_ids: list[str],
+        confidence: float,
+        independent: bool,
+    ) -> ClaimCard:
+        self._claim_lifecycle.record_checkpoint_verification(
+            claim_id,
+            report_ids=report_ids,
+            confidence=confidence,
+            independent=independent,
+        )
+        self._downgrade_invalid_dependency_cycles()
+        self._persist()
+        return self._claims[claim_id]
 
     def verified(self) -> list[ClaimCard]:
         valid_ids = self._valid_verified_ids()
@@ -208,14 +207,22 @@ class LemmaMemory:
                     continue
                 elif dep in self._claims:
                     # A verified claim depending on a non-verified stored claim is not reusable as verified.
-                    claim.status = ClaimStatus.UNCERTAIN
+                    self._claim_lifecycle.invalidate_claim(
+                        claim.claim_id,
+                        reason="dependency_invalidated",
+                        evidence_ids=[dep],
+                    )
                     limitation = f"dependency is not verified: {dep}"
                     if limitation not in claim.scope_limitations:
                         claim.scope_limitations.append(limitation)
                 else:
                     # Missing IDs are never silently ignored. This also catches accidental use of a
                     # local proof-step ID in ClaimCard.dependencies.
-                    claim.status = ClaimStatus.UNCERTAIN
+                    self._claim_lifecycle.invalidate_claim(
+                        claim.claim_id,
+                        reason="dependency_invalidated",
+                        evidence_ids=[dep],
+                    )
                     limitation = f"missing dependency: {dep}"
                     if limitation not in claim.scope_limitations:
                         claim.scope_limitations.append(limitation)
@@ -230,7 +237,11 @@ class LemmaMemory:
                     queue.append(nxt)
         cycle_nodes = verified_ids - visited
         for claim_id in cycle_nodes:
-            self._claims[claim_id].status = ClaimStatus.UNCERTAIN
+            self._claim_lifecycle.invalidate_claim(
+                claim_id,
+                reason="dependency_invalidated",
+                evidence_ids=sorted(cycle_nodes),
+            )
             limitations = self._claims[claim_id].scope_limitations
             if "dependency cycle detected" not in limitations:
                 limitations.append("dependency cycle detected")

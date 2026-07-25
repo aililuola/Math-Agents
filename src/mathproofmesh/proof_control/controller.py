@@ -10,7 +10,7 @@ from ..config import SystemConfig
 from ..memory import TypedMemory
 from ..proof_graph.contradictions import ContradictionRecord
 from ..proof_graph.store import ProofGraphStore
-from ..proof_identity import normalize_text
+from ..proof_identity import normalize_text, obligation_identity_text
 from ..schemas import (
     ClaimCard,
     ClaimStatus,
@@ -32,6 +32,7 @@ from ..schemas import (
 from ..store import ArtifactStore
 from .action_dispatcher import ControlActionDispatcher
 from .bottleneck import BottleneckCompressor
+from .claim_lifecycle import ClaimLifecycleController
 from .common_mode import CriticalAssumptionMatrix
 from .failure_control import BlueprintRewriter, FailureClassifier
 from .gates import (
@@ -39,20 +40,33 @@ from .gates import (
     RouteAdmissionGate,
     SynthesisReadinessGate,
 )
-from .goal_alignment import GoalAlignmentAnalyzer
+from .goal_alignment import (
+    GoalAlignmentAnalyzer,
+    GoalAlignmentContract,
+    PremiseClosureAnalyzer,
+)
 from .induction import InductionMeasureSelector
 from .inference_risk import InferenceRiskScanner
 from .message_utility import MessageUtilityController
 from .models import (
+    AlignmentExceptionCode,
+    BlueprintRewriteRequest,
     ClaimGoalLink,
+    ControlActionRecord,
+    ControlActionResult,
+    ControlActionType,
+    CountermodelTaskRecord,
     GateVerdict,
+    GoalAlignmentContractResult,
     GoalRelation,
     InferenceRiskRecord,
     InferenceRiskType,
     MessageExpectedEffect,
+    NegativePatternRecord,
     ProofRole,
     RealizerFailureType,
     RouteAdmissionRecord,
+    RouteTargetBinding,
     ScopeRelation,
     ScopeSignature,
     SynthesisReadinessRecord,
@@ -62,6 +76,7 @@ from .proof_roles import ProofRoleClassifier, core_proof_debt
 from .realizer import AbstractRealizerController
 from .scope_guard import ScopeGuard
 from .state import ProofControlState
+from .route_target import choose_nearest_target_obligation
 
 
 class ProofControlLayer:
@@ -100,6 +115,19 @@ class ProofControlLayer:
 
         self.scope_guard = ScopeGuard(self.control_config.scope_guard)
         self.goal_alignment = GoalAlignmentAnalyzer(proof_graph, self.scope_guard)
+        self.goal_alignment_contract = GoalAlignmentContract(
+            self.control_config.goal_alignment,
+            self.control_config.route_admission,
+            strict_fail_closed=self.control_config.strict_fail_closed,
+        )
+        self.premise_closure = PremiseClosureAnalyzer()
+        self.claim_lifecycle = (
+            typed_memory.lemma_memory.attach_claim_lifecycle(
+                self.state.claim_verification_ledger
+            )
+            if typed_memory.lemma_memory is not None
+            else ClaimLifecycleController({}, self.state.claim_verification_ledger)
+        )
         self.risk_scanner = InferenceRiskScanner()
         self.role_classifier = ProofRoleClassifier()
         self.realizers = AbstractRealizerController(
@@ -134,6 +162,26 @@ class ProofControlLayer:
         self.readiness_gate = SynthesisReadinessGate(
             self.control_config.synthesis_readiness
         )
+        self.action_dispatcher.register_handler(
+            ControlActionType.CREATE_SUB_OBLIGATION,
+            self._handle_create_sub_obligation,
+            postcondition=self._sub_obligation_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.BIND_ROUTE_TARGET,
+            self._handle_bind_route_target,
+            postcondition=self._route_target_binding_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.CREATE_COUNTERMODEL_TASK,
+            self._handle_create_countermodel_task,
+            postcondition=self._countermodel_task_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.CLOSE_BY_DIRECT_PREMISE,
+            self._handle_direct_premise_request,
+            postcondition=self._direct_premise_postcondition,
+        )
 
         self.message_broker.set_proof_control_message_gate(self._message_gate)
         self.proof_graph.set_proof_control_pre_close_policy(self._pre_close_policy)
@@ -148,28 +196,122 @@ class ProofControlLayer:
 
     def register_strategy(self, strategy: StrategyCard) -> ClaimGoalLink | None:
         existing = self._goal_link_for_subject(strategy.strategy_id)
-        if existing is not None:
+        existing_binding = self._route_target_binding_for_strategy(strategy.strategy_id)
+        existing_contract = self._alignment_contract_for_subject(strategy.strategy_id)
+        if (
+            existing is not None
+            and existing_binding is not None
+            and existing_contract is not None
+        ):
             return existing
-        target = self._main_goal()
-        if target is None:
+        try:
+            binding = choose_nearest_target_obligation(
+                strategy,
+                self.proof_graph,
+                self.state.goal_links,
+            )
+        except ValueError as exc:
             self._emit(
                 "goal_alignment_blocked",
                 {
                     "subject_id": strategy.strategy_id,
-                    "reason": "main goal obligation is not registered",
+                    "reason": str(exc),
                 },
             )
             return None
-        link = self.goal_alignment.assess_strategy(strategy, target)
+        generated_subgoal_id: str | None = None
+        main_goal = self.proof_graph.get_obligation(binding.main_goal_obligation_id)
         if (
-            link.relation == GoalRelation.UNKNOWN
-            and strategy.expected_lemmas
-            and strategy.falsification_test.strip()
+            binding.direct_target_obligation_id == binding.main_goal_obligation_id
+            and obligation_identity_text(strategy.bottleneck)
+            != obligation_identity_text(main_goal.normalized_statement)
+            and bool(strategy.expected_lemmas)
+            and bool(strategy.falsification_test.strip())
+            and bool(strategy.key_original_step and strategy.key_original_step.strip())
         ):
-            link = link.model_copy(
-                update={"alignment_confidence": max(link.alignment_confidence, 0.70)}
+            generated_subgoal_id = self._dispatch_strategy_sub_obligation(
+                strategy,
+                main_goal_id=binding.main_goal_obligation_id,
             )
-        return self._register_goal_link(strategy, link)
+            if generated_subgoal_id is not None:
+                binding = binding.model_copy(
+                    update={
+                        "direct_target_obligation_id": generated_subgoal_id,
+                        "ancestor_obligation_ids": [binding.main_goal_obligation_id],
+                        "bridge_obligation_ids": [],
+                        "blueprint_path_complete": True,
+                        "binding_confidence": max(
+                            binding.binding_confidence,
+                            0.9,
+                        ),
+                    }
+                )
+        route = self.route_registry.route_for_strategy(strategy.strategy_id)
+        if route is not None:
+            binding = binding.model_copy(update={"route_id": route.route_id})
+        target = self.proof_graph.get_obligation(binding.direct_target_obligation_id)
+        link = existing or self.goal_alignment.assess_strategy(strategy, target)
+        registered = (
+            link if existing is not None else self._register_goal_link(strategy, link)
+        )
+        binding = binding.model_copy(
+            update={
+                "relation_to_direct_target": registered.relation,
+                "relation_to_main_goal": (
+                    registered.relation
+                    if binding.direct_target_obligation_id
+                    == binding.main_goal_obligation_id
+                    else GoalRelation.NECESSARY_ONLY
+                ),
+                "scope_relation_to_direct_target": registered.scope_relation,
+                "binding_confidence": min(
+                    binding.binding_confidence,
+                    registered.alignment_confidence,
+                ),
+            }
+        )
+        self._dispatch_route_target_binding(binding, registered)
+        countermodel_action_id = self._dispatch_countermodel_if_required(
+            registered,
+            route_id=binding.route_id,
+        )
+        closure = self.premise_closure.scan(
+            target,
+            given_assumptions=target.assumptions,
+            verified_facts=self.message_broker.admitted_facts(),
+            verified_claims=self.typed_memory.verified(),
+        )
+        self.state.premise_closure_records[closure.record_id] = closure
+        exception_code = None
+        exception_evidence_ids: list[str] = []
+        if closure.verified:
+            direct_action = self.action_dispatcher.propose(
+                ControlActionType.CLOSE_BY_DIRECT_PREMISE,
+                source_record_ids=[closure.record_id],
+                route_ids=[binding.route_id] if binding.route_id is not None else [],
+                target_obligation_ids=[target.obligation_id],
+                payload={"premise_closure_record_id": closure.record_id},
+            )
+            self.action_dispatcher.execute_sync(
+                direct_action.action_id, current_round=0
+            )
+            exception_code = AlignmentExceptionCode.DIRECT_PREMISE_CLOSURE
+            exception_evidence_ids = [
+                closure.record_id,
+                *closure.supporting_ids,
+            ]
+        contract = self.goal_alignment_contract.validate(
+            registered,
+            exception_code=exception_code,
+            exception_evidence_ids=exception_evidence_ids,
+            countermodel_action_id=countermodel_action_id,
+        )
+        self.state.goal_alignment_contracts[contract.contract_id] = contract
+        self._emit(
+            "goal_alignment_contract_evaluated",
+            contract.model_dump(mode="json"),
+        )
+        return registered
 
     def register_claim(
         self,
@@ -320,7 +462,12 @@ class ProofControlLayer:
         if report.verdict == VerificationVerdict.PASS:
             for risk in self.state.inference_risks.values():
                 if risk.subject_id in subject_ids and risk.status == "open":
-                    risk.status = "cleared"
+                    if risk.risk_type in self._property_strengthening_risk_types():
+                        if not self._verified_risk_bridges(risk):
+                            continue
+                        risk.status = "accepted_with_bridge"
+                    else:
+                        risk.status = "cleared"
                     self._emit(
                         "inference_risk_cleared",
                         {"risk_id": risk.risk_id, "subject_id": risk.subject_id},
@@ -351,6 +498,30 @@ class ProofControlLayer:
             self._emit("failure_classified", failure.model_dump(mode="json"))
             self._record_realizer_failure(report, route_id=route_id)
         self._update_core_debt(route_id)
+
+    def resolve_inference_risk_with_bridges(
+        self,
+        risk_id: str,
+        *,
+        bridge_obligation_ids: Sequence[str],
+    ) -> InferenceRiskRecord:
+        risk = self.state.inference_risks[risk_id]
+        supplied = sorted(set(bridge_obligation_ids))
+        if not supplied:
+            raise ValueError("at least one verified bridge obligation is required")
+        risk.required_bridge_obligation_ids = supplied
+        if not self._verified_risk_bridges(risk):
+            raise ValueError("bridge obligations are not closed by reusable evidence")
+        risk.status = "accepted_with_bridge"
+        self._emit(
+            "inference_risk_cleared_by_bridge",
+            {
+                "risk_id": risk.risk_id,
+                "bridge_obligation_ids": supplied,
+            },
+        )
+        self.persist()
+        return risk
 
     def update_after_round(
         self,
@@ -514,6 +685,9 @@ class ProofControlLayer:
         }
         for strategy in strategies:
             link = self.register_strategy(strategy)
+            obligations = {
+                item.obligation_id: item for item in self.proof_graph.obligations
+            }
             if link is None:
                 record = RouteAdmissionRecord(
                     strategy_id=strategy.strategy_id,
@@ -525,6 +699,8 @@ class ProofControlLayer:
                     reasons=["main goal obligation is unavailable"],
                 )
             else:
+                binding = self._route_target_binding_for_strategy(strategy.strategy_id)
+                contract = self._alignment_contract_for_subject(strategy.strategy_id)
                 record = self.route_admission_gate.evaluate(
                     strategy,
                     goal_link=link,
@@ -533,10 +709,27 @@ class ProofControlLayer:
                     existing_mechanism_signatures=existing_signatures,
                     critical_assumptions=list(self.state.critical_assumptions.values()),
                     expected_core_obligation_reduction=(
-                        link.target_obligation_id in core_ids
+                        (
+                            (
+                                binding.direct_target_obligation_id in core_ids
+                                or binding.blueprint_path_complete
+                            )
+                            if binding is not None
+                            else link.target_obligation_id in core_ids
+                        )
                         and bool(strategy.expected_lemmas)
                     ),
+                    target_binding=binding,
+                    alignment_contract=contract,
                 )
+                if record.verdict == GateVerdict.REWRITE:
+                    self._ensure_route_admission_rewrite(
+                        strategy,
+                        link=link,
+                        binding=binding,
+                        contract=contract,
+                        record=record,
+                    )
             self.state.route_admissions[strategy.strategy_id] = record
             records.append(record)
             if record.verdict in {GateVerdict.BLOCK, GateVerdict.REWRITE}:
@@ -719,6 +912,7 @@ class ProofControlLayer:
             InferenceRiskType.LOCAL_TO_GLOBAL,
             InferenceRiskType.EXISTENCE_TO_UNIFORM_EXISTENCE,
             InferenceRiskType.PAIRWISE_TO_COMMON_WITNESS,
+            *self._property_strengthening_risk_types(),
         }
         debt_auc_by_route = {
             route_id: self._history_auc(history)
@@ -1041,40 +1235,69 @@ class ProofControlLayer:
             )
             if key in existing:
                 continue
+            self.state.inference_risks[risk.risk_id] = risk
+            existing.add(key)
+            self._emit("inference_risk_opened", risk.model_dump(mode="json"))
+            if (
+                risk.risk_type in self._property_strengthening_risk_types()
+                and risk.confidence
+                >= self.control_config.scope_guard.risk_confidence_threshold
+            ):
+                pattern_id = f"negative_pattern_{stable_hash(key)[:16]}"
+                self.state.negative_patterns[pattern_id] = NegativePatternRecord(
+                    pattern_id=pattern_id,
+                    source_risk_id=risk.risk_id,
+                    risk_type=risk.risk_type,
+                    description=risk.explanation,
+                    deterministic_signature=stable_hash(
+                        {
+                            "risk_type": risk.risk_type.value,
+                            "rule_id": risk.deterministic_rule_id,
+                            "premise_relations": [
+                                item.model_dump(mode="json")
+                                for item in risk.premise_relation_signatures
+                            ],
+                            "conclusion_relation": (
+                                risk.conclusion_relation_signature.model_dump(
+                                    mode="json"
+                                )
+                                if risk.conclusion_relation_signature is not None
+                                else None
+                            ),
+                        }
+                    ),
+                    evidence_ids=[risk.risk_id],
+                )
             countermodel_count = sum(
                 item.countermodel_task_id is not None
                 for item in self.state.inference_risks.values()
             )
+            if risk.status != "open" or risk.countermodel_task_id is not None:
+                continue
+            target_ids = self._risk_target_obligation_ids(risk)
+            action = self.action_dispatcher.propose(
+                ControlActionType.CREATE_COUNTERMODEL_TASK,
+                source_record_ids=[risk.risk_id],
+                route_ids=[risk.route_id] if risk.route_id is not None else [],
+                target_obligation_ids=target_ids,
+                payload={"source_record_id": risk.risk_id},
+            )
+            if not target_ids:
+                self.action_dispatcher.defer(
+                    action.action_id,
+                    reason="no mathematical target obligation is available",
+                )
+                continue
             if (
-                risk.status == "open"
-                and risk.countermodel_task_id is None
-                and countermodel_count
-                < self.control_config.scope_guard.max_countermodel_tasks_per_round
+                countermodel_count
+                >= self.control_config.scope_guard.max_countermodel_tasks_per_round
             ):
-                risk.countermodel_task_id = (
-                    "countermodel_"
-                    + stable_hash(
-                        (
-                            risk.subject_id,
-                            risk.risk_type.value,
-                            risk.deterministic_rule_id,
-                        )
-                    )[:12]
+                self.action_dispatcher.defer(
+                    action.action_id,
+                    reason="countermodel task cap reached",
                 )
-            self.state.inference_risks[risk.risk_id] = risk
-            existing.add(key)
-            self._emit("inference_risk_opened", risk.model_dump(mode="json"))
-            if risk.countermodel_task_id is not None:
-                self._emit(
-                    "countermodel_task_created",
-                    {
-                        "task_id": risk.countermodel_task_id,
-                        "risk_id": risk.risk_id,
-                        "risk_type": risk.risk_type.value,
-                        "subject_id": risk.subject_id,
-                        "premise_eligible": False,
-                    },
-                )
+                continue
+            self.action_dispatcher.execute_sync(action.action_id, current_round=0)
 
     def _extract_near_miss(
         self,
@@ -1210,7 +1433,8 @@ class ProofControlLayer:
                     f"{link.relation.value} message cannot be promoted as sufficient"
                 )
             if any(
-                item.subject_id == message.message_id and item.status == "open"
+                item.subject_id in {message.message_id, *message.dependencies}
+                and item.status == "open"
                 for item in self.state.inference_risks.values()
             ):
                 reasons.append("message has an open proof-control inference risk")
@@ -1276,6 +1500,26 @@ class ProofControlLayer:
             self.state.scope_signatures[message.message_id] = message_scope
         obligation_scope = self._scope_for_obligation(obligation)
         allowed = self.scope_guard.can_close_obligation(message_scope, obligation_scope)
+        risky_subject_ids = {message.message_id, *message.dependencies}
+        blocking_risks = [
+            item
+            for item in self.state.inference_risks.values()
+            if item.status == "open"
+            and item.subject_id in risky_subject_ids
+            and item.confidence
+            >= self.control_config.scope_guard.risk_confidence_threshold
+        ]
+        if blocking_risks:
+            payload = {
+                "message_id": message.message_id,
+                "obligation_id": obligation.obligation_id,
+                "mode": self.control_config.mode,
+                "reason": "open high-confidence inference risk blocks closure",
+                "risk_ids": [item.risk_id for item in blocking_risks],
+            }
+            self._emit("inference_risk_close_blocked", payload)
+            if self.active:
+                return False, str(payload["reason"])
         if not allowed:
             payload = {
                 "message_id": message.message_id,
@@ -1446,10 +1690,370 @@ class ProofControlLayer:
             result[key] = result.get(key, 0) + 1
         return dict(sorted(result.items()))
 
+    def _dispatch_strategy_sub_obligation(
+        self,
+        strategy: StrategyCard,
+        *,
+        main_goal_id: str,
+    ) -> str | None:
+        obligation_id = (
+            "obl_route_"
+            + stable_hash(
+                {
+                    "problem_hash": self.proof_graph.problem_hash,
+                    "strategy_id": strategy.strategy_id,
+                    "statement": normalize_text(strategy.bottleneck),
+                }
+            )[:16]
+        )
+        route = self.route_registry.route_for_strategy(strategy.strategy_id)
+        obligation = ProofObligation(
+            obligation_id=obligation_id,
+            problem_hash=self.proof_graph.problem_hash,
+            route_ids=[route.route_id] if route is not None else [],
+            kind=ObligationKind.SUBGOAL,
+            statement=strategy.bottleneck,
+            normalized_statement=normalize_text(strategy.bottleneck),
+            assumptions=list(strategy.prerequisites),
+            priority=0.75,
+            centrality=0.6,
+        )
+        action = self.action_dispatcher.propose(
+            ControlActionType.CREATE_SUB_OBLIGATION,
+            route_ids=[route.route_id] if route is not None else [],
+            target_obligation_ids=[main_goal_id],
+            payload={
+                "strategy_id": strategy.strategy_id,
+                "parent_main_goal_id": main_goal_id,
+                "obligation": obligation.model_dump(mode="json"),
+            },
+        )
+        executed = self.action_dispatcher.execute_sync(
+            action.action_id,
+            current_round=0,
+        )
+        if self.shadow:
+            return None
+        if not executed.result_refs:
+            raise RuntimeError("sub-obligation action did not materialize a target")
+        return executed.result_refs[0]
+
+    def _handle_create_sub_obligation(
+        self, action: ControlActionRecord
+    ) -> ControlActionResult:
+        obligation = ProofObligation.model_validate(action.payload["obligation"])
+        materialized = self.proof_graph.add_obligation(obligation)
+        return ControlActionResult(
+            result_refs=[materialized.obligation_id],
+            postcondition_met=True,
+        )
+
+    def _sub_obligation_postcondition(
+        self,
+        _action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        for obligation_id in result.result_refs:
+            try:
+                obligation = self.proof_graph.get_obligation(obligation_id)
+            except KeyError:
+                return False
+            if obligation.kind == ObligationKind.MAIN_GOAL:
+                return False
+        return bool(result.result_refs)
+
+    def _dispatch_route_target_binding(
+        self,
+        binding: RouteTargetBinding,
+        link: ClaimGoalLink,
+    ) -> ControlActionRecord:
+        action = self.action_dispatcher.propose(
+            ControlActionType.BIND_ROUTE_TARGET,
+            source_record_ids=[link.link_id],
+            route_ids=[binding.route_id] if binding.route_id is not None else [],
+            target_obligation_ids=[
+                binding.direct_target_obligation_id,
+                binding.main_goal_obligation_id,
+            ],
+            payload=binding.model_dump(mode="json"),
+        )
+        self.action_dispatcher.execute_sync(action.action_id, current_round=0)
+        return action
+
+    def _handle_bind_route_target(
+        self, action: ControlActionRecord
+    ) -> ControlActionResult:
+        binding = RouteTargetBinding.model_validate(action.payload)
+        self.state.route_target_bindings[binding.binding_id] = binding
+        return ControlActionResult(
+            result_refs=[binding.binding_id],
+            postcondition_met=True,
+        )
+
+    def _route_target_binding_postcondition(
+        self,
+        _action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        return bool(result.result_refs) and all(
+            result_ref in self.state.route_target_bindings
+            for result_ref in result.result_refs
+        )
+
+    def _dispatch_countermodel_if_required(
+        self,
+        link: ClaimGoalLink,
+        *,
+        route_id: str | None,
+    ) -> str | None:
+        if (
+            link.relation != GoalRelation.UNKNOWN
+            or not self.control_config.goal_alignment.run_countermodel_on_unknown_relation
+        ):
+            return None
+        action = self.action_dispatcher.propose(
+            ControlActionType.CREATE_COUNTERMODEL_TASK,
+            source_record_ids=[link.link_id],
+            route_ids=[route_id] if route_id is not None else [],
+            target_obligation_ids=[link.target_obligation_id],
+            payload={
+                "source_record_id": link.link_id,
+                "goal_link_id": link.link_id,
+            },
+        )
+        self.action_dispatcher.execute_sync(action.action_id, current_round=0)
+        return action.action_id
+
+    def _handle_create_countermodel_task(
+        self, action: ControlActionRecord
+    ) -> ControlActionResult:
+        source_record_id = str(action.payload["source_record_id"])
+        link_id = action.payload.get("goal_link_id")
+        link = self.state.goal_links.get(str(link_id)) if link_id is not None else None
+        target_obligation_id = (
+            link.target_obligation_id
+            if link is not None
+            else action.target_obligation_ids[0]
+        )
+        task_id = f"countermodel_task_{action.idempotency_key[:16]}"
+        task = CountermodelTaskRecord(
+            task_id=task_id,
+            source_record_id=source_record_id,
+            source_goal_link_id=str(link_id) if link_id is not None else None,
+            target_obligation_id=target_obligation_id,
+            route_ids=list(action.route_ids),
+            status="pending",
+        )
+        self.state.countermodel_tasks[task_id] = task
+        if link is not None:
+            link.countermodel_status = "pending"
+        risk = self.state.inference_risks.get(source_record_id)
+        if risk is not None:
+            risk.countermodel_task_id = task_id
+        return ControlActionResult(
+            result_refs=[task_id],
+            postcondition_met=True,
+        )
+
+    def _countermodel_task_postcondition(
+        self,
+        _action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        return bool(result.result_refs) and all(
+            result_ref in self.state.countermodel_tasks
+            and self.state.countermodel_tasks[result_ref].status
+            in {"pending", "deferred", "inapplicable", "completed"}
+            for result_ref in result.result_refs
+        )
+
+    def _handle_direct_premise_request(
+        self, action: ControlActionRecord
+    ) -> ControlActionResult:
+        record_id = str(action.payload["premise_closure_record_id"])
+        record = self.state.premise_closure_records[record_id]
+        return ControlActionResult(
+            result_refs=[record.record_id],
+            postcondition_met=record.verified,
+            detail=(
+                ""
+                if record.verified
+                else "direct-premise request lacks exact verified evidence"
+            ),
+        )
+
+    def _direct_premise_postcondition(
+        self,
+        _action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        return bool(result.result_refs) and all(
+            result_ref in self.state.premise_closure_records
+            and self.state.premise_closure_records[result_ref].verified
+            for result_ref in result.result_refs
+        )
+
+    def _ensure_route_admission_rewrite(
+        self,
+        strategy: StrategyCard,
+        *,
+        link: ClaimGoalLink,
+        binding: RouteTargetBinding | None,
+        contract: GoalAlignmentContractResult | None,
+        record: RouteAdmissionRecord,
+    ) -> None:
+        if record.rewrite_request_id is None:
+            raise RuntimeError("REWRITE verdict requires a rewrite request ID")
+        request = self.state.blueprint_rewrites.get(record.rewrite_request_id)
+        if request is None:
+            route_id = (
+                binding.route_id
+                if binding is not None and binding.route_id is not None
+                else f"strategy:{strategy.strategy_id}"
+            )
+            request = BlueprintRewriteRequest(
+                request_id=record.rewrite_request_id,
+                route_id=route_id,
+                failure_record_id=(
+                    contract.contract_id if contract is not None else link.link_id
+                ),
+                preserved_fact_ids=[
+                    item.message_id for item in self.message_broker.admitted_facts()
+                ],
+                preserved_step_ids=[],
+                invalidated_plan_elements=[link.target_obligation_id],
+                current_overstrong_targets=(
+                    [link.subject_id]
+                    if link.scope_relation == ScopeRelation.CLAIM_STRONGER
+                    else []
+                ),
+                proposed_weaker_targets=(
+                    [binding.direct_target_obligation_id] if binding is not None else []
+                ),
+                proposed_bridge_obligation_ids=(
+                    binding.bridge_obligation_ids
+                    if binding is not None
+                    else link.required_bridge_obligation_ids
+                ),
+                representation_change_required=False,
+            )
+            self.state.blueprint_rewrites[request.request_id] = request
+            self.blueprint_rewriter.requests[request.request_id] = request
+            self._emit(
+                "blueprint_rewrite_requested",
+                request.model_dump(mode="json"),
+            )
+        action = self.action_dispatcher.propose(
+            ControlActionType.REWRITE_BLUEPRINT,
+            source_record_ids=[request.request_id],
+            route_ids=(
+                [binding.route_id]
+                if binding is not None and binding.route_id is not None
+                else []
+            ),
+            target_obligation_ids=record.target_obligation_ids,
+            payload={"blueprint_rewrite_request_id": request.request_id},
+        )
+        self._emit(
+            "control_action_materialized",
+            {
+                "action_id": action.action_id,
+                "action_type": action.action_type.value,
+                "source_record_id": request.request_id,
+            },
+        )
+
+    def _route_target_binding_for_strategy(
+        self, strategy_id: str
+    ) -> RouteTargetBinding | None:
+        stored = next(
+            (
+                binding
+                for binding in self.state.route_target_bindings.values()
+                if binding.strategy_id == strategy_id
+            ),
+            None,
+        )
+        if stored is not None:
+            return stored
+        action = next(
+            (
+                item
+                for item in self.state.control_actions.values()
+                if item.action_type == ControlActionType.BIND_ROUTE_TARGET
+                and item.payload.get("strategy_id") == strategy_id
+            ),
+            None,
+        )
+        return (
+            RouteTargetBinding.model_validate(action.payload)
+            if action is not None
+            else None
+        )
+
+    def _alignment_contract_for_subject(
+        self, subject_id: str
+    ) -> GoalAlignmentContractResult | None:
+        return next(
+            (
+                contract
+                for contract in reversed(
+                    list(self.state.goal_alignment_contracts.values())
+                )
+                if contract.subject_id == subject_id
+            ),
+            None,
+        )
+
+    def _risk_target_obligation_ids(self, risk: InferenceRiskRecord) -> list[str]:
+        if risk.conclusion_id is not None and self._control_obligation_exists(
+            risk.conclusion_id
+        ):
+            return [risk.conclusion_id]
+        if risk.route_id is not None:
+            try:
+                route = self.route_registry.get(risk.route_id)
+            except KeyError:
+                route = None
+            if route is not None:
+                binding = self._route_target_binding_for_strategy(route.strategy_id)
+                if binding is not None:
+                    return [binding.direct_target_obligation_id]
+        return self._main_goal_ids()
+
+    def _verified_risk_bridges(self, risk: InferenceRiskRecord) -> bool:
+        if not risk.required_bridge_obligation_ids:
+            return False
+        for obligation_id in risk.required_bridge_obligation_ids:
+            try:
+                obligation = self.proof_graph.get_obligation(obligation_id)
+            except KeyError:
+                return False
+            if obligation.status != "closed" or not obligation.evidence_message_ids:
+                return False
+        return True
+
+    @staticmethod
+    def _property_strengthening_risk_types() -> set[InferenceRiskType]:
+        return {
+            InferenceRiskType.PARTIAL_PROPERTY_TO_TOTAL_PROPERTY,
+            InferenceRiskType.NONEMPTY_INTERSECTION_TO_SUBSET_CONTAINMENT,
+            InferenceRiskType.EXISTS_COMPONENT_TO_ALL_COMPONENTS,
+            InferenceRiskType.SOME_WITNESS_TO_ALL_WITNESSES,
+            InferenceRiskType.COVERAGE_TO_EXHAUSTIVENESS,
+            InferenceRiskType.AT_LEAST_ONE_TO_ONLY_FROM_SET,
+        }
+
     def _control_source_exists(self, source_id: str) -> bool:
         state_mappings = (
             self.state.control_actions,
             self.state.goal_links,
+            self.state.route_target_bindings,
+            self.state.goal_alignment_contracts,
+            self.state.claim_verification_ledger,
+            self.state.premise_closure_records,
+            self.state.countermodel_tasks,
+            self.state.negative_patterns,
             self.state.scope_signatures,
             self.state.proof_roles,
             self.state.inference_risks,

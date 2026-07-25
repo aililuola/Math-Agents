@@ -249,7 +249,7 @@ def test_normalized_delta_claim_keeps_its_narrow_verification_scope() -> None:
         raw_ref=None,
     )
 
-    assert normalized.status == ClaimStatus.VERIFIED
+    assert normalized.status == ClaimStatus.PROPOSED
     assert normalized.source_attempt_id == "attempt-a"
     assert normalized.source_delta_id == "delta-base-case"
 

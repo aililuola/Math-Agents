@@ -188,6 +188,16 @@ class ControlActionDispatcher:
         self._checkpoint(action)
         return action
 
+    def defer(self, action_id: str, *, reason: str) -> ControlActionRecord:
+        action = self._get(action_id)
+        if action.status == ControlActionStatus.EXECUTED:
+            return action
+        action.status = ControlActionStatus.DEFERRED
+        action.admission_reason = reason
+        action.failure_reason = ""
+        self._checkpoint(action)
+        return action
+
     async def execute(
         self,
         action_id: str,
@@ -239,6 +249,86 @@ class ControlActionDispatcher:
             raw_result = handler(action)
             if inspect.isawaitable(raw_result):
                 raw_result = await raw_result
+            result = self._normalize_result(raw_result)
+        except Exception as exc:
+            action.status = ControlActionStatus.FAILED
+            action.failure_reason = f"{type(exc).__name__}: {exc}"
+            self._checkpoint(action)
+            raise
+
+        action.result_refs = sorted(set(result.result_refs))
+        postcondition_met = (
+            result.postcondition_met
+            and bool(action.result_refs)
+            and postcondition(action, result)
+        )
+        if not postcondition_met:
+            action.status = ControlActionStatus.FAILED
+            action.failure_reason = result.detail or "action postcondition failed"
+            self._checkpoint(action)
+            return action
+
+        action.status = ControlActionStatus.EXECUTED
+        action.executed_round = current_round
+        action.failure_reason = ""
+        self._checkpoint(action)
+        return action
+
+    def execute_sync(
+        self,
+        action_id: str,
+        *,
+        current_round: int,
+    ) -> ControlActionRecord:
+        """Execute a registered local handler without entering an event loop."""
+
+        action = self._get(action_id)
+        if action.status == ControlActionStatus.EXECUTED:
+            return action
+        if action.status in {
+            ControlActionStatus.PROPOSED,
+            ControlActionStatus.DEFERRED,
+        }:
+            action = self.admit(action_id, current_round=current_round)
+        if action.status in {
+            ControlActionStatus.REJECTED,
+            ControlActionStatus.FAILED,
+            ControlActionStatus.DEFERRED,
+        }:
+            return action
+        if self.mode == "shadow":
+            return action
+
+        handler = self._handlers.get(action.action_type)
+        postcondition = self._postconditions.get(action.action_type)
+        if handler is None or postcondition is None:
+            action.status = ControlActionStatus.DEFERRED
+            action.admission_reason = "no authority handler is registered"
+            self._checkpoint(action)
+            return action
+
+        if action.status == ControlActionStatus.EXECUTING:
+            recovered = ControlActionResult(
+                result_refs=list(action.result_refs),
+                postcondition_met=True,
+                detail="resume postcondition probe",
+            )
+            if action.result_refs and postcondition(action, recovered):
+                action.status = ControlActionStatus.EXECUTED
+                action.executed_round = current_round
+                action.failure_reason = ""
+                self._checkpoint(action)
+                return action
+
+        action.status = ControlActionStatus.EXECUTING
+        action.executed_round = None
+        self._checkpoint(action)
+        try:
+            raw_result = handler(action)
+            if inspect.isawaitable(raw_result):
+                raise TypeError(
+                    "execute_sync cannot run an asynchronous authority handler"
+                )
             result = self._normalize_result(raw_result)
         except Exception as exc:
             action.status = ControlActionStatus.FAILED

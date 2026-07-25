@@ -9,21 +9,27 @@ from .models import (
     AbstractStructureProposal,
     BlueprintRewriteRequest,
     BottleneckCluster,
+    ClaimVerificationLedgerEntry,
     ClaimGoalLink,
     ControlActionRecord,
+    CountermodelTaskRecord,
     ContinueGateRecord,
     CriticalAssumption,
     FailureClassificationRecord,
+    GoalAlignmentContractResult,
     InductionMeasureProposal,
     InferenceRiskRecord,
     MinimalBridgeProposal,
     MessageUsageReceipt,
     MessageUtilityContract,
     NearMissRecord,
+    NegativePatternRecord,
+    PremiseClosureRecord,
     ProofRole,
     RealizerCandidate,
     RealizerRepairTask,
     RouteAdmissionRecord,
+    RouteTargetBinding,
     ScopeSignature,
     SynthesisReadinessRecord,
 )
@@ -39,6 +45,12 @@ class ProofControlState:
     def __init__(self) -> None:
         self.goal_links: dict[str, ClaimGoalLink] = {}
         self.control_actions: dict[str, ControlActionRecord] = {}
+        self.route_target_bindings: dict[str, RouteTargetBinding] = {}
+        self.goal_alignment_contracts: dict[str, GoalAlignmentContractResult] = {}
+        self.claim_verification_ledger: dict[str, ClaimVerificationLedgerEntry] = {}
+        self.premise_closure_records: dict[str, PremiseClosureRecord] = {}
+        self.countermodel_tasks: dict[str, CountermodelTaskRecord] = {}
+        self.negative_patterns: dict[str, NegativePatternRecord] = {}
         self.scope_signatures: dict[str, ScopeSignature] = {}
         self.proof_roles: dict[str, ProofRole] = {}
         self.inference_risks: dict[str, InferenceRiskRecord] = {}
@@ -70,6 +82,16 @@ class ProofControlState:
             "schema_version": self.schema_version,
             "goal_links": self._dump_models(self.goal_links),
             "control_actions": self._dump_models(self.control_actions),
+            "route_target_bindings": self._dump_models(self.route_target_bindings),
+            "goal_alignment_contracts": self._dump_models(
+                self.goal_alignment_contracts
+            ),
+            "claim_verification_ledger": self._dump_models(
+                self.claim_verification_ledger
+            ),
+            "premise_closure_records": self._dump_models(self.premise_closure_records),
+            "countermodel_tasks": self._dump_models(self.countermodel_tasks),
+            "negative_patterns": self._dump_models(self.negative_patterns),
             "scope_signatures": self._dump_models(self.scope_signatures),
             "proof_roles": {
                 key: self.proof_roles[key].value for key in sorted(self.proof_roles)
@@ -122,6 +144,12 @@ class ProofControlState:
         model_fields: tuple[tuple[str, type[BaseModel]], ...] = (
             ("goal_links", ClaimGoalLink),
             ("control_actions", ControlActionRecord),
+            ("route_target_bindings", RouteTargetBinding),
+            ("goal_alignment_contracts", GoalAlignmentContractResult),
+            ("claim_verification_ledger", ClaimVerificationLedgerEntry),
+            ("premise_closure_records", PremiseClosureRecord),
+            ("countermodel_tasks", CountermodelTaskRecord),
+            ("negative_patterns", NegativePatternRecord),
             ("scope_signatures", ScopeSignature),
             ("inference_risks", InferenceRiskRecord),
             ("minimal_bridge_proposals", MinimalBridgeProposal),

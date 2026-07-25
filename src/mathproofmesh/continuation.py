@@ -266,12 +266,16 @@ def normalize_delta_claims(
     raw_ref: str | None,
 ) -> list[ClaimCard]:
     claims: list[ClaimCard] = []
-    for claim in delta.new_claims:
-        claim.status = ClaimStatus.VERIFIED
-        claim.source_delta_id = delta.delta_id
-        claim.source_attempt_id = attempt_id
-        claim.source_agent_id = delta.agent_id
-        claim.verification_confidence = 1.0
+    for raw_claim in delta.new_claims:
+        claim = raw_claim.model_copy(
+            update={
+                "status": ClaimStatus.PROPOSED,
+                "source_delta_id": delta.delta_id,
+                "source_attempt_id": attempt_id,
+                "source_agent_id": delta.agent_id,
+                "verification_confidence": None,
+            }
+        )
         if raw_ref and not any(
             ref.artifact_ref == raw_ref for ref in claim.evidence_refs
         ):

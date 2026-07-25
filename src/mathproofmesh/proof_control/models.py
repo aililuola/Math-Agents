@@ -94,6 +94,62 @@ class ControlActionResult(StrictModel):
     detail: str = ""
 
 
+class AlignmentExceptionCode(StrEnum):
+    DIRECT_PREMISE_CLOSURE = "direct_premise_closure"
+    VERIFIED_GRAPH_EDGE = "verified_graph_edge"
+    EXACT_EQUIVALENCE = "exact_equivalence"
+
+
+class ClaimVerificationState(StrEnum):
+    PROPOSED = "proposed"
+    LOCALLY_VERIFIED = "locally_verified"
+    INDEPENDENTLY_VERIFIED = "independently_verified"
+    REFEREE_ACCEPTED = "referee_accepted"
+    FACT_CANDIDATE = "fact_candidate"
+    FACT = "fact"
+    INVALIDATED = "invalidated"
+    REJECTED = "rejected"
+
+
+class ClaimVerificationLedgerEntry(StrictModel):
+    claim_id: str
+    source_attempt_id: str
+    state: ClaimVerificationState = ClaimVerificationState.PROPOSED
+    dependency_ids: list[str] = Field(default_factory=list)
+    local_report_ids: list[str] = Field(default_factory=list)
+    independent_report_ids: list[str] = Field(default_factory=list)
+    referee_review_ids: list[str] = Field(default_factory=list)
+    source_attempt_incomplete: bool = False
+    invalidation_reason: str | None = None
+    invalidating_evidence_ids: list[str] = Field(default_factory=list)
+    transition_history: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PremiseClosureRecord(StrictModel):
+    record_id: str = Field(default_factory=lambda: new_id("premise_closure"))
+    target_obligation_id: str
+    closure_type: Literal[
+        "given_assumption",
+        "direct_witness",
+        "definition_unfolding",
+        "verified_fact_instance",
+        "none",
+    ]
+    supporting_ids: list[str] = Field(default_factory=list)
+    verified: bool = False
+
+
+class CountermodelTaskRecord(StrictModel):
+    task_id: str = Field(default_factory=lambda: new_id("countermodel_task"))
+    source_record_id: str
+    source_goal_link_id: str | None = None
+    target_obligation_id: str
+    route_ids: list[str] = Field(default_factory=list)
+    status: Literal["pending", "deferred", "inapplicable", "completed"] = "pending"
+    reason: str = ""
+    result_refs: list[str] = Field(default_factory=list)
+
+
 class ClaimGoalLink(StrictModel):
     link_id: str = Field(default_factory=lambda: new_id("goal_link"))
     subject_id: str
@@ -110,6 +166,7 @@ class ClaimGoalLink(StrictModel):
         "none_found_bounded",
         "found",
         "inapplicable",
+        "deferred",
     ] = "not_requested"
     minimality_score: float = Field(default=0.5, ge=0.0, le=1.0)
     alignment_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -117,6 +174,22 @@ class ClaimGoalLink(StrictModel):
         "deterministic"
     )
     evidence_refs: list[str] = Field(default_factory=list)
+
+
+class RouteTargetBinding(StrictModel):
+    binding_id: str = Field(default_factory=lambda: new_id("route_target"))
+    strategy_id: str
+    route_id: str | None = None
+    direct_target_obligation_id: str
+    ancestor_obligation_ids: list[str] = Field(default_factory=list)
+    main_goal_obligation_id: str
+    direct_claim_ids: list[str] = Field(default_factory=list)
+    bridge_obligation_ids: list[str] = Field(default_factory=list)
+    relation_to_direct_target: GoalRelation
+    relation_to_main_goal: GoalRelation
+    scope_relation_to_direct_target: ScopeRelation
+    blueprint_path_complete: bool
+    binding_confidence: float = Field(ge=0.0, le=1.0)
 
 
 class MinimalBridgeProposal(StrictModel):
@@ -181,6 +254,45 @@ class InferenceRiskType(StrEnum):
     EXISTENCE_TO_UNIFORM_EXISTENCE = "existence_to_uniform_existence"
     PAIRWISE_TO_COMMON_WITNESS = "pairwise_to_common_witness"
     EMPIRICAL_TO_UNIVERSAL = "empirical_to_universal"
+    PARTIAL_PROPERTY_TO_TOTAL_PROPERTY = "partial_property_to_total_property"
+    NONEMPTY_INTERSECTION_TO_SUBSET_CONTAINMENT = (
+        "nonempty_intersection_to_subset_containment"
+    )
+    EXISTS_COMPONENT_TO_ALL_COMPONENTS = "exists_component_to_all_components"
+    SOME_WITNESS_TO_ALL_WITNESSES = "some_witness_to_all_witnesses"
+    COVERAGE_TO_EXHAUSTIVENESS = "coverage_to_exhaustiveness"
+    AT_LEAST_ONE_TO_ONLY_FROM_SET = "at_least_one_to_only_from_set"
+
+
+class SetRelationKind(StrEnum):
+    NONEMPTY_INTERSECTION = "nonempty_intersection"
+    SUBSET = "subset"
+    SUPERSET = "superset"
+    EQUALITY = "equality"
+    COVER = "cover"
+    PARTITION = "partition"
+    UNKNOWN = "unknown"
+
+
+class PropertyStrength(StrEnum):
+    EXISTENTIAL = "existential"
+    PARTIAL = "partial"
+    UNIVERSAL = "universal"
+    EXHAUSTIVE = "exhaustive"
+
+
+class RelationSignature(StrictModel):
+    source_id: str | None = None
+    set_relation: SetRelationKind = SetRelationKind.UNKNOWN
+    property_strength: PropertyStrength = PropertyStrength.PARTIAL
+    semantic_role: Literal[
+        "property",
+        "component",
+        "witness",
+        "coverage",
+        "membership",
+        "unknown",
+    ] = "unknown"
 
 
 class InferenceRiskRecord(StrictModel):
@@ -196,6 +308,17 @@ class InferenceRiskRecord(StrictModel):
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     countermodel_task_id: str | None = None
     required_bridge_obligation_ids: list[str] = Field(default_factory=list)
+    premise_relation_signatures: list[RelationSignature] = Field(default_factory=list)
+    conclusion_relation_signature: RelationSignature | None = None
+
+
+class NegativePatternRecord(StrictModel):
+    pattern_id: str = Field(default_factory=lambda: new_id("negative_pattern"))
+    source_risk_id: str
+    risk_type: InferenceRiskType
+    description: str
+    deterministic_signature: str
+    evidence_ids: list[str] = Field(default_factory=list)
 
 
 class AbstractStructureProposal(StrictModel):
@@ -397,6 +520,19 @@ class GateVerdict(StrEnum):
     SHADOW_BLOCK = "shadow_block"
 
 
+class GoalAlignmentContractResult(StrictModel):
+    contract_id: str = Field(default_factory=lambda: new_id("alignment_contract"))
+    subject_id: str
+    passed_min_confidence: bool
+    has_required_outline: bool
+    unknown_relation_resolved: bool
+    countermodel_action_id: str | None = None
+    exception_code: AlignmentExceptionCode | None = None
+    exception_evidence_ids: list[str] = Field(default_factory=list)
+    final_verdict: GateVerdict
+    reasons: list[str] = Field(default_factory=list)
+
+
 class RouteAdmissionRecord(StrictModel):
     record_id: str = Field(default_factory=lambda: new_id("route_admission"))
     strategy_id: str
@@ -405,6 +541,8 @@ class RouteAdmissionRecord(StrictModel):
     target_obligation_ids: list[str]
     reasons: list[str]
     rewrite_request_id: str | None = None
+    target_binding_id: str | None = None
+    alignment_contract_id: str | None = None
 
 
 class ContinueGateRecord(StrictModel):
