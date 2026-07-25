@@ -75,7 +75,7 @@ be reverted or accidentally staged.
 
 ## 4. New Package and Artifacts
 
-Planned package:
+Implemented package:
 
 ```text
 src/mathproofmesh/proof_control/
@@ -98,14 +98,14 @@ src/mathproofmesh/proof_control/
   gates.py
 ```
 
-Planned configuration:
+Implemented configuration:
 
 ```text
 config.deepseek-v4-pro.proof-control-shadow.yaml
 config.deepseek-v4-pro.proof-control-active.yaml
 ```
 
-Planned documentation and benchmark assets:
+Implemented documentation and benchmark assets:
 
 ```text
 docs/GOAL_PLAN_FAILURE_UTILITY_CONTROL.md
@@ -167,3 +167,16 @@ benchmarks/proof_control/
 | 6 | Fast lane and three gates in shadow | Computation and gate tests | `feat: add proof-control admission continuation and synthesis gates` |
 | 7 | Active orchestrator wiring and resume | Resume, active E2E, legacy/off E2E | `feat: activate goal-plan-failure-utility control with checkpoint resume` |
 | 8 | Logic traps, benchmark, docs, release/version | Full pytest, Ruff, format, compileall, both mock benchmarks | `test: add proof-control logic-trap and end-to-end suite`; `docs: release MathProofMesh v0.8 proof control layer` |
+
+## 8. Acceptance Snapshot
+
+- Full suite before release metadata update: `440 passed, 1 warning`.
+- Ruff check: pass.
+- Ruff format check: `252 files already formatted`.
+- `compileall -q src tests benchmarks`: pass.
+- Topology Mock benchmark: 21/21 component contracts, 6 cases, 11 variants,
+  and 0 provider calls.
+- Proof-control Mock benchmark: 14/14 component contracts, 10 fixtures, 3
+  mode variants, and 0 provider calls.
+- Active proof-control E2E, active Inspiration plus active proof control,
+  v0.7 checkpoint migration, and legacy/off regressions: pass.

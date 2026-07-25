@@ -113,7 +113,7 @@ def test_desktop_app_requires_session_cookie_and_serves_workbench(
     bootstrap = client.get("/api/bootstrap")
     assert bootstrap.status_code == 200
     body = bootstrap.json()
-    assert body["version"] == "0.7.0"
+    assert body["version"] == "0.8.0"
     assert len(body["profiles"]) == 3
     assert body["credential_status"]["DEEPSEEK_AGENT_1_KEY"] == "missing"
 

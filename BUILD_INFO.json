@@ -1,11 +1,11 @@
 {
   "project": "MathProofMesh",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "validated_on": "2026-07-24",
   "python_requirement": ">=3.11",
-  "base_branch": "feature/mathproofmesh-v0.6.0-reasoning-first-computation",
-  "base_commit": "5a77fffb0758240e021c86545fe6165fac52585a",
-  "release_branch": "feature/mathproofmesh-v0.7.0-hierarchical-sparse-topology",
+  "base_branch": "feature/mathproofmesh-v0.7.0-hierarchical-sparse-topology",
+  "base_commit": "866e7270a01babb93342d272b99865b449e3b934",
+  "release_branch": "feature/mathproofmesh-v0.8.0-goal-plan-failure-utility-control",
   "deepseek_profile": {
     "provider": "deepseek",
     "model": "deepseek-v4-pro",
@@ -102,6 +102,25 @@
     "checkpoint_and_activity": true,
     "deepseek_default_mode": "shadow"
   },
+  "proof_control": {
+    "default_enabled": false,
+    "default_mode": "off",
+    "shadow_profile": "config.deepseek-v4-pro.proof-control-shadow.yaml",
+    "active_profile": "config.deepseek-v4-pro.proof-control-active.yaml",
+    "work_packages_complete": 17,
+    "sidecar_metadata": true,
+    "math_object_hashes_unchanged": true,
+    "fact_write_authority_preserved": true,
+    "obligation_close_authority_preserved": true,
+    "goal_alignment_and_minimal_sufficiency": true,
+    "scope_signatures_and_ten_inference_risks": true,
+    "abstract_realizer_repair_and_near_miss": true,
+    "core_debt_compression_and_common_mode": true,
+    "failure_blueprint_and_message_utility": true,
+    "falsification_route_continue_synthesis_gates": true,
+    "v07_checkpoint_migration": true,
+    "reasoning_token_and_tier_settings_unchanged": true
+  },
   "reliability_control": {
     "stable_mathematical_identity": true,
     "write_before_deduplication_guard": true,
@@ -142,13 +161,20 @@
     "compileall": "PASS",
     "ruff_check": "PASS",
     "ruff_format_check": "PASS",
-    "pytest": "360 passed with dev and server extras including z3-solver",
+    "pytest": "440 passed with dev, server, and desktop extras including z3-solver",
     "offline_topology_benchmark": {
       "status": "PASS",
       "provider_calls": 0,
       "cases": 6,
       "variants": 11,
       "component_contracts_passed": 21
+    },
+    "offline_proof_control_benchmark": {
+      "status": "PASS",
+      "provider_calls": 0,
+      "fixtures": 10,
+      "mode_variants": 3,
+      "component_contracts_passed": 14
     },
     "directed_computation_smoke": "PASS; bounded_greedy_sequence produced 12 exact bounded terms and one evidence-linked unproved candidate formula",
     "reasoning_first_computation_regression": "PASS",
