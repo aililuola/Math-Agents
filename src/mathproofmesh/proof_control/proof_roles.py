@@ -16,6 +16,8 @@ from .models import (
     CriticalAssumption,
     GoalRelation,
     InferenceRiskRecord,
+    ObligationDomain,
+    ObligationDomainRecord,
     ProofRole,
 )
 
@@ -84,10 +86,20 @@ def core_proof_debt(
     proof_roles: dict[str, ProofRole] | None = None,
     inference_risks: dict[str, InferenceRiskRecord] | None = None,
     critical_assumptions: dict[str, CriticalAssumption] | None = None,
+    obligation_domains: dict[str, ObligationDomainRecord] | None = None,
 ) -> float:
     cfg = config or CoreDebtControlConfig()
     roles = proof_roles or {}
-    core = graph.obligations_in_core_closure(route_id=route_id, open_only=True)
+    domains = obligation_domains or {}
+    core = [
+        item
+        for item in graph.obligations_in_core_closure(
+            route_id=route_id,
+            open_only=True,
+        )
+        if item.obligation_id not in domains
+        or domains[item.obligation_id].domain == ObligationDomain.MATHEMATICAL
+    ]
     core_ids = {item.obligation_id for item in core}
     debt = 0.0
     for obligation in core:

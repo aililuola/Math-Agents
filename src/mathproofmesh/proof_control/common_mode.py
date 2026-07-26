@@ -17,7 +17,14 @@ from ..schemas import (
     StrategyCard,
     stable_hash,
 )
-from .models import CriticalAssumption
+from .domains import classify_assumption_domain
+from .models import (
+    AssumptionChallengerTask,
+    AssumptionDomain,
+    AssumptionDomainRecord,
+    AssumptionFamily,
+    CriticalAssumption,
+)
 
 
 class CriticalAssumptionMatrix:
@@ -32,6 +39,8 @@ class CriticalAssumptionMatrix:
         self.config = config or CommonModeControlConfig()
         self.usage: dict[str, dict[str, float]] = {}
         self.assumptions: dict[str, CriticalAssumption] = {}
+        self.families: dict[str, AssumptionFamily] = {}
+        self.domain_records: dict[str, AssumptionDomainRecord] = {}
 
     def build(
         self,
@@ -64,12 +73,19 @@ class CriticalAssumptionMatrix:
             normalized = self._normalize_assumption(statement)
             if not normalized or not route_id:
                 return
+            domain_record = classify_assumption_domain(statement)
+            self.domain_records[
+                f"{source_subject_id}:{stable_hash(normalized)[:12]}"
+            ] = domain_record
+            if domain_record.domain != AssumptionDomain.MATHEMATICAL:
+                return
             record = raw.setdefault(
                 normalized,
                 {
                     "sources": set(),
                     "routes": {},
                     "verified": False,
+                    "semantic_tags": self._semantic_tags(normalized),
                 },
             )
             record["sources"].add(source_subject_id)
@@ -160,12 +176,23 @@ class CriticalAssumptionMatrix:
                 ),
                 necessity_by_route=necessity_by_route,
                 common_mode_risk=risk,
+                domain=AssumptionDomain.MATHEMATICAL,
+                semantic_tags=sorted(record["semantic_tags"]),
             )
             assumptions[assumption_id] = assumption
             for route_id, weight in necessity_by_route.items():
                 usage.setdefault(route_id, {})[assumption_id] = weight
         self.assumptions = assumptions
         self.usage = usage
+        self.families = self._build_families(
+            assumptions,
+            active_route_ids=active_route_ids,
+        )
+        for family in self.families.values():
+            for assumption_id in family.member_assumption_ids:
+                assumption = assumptions[assumption_id]
+                assumption.family_id = family.family_id
+                assumption.common_mode_risk = family.common_mode_risk
         return dict(assumptions)
 
     def risks(
@@ -208,6 +235,156 @@ class CriticalAssumptionMatrix:
                 "determine whether the assumption is actually necessary",
             ],
             "premise_eligible": False,
+        }
+
+    def risk_families(self) -> list[AssumptionFamily]:
+        return sorted(
+            (
+                family
+                for family in self.families.values()
+                if len(family.route_ids) >= self.config.min_routes
+                and family.common_mode_risk >= self.config.risk_threshold
+                and any(
+                    self.assumptions[assumption_id].verification_status
+                    != ClaimStatus.VERIFIED
+                    for assumption_id in family.member_assumption_ids
+                )
+            ),
+            key=lambda item: (
+                -item.common_mode_risk,
+                -len(item.route_ids),
+                item.family_id,
+            ),
+        )
+
+    @staticmethod
+    def challenger_for_family(
+        family: AssumptionFamily,
+    ) -> AssumptionChallengerTask:
+        return AssumptionChallengerTask(
+            task_id=f"challenger_{stable_hash(family.family_id)[:12]}",
+            family_id=family.family_id,
+            assumption_ids=list(family.member_assumption_ids),
+            target_statement=family.canonical_statement,
+            route_ids=list(family.route_ids),
+            required_actions=[
+                "seek an exact counterexample",
+                "show that the assumption is not necessary",
+                "find a weaker sufficient condition",
+                "construct a route independent of the assumption family",
+            ],
+            premise_eligible=False,
+        )
+
+    def _build_families(
+        self,
+        assumptions: dict[str, CriticalAssumption],
+        *,
+        active_route_ids: set[str],
+    ) -> dict[str, AssumptionFamily]:
+        groups: list[list[CriticalAssumption]] = []
+        for assumption in sorted(
+            assumptions.values(), key=lambda item: item.assumption_id
+        ):
+            tags = set(assumption.semantic_tags)
+            group = next(
+                (
+                    candidate
+                    for candidate in groups
+                    if self._tag_similarity(
+                        tags,
+                        {tag for member in candidate for tag in member.semantic_tags},
+                    )
+                    >= 0.6
+                ),
+                None,
+            )
+            if group is None:
+                groups.append([assumption])
+            else:
+                group.append(assumption)
+
+        denominator = max(1.0, float(len(active_route_ids)))
+        families: dict[str, AssumptionFamily] = {}
+        for group in groups:
+            member_ids = sorted(item.assumption_id for item in group)
+            route_weights: dict[str, float] = {}
+            for assumption in group:
+                for route_id, weight in assumption.necessity_by_route.items():
+                    route_weights[route_id] = max(
+                        route_weights.get(route_id, 0.0),
+                        float(weight),
+                    )
+            semantic_tags = sorted(
+                {tag for item in group for tag in item.semantic_tags}
+            )
+            family_id = (
+                "assumption_family_"
+                + stable_hash(
+                    {
+                        "members": member_ids,
+                        "semantic_tags": semantic_tags,
+                    }
+                )[:16]
+            )
+            canonical = min(
+                group,
+                key=lambda item: (
+                    len(item.normalized_statement),
+                    item.normalized_statement,
+                ),
+            )
+            family = AssumptionFamily(
+                family_id=family_id,
+                canonical_statement=canonical.normalized_statement,
+                member_assumption_ids=member_ids,
+                route_ids=sorted(route_weights),
+                semantic_tags=semantic_tags,
+                common_mode_risk=min(
+                    1.0,
+                    sum(
+                        weight
+                        for route_id, weight in route_weights.items()
+                        if route_id in active_route_ids
+                    )
+                    / denominator,
+                ),
+                normalization_confidence=(0.95 if len(group) == 1 else 0.85),
+            )
+            families[family.family_id] = family
+        return families
+
+    @staticmethod
+    def _tag_similarity(left: set[str], right: set[str]) -> float:
+        union = left | right
+        return len(left & right) / len(union) if union else 0.0
+
+    @staticmethod
+    def _semantic_tags(statement: str) -> set[str]:
+        aliases = {
+            "preserve": "preservation",
+            "preserves": "preservation",
+            "preserved": "preservation",
+            "invariant": "preservation",
+            "invariance": "preservation",
+            "transform": "transformation",
+            "transforms": "transformation",
+        }
+        stop = {
+            "a",
+            "an",
+            "and",
+            "are",
+            "is",
+            "of",
+            "remains",
+            "the",
+            "under",
+        }
+        return {
+            aliases.get(token, token)
+            for token in re.findall(r"[a-z][a-z0-9_]*", statement.casefold())
+            if token not in stop
         }
 
     @classmethod

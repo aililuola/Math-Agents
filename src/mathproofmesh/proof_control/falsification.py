@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Protocol
@@ -7,12 +8,21 @@ from typing import Protocol
 from ..config import SystemConfig
 from ..schemas import (
     ComputationMethod,
+    ComputationPlan,
+    ComputationPurpose,
     EvidenceType,
     ExperimentOutcome,
     ExperimentResult,
     ExperimentSpec,
     MemoryTier,
     MessageType,
+    StrategyCard,
+    stable_hash,
+)
+from .models import (
+    ClaimGoalLink,
+    FalsificationTaskRecord,
+    InferenceRiskRecord,
 )
 
 
@@ -40,6 +50,178 @@ class FalsificationDisposition:
     conclusive_refutation: bool
     claim_status_changed: bool
     reason: str
+
+
+class FalsificationTaskMaterializer:
+    """Compile only an explicit finite typed relation into the fast lane."""
+
+    _FINITE_RELATION = re.compile(
+        r"^\s*(?:check|test)\s+"
+        r"(?P<variable>[A-Za-z][A-Za-z0-9_]*)\s+in\s*"
+        r"\[\s*(?P<lower>-?\d+)\s*,\s*(?P<upper>-?\d+)\s*\]\s*:\s*"
+        r"(?P<lhs>.+?)\s*(?P<relation><=|>=|==|!=|=|<|>)\s*"
+        r"(?P<rhs>.+?)\s*$",
+        re.IGNORECASE,
+    )
+    _RELATIONS = {
+        "=": "eq",
+        "==": "eq",
+        "!=": "ne",
+        "<": "lt",
+        "<=": "le",
+        ">": "gt",
+        ">=": "ge",
+    }
+
+    def __init__(self, config: SystemConfig) -> None:
+        self.config = config
+
+    def from_strategy(
+        self,
+        strategy: StrategyCard,
+        *,
+        target_claim: str,
+        target_obligation_id: str | None,
+        target_claim_id: str | None = None,
+        route_id: str | None = None,
+    ) -> FalsificationTaskRecord:
+        return self._materialize(
+            source_kind="strategy",
+            source_record_id=strategy.strategy_id,
+            strategy_id=strategy.strategy_id,
+            route_id=route_id,
+            target_obligation_id=target_obligation_id,
+            target_claim_id=target_claim_id,
+            request_text=strategy.falsification_test,
+            target_claim=target_claim,
+        )
+
+    def from_goal_link(
+        self,
+        link: ClaimGoalLink,
+        *,
+        request_text: str,
+        target_claim: str,
+        route_id: str | None = None,
+    ) -> FalsificationTaskRecord:
+        return self._materialize(
+            source_kind="goal_link",
+            source_record_id=link.link_id,
+            strategy_id=link.subject_id if link.subject_kind == "strategy" else None,
+            route_id=route_id,
+            target_obligation_id=link.target_obligation_id,
+            target_claim_id=link.subject_id if link.subject_kind == "claim" else None,
+            request_text=request_text,
+            target_claim=target_claim,
+        )
+
+    def from_inference_risk(
+        self,
+        risk: InferenceRiskRecord,
+        *,
+        request_text: str,
+        target_claim: str,
+        target_obligation_id: str | None,
+    ) -> FalsificationTaskRecord:
+        return self._materialize(
+            source_kind="inference_risk",
+            source_record_id=risk.risk_id,
+            strategy_id=None,
+            route_id=risk.route_id,
+            target_obligation_id=target_obligation_id,
+            target_claim_id=risk.subject_id,
+            request_text=request_text,
+            target_claim=target_claim,
+        )
+
+    def _materialize(
+        self,
+        *,
+        source_kind: str,
+        source_record_id: str,
+        strategy_id: str | None,
+        route_id: str | None,
+        target_obligation_id: str | None,
+        target_claim_id: str | None,
+        request_text: str,
+        target_claim: str,
+    ) -> FalsificationTaskRecord:
+        identity = {
+            "source_kind": source_kind,
+            "source_record_id": source_record_id,
+            "request_text": request_text,
+            "target_obligation_id": target_obligation_id,
+            "target_claim_id": target_claim_id,
+        }
+        task = FalsificationTaskRecord(
+            task_id=f"falsification_task_{stable_hash(identity)[:16]}",
+            source_kind=source_kind,
+            source_record_id=source_record_id,
+            strategy_id=strategy_id,
+            route_id=route_id,
+            target_obligation_id=target_obligation_id,
+            target_claim_id=target_claim_id,
+            request_text=request_text,
+        )
+        match = self._FINITE_RELATION.fullmatch(request_text.strip())
+        if match is None:
+            task.status = "deferred"
+            task.deferred_reason = (
+                "Automatic fast-lane admission requires an explicit finite integer "
+                "interval and a typed arithmetic relation."
+            )
+            return task
+        lower = int(match.group("lower"))
+        upper = int(match.group("upper"))
+        if upper < lower:
+            task.status = "deferred"
+            task.deferred_reason = "The declared finite interval has upper < lower."
+            return task
+        cases = upper - lower + 1
+        lane = self.config.topology.proof_control.falsification_fast_lane
+        if cases > lane.max_cases:
+            task.status = "deferred"
+            task.deferred_reason = (
+                "The declared finite interval exceeds the proof-control case limit."
+            )
+            return task
+        variable = match.group("variable")
+        spec = ExperimentSpec(
+            experiment_id=f"experiment_{stable_hash(identity)[:16]}",
+            purpose=ComputationPurpose.FALSIFY_CLAIM,
+            target_claim=target_claim,
+            reasoning_basis=(
+                "The strategy supplied an explicit finite boundary falsification test."
+            ),
+            why_computation_is_needed=(
+                "A typed exact search can find a decisive counterexample cheaply."
+            ),
+            decision_if_confirmed=(
+                "Retain only bounded not-refuted evidence and continue the proof."
+            ),
+            decision_if_refuted=(
+                "Invalidate the targeted claim and revise or abandon the route."
+            ),
+            noncomputational_alternative=(
+                "Ask an independent route agent to construct an exact counterexample."
+            ),
+            method=ComputationMethod.BOUNDED_INTEGER_SEARCH,
+            domains={variable: {"min": lower, "max": upper}},
+            arguments={
+                "target": {
+                    "lhs": match.group("lhs").strip(),
+                    "rhs": match.group("rhs").strip(),
+                    "relation": self._RELATIONS[match.group("relation")],
+                }
+            },
+            exact_arithmetic=True,
+            broad_search=False,
+            max_cases=cases,
+            requested_by="proof_control",
+        )
+        task.experiment_spec = spec
+        task.computation_plan = ComputationPlan.from_spec(spec)
+        return task
 
 
 def evaluate_fast_lane_eligibility(

@@ -26,6 +26,8 @@ from .models import (
     GoalRelation,
     InferenceRiskRecord,
     InferenceRiskType,
+    ObligationDomain,
+    ObligationDomainRecord,
     RouteAdmissionRecord,
     RouteTargetBinding,
     ScopeRelation,
@@ -420,13 +422,22 @@ class SynthesisReadinessGate:
         candidate_dependency_ids: Sequence[str] = (),
         candidate_fact_ids: Sequence[str] = (),
         broker_admitted_fact_ids: Collection[str] = (),
+        obligation_domains: Mapping[str, ObligationDomainRecord] | None = None,
     ) -> SynthesisReadinessRecord:
         reasons: list[str] = []
+        domains = obligation_domains or {}
+        mathematical_ids = {
+            item.obligation_id
+            for item in graph.obligations
+            if item.obligation_id not in domains
+            or domains[item.obligation_id].domain == ObligationDomain.MATHEMATICAL
+        }
         main_goal_ids = set(graph.main_goal_obligation_ids())
         open_core = [
             item
             for item in graph.core_open_obligations()
             if item.kind != ObligationKind.MAIN_GOAL
+            and item.obligation_id in mathematical_ids
         ]
         if self.config.require_core_dependency_closure and open_core:
             reasons.append("core dependency closure contains open obligations")
@@ -456,9 +467,12 @@ class SynthesisReadinessGate:
         invalid_links = [
             item
             for item in goal_links
-            if item.relation == GoalRelation.NECESSARY_ONLY
-            or item.scope_relation
-            in {ScopeRelation.CLAIM_WEAKER, ScopeRelation.INCOMPARABLE}
+            if item.target_obligation_id in mathematical_ids
+            and (
+                item.relation == GoalRelation.NECESSARY_ONLY
+                or item.scope_relation
+                in {ScopeRelation.CLAIM_WEAKER, ScopeRelation.INCOMPARABLE}
+            )
         ]
         if self.config.require_no_necessary_only_bridge_as_sufficient and invalid_links:
             reasons.append("necessary-only or scope-invalid goal links remain")
@@ -475,7 +489,8 @@ class SynthesisReadinessGate:
         open_auxiliary = [
             item
             for item in graph.obligations
-            if item.obligation_id not in graph.core_dependency_closure()
+            if item.obligation_id in mathematical_ids
+            and item.obligation_id not in graph.core_dependency_closure()
             and item.status in {"open", "tentative", "blocked"}
         ]
         if len(open_auxiliary) > self.config.max_open_auxiliary_obligations:
@@ -488,6 +503,7 @@ class SynthesisReadinessGate:
             for item_id in candidate_dependency_ids
             if (
                 item_id in obligation_by_id
+                and item_id in mathematical_ids
                 and obligation_by_id[item_id].status != "closed"
             )
             or (item_id not in obligation_by_id and item_id not in admitted)

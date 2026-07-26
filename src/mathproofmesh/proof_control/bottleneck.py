@@ -8,7 +8,12 @@ from ..proof_graph.matching import statement_similarity
 from ..proof_graph.store import ProofGraphStore
 from ..proof_identity import canonical_obligation_statement
 from ..schemas import ProofObligation
-from .models import BottleneckCluster, ScopeSignature
+from .models import (
+    BottleneckCluster,
+    ObligationDomain,
+    ObligationDomainRecord,
+    ScopeSignature,
+)
 
 
 class BottleneckCompressor:
@@ -17,12 +22,23 @@ class BottleneckCompressor:
     def __init__(self, config: BottleneckControlConfig | None = None) -> None:
         self.config = config or BottleneckControlConfig()
 
-    def scan_open_obligations(self, graph: ProofGraphStore) -> list[ProofObligation]:
+    def scan_open_obligations(
+        self,
+        graph: ProofGraphStore,
+        *,
+        obligation_domains: Mapping[str, ObligationDomainRecord] | None = None,
+    ) -> list[ProofObligation]:
+        obligation_domains = obligation_domains or {}
         return sorted(
             (
                 item
                 for item in graph.obligations
                 if item.status in {"open", "tentative", "blocked"}
+                and (
+                    item.obligation_id not in obligation_domains
+                    or obligation_domains[item.obligation_id].domain
+                    == ObligationDomain.MATHEMATICAL
+                )
             ),
             key=lambda item: (
                 -item.centrality,
@@ -36,9 +52,13 @@ class BottleneckCompressor:
         graph: ProofGraphStore,
         *,
         scope_signatures: Mapping[str, ScopeSignature] | None = None,
+        obligation_domains: Mapping[str, ObligationDomainRecord] | None = None,
     ) -> list[list[ProofObligation]]:
         scope_signatures = scope_signatures or {}
-        remaining = self.scan_open_obligations(graph)
+        remaining = self.scan_open_obligations(
+            graph,
+            obligation_domains=obligation_domains,
+        )
         groups: list[list[ProofObligation]] = []
         while remaining:
             seed = remaining.pop(0)
@@ -130,6 +150,19 @@ class BottleneckCompressor:
                     route_ids=route_ids,
                     centrality=max(item.centrality for item in members),
                     proof_debt=debt,
+                    alias_map={
+                        item.obligation_id: canonical.obligation_id for item in members
+                    },
+                    member_statuses={
+                        item.obligation_id: item.status for item in members
+                    },
+                    first_error_fingerprints=sorted(
+                        {
+                            item.first_error_fingerprint
+                            for item in members
+                            if item.first_error_fingerprint
+                        }
+                    ),
                 )
             )
         return sorted(clusters, key=lambda item: item.cluster_id)
@@ -140,6 +173,21 @@ class BottleneckCompressor:
         statuses = [
             graph.get_obligation(item).status for item in cluster.member_obligation_ids
         ]
+        canonical_status = graph.get_obligation(cluster.canonical_obligation_id).status
+        if canonical_status in {"closed", "refuted"}:
+            cluster.status = "resolved"
+            cluster.member_statuses = {
+                member_id: canonical_status
+                for member_id in cluster.member_obligation_ids
+            }
+        else:
+            cluster.member_statuses = {
+                member_id: status
+                for member_id, status in zip(
+                    cluster.member_obligation_ids,
+                    statuses,
+                )
+            }
         if statuses and all(item in {"closed", "refuted"} for item in statuses):
             cluster.status = "resolved"
         return cluster

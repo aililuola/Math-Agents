@@ -8,6 +8,8 @@ from pydantic import Field
 from ..schemas import (
     ActionKind,
     ClaimStatus,
+    ComputationPlan,
+    ExperimentSpec,
     FailureLevel,
     QuantifierSpec,
     StrictModel,
@@ -42,6 +44,21 @@ class ProofRole(StrEnum):
     TECHNICAL_LEMMA = "technical_lemma"
     SEARCH_HEURISTIC = "search_heuristic"
     COUNTEREXAMPLE = "counterexample"
+
+
+class AssumptionDomain(StrEnum):
+    MATHEMATICAL = "mathematical"
+    PROTOCOL = "protocol"
+    PROCESS = "process"
+    TOOL = "tool"
+    SAFETY = "safety"
+
+
+class ObligationDomain(StrEnum):
+    MATHEMATICAL = "mathematical"
+    PROCESS = "process"
+    TOOL = "tool"
+    VERIFICATION = "verification"
 
 
 class ControlActionType(StrEnum):
@@ -92,6 +109,20 @@ class ControlActionResult(StrictModel):
     result_refs: list[str] = Field(default_factory=list)
     postcondition_met: bool
     detail: str = ""
+
+
+class AssumptionDomainRecord(StrictModel):
+    assumption_key: str
+    domain: AssumptionDomain
+    inferred_from: str
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class ObligationDomainRecord(StrictModel):
+    obligation_id: str
+    domain: ObligationDomain
+    inferred_from: str
+    confidence: float = Field(ge=0.0, le=1.0)
 
 
 class AlignmentExceptionCode(StrEnum):
@@ -487,6 +518,11 @@ class BottleneckCluster(StrictModel):
     centrality: float = Field(ge=0.0, le=1.0)
     proof_debt: float = Field(ge=0.0)
     minimal_bridge_candidate_ids: list[str] = Field(default_factory=list)
+    alias_map: dict[str, str] = Field(default_factory=dict)
+    member_statuses: dict[str, str] = Field(default_factory=dict)
+    first_error_fingerprints: list[str] = Field(default_factory=list)
+    bridge_task_id: str | None = None
+    materialization_action_id: str | None = None
     status: Literal["active", "resolved", "split"] = "active"
 
 
@@ -498,7 +534,68 @@ class CriticalAssumption(StrictModel):
     verification_status: ClaimStatus
     necessity_by_route: dict[str, float]
     common_mode_risk: float = Field(ge=0.0, le=1.0)
+    domain: AssumptionDomain = AssumptionDomain.MATHEMATICAL
+    family_id: str | None = None
+    semantic_tags: list[str] = Field(default_factory=list)
     challenger_task_id: str | None = None
+
+
+class AssumptionFamily(StrictModel):
+    family_id: str = Field(default_factory=lambda: new_id("assumption_family"))
+    canonical_statement: str
+    member_assumption_ids: list[str]
+    route_ids: list[str]
+    semantic_tags: list[str]
+    common_mode_risk: float = Field(ge=0.0, le=1.0)
+    normalization_confidence: float = Field(ge=0.0, le=1.0)
+    challenger_task_id: str | None = None
+
+
+class AssumptionChallengerTask(StrictModel):
+    task_id: str = Field(default_factory=lambda: new_id("assumption_challenger"))
+    family_id: str
+    assumption_ids: list[str]
+    target_statement: str
+    route_ids: list[str]
+    required_actions: list[str]
+    premise_eligible: bool = False
+    status: Literal["open", "resolved", "cancelled"] = "open"
+    action_id: str | None = None
+
+
+class BottleneckBridgeTask(StrictModel):
+    task_id: str = Field(default_factory=lambda: new_id("bottleneck_bridge"))
+    cluster_id: str
+    target_obligation_id: str
+    member_obligation_ids: list[str]
+    route_ids: list[str]
+    required_action: str
+    status: Literal["open", "resolved", "cancelled"] = "open"
+
+
+class FalsificationTaskRecord(StrictModel):
+    task_id: str = Field(default_factory=lambda: new_id("falsification_task"))
+    source_kind: Literal["strategy", "goal_link", "inference_risk"]
+    source_record_id: str
+    strategy_id: str | None = None
+    route_id: str | None = None
+    target_obligation_id: str | None = None
+    target_claim_id: str | None = None
+    request_text: str
+    experiment_spec: ExperimentSpec | None = None
+    computation_plan: ComputationPlan | None = None
+    status: Literal[
+        "proposed",
+        "admitted",
+        "deferred",
+        "running",
+        "counterexample_found",
+        "not_refuted",
+        "failed",
+    ] = "proposed"
+    deferred_reason: str = ""
+    result_experiment_id: str | None = None
+    action_id: str | None = None
 
 
 class MessageExpectedEffect(StrEnum):

@@ -7,7 +7,11 @@ from pydantic import BaseModel
 
 from .models import (
     AbstractStructureProposal,
+    AssumptionChallengerTask,
+    AssumptionDomainRecord,
+    AssumptionFamily,
     BlueprintRewriteRequest,
+    BottleneckBridgeTask,
     BottleneckCluster,
     ClaimVerificationLedgerEntry,
     ClaimGoalLink,
@@ -16,6 +20,7 @@ from .models import (
     ContinueGateRecord,
     CriticalAssumption,
     FailureClassificationRecord,
+    FalsificationTaskRecord,
     GoalAlignmentContractResult,
     InductionBlueprintNode,
     InductionMeasureProposal,
@@ -25,6 +30,7 @@ from .models import (
     MessageUtilityContract,
     NearMissRecord,
     NegativePatternRecord,
+    ObligationDomainRecord,
     PremiseClosureRecord,
     ProofRole,
     RealizerCandidate,
@@ -51,7 +57,10 @@ class ProofControlState:
         self.claim_verification_ledger: dict[str, ClaimVerificationLedgerEntry] = {}
         self.premise_closure_records: dict[str, PremiseClosureRecord] = {}
         self.countermodel_tasks: dict[str, CountermodelTaskRecord] = {}
+        self.falsification_tasks: dict[str, FalsificationTaskRecord] = {}
         self.negative_patterns: dict[str, NegativePatternRecord] = {}
+        self.assumption_domains: dict[str, AssumptionDomainRecord] = {}
+        self.obligation_domains: dict[str, ObligationDomainRecord] = {}
         self.scope_signatures: dict[str, ScopeSignature] = {}
         self.proof_roles: dict[str, ProofRole] = {}
         self.inference_risks: dict[str, InferenceRiskRecord] = {}
@@ -64,7 +73,11 @@ class ProofControlState:
         self.failure_records: dict[str, FailureClassificationRecord] = {}
         self.blueprint_rewrites: dict[str, BlueprintRewriteRequest] = {}
         self.bottleneck_clusters: dict[str, BottleneckCluster] = {}
+        self.bottleneck_aliases: dict[str, str] = {}
+        self.bottleneck_bridge_tasks: dict[str, BottleneckBridgeTask] = {}
         self.critical_assumptions: dict[str, CriticalAssumption] = {}
+        self.assumption_families: dict[str, AssumptionFamily] = {}
+        self.assumption_challenger_tasks: dict[str, AssumptionChallengerTask] = {}
         self.utility_contracts: dict[str, MessageUtilityContract] = {}
         self.usage_receipts: dict[str, MessageUsageReceipt] = {}
         self.near_misses: dict[str, NearMissRecord] = {}
@@ -93,7 +106,10 @@ class ProofControlState:
             ),
             "premise_closure_records": self._dump_models(self.premise_closure_records),
             "countermodel_tasks": self._dump_models(self.countermodel_tasks),
+            "falsification_tasks": self._dump_models(self.falsification_tasks),
             "negative_patterns": self._dump_models(self.negative_patterns),
+            "assumption_domains": self._dump_models(self.assumption_domains),
+            "obligation_domains": self._dump_models(self.obligation_domains),
             "scope_signatures": self._dump_models(self.scope_signatures),
             "proof_roles": {
                 key: self.proof_roles[key].value for key in sorted(self.proof_roles)
@@ -110,7 +126,16 @@ class ProofControlState:
             "failure_records": self._dump_models(self.failure_records),
             "blueprint_rewrites": self._dump_models(self.blueprint_rewrites),
             "bottleneck_clusters": self._dump_models(self.bottleneck_clusters),
+            "bottleneck_aliases": {
+                key: self.bottleneck_aliases[key]
+                for key in sorted(self.bottleneck_aliases)
+            },
+            "bottleneck_bridge_tasks": self._dump_models(self.bottleneck_bridge_tasks),
             "critical_assumptions": self._dump_models(self.critical_assumptions),
+            "assumption_families": self._dump_models(self.assumption_families),
+            "assumption_challenger_tasks": self._dump_models(
+                self.assumption_challenger_tasks
+            ),
             "utility_contracts": self._dump_models(self.utility_contracts),
             "usage_receipts": self._dump_models(self.usage_receipts),
             "near_misses": self._dump_models(self.near_misses),
@@ -152,7 +177,10 @@ class ProofControlState:
             ("claim_verification_ledger", ClaimVerificationLedgerEntry),
             ("premise_closure_records", PremiseClosureRecord),
             ("countermodel_tasks", CountermodelTaskRecord),
+            ("falsification_tasks", FalsificationTaskRecord),
             ("negative_patterns", NegativePatternRecord),
+            ("assumption_domains", AssumptionDomainRecord),
+            ("obligation_domains", ObligationDomainRecord),
             ("scope_signatures", ScopeSignature),
             ("inference_risks", InferenceRiskRecord),
             ("minimal_bridge_proposals", MinimalBridgeProposal),
@@ -164,7 +192,10 @@ class ProofControlState:
             ("failure_records", FailureClassificationRecord),
             ("blueprint_rewrites", BlueprintRewriteRequest),
             ("bottleneck_clusters", BottleneckCluster),
+            ("bottleneck_bridge_tasks", BottleneckBridgeTask),
             ("critical_assumptions", CriticalAssumption),
+            ("assumption_families", AssumptionFamily),
+            ("assumption_challenger_tasks", AssumptionChallengerTask),
             ("utility_contracts", MessageUtilityContract),
             ("usage_receipts", MessageUsageReceipt),
             ("near_misses", NearMissRecord),
@@ -193,6 +224,17 @@ class ProofControlState:
                     )
         else:
             restored._migration_event("proof_roles", "expected mapping")
+
+        raw_aliases = state.get("bottleneck_aliases", {})
+        if isinstance(raw_aliases, Mapping):
+            restored.bottleneck_aliases = {
+                str(key): str(value)
+                for key, value in sorted(
+                    raw_aliases.items(), key=lambda item: str(item[0])
+                )
+            }
+        else:
+            restored._migration_event("bottleneck_aliases", "expected mapping")
 
         restored.continue_gate_records = restored._restore_list(
             state.get("continue_gate_records", []),

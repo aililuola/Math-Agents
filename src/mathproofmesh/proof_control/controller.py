@@ -14,6 +14,7 @@ from ..proof_identity import normalize_text, obligation_identity_text
 from ..schemas import (
     ClaimCard,
     ClaimStatus,
+    ComputationMethod,
     GraphEdgeType,
     MemoryTier,
     MessageEnvelope,
@@ -36,7 +37,12 @@ from .action_dispatcher import ControlActionDispatcher
 from .bottleneck import BottleneckCompressor
 from .claim_lifecycle import ClaimLifecycleController
 from .common_mode import CriticalAssumptionMatrix
+from .domains import classify_obligation_domain
 from .failure_control import BlueprintRewriter, FailureClassifier
+from .falsification import (
+    FalsificationTaskMaterializer,
+    classify_falsification_result,
+)
 from .gates import (
     ContinueDeepeningGate,
     RouteAdmissionGate,
@@ -53,12 +59,15 @@ from .message_utility import MessageUtilityController
 from .models import (
     AlignmentExceptionCode,
     BlueprintRewriteRequest,
+    BottleneckBridgeTask,
+    BottleneckCluster,
     ClaimGoalLink,
     ControlActionRecord,
     ControlActionResult,
     ControlActionStatus,
     ControlActionType,
     CountermodelTaskRecord,
+    FalsificationTaskRecord,
     GateVerdict,
     GoalAlignmentContractResult,
     GoalRelation,
@@ -68,6 +77,8 @@ from .models import (
     MessageExpectedEffect,
     MinimalBridgeProposal,
     NegativePatternRecord,
+    ObligationDomain,
+    ObligationDomainRecord,
     ProofRole,
     RealizerFailureType,
     RouteAdmissionRecord,
@@ -147,6 +158,7 @@ class ProofControlLayer:
         self.blueprint_rewriter.requests = self.state.blueprint_rewrites
         self.bottlenecks = BottleneckCompressor(self.control_config.bottleneck)
         self.common_mode = CriticalAssumptionMatrix(self.control_config.common_mode)
+        self.falsification_tasks = FalsificationTaskMaterializer(config)
         self.message_utility = MessageUtilityController(
             self.control_config.message_utility,
             proof_graph=proof_graph,
@@ -207,6 +219,21 @@ class ProofControlLayer:
             self._handle_activate_induction_measure,
             postcondition=self._induction_activation_postcondition,
         )
+        self.action_dispatcher.register_handler(
+            ControlActionType.CREATE_ASSUMPTION_CHALLENGER,
+            self._handle_create_assumption_challenger,
+            postcondition=self._assumption_challenger_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.MATERIALIZE_BOTTLENECK_CLUSTER,
+            self._handle_materialize_bottleneck_cluster,
+            postcondition=self._bottleneck_cluster_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.MATERIALIZE_FALSIFICATION_TASK,
+            self._handle_materialize_falsification_task,
+            postcondition=self._falsification_task_postcondition,
+        )
 
         self.message_broker.set_proof_control_message_gate(self._message_gate)
         self.proof_graph.set_proof_control_pre_close_policy(self._pre_close_policy)
@@ -228,12 +255,24 @@ class ProofControlLayer:
             and existing_binding is not None
             and existing_contract is not None
         ):
+            for obligation in self.proof_graph.obligations:
+                self._ensure_obligation_domain(obligation)
+            self.materialize_strategy_falsification(
+                strategy,
+                target_obligation_id=existing_binding.direct_target_obligation_id,
+                route_id=existing_binding.route_id,
+                current_round=0,
+                authority_source_id=existing.link_id,
+            )
             return existing
+        for obligation in self.proof_graph.obligations:
+            self._ensure_obligation_domain(obligation)
         try:
             binding = choose_nearest_target_obligation(
                 strategy,
                 self.proof_graph,
                 self.state.goal_links,
+                self.state.obligation_domains,
             )
         except ValueError as exc:
             self._emit(
@@ -259,6 +298,10 @@ class ProofControlLayer:
                 main_goal_id=binding.main_goal_obligation_id,
             )
             if generated_subgoal_id is not None:
+                self._ensure_obligation_domain(
+                    self.proof_graph.get_obligation(generated_subgoal_id),
+                    source_kind="mathematical",
+                )
                 binding = binding.model_copy(
                     update={
                         "direct_target_obligation_id": generated_subgoal_id,
@@ -336,6 +379,13 @@ class ProofControlLayer:
             "goal_alignment_contract_evaluated",
             contract.model_dump(mode="json"),
         )
+        self.materialize_strategy_falsification(
+            strategy,
+            target_obligation_id=target.obligation_id,
+            route_id=binding.route_id,
+            current_round=0,
+            authority_source_id=registered.link_id,
+        )
         return registered
 
     def register_claim(
@@ -390,6 +440,9 @@ class ProofControlLayer:
         return registered
 
     def register_obligation(self, obligation: ProofObligation) -> ClaimGoalLink | None:
+        domain = self._ensure_obligation_domain(obligation)
+        if domain.domain != ObligationDomain.MATHEMATICAL:
+            return None
         signature = self._scope_for_obligation(obligation)
         if obligation.kind == ObligationKind.MAIN_GOAL:
             self.state.proof_roles[obligation.obligation_id] = ProofRole.CORE_BRIDGE
@@ -569,6 +622,8 @@ class ProofControlLayer:
         current_round: int,
     ) -> None:
         route_ids = [item.route_id for item in self.route_registry.routes]
+        for obligation in self.proof_graph.obligations:
+            self._ensure_obligation_domain(obligation)
         for main_goal_id in self.proof_graph.main_goal_obligation_ids():
             main_goal = self.proof_graph.get_obligation(main_goal_id)
             main_goal.route_ids = list(
@@ -588,6 +643,7 @@ class ProofControlLayer:
             groups = self.bottlenecks.deterministic_clusters(
                 self.proof_graph,
                 scope_signatures=self.state.scope_signatures,
+                obligation_domains=self.state.obligation_domains,
             )
             existing_members = {
                 tuple(item.member_obligation_ids)
@@ -599,12 +655,13 @@ class ProofControlLayer:
                 key = tuple(cluster.member_obligation_ids)
                 if key in existing_members:
                     continue
-                self.state.bottleneck_clusters[cluster.cluster_id] = cluster
-                existing_members.add(key)
-                self._emit(
-                    "bottleneck_cluster_created",
-                    cluster.model_dump(mode="json"),
+                action = self.materialize_bottleneck_cluster(
+                    cluster,
+                    current_round=current_round,
                 )
+                if action.status != ControlActionStatus.EXECUTED:
+                    continue
+                existing_members.add(key)
             for cluster in self.state.bottleneck_clusters.values():
                 previous = cluster.status
                 self.bottlenecks.refresh_cluster_status(self.proof_graph, cluster)
@@ -618,20 +675,35 @@ class ProofControlLayer:
             self.route_registry.routes,
             strategies,
             self.message_broker.messages,
-            self.proof_graph.obligations,
+            [
+                item
+                for item in self.proof_graph.obligations
+                if self.state.obligation_domains[item.obligation_id].domain
+                == ObligationDomain.MATHEMATICAL
+            ],
         )
+        self.state.assumption_domains = dict(self.common_mode.domain_records)
         self.state.critical_assumptions.clear()
         self.state.critical_assumptions.update(assumptions)
-        for assumption in self.common_mode.risks()[
+        self.state.assumption_families = dict(self.common_mode.families)
+        for family in self.common_mode.risk_families()[
             : self.control_config.common_mode.max_challengers_per_round
         ]:
             self._emit(
-                "common_mode_assumption_detected",
-                assumption.model_dump(mode="json"),
+                "common_mode_assumption_family_detected",
+                family.model_dump(mode="json"),
             )
-            if assumption.challenger_task_id is None:
-                task = self.common_mode.challenger_task(assumption)
-                self._emit("assumption_challenger_created", task)
+            action = self.action_dispatcher.propose(
+                ControlActionType.CREATE_ASSUMPTION_CHALLENGER,
+                source_record_ids=list(family.member_assumption_ids),
+                route_ids=list(family.route_ids),
+                payload={"family_id": family.family_id},
+                current_round=current_round,
+            )
+            self.action_dispatcher.execute_sync(
+                action.action_id,
+                current_round=current_round,
+            )
 
         for route in self.route_registry.routes:
             self._update_core_debt(route.route_id)
@@ -680,6 +752,8 @@ class ProofControlLayer:
                 route_id=route_id,
                 open_only=True,
             )
+            if self._ensure_obligation_domain(item).domain
+            == ObligationDomain.MATHEMATICAL
         ]
         route = self.route_registry.get(route_id)
         return {
@@ -710,6 +784,12 @@ class ProofControlLayer:
                 for item in self.state.induction_blueprints.values()
                 if item.route_id == route_id and item.status == "active"
             ],
+            "falsification_tasks": [
+                item.model_dump(mode="json")
+                for item in self.state.falsification_tasks.values()
+                if item.route_id in {None, route_id}
+                and item.status in {"admitted", "deferred", "running"}
+            ],
             "core_proof_debt": self.route_signals(route_id)["core_proof_debt"],
             "active_goal_link": (
                 link.model_dump(mode="json")
@@ -726,14 +806,27 @@ class ProofControlLayer:
         existing_signatures = [
             route.mechanism_signature for route in self.route_registry.routes
         ]
-        core_ids = self.proof_graph.core_dependency_closure()
+        for obligation in self.proof_graph.obligations:
+            self._ensure_obligation_domain(obligation)
+        core_ids = {
+            obligation_id
+            for obligation_id in self.proof_graph.core_dependency_closure()
+            if self.state.obligation_domains[obligation_id].domain
+            == ObligationDomain.MATHEMATICAL
+        }
         obligations = {
-            item.obligation_id: item for item in self.proof_graph.obligations
+            item.obligation_id: item
+            for item in self.proof_graph.obligations
+            if self.state.obligation_domains[item.obligation_id].domain
+            == ObligationDomain.MATHEMATICAL
         }
         for strategy in strategies:
             link = self.register_strategy(strategy)
             obligations = {
-                item.obligation_id: item for item in self.proof_graph.obligations
+                item.obligation_id: item
+                for item in self.proof_graph.obligations
+                if self.state.obligation_domains[item.obligation_id].domain
+                == ObligationDomain.MATHEMATICAL
             }
             if link is None:
                 record = RouteAdmissionRecord(
@@ -867,6 +960,7 @@ class ProofControlLayer:
             candidate_dependency_ids=candidate_dependency_ids,
             candidate_fact_ids=candidate_fact_ids,
             broker_admitted_fact_ids=admitted_fact_ids,
+            obligation_domains=self.state.obligation_domains,
         )
         self.state.synthesis_readiness_records.append(record)
         if record.verdict in {GateVerdict.BLOCK, GateVerdict.SHADOW_BLOCK}:
@@ -911,9 +1005,198 @@ class ProofControlLayer:
         self._emit("message_usage_verified", receipt.model_dump(mode="json"))
         self.persist()
 
-    def record_falsification_result(self, result: ExperimentResult) -> None:
+    def materialize_strategy_falsification(
+        self,
+        strategy: StrategyCard,
+        *,
+        target_obligation_id: str,
+        route_id: str | None,
+        current_round: int,
+        target_claim_id: str | None = None,
+        authority_source_id: str | None = None,
+    ) -> ControlActionRecord:
+        target = self.proof_graph.get_obligation(target_obligation_id)
+        target_claim = target.normalized_statement
+        if (
+            target_claim_id is not None
+            and target_claim_id in self.claim_lifecycle.claims
+        ):
+            target_claim = self.claim_lifecycle.claims[target_claim_id].statement
+        task = self.falsification_tasks.from_strategy(
+            strategy,
+            target_claim=target_claim,
+            target_obligation_id=target_obligation_id,
+            target_claim_id=target_claim_id,
+            route_id=route_id,
+        )
+        existing = self.state.falsification_tasks.get(task.task_id)
+        if existing is not None:
+            task = existing
+        else:
+            self.state.falsification_tasks[task.task_id] = task
+        action = self.action_dispatcher.propose(
+            ControlActionType.MATERIALIZE_FALSIFICATION_TASK,
+            source_record_ids=[authority_source_id or task.source_record_id],
+            route_ids=[route_id] if route_id is not None else [],
+            target_obligation_ids=[target_obligation_id],
+            payload={"task_id": task.task_id},
+            current_round=current_round,
+        )
+        task.action_id = action.action_id
+        if task.experiment_spec is None:
+            task.status = "deferred"
+            return self.action_dispatcher.defer(
+                action.action_id,
+                reason=task.deferred_reason,
+            )
+        return self.action_dispatcher.execute_sync(
+            action.action_id,
+            current_round=current_round,
+        )
+
+    def pending_falsification_specs(
+        self,
+        strategy_id: str,
+        *,
+        route_id: str | None = None,
+    ) -> list[FalsificationTaskRecord]:
+        pending = [
+            task
+            for task in self.state.falsification_tasks.values()
+            if task.strategy_id == strategy_id
+            and task.status == "admitted"
+            and task.result_experiment_id is None
+            and task.experiment_spec is not None
+        ]
+        for task in pending:
+            if task.route_id is None and route_id is not None:
+                task.route_id = route_id
+        return sorted(pending, key=lambda item: item.task_id)
+
+    def mark_falsification_running(self, task_id: str) -> None:
+        task = self.state.falsification_tasks[task_id]
+        if task.status == "admitted":
+            task.status = "running"
+            self.persist()
+
+    def record_falsification_result(
+        self,
+        result: ExperimentResult,
+        *,
+        task_id: str | None = None,
+    ) -> None:
         self.state.fast_lane_outcomes[result.experiment_id] = result.outcome.value
+        task = (
+            self.state.falsification_tasks.get(task_id)
+            if task_id is not None
+            else next(
+                (
+                    item
+                    for item in self.state.falsification_tasks.values()
+                    if item.experiment_spec is not None
+                    and item.experiment_spec.experiment_id == result.experiment_id
+                ),
+                None,
+            )
+        )
+        if (
+            task is not None
+            and task.experiment_spec is not None
+            and task.experiment_spec.experiment_id != result.experiment_id
+        ):
+            raise ValueError(
+                "falsification result does not match the materialized task"
+            )
+        disposition = classify_falsification_result(result)
+        if task is not None:
+            task.result_experiment_id = result.experiment_id
+            if disposition.conclusive_refutation:
+                task.status = "counterexample_found"
+                if (
+                    task.target_claim_id is not None
+                    and task.target_claim_id in self.claim_lifecycle.claims
+                ):
+                    self.claim_lifecycle.invalidate_claim(
+                        task.target_claim_id,
+                        reason="exact_counterexample",
+                        evidence_ids=[result.experiment_id],
+                    )
+            elif result.outcome in {
+                ExperimentOutcome.NOT_REFUTED,
+                ExperimentOutcome.CERTIFIED,
+            }:
+                task.status = "not_refuted"
+            else:
+                task.status = "failed"
+        self._emit(
+            disposition.event_type,
+            {
+                "experiment_id": result.experiment_id,
+                "task_id": task.task_id if task is not None else None,
+                "outcome": result.outcome.value,
+                "conclusive_refutation": disposition.conclusive_refutation,
+                "reason": disposition.reason,
+            },
+        )
         self.persist()
+
+    def record_falsification_decision(
+        self,
+        task_id: str,
+        *,
+        decision: str,
+        reason: str,
+    ) -> None:
+        task = self.state.falsification_tasks[task_id]
+        task.status = "deferred"
+        task.deferred_reason = reason
+        self._emit(
+            "falsification_task_deferred",
+            {
+                "task_id": task_id,
+                "decision": decision,
+                "reason": reason,
+            },
+        )
+        self.persist()
+
+    def record_falsification_execution_failure(
+        self,
+        task_id: str,
+        *,
+        error: BaseException,
+    ) -> None:
+        task = self.state.falsification_tasks[task_id]
+        task.status = "failed"
+        task.deferred_reason = f"{type(error).__name__}: {error}"
+        self._emit(
+            "falsification_task_failed",
+            {
+                "task_id": task_id,
+                "decision": "execution_error",
+                "reason": task.deferred_reason,
+            },
+        )
+        self.persist()
+
+    def materialize_bottleneck_cluster(
+        self,
+        cluster: BottleneckCluster,
+        *,
+        current_round: int,
+    ) -> ControlActionRecord:
+        action = self.action_dispatcher.propose(
+            ControlActionType.MATERIALIZE_BOTTLENECK_CLUSTER,
+            source_record_ids=list(cluster.member_obligation_ids),
+            route_ids=list(cluster.route_ids),
+            target_obligation_ids=list(cluster.member_obligation_ids),
+            payload={"cluster": cluster.model_dump(mode="json")},
+            current_round=current_round,
+        )
+        return self.action_dispatcher.execute_sync(
+            action.action_id,
+            current_round=current_round,
+        )
 
     def review_induction_measure(
         self,
@@ -1830,12 +2113,34 @@ class ProofControlLayer:
             (
                 item
                 for item in self.proof_graph.obligations
-                if item.normalized_statement == message.normalized_statement
+                if self._ensure_obligation_domain(item).domain
+                == ObligationDomain.MATHEMATICAL
+                and item.normalized_statement == message.normalized_statement
                 and item.assumptions == message.assumptions
             ),
             None,
         )
         return match or self._main_goal()
+
+    def _ensure_obligation_domain(
+        self,
+        obligation: ProofObligation,
+        *,
+        source_kind: str | None = None,
+    ) -> ObligationDomainRecord:
+        existing = self.state.obligation_domains.get(obligation.obligation_id)
+        if existing is not None:
+            return existing
+        record = classify_obligation_domain(
+            obligation,
+            source_kind=source_kind,
+        )
+        self.state.obligation_domains[obligation.obligation_id] = record
+        self._emit(
+            "obligation_domain_classified",
+            record.model_dump(mode="json"),
+        )
+        return record
 
     def _scope_for_obligation(self, obligation: ProofObligation) -> ScopeSignature:
         signature = self.state.scope_signatures.get(obligation.obligation_id)
@@ -1880,6 +2185,7 @@ class ProofControlLayer:
             proof_roles=self.state.proof_roles,
             inference_risks=self.state.inference_risks,
             critical_assumptions=self.state.critical_assumptions,
+            obligation_domains=self.state.obligation_domains,
         )
         history = self.state.core_debt_history.setdefault(route_id, [])
         if not history or abs(history[-1] - debt) > 1e-9:
@@ -2209,6 +2515,183 @@ class ProofControlLayer:
             result_ref in self.state.premise_closure_records
             and self.state.premise_closure_records[result_ref].verified
             for result_ref in result.result_refs
+        )
+
+    def _handle_create_assumption_challenger(
+        self, action: ControlActionRecord
+    ) -> ControlActionResult:
+        family_id = str(action.payload["family_id"])
+        family = self.state.assumption_families[family_id]
+        task = self.common_mode.challenger_for_family(family)
+        task.action_id = action.action_id
+        self.state.assumption_challenger_tasks[task.task_id] = task
+        family.challenger_task_id = task.task_id
+        for assumption_id in family.member_assumption_ids:
+            assumption = self.state.critical_assumptions[assumption_id]
+            assumption.challenger_task_id = task.task_id
+        self._emit(
+            "assumption_challenger_created",
+            task.model_dump(mode="json"),
+        )
+        return ControlActionResult(
+            result_refs=[family.family_id, task.task_id],
+            postcondition_met=True,
+        )
+
+    def _assumption_challenger_postcondition(
+        self,
+        action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        family = self.state.assumption_families.get(
+            str(action.payload.get("family_id", ""))
+        )
+        if family is None or family.challenger_task_id is None:
+            return False
+        task = self.state.assumption_challenger_tasks.get(family.challenger_task_id)
+        return (
+            task is not None
+            and task.action_id == action.action_id
+            and not task.premise_eligible
+            and task.task_id in result.result_refs
+            and set(task.assumption_ids) == set(family.member_assumption_ids)
+        )
+
+    def _handle_materialize_bottleneck_cluster(
+        self, action: ControlActionRecord
+    ) -> ControlActionResult:
+        cluster = BottleneckCluster.model_validate(action.payload["cluster"])
+        for member_id in cluster.member_obligation_ids:
+            domain = self.state.obligation_domains.get(member_id)
+            if domain is not None and domain.domain != ObligationDomain.MATHEMATICAL:
+                return ControlActionResult(
+                    detail="non-mathematical obligations cannot enter a bottleneck cluster"
+                )
+            self.proof_graph.get_obligation(member_id)
+        if cluster.canonical_obligation_id not in cluster.member_obligation_ids:
+            return ControlActionResult(
+                detail="bottleneck canonical obligation is not a cluster member"
+            )
+        cluster.alias_map = {
+            member_id: cluster.canonical_obligation_id
+            for member_id in cluster.member_obligation_ids
+        }
+        cluster.member_statuses = {
+            member_id: self.proof_graph.get_obligation(member_id).status
+            for member_id in cluster.member_obligation_ids
+        }
+        cluster.materialization_action_id = action.action_id
+        task_id = (
+            "bottleneck_bridge_"
+            + stable_hash(
+                {
+                    "cluster_id": cluster.cluster_id,
+                    "canonical_obligation_id": cluster.canonical_obligation_id,
+                }
+            )[:16]
+        )
+        task = BottleneckBridgeTask(
+            task_id=task_id,
+            cluster_id=cluster.cluster_id,
+            target_obligation_id=cluster.canonical_obligation_id,
+            member_obligation_ids=list(cluster.member_obligation_ids),
+            route_ids=list(cluster.route_ids),
+            required_action=(
+                "Resolve the canonical mathematical bottleneck while preserving "
+                "all member obligations as auditable aliases."
+            ),
+        )
+        cluster.bridge_task_id = task.task_id
+        self.state.bottleneck_clusters[cluster.cluster_id] = cluster
+        self.state.bottleneck_bridge_tasks[task.task_id] = task
+        self.state.bottleneck_aliases.update(cluster.alias_map)
+        self._emit(
+            "bottleneck_cluster_created",
+            cluster.model_dump(mode="json"),
+        )
+        return ControlActionResult(
+            result_refs=[
+                cluster.cluster_id,
+                task.task_id,
+                cluster.canonical_obligation_id,
+            ],
+            postcondition_met=True,
+        )
+
+    def _bottleneck_cluster_postcondition(
+        self,
+        action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        cluster_payload = action.payload.get("cluster", {})
+        cluster_id = (
+            str(cluster_payload.get("cluster_id", ""))
+            if isinstance(cluster_payload, Mapping)
+            else ""
+        )
+        cluster = self.state.bottleneck_clusters.get(cluster_id)
+        if (
+            cluster is None
+            or cluster.materialization_action_id != action.action_id
+            or cluster.bridge_task_id is None
+        ):
+            return False
+        return (
+            cluster.cluster_id in result.result_refs
+            and cluster.bridge_task_id in self.state.bottleneck_bridge_tasks
+            and all(
+                self.state.bottleneck_aliases.get(member_id)
+                == cluster.canonical_obligation_id
+                for member_id in cluster.member_obligation_ids
+            )
+        )
+
+    def _handle_materialize_falsification_task(
+        self, action: ControlActionRecord
+    ) -> ControlActionResult:
+        task_id = str(action.payload["task_id"])
+        task = self.state.falsification_tasks[task_id]
+        if task.experiment_spec is None or task.computation_plan is None:
+            return ControlActionResult(
+                detail=task.deferred_reason
+                or "falsification request has no typed finite computation plan"
+            )
+        if task.experiment_spec.method == ComputationMethod.SANDBOXED_PYTHON:
+            return ControlActionResult(
+                detail="sandboxed Python is forbidden in the falsification fast lane"
+            )
+        task.status = "admitted"
+        task.action_id = action.action_id
+        self._emit(
+            "falsification_task_materialized",
+            {
+                "action_id": action.action_id,
+                "task_id": task.task_id,
+                "experiment_id": task.experiment_spec.experiment_id,
+                "target_obligation_id": task.target_obligation_id,
+            },
+        )
+        return ControlActionResult(
+            result_refs=[task.task_id, task.computation_plan.plan_id],
+            postcondition_met=True,
+        )
+
+    def _falsification_task_postcondition(
+        self,
+        action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        task = self.state.falsification_tasks.get(
+            str(action.payload.get("task_id", ""))
+        )
+        return (
+            task is not None
+            and task.status == "admitted"
+            and task.action_id == action.action_id
+            and task.experiment_spec is not None
+            and task.computation_plan is not None
+            and task.task_id in result.result_refs
+            and task.computation_plan.plan_id in result.result_refs
         )
 
     def _handle_activate_induction_measure(
@@ -2849,7 +3332,12 @@ class ProofControlLayer:
         if risk.conclusion_id is not None and self._control_obligation_exists(
             risk.conclusion_id
         ):
-            return [risk.conclusion_id]
+            conclusion = self.proof_graph.get_obligation(risk.conclusion_id)
+            if (
+                self._ensure_obligation_domain(conclusion).domain
+                == ObligationDomain.MATHEMATICAL
+            ):
+                return [risk.conclusion_id]
         if risk.route_id is not None:
             try:
                 route = self.route_registry.get(risk.route_id)
@@ -2858,7 +3346,14 @@ class ProofControlLayer:
             if route is not None:
                 binding = self._route_target_binding_for_strategy(route.strategy_id)
                 if binding is not None:
-                    return [binding.direct_target_obligation_id]
+                    target = self.proof_graph.get_obligation(
+                        binding.direct_target_obligation_id
+                    )
+                    if (
+                        self._ensure_obligation_domain(target).domain
+                        == ObligationDomain.MATHEMATICAL
+                    ):
+                        return [binding.direct_target_obligation_id]
         return self._main_goal_ids()
 
     def _verified_risk_bridges(self, risk: InferenceRiskRecord) -> bool:
@@ -2893,7 +3388,10 @@ class ProofControlLayer:
             self.state.claim_verification_ledger,
             self.state.premise_closure_records,
             self.state.countermodel_tasks,
+            self.state.falsification_tasks,
             self.state.negative_patterns,
+            self.state.assumption_domains,
+            self.state.obligation_domains,
             self.state.scope_signatures,
             self.state.proof_roles,
             self.state.inference_risks,
@@ -2906,7 +3404,10 @@ class ProofControlLayer:
             self.state.failure_records,
             self.state.blueprint_rewrites,
             self.state.bottleneck_clusters,
+            self.state.bottleneck_bridge_tasks,
             self.state.critical_assumptions,
+            self.state.assumption_families,
+            self.state.assumption_challenger_tasks,
             self.state.utility_contracts,
             self.state.usage_receipts,
             self.state.near_misses,
