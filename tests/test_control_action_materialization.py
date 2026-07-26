@@ -193,6 +193,7 @@ def _control_runtime(tmp_path):
         broker,
         registry,
     )
+    control.archive_strategy(strategy)
     binding = RouteTargetBinding(
         binding_id="binding-rewrite",
         strategy_id=strategy.strategy_id,
@@ -249,7 +250,7 @@ def test_every_rewrite_request_materializes_action_and_bridge(tmp_path) -> None:
     assert updated.bridge_obligation_ids
 
 
-def test_every_rewrite_verdict_materializes_action(tmp_path) -> None:
+def test_blueprint_prevents_unnecessary_rewrite_verdict(tmp_path) -> None:
     config = make_proof_control_config(tmp_path / "runs", mode="active")
     store, registry, memory, graph, broker = make_broker_runtime(
         config, tmp_path / "runtime"
@@ -298,16 +299,15 @@ def test_every_rewrite_verdict_materializes_action(tmp_path) -> None:
 
     admitted, records = control.admit_routes([strategy])
 
-    assert admitted == []
-    assert records[0].verdict == GateVerdict.REWRITE
-    assert records[0].rewrite_request_id
+    assert admitted == [strategy]
+    assert records[0].verdict == GateVerdict.PASS
+    assert records[0].rewrite_request_id is None
     actions = [
         item
         for item in control.state.control_actions.values()
         if item.action_type == ControlActionType.REWRITE_BLUEPRINT
     ]
-    assert len(actions) == 1
-    assert actions[0].status == ControlActionStatus.EXECUTED
+    assert actions == []
 
 
 def test_minimal_bridge_record_materializes_obligation(tmp_path) -> None:

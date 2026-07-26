@@ -90,6 +90,9 @@ from .models import (
     ScopeRelation,
     ScopeSignature,
     SynthesisReadinessRecord,
+    StrategyBlueprintCompilation,
+    StrategyRevisionReason,
+    RewriteSemanticVerdict,
 )
 from .near_miss import NearMissLedger
 from .proof_roles import ProofRoleClassifier, core_proof_debt
@@ -97,6 +100,12 @@ from .realizer import AbstractRealizerController
 from .scope_guard import ScopeGuard
 from .state import ProofControlState
 from .route_target import choose_nearest_target_obligation
+from .strategy_blueprint import (
+    BlueprintSemanticGate,
+    OriginalStrategyArchive,
+    RewriteSemanticGate,
+    StrategyBlueprintCompiler,
+)
 
 
 class ProofControlLayer:
@@ -164,6 +173,13 @@ class ProofControlLayer:
         self.failure_classifier = FailureClassifier(self.control_config.failure)
         self.blueprint_rewriter = BlueprintRewriter(self.control_config.failure)
         self.blueprint_rewriter.requests = self.state.blueprint_rewrites
+        self.strategy_blueprint_compiler = StrategyBlueprintCompiler()
+        self.blueprint_semantic_gate = BlueprintSemanticGate()
+        self.rewrite_semantic_gate = RewriteSemanticGate()
+        self.strategy_archive = OriginalStrategyArchive(
+            self.state.original_strategy_archive,
+            self.state.strategy_lineage,
+        )
         self.bottlenecks = BottleneckCompressor(self.control_config.bottleneck)
         self.common_mode = CriticalAssumptionMatrix(self.control_config.common_mode)
         self.falsification_tasks = FalsificationTaskMaterializer(config)
@@ -274,7 +290,237 @@ class ProofControlLayer:
     def shadow(self) -> bool:
         return self.control_config.enabled and self.control_config.mode == "shadow"
 
-    def register_strategy(self, strategy: StrategyCard) -> ClaimGoalLink | None:
+    def archive_strategy(
+        self,
+        strategy: StrategyCard,
+        *,
+        first_seen_round: int = 0,
+        raw_artifact_ref: str | None = None,
+    ) -> None:
+        if not self.control_config.enabled or self.control_config.mode == "off":
+            return
+        created = strategy.strategy_id not in self.state.original_strategy_archive
+        entry = self.strategy_archive.archive(
+            strategy,
+            first_seen_round=first_seen_round,
+            raw_artifact_ref=(
+                raw_artifact_ref or f"planner-strategy:{strategy.strategy_id}"
+            ),
+        )
+        if created:
+            self._emit(
+                "strategy_archived",
+                {
+                    "strategy_id": strategy.strategy_id,
+                    "mechanism_hash": entry.mechanism_signature.normalized_hash,
+                    "domain_objects": entry.domain_objects,
+                },
+            )
+
+    def compile_strategy_blueprint(
+        self,
+        strategy: StrategyCard,
+    ) -> StrategyBlueprintCompilation | None:
+        if not self.control_config.enabled or self.control_config.mode == "off":
+            return None
+        self.archive_strategy(strategy)
+        existing = self.state.strategy_blueprints.get(strategy.strategy_id)
+        if existing is not None:
+            return StrategyBlueprintCompilation(
+                blueprint=existing,
+                nodes=[
+                    self.state.blueprint_nodes[item]
+                    for item in existing.node_ids
+                    if item in self.state.blueprint_nodes
+                ],
+                edges=[
+                    self.state.blueprint_edges[item]
+                    for item in existing.edge_ids
+                    if item in self.state.blueprint_edges
+                ],
+            )
+        main_goal = self._main_goal()
+        if main_goal is None:
+            return None
+        compilation = self.strategy_blueprint_compiler.compile(
+            strategy,
+            problem_hash=self.proof_graph.problem_hash,
+            main_goal=main_goal,
+            open_obligations=self.proof_graph.obligations,
+            admitted_facts=self.message_broker.admitted_facts(),
+            negative_memory=self.typed_memory.negatives,
+        )
+        assessment = self.blueprint_semantic_gate.validate(
+            compilation.blueprint,
+            nodes=compilation.nodes,
+            edges=compilation.edges,
+            strategy=strategy,
+            main_goal=main_goal,
+        )
+        self.state.strategy_blueprints[strategy.strategy_id] = compilation.blueprint
+        self.state.blueprint_nodes.update(
+            {item.node_id: item for item in compilation.nodes}
+        )
+        self.state.blueprint_edges.update(
+            {item.edge_id: item for item in compilation.edges}
+        )
+        if not assessment.accepted:
+            compilation.blueprint.status = "needs_review"
+            compilation.review_reasons = list(assessment.reasons)
+            self._emit(
+                "strategy_blueprint_rejected",
+                {
+                    "strategy_id": strategy.strategy_id,
+                    "blueprint_id": compilation.blueprint.blueprint_id,
+                    "reasons": assessment.reasons,
+                },
+            )
+            return compilation
+        self._materialize_tentative_blueprint(strategy, compilation)
+        self._emit(
+            "strategy_blueprint_compiled",
+            {
+                "strategy_id": strategy.strategy_id,
+                "blueprint_id": compilation.blueprint.blueprint_id,
+                "node_ids": compilation.blueprint.node_ids,
+                "edge_ids": compilation.blueprint.edge_ids,
+            },
+        )
+        return compilation
+
+    def _materialize_tentative_blueprint(
+        self,
+        strategy: StrategyCard,
+        compilation: StrategyBlueprintCompilation,
+    ) -> None:
+        existing_ids = {item.obligation_id for item in self.proof_graph.obligations}
+        route_id = self._blueprint_route_id(strategy)
+        kind_map = {
+            "claim": ObligationKind.SUBGOAL,
+            "lemma": ObligationKind.LEMMA,
+            "construction": ObligationKind.CONSTRUCTION,
+            "case_split": ObligationKind.CASE_BRANCH,
+            "countermodel_task": ObligationKind.COMPUTATION_QUESTION,
+            "computation_task": ObligationKind.COMPUTATION_QUESTION,
+            "given": ObligationKind.SUBGOAL,
+        }
+        for node in compilation.nodes:
+            if (
+                node.node_id == compilation.blueprint.main_goal_node_id
+                or node.node_id in existing_ids
+            ):
+                continue
+            obligation = self.proof_graph.add_obligation(
+                ProofObligation(
+                    obligation_id=node.node_id,
+                    problem_hash=self.proof_graph.problem_hash,
+                    route_ids=[route_id],
+                    kind=kind_map.get(node.kind.value, ObligationKind.LEMMA),
+                    statement=node.statement,
+                    normalized_statement=node.normalized_statement,
+                    assumptions=list(node.assumptions),
+                    quantifiers=list(node.quantifiers),
+                    status="tentative",
+                    priority=0.75,
+                    centrality=0.65,
+                )
+            )
+            self._ensure_obligation_domain(obligation, source_kind="mathematical")
+
+    def _blueprint_route_id(self, strategy: StrategyCard) -> str:
+        route = self.route_registry.route_for_strategy(strategy.strategy_id)
+        return (
+            route.route_id
+            if route is not None
+            else "route_"
+            + stable_hash((self.proof_graph.problem_hash, strategy.strategy_id))[:20]
+        )
+
+    def _binding_from_blueprint(
+        self,
+        strategy: StrategyCard,
+        compilation: StrategyBlueprintCompilation,
+    ) -> RouteTargetBinding:
+        blueprint = compilation.blueprint
+        direct_id = blueprint.direct_target_node_ids[0]
+        outgoing = {
+            edge.source_node_id: edge.target_node_id for edge in compilation.edges
+        }
+        path = [direct_id]
+        while path[-1] != blueprint.main_goal_node_id:
+            next_id = outgoing.get(path[-1])
+            if next_id is None or next_id in path:
+                break
+            path.append(next_id)
+        target = self.proof_graph.get_obligation(direct_id)
+        matched_claim_ids = [
+            item.claim_id
+            for item in strategy.critical_claims
+            if obligation_identity_text(item.statement)
+            == obligation_identity_text(target.normalized_statement)
+        ]
+        binding = RouteTargetBinding(
+            binding_id=(
+                "route_target_"
+                + stable_hash(
+                    {
+                        "problem_hash": self.proof_graph.problem_hash,
+                        "strategy_id": strategy.strategy_id,
+                        "blueprint_id": blueprint.blueprint_id,
+                        "direct_target": direct_id,
+                    }
+                )[:16]
+            ),
+            strategy_id=strategy.strategy_id,
+            route_id=(
+                self.route_registry.route_for_strategy(strategy.strategy_id).route_id
+                if self.route_registry.route_for_strategy(strategy.strategy_id)
+                is not None
+                else None
+            ),
+            direct_target_obligation_id=direct_id,
+            ancestor_obligation_ids=path[1:],
+            main_goal_obligation_id=blueprint.main_goal_node_id,
+            direct_claim_ids=matched_claim_ids,
+            bridge_obligation_ids=path[1:-1],
+            relation_to_direct_target=GoalRelation.SUFFICIENT,
+            relation_to_main_goal=GoalRelation.NECESSARY_ONLY,
+            scope_relation_to_direct_target=ScopeRelation.SAME,
+            blueprint_path_complete=(
+                bool(path) and path[-1] == blueprint.main_goal_node_id
+            ),
+            binding_confidence=blueprint.compilation_confidence,
+        )
+        self.state.route_target_bindings[binding.binding_id] = binding
+        return binding
+
+    def _activate_blueprint(
+        self,
+        strategy: StrategyCard,
+        compilation: StrategyBlueprintCompilation,
+    ) -> None:
+        route_id = self._blueprint_route_id(strategy)
+        for node in compilation.nodes:
+            if node.node_id == compilation.blueprint.main_goal_node_id:
+                continue
+            obligation = self.proof_graph.get_obligation(node.node_id)
+            if route_id not in obligation.route_ids:
+                obligation.route_ids.append(route_id)
+            if obligation.status == "tentative":
+                obligation.status = "open"
+        for edge in compilation.edges:
+            self._ensure_dependency_edge(
+                edge.target_node_id,
+                edge.source_node_id,
+            )
+        compilation.blueprint.status = "accepted"
+
+    def register_strategy(
+        self,
+        strategy: StrategyCard,
+        *,
+        blueprint_binding: RouteTargetBinding | None = None,
+    ) -> ClaimGoalLink | None:
         existing = self._goal_link_for_subject(strategy.strategy_id)
         existing_binding = self._route_target_binding_for_strategy(strategy.strategy_id)
         existing_contract = self._alignment_contract_for_subject(strategy.strategy_id)
@@ -295,26 +541,29 @@ class ProofControlLayer:
             return existing
         for obligation in self.proof_graph.obligations:
             self._ensure_obligation_domain(obligation)
-        try:
-            binding = choose_nearest_target_obligation(
-                strategy,
-                self.proof_graph,
-                self.state.goal_links,
-                self.state.obligation_domains,
-            )
-        except ValueError as exc:
-            self._emit(
-                "goal_alignment_blocked",
-                {
-                    "subject_id": strategy.strategy_id,
-                    "reason": str(exc),
-                },
-            )
-            return None
+        binding = blueprint_binding
+        if binding is None:
+            try:
+                binding = choose_nearest_target_obligation(
+                    strategy,
+                    self.proof_graph,
+                    self.state.goal_links,
+                    self.state.obligation_domains,
+                )
+            except ValueError as exc:
+                self._emit(
+                    "goal_alignment_blocked",
+                    {
+                        "subject_id": strategy.strategy_id,
+                        "reason": str(exc),
+                    },
+                )
+                return None
         generated_subgoal_id: str | None = None
         main_goal = self.proof_graph.get_obligation(binding.main_goal_obligation_id)
         if (
-            binding.direct_target_obligation_id == binding.main_goal_obligation_id
+            blueprint_binding is None
+            and binding.direct_target_obligation_id == binding.main_goal_obligation_id
             and obligation_identity_text(strategy.bottleneck)
             != obligation_identity_text(main_goal.normalized_statement)
             and bool(strategy.expected_lemmas)
@@ -346,7 +595,31 @@ class ProofControlLayer:
         if route is not None:
             binding = binding.model_copy(update={"route_id": route.route_id})
         target = self.proof_graph.get_obligation(binding.direct_target_obligation_id)
-        link = existing or self.goal_alignment.assess_strategy(strategy, target)
+        link = existing
+        if link is None and blueprint_binding is not None:
+            link = ClaimGoalLink(
+                subject_id=strategy.strategy_id,
+                subject_kind="strategy",
+                target_obligation_id=target.obligation_id,
+                relation=GoalRelation.SUFFICIENT,
+                scope_relation=ScopeRelation.SAME,
+                implication_outline=[
+                    strategy.strategy_id,
+                    *binding.ancestor_obligation_ids,
+                ],
+                remaining_obligation_ids_if_proved=list(
+                    binding.ancestor_obligation_ids
+                ),
+                required_bridge_obligation_ids=list(binding.bridge_obligation_ids),
+                minimality_score=0.9,
+                alignment_confidence=binding.binding_confidence,
+                assessment_source="deterministic",
+                evidence_refs=[
+                    self.state.strategy_blueprints[strategy.strategy_id].blueprint_id
+                ],
+            )
+        if link is None:
+            link = self.goal_alignment.assess_strategy(strategy, target)
         registered = (
             link if existing is not None else self._register_goal_link(strategy, link)
         )
@@ -830,6 +1103,8 @@ class ProofControlLayer:
     def admit_routes(
         self, strategies: Sequence[StrategyCard]
     ) -> tuple[list[StrategyCard], list[RouteAdmissionRecord]]:
+        if not self.control_config.enabled or self.control_config.mode == "off":
+            return list(strategies), []
         admitted: list[StrategyCard] = []
         records: list[RouteAdmissionRecord] = []
         existing_signatures = [
@@ -850,14 +1125,22 @@ class ProofControlLayer:
             == ObligationDomain.MATHEMATICAL
         }
         for strategy in strategies:
-            link = self.register_strategy(strategy)
+            compilation = self.compile_strategy_blueprint(strategy)
+            binding = None
+            if compilation is not None and compilation.blueprint.status == "accepted":
+                binding = self._binding_from_blueprint(strategy, compilation)
+            link = (
+                self.register_strategy(strategy, blueprint_binding=binding)
+                if binding is not None
+                else None
+            )
             obligations = {
                 item.obligation_id: item
                 for item in self.proof_graph.obligations
                 if self.state.obligation_domains[item.obligation_id].domain
                 == ObligationDomain.MATHEMATICAL
             }
-            if link is None:
+            if compilation is None or compilation.blueprint.status != "accepted":
                 record = RouteAdmissionRecord(
                     strategy_id=strategy.strategy_id,
                     verdict=(
@@ -865,10 +1148,26 @@ class ProofControlLayer:
                     ),
                     alignment_score=0.0,
                     target_obligation_ids=[],
-                    reasons=["main goal obligation is unavailable"],
+                    reasons=(
+                        compilation.review_reasons
+                        if compilation is not None and compilation.review_reasons
+                        else ["strategy blueprint is unavailable or invalid"]
+                    ),
+                )
+            elif link is None:
+                record = RouteAdmissionRecord(
+                    strategy_id=strategy.strategy_id,
+                    verdict=(
+                        GateVerdict.BLOCK if self.active else GateVerdict.SHADOW_BLOCK
+                    ),
+                    alignment_score=0.0,
+                    target_obligation_ids=[],
+                    reasons=["blueprint direct target could not be aligned"],
                 )
             else:
-                binding = self._route_target_binding_for_strategy(strategy.strategy_id)
+                binding = binding or self._route_target_binding_for_strategy(
+                    strategy.strategy_id
+                )
                 contract = self._alignment_contract_for_subject(strategy.strategy_id)
                 record = self.route_admission_gate.evaluate(
                     strategy,
@@ -901,6 +1200,10 @@ class ProofControlLayer:
                     )
             self.state.route_admissions[strategy.strategy_id] = record
             records.append(record)
+            self._emit(
+                "route_admission_evaluated",
+                record.model_dump(mode="json"),
+            )
             if record.verdict in {GateVerdict.BLOCK, GateVerdict.REWRITE}:
                 self._emit(
                     "route_admission_blocked",
@@ -912,6 +1215,11 @@ class ProofControlLayer:
                     record.model_dump(mode="json"),
                 )
             if record.verdict in {GateVerdict.PASS, GateVerdict.SHADOW_BLOCK}:
+                if (
+                    compilation is not None
+                    and compilation.blueprint.status == "accepted"
+                ):
+                    self._activate_blueprint(strategy, compilation)
                 admitted.append(strategy)
                 existing_signatures.append(strategy.tags)
         self.persist()
@@ -3846,7 +4154,166 @@ class ProofControlLayer:
             if binding_id is not None
             else None
         )
-        result_refs = [request.request_id]
+        strategy_id = str(action.payload.get("strategy_id", ""))
+        archive_entry = self.state.original_strategy_archive.get(strategy_id)
+        if archive_entry is None:
+            request.status = "failed"
+            request.failure_reason = (
+                "blueprint rewrite requires an archived original StrategyCard"
+            )
+            return ControlActionResult(
+                postcondition_met=False,
+                detail=request.failure_reason,
+            )
+        if (
+            binding is not None
+            and binding.direct_target_obligation_id == binding.main_goal_obligation_id
+        ):
+            request.status = "failed"
+            request.failure_reason = "self-implication rewrite is not permitted"
+            self._emit(
+                "rewrite_semantic_rejected",
+                {
+                    "request_id": request.request_id,
+                    "strategy_id": strategy_id,
+                    "reason": request.failure_reason,
+                },
+            )
+            return ControlActionResult(
+                postcondition_met=False,
+                detail=request.failure_reason,
+            )
+        original_strategy = archive_entry.strategy
+        main_goal = (
+            self.proof_graph.get_obligation(binding.main_goal_obligation_id)
+            if binding is not None
+            else self._main_goal()
+        )
+        if main_goal is None:
+            request.status = "failed"
+            request.failure_reason = "rewrite has no frozen main goal"
+            return ControlActionResult(
+                postcondition_met=False,
+                detail=request.failure_reason,
+            )
+        added_statements: list[str] = []
+        for value in [
+            *request.proposed_weaker_targets,
+            *request.proposed_bridge_obligation_ids,
+        ]:
+            if self._control_obligation_exists(value):
+                added_statements.append(
+                    self.proof_graph.get_obligation(value).normalized_statement
+                )
+            elif value.strip():
+                added_statements.append(value.strip())
+        if binding is not None:
+            direct = self.proof_graph.get_obligation(
+                binding.direct_target_obligation_id
+            )
+            bridge_statement = (
+                f"If {direct.normalized_statement}, then "
+                f"{main_goal.normalized_statement}."
+            )
+            if obligation_identity_text(direct.normalized_statement) == (
+                obligation_identity_text(main_goal.normalized_statement)
+            ):
+                request.status = "failed"
+                request.failure_reason = "self-implication rewrite is not permitted"
+                return ControlActionResult(
+                    postcondition_met=False,
+                    detail=request.failure_reason,
+                )
+            added_statements.append(bridge_statement)
+        added_statements = list(dict.fromkeys(added_statements))
+        revised_strategy = original_strategy.model_copy(
+            update={
+                "strategy_id": (
+                    "strategy_revision_"
+                    + stable_hash(
+                        {
+                            "request_id": request.request_id,
+                            "parent": original_strategy.strategy_id,
+                            "statements": added_statements,
+                        }
+                    )[:16]
+                ),
+                "core_idea": (
+                    original_strategy.core_idea
+                    + " Preserve that mechanism while proving the explicit "
+                    "intermediate implication."
+                ),
+                "expected_lemmas": list(
+                    dict.fromkeys(
+                        [*original_strategy.expected_lemmas, *added_statements]
+                    )
+                ),
+                "bottleneck": (
+                    added_statements[-1]
+                    if added_statements
+                    else original_strategy.bottleneck
+                ),
+                "parent_strategy_ids": list(
+                    dict.fromkeys(
+                        [
+                            *original_strategy.parent_strategy_ids,
+                            original_strategy.strategy_id,
+                        ]
+                    )
+                ),
+            }
+        )
+        semantic_result = self.rewrite_semantic_gate.revise_from_claims(
+            rewrite_request_id=request.request_id,
+            original_strategy=original_strategy,
+            candidate_strategy=revised_strategy,
+            main_goal=main_goal,
+            retained_claim_statements=original_strategy.expected_lemmas,
+            added_claim_statements=added_statements,
+        )
+        self.state.rewrite_semantic_assessments[request.request_id] = (
+            semantic_result.semantic_assessment
+        )
+        self.state.strategy_lineage[semantic_result.lineage.strategy_id] = (
+            semantic_result.lineage
+        )
+        if semantic_result.semantic_assessment.verdict != RewriteSemanticVerdict.VALID:
+            request.status = "failed"
+            request.failure_reason = "; ".join(
+                semantic_result.semantic_assessment.reasons
+            )
+            self.state.strategy_lineage[strategy_id].status = "needs_rewrite"
+            self._emit(
+                "rewrite_semantic_rejected",
+                {
+                    "request_id": request.request_id,
+                    "strategy_id": strategy_id,
+                    "verdict": semantic_result.semantic_assessment.verdict.value,
+                    "reasons": semantic_result.semantic_assessment.reasons,
+                },
+            )
+            return ControlActionResult(
+                postcondition_met=False,
+                detail=request.failure_reason,
+            )
+        self.state.revised_strategy_results[request.request_id] = semantic_result
+        self.strategy_archive.register_child(
+            semantic_result.revised_strategy,
+            parent_strategy_id=original_strategy.strategy_id,
+            reason=StrategyRevisionReason.ADMISSION_REWRITE,
+        )
+        self._emit(
+            "revised_strategy_created",
+            {
+                "request_id": request.request_id,
+                "strategy_id": semantic_result.revised_strategy.strategy_id,
+                "parent_strategy_id": original_strategy.strategy_id,
+            },
+        )
+        result_refs = [
+            request.request_id,
+            semantic_result.revised_strategy.strategy_id,
+        ]
         historical_targets = [
             target_id
             for target_id in (
@@ -4020,6 +4487,17 @@ class ProofControlLayer:
             or request.status != "executed"
             or request.execution_action_id != action.action_id
             or request.request_id not in result.result_refs
+        ):
+            return False
+        semantic = self.state.rewrite_semantic_assessments.get(request.request_id)
+        revised = self.state.revised_strategy_results.get(request.request_id)
+        if (
+            semantic is None
+            or semantic.verdict != RewriteSemanticVerdict.VALID
+            or revised is None
+            or revised.revised_strategy.strategy_id not in result.result_refs
+            or revised.lineage.parent_strategy_id is None
+            or not revised.first_executable_obligation_id
         ):
             return False
         materialized = [

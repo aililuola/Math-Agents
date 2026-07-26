@@ -11,7 +11,9 @@ from ..schemas import (
     ComputationPlan,
     ExperimentSpec,
     FailureLevel,
+    NoveltySignature,
     QuantifierSpec,
+    StrategyCard,
     StrictModel,
     VariableBinding,
     new_id,
@@ -97,6 +99,171 @@ class MetaPivotStatus(StrEnum):
     EXECUTED = "executed"
     EVALUATED = "evaluated"
     FAILED = "failed"
+
+
+class BlueprintNodeKind(StrEnum):
+    GIVEN = "given"
+    CLAIM = "claim"
+    LEMMA = "lemma"
+    CONSTRUCTION = "construction"
+    CASE_SPLIT = "case_split"
+    COUNTERMODEL_TASK = "countermodel_task"
+    COMPUTATION_TASK = "computation_task"
+    TARGET = "target"
+
+
+class BlueprintNode(StrictModel):
+    node_id: str
+    strategy_id: str
+    kind: BlueprintNodeKind
+    statement: str
+    normalized_statement: str
+    assumptions: list[str] = Field(default_factory=list)
+    quantifiers: list[QuantifierSpec] = Field(default_factory=list)
+    scope_signature_id: str | None = None
+    source_field: Literal[
+        "critical_claim",
+        "expected_lemma",
+        "bottleneck",
+        "key_original_step",
+        "generated_bridge",
+        "main_goal",
+        "given",
+    ]
+    executable_first_step: str | None = None
+    semantic_quality_score: float = Field(ge=0.0, le=1.0)
+
+
+class BlueprintEdge(StrictModel):
+    edge_id: str
+    source_node_id: str
+    target_node_id: str
+    relation: Literal[
+        "implies",
+        "depends_on",
+        "equivalent_to",
+        "closes",
+        "requires_construction",
+    ]
+    implication_outline: list[str] = Field(default_factory=list)
+    verified: bool = False
+
+
+class StrategyBlueprint(StrictModel):
+    blueprint_id: str
+    strategy_id: str
+    problem_hash: str
+    node_ids: list[str]
+    edge_ids: list[str]
+    main_goal_node_id: str
+    direct_target_node_ids: list[str]
+    root_entry_node_ids: list[str]
+    open_gap_node_ids: list[str]
+    preserves_mechanism_signature: bool
+    complete_path_to_main_goal: bool
+    compilation_confidence: float = Field(ge=0.0, le=1.0)
+    status: Literal[
+        "draft",
+        "compiled",
+        "needs_review",
+        "accepted",
+        "rejected",
+    ] = "draft"
+
+
+class StrategyBlueprintCompilation(StrictModel):
+    blueprint: StrategyBlueprint
+    nodes: list[BlueprintNode]
+    edges: list[BlueprintEdge]
+    review_reasons: list[str] = Field(default_factory=list)
+
+
+class BlueprintSemanticAssessment(StrictModel):
+    blueprint_id: str
+    accepted: bool
+    reasons: list[str] = Field(default_factory=list)
+
+
+class StrategyRevisionReason(StrEnum):
+    ADMISSION_REWRITE = "admission_rewrite"
+    PLAN_FAILURE = "plan_failure"
+    SCOPE_REPAIR = "scope_repair"
+    BRIDGE_INSERTION = "bridge_insertion"
+    COUNTERMODEL_FEEDBACK = "countermodel_feedback"
+    USER_INTERVENTION = "user_intervention"
+
+
+class StrategyLineageRecord(StrictModel):
+    strategy_id: str
+    parent_strategy_id: str | None
+    root_strategy_id: str
+    revision_number: int = Field(ge=0)
+    revision_reason: StrategyRevisionReason | None
+    preserved_mechanism_tags: list[str]
+    preserved_domain_objects: list[str]
+    removed_claim_ids: list[str]
+    added_claim_ids: list[str]
+    superseded_by_strategy_id: str | None = None
+    status: Literal[
+        "original",
+        "active",
+        "needs_rewrite",
+        "superseded",
+        "rejected_with_evidence",
+        "archived",
+    ]
+
+
+class RewriteSemanticVerdict(StrEnum):
+    VALID = "valid"
+    TAUTOLOGICAL = "tautological"
+    PLACEHOLDER = "placeholder"
+    NO_EXECUTABLE_STEP = "no_executable_step"
+    NO_TARGET = "no_target"
+    LOST_DOMAIN_MECHANISM = "lost_domain_mechanism"
+    SCOPE_INVALID = "scope_invalid"
+    DUPLICATE = "duplicate"
+
+
+class RewriteSemanticAssessment(StrictModel):
+    rewrite_request_id: str
+    candidate_strategy_id: str | None
+    candidate_bridge_node_ids: list[str]
+    verdict: RewriteSemanticVerdict
+    canonical_source_hash: str
+    canonical_target_hash: str
+    is_self_implication: bool
+    has_nontrivial_graph_change: bool
+    has_executable_first_step: bool
+    domain_mechanism_preserved: bool
+    reasons: list[str]
+
+
+class RevisedStrategyResult(StrictModel):
+    revised_strategy: StrategyCard
+    revised_blueprint: StrategyBlueprint
+    lineage: StrategyLineageRecord
+    semantic_assessment: RewriteSemanticAssessment
+    retained_claim_ids: list[str]
+    removed_claim_ids: list[str]
+    added_claim_ids: list[str]
+    first_executable_obligation_id: str
+
+
+class OriginalStrategyArchiveEntry(StrictModel):
+    strategy: StrategyCard
+    mechanism_signature: NoveltySignature
+    domain_objects: list[str]
+    critical_claims: list[str]
+    expected_lemmas: list[str]
+    first_seen_round: int = Field(ge=0)
+    raw_artifact_ref: str
+
+
+class StrategyCandidateAssessment(StrictModel):
+    strategy_id: str
+    selectable: bool
+    semantic_rejection_reason: str | None = None
 
 
 class ControlActionRecord(StrictModel):

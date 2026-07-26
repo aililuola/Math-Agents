@@ -11,6 +11,8 @@ from .models import (
     AssumptionDomainRecord,
     AssumptionFamily,
     BlueprintRewriteRequest,
+    BlueprintEdge,
+    BlueprintNode,
     BottleneckBridgeTask,
     BottleneckCluster,
     ClaimVerificationLedgerEntry,
@@ -41,7 +43,12 @@ from .models import (
     RouteAdmissionRecord,
     RouteUpdateTask,
     RouteTargetBinding,
+    OriginalStrategyArchiveEntry,
+    RevisedStrategyResult,
+    RewriteSemanticAssessment,
     ScopeSignature,
+    StrategyBlueprint,
+    StrategyLineageRecord,
     SynthesisReadinessRecord,
 )
 
@@ -51,7 +58,7 @@ T = TypeVar("T", bound=BaseModel)
 class ProofControlState:
     """Stable sidecar state that never participates in mathematical hashes."""
 
-    schema_version = "0.8.1"
+    schema_version = "0.8.2"
 
     def __init__(self) -> None:
         self.goal_links: dict[str, ClaimGoalLink] = {}
@@ -76,6 +83,13 @@ class ProofControlState:
         self.induction_blueprints: dict[str, InductionBlueprintNode] = {}
         self.failure_records: dict[str, FailureClassificationRecord] = {}
         self.blueprint_rewrites: dict[str, BlueprintRewriteRequest] = {}
+        self.strategy_blueprints: dict[str, StrategyBlueprint] = {}
+        self.blueprint_nodes: dict[str, BlueprintNode] = {}
+        self.blueprint_edges: dict[str, BlueprintEdge] = {}
+        self.strategy_lineage: dict[str, StrategyLineageRecord] = {}
+        self.original_strategy_archive: dict[str, OriginalStrategyArchiveEntry] = {}
+        self.rewrite_semantic_assessments: dict[str, RewriteSemanticAssessment] = {}
+        self.revised_strategy_results: dict[str, RevisedStrategyResult] = {}
         self.bottleneck_clusters: dict[str, BottleneckCluster] = {}
         self.bottleneck_aliases: dict[str, str] = {}
         self.bottleneck_bridge_tasks: dict[str, BottleneckBridgeTask] = {}
@@ -133,6 +147,19 @@ class ProofControlState:
             "induction_blueprints": self._dump_models(self.induction_blueprints),
             "failure_records": self._dump_models(self.failure_records),
             "blueprint_rewrites": self._dump_models(self.blueprint_rewrites),
+            "strategy_blueprints": self._dump_models(self.strategy_blueprints),
+            "blueprint_nodes": self._dump_models(self.blueprint_nodes),
+            "blueprint_edges": self._dump_models(self.blueprint_edges),
+            "strategy_lineage": self._dump_models(self.strategy_lineage),
+            "original_strategy_archive": self._dump_models(
+                self.original_strategy_archive
+            ),
+            "rewrite_semantic_assessments": self._dump_models(
+                self.rewrite_semantic_assessments
+            ),
+            "revised_strategy_results": self._dump_models(
+                self.revised_strategy_results
+            ),
             "bottleneck_clusters": self._dump_models(self.bottleneck_clusters),
             "bottleneck_aliases": {
                 key: self.bottleneck_aliases[key]
@@ -187,6 +214,14 @@ class ProofControlState:
         restored.events = [
             dict(item) for item in state.get("events", []) if isinstance(item, Mapping)
         ]
+        if str(state.get("schema_version", "")) != cls.schema_version:
+            restored.events.append(
+                {
+                    "event_type": "checkpoint_migrated_to_v0_8_2",
+                    "from_schema_version": str(state.get("schema_version", "missing")),
+                    "to_schema_version": cls.schema_version,
+                }
+            )
         model_fields: tuple[tuple[str, type[BaseModel]], ...] = (
             ("goal_links", ClaimGoalLink),
             ("control_actions", ControlActionRecord),
@@ -209,6 +244,13 @@ class ProofControlState:
             ("induction_blueprints", InductionBlueprintNode),
             ("failure_records", FailureClassificationRecord),
             ("blueprint_rewrites", BlueprintRewriteRequest),
+            ("strategy_blueprints", StrategyBlueprint),
+            ("blueprint_nodes", BlueprintNode),
+            ("blueprint_edges", BlueprintEdge),
+            ("strategy_lineage", StrategyLineageRecord),
+            ("original_strategy_archive", OriginalStrategyArchiveEntry),
+            ("rewrite_semantic_assessments", RewriteSemanticAssessment),
+            ("revised_strategy_results", RevisedStrategyResult),
             ("bottleneck_clusters", BottleneckCluster),
             ("bottleneck_bridge_tasks", BottleneckBridgeTask),
             ("critical_assumptions", CriticalAssumption),

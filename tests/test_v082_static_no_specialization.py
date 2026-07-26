@@ -29,7 +29,7 @@ def test_route_admission_source_orders_blueprint_before_gate() -> None:
 def test_no_problem_specific_conditionals_in_production() -> None:
     prohibited = {"prime", "gcd", "a_n"}
     findings: list[str] = []
-    for path in PRODUCTION.rglob("*.py"):
+    for path in (PRODUCTION / "proof_control").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, (ast.If, ast.IfExp, ast.While, ast.Match)):

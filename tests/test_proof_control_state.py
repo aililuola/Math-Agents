@@ -52,16 +52,17 @@ def test_unknown_old_record_is_skipped_with_migration_event() -> None:
 
     assert restored.goal_links == {}
     assert restored.proof_roles == {}
-    assert len(restored.events) == 2
+    assert len(restored.events) == 3
+    assert restored.events[0]["event_type"] == "checkpoint_migrated_to_v0_8_2"
     assert all(
         event["event_type"] == "proof_control_migration_record_skipped"
-        for event in restored.events
+        for event in restored.events[1:]
     )
 
 
 def test_missing_payload_initializes_empty_state() -> None:
     restored = ProofControlState.from_state(None)
 
-    assert restored.export_state()["schema_version"] == "0.8.1"
+    assert restored.export_state()["schema_version"] == "0.8.2"
     assert restored.goal_links == {}
     assert restored.events == []
