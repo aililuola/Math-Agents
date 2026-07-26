@@ -32,8 +32,12 @@ class StartRunRequest(_ApiModel):
     run_id: str | None = Field(default=None, max_length=160)
 
 
+RESUME_MODES = ("normal", "reopen_with_pivot", "reset_stagnation", "replay_stage")
+
+
 class ResumeRunRequest(_ApiModel):
     profile: DesktopProfile
+    resume_mode: str = Field(default="normal", max_length=40)
 
 
 class ClarificationDecisionRequest(_ApiModel):
@@ -346,8 +350,17 @@ def create_desktop_app(
         run_id: str,
         payload: ResumeRunRequest,
     ) -> dict[str, object]:
+        if payload.resume_mode not in RESUME_MODES:
+            raise HTTPException(
+                status_code=400,
+                detail="resume_mode must be one of: " + ", ".join(RESUME_MODES),
+            )
         try:
-            session = await manager.resume(run_id=run_id, profile=payload.profile)
+            session = await manager.resume(
+                run_id=run_id,
+                profile=payload.profile,
+                resume_mode=payload.resume_mode,
+            )
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except FileNotFoundError as exc:

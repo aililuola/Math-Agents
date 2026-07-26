@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 from mathproofmesh.orchestrator import ProofMeshOrchestrator, SolveState
 from mathproofmesh.proof_control.controller import ProofControlLayer
@@ -141,7 +142,7 @@ def test_meta_pivot_resume_exactly_once(tmp_path) -> None:
 
 
 def test_failed_meta_pivot_has_explicit_reason(tmp_path) -> None:
-    _config, _store, control, _orchestrator, _state = _runtime(tmp_path)
+    config, store, control, orchestrator, state = _runtime(tmp_path)
     pivot = control.request_meta_pivot(
         source_stagnation_signature="plateau-failed",
         trigger_round=2,
@@ -162,6 +163,21 @@ def test_failed_meta_pivot_has_explicit_reason(tmp_path) -> None:
     assert "no independent pivot agent" in failed.failure_reason
     action = control.state.control_actions[pivot.action_id]
     assert action.status == ControlActionStatus.FAILED
+
+    state.last_progress_signature = orchestrator._global_progress_signature(state)
+    state.global_no_progress_rounds = (
+        config.scheduler.global_no_progress_rounds_before_stop - 1
+    )
+    orchestrator._apply_global_progress_gate(
+        state,
+        round_index=4,
+        store=store,
+    )
+    assert (
+        state.global_no_progress_rounds
+        == config.scheduler.global_no_progress_rounds_before_stop
+    )
+    assert state.pivot_grace_used is False
 
 
 def test_stop_allowed_after_empty_pivot(tmp_path) -> None:
@@ -193,8 +209,63 @@ def test_stop_allowed_after_empty_pivot(tmp_path) -> None:
         config.scheduler.global_no_progress_rounds_before_stop - 1
     )
 
-    assert orchestrator._apply_global_progress_gate(
+    # The admitted pivot burned this round without materializing, so the
+    # round is not counted: one grace round precedes the hard stop.
+    assert not orchestrator._apply_global_progress_gate(
         state,
         round_index=4,
         store=store,
+    )
+    assert state.pivot_grace_used is True
+    assert orchestrator._apply_global_progress_gate(
+        state,
+        round_index=5,
+        store=store,
+    )
+
+
+def test_pivot_grace_survives_checkpoint_resume(tmp_path) -> None:
+    _config, store, _control, orchestrator, state = _runtime(tmp_path)
+    state.pivot_grace_used = True
+    runner = SimpleNamespace(
+        ledger=SimpleNamespace(
+            calls_started=0,
+            stage_calls={},
+            bucket_calls={},
+            reservation_calls={},
+        ),
+        pool=SimpleNamespace(
+            metrics=lambda: {},
+            provider_circuit_state=lambda: {},
+        ),
+        persist_runtime_state=lambda: None,
+    )
+
+    orchestrator._checkpoint(
+        store,
+        "pivot_grace",
+        state,
+        SimpleNamespace(claims={}),
+        runner,
+    )
+
+    latest = store.latest_stage_checkpoint()
+    assert latest is not None
+    _stage, payload = latest
+    assert payload["pivot_grace_used"] is True
+    assert (
+        orchestrator._restore_state_from_checkpoint(
+            payload,
+            store,
+        ).pivot_grace_used
+        is True
+    )
+
+    payload.pop("pivot_grace_used")
+    assert (
+        orchestrator._restore_state_from_checkpoint(
+            payload,
+            store,
+        ).pivot_grace_used
+        is False
     )

@@ -87,6 +87,7 @@ from .proof_control.models import (
     ControlActionStatus,
     DependencyKind,
     GateVerdict,
+    MetaPivotEffect,
     MetaPivotStatus,
     ProofRole,
     ResumeDecisionKind,
@@ -281,6 +282,7 @@ class SolveState:
     proof_control: ProofControlLayer | None = None
     global_no_progress_rounds: int = 0
     global_meta_pivot_used: bool = False
+    pivot_grace_used: bool = False
     hard_stopped: bool = False
     last_progress_signature: str | None = None
     certified_counterexample_hashes: list[str] = field(default_factory=list)
@@ -4517,6 +4519,28 @@ class ProofMeshOrchestrator:
             state.hard_stopped = False
         else:
             state.global_no_progress_rounds += 1
+            pivot = (
+                control.state.meta_pivot_state
+                if control is not None and control.active
+                else None
+            )
+            pivot_outcome = (
+                control.state.meta_pivot_outcomes.get(pivot.pivot_id)
+                if control is not None and pivot is not None
+                else None
+            )
+            if (
+                not state.pivot_grace_used
+                and pivot is not None
+                and pivot.status == MetaPivotStatus.FAILED
+                and pivot_outcome is not None
+                and pivot_outcome.effect == MetaPivotEffect.EMPTY
+            ):
+                # An admitted pivot that never materialized consumed this
+                # round; hold the counter once per run so the hard stop does
+                # not fire on the very round the pivot burned.
+                state.pivot_grace_used = True
+                state.global_no_progress_rounds -= 1
         state.last_progress_signature = current
 
         certificate = {
@@ -6770,6 +6794,7 @@ class ProofMeshOrchestrator:
             capability_domain=str(payload.get("capability_domain", "algebra")),
             global_no_progress_rounds=int(payload.get("global_no_progress_rounds", 0)),
             global_meta_pivot_used=bool(payload.get("global_meta_pivot_used", False)),
+            pivot_grace_used=bool(payload.get("pivot_grace_used", False)),
             hard_stopped=bool(payload.get("hard_stopped", False)),
             last_progress_signature=payload.get("last_progress_signature"),
             certified_counterexample_hashes=[
@@ -15345,6 +15370,7 @@ class ProofMeshOrchestrator:
                 "research_progress_report": state.research_progress_report,
                 "global_no_progress_rounds": state.global_no_progress_rounds,
                 "global_meta_pivot_used": state.global_meta_pivot_used,
+                "pivot_grace_used": state.pivot_grace_used,
                 "hard_stopped": state.hard_stopped,
                 "last_progress_signature": state.last_progress_signature,
                 "proof_control_config_hash": stable_hash(

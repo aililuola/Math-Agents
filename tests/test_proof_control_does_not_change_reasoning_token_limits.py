@@ -12,6 +12,7 @@ PROOF_CONTROL_CONFIGS = (
     ROOT / "config.deepseek-v4-pro.proof-control-shadow.yaml",
     ROOT / "config.deepseek-v4-pro.proof-control-active.yaml",
 )
+ALL_FROZEN_PROFILES = (BASELINE, *PROOF_CONTROL_CONFIGS)
 
 
 def _without_proof_control(config_path: Path) -> dict[str, Any]:
@@ -59,3 +60,13 @@ def test_all_reasoning_and_deep_exploration_limits_are_frozen() -> None:
 
     for config_path in PROOF_CONTROL_CONFIGS:
         assert _frozen_reasoning_limits(config_path) == baseline
+
+
+def test_release_reasoning_budgets_and_stop_threshold_remain_frozen() -> None:
+    for config_path in ALL_FROZEN_PROFILES:
+        config = load_config(config_path)
+        assert config.scheduler.global_no_progress_rounds_before_stop == 3
+        assert (
+            config.runtime.stage_output_token_limits["hypothesize_invariant"] == 24000
+        )
+        assert config.runtime.stage_output_token_limits["inspiration_referee"] == 16000
