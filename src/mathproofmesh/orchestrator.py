@@ -6183,6 +6183,83 @@ class ProofMeshOrchestrator:
             return 0
         return max(route.stagnation_rounds, route.no_progress_strikes)
 
+    async def _run_materialized_falsification_tasks(
+        self,
+        problem: ProblemContract,
+        strategy: StrategyCard,
+        author: AgentRuntime,
+        *,
+        state: SolveState | None,
+        round_index: int,
+        path_id: str,
+        parent_checkpoint_id: str | None,
+        meta_review_approved: bool,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        tools: ToolBroker,
+        budget_bucket: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if (
+            state is None
+            or state.proof_control is None
+            or not state.proof_control.active
+        ):
+            return [], []
+        route = (
+            state.route_registry.route_for_strategy(strategy.strategy_id)
+            if state.route_registry is not None
+            else None
+        )
+        route_id = route.route_id if route is not None else None
+        lane = self.config.topology.proof_control.falsification_fast_lane
+        tasks = state.proof_control.pending_falsification_specs(
+            strategy.strategy_id,
+            route_id=route_id,
+        )[: lane.max_tasks_per_round]
+        feedback: list[dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
+        for task in tasks:
+            assert task.experiment_spec is not None
+            state.proof_control.mark_falsification_running(task.task_id)
+            try:
+                decision, result = await self._run_requested_computation(
+                    problem,
+                    task.experiment_spec.model_copy(deep=True),
+                    author,
+                    path_id=path_id,
+                    parent_checkpoint_id=parent_checkpoint_id,
+                    stalled_rounds=self._computation_stalled_rounds(
+                        state,
+                        strategy,
+                        round_index=round_index,
+                    ),
+                    meta_review_approved=meta_review_approved,
+                    runner=runner,
+                    prompts=prompts,
+                    tools=tools,
+                    budget_bucket=budget_bucket,
+                    state=state,
+                    proof_control_task_id=task.task_id,
+                    proof_control_target_obligation_id=(task.target_obligation_id),
+                    proof_control_target_claim_id=task.target_claim_id,
+                )
+            except BaseException as exc:
+                state.proof_control.record_falsification_execution_failure(
+                    task.task_id,
+                    error=exc,
+                )
+                raise
+            feedback.append(decision.model_dump(mode="json"))
+            if result is None:
+                state.proof_control.record_falsification_decision(
+                    task.task_id,
+                    decision=decision.decision.value,
+                    reason=decision.reason,
+                )
+                continue
+            results.append(result.model_dump(mode="json"))
+        return feedback, results
+
     async def _retry_deferred_computations(
         self,
         problem: ProblemContract,
@@ -6499,6 +6576,9 @@ class ProofMeshOrchestrator:
         tools: ToolBroker,
         budget_bucket: str,
         state: SolveState | None = None,
+        proof_control_task_id: str | None = None,
+        proof_control_target_obligation_id: str | None = None,
+        proof_control_target_claim_id: str | None = None,
     ) -> tuple[ComputationDecision, ExperimentResult | None]:
         # Provenance is authoritative and deliberately excluded from the semantic
         # request hash so the same mathematical request can be reused from cache.
@@ -6516,17 +6596,23 @@ class ProofMeshOrchestrator:
                 and state.proof_control.active
             ),
             target_obligation_id=(
-                state.proof_graph.main_goal_obligation_ids()[0]
-                if state is not None
-                and state.proof_control is not None
-                and state.proof_graph is not None
-                and state.proof_graph.main_goal_obligation_ids()
-                else None
+                proof_control_target_obligation_id
+                or (
+                    state.proof_graph.main_goal_obligation_ids()[0]
+                    if state is not None
+                    and state.proof_control is not None
+                    and state.proof_graph is not None
+                    and state.proof_graph.main_goal_obligation_ids()
+                    else None
+                )
             ),
             target_claim_id=(
-                f"claim_{stable_hash(spec.target_claim)[:12]}"
-                if state is not None and state.proof_control is not None
-                else None
+                proof_control_target_claim_id
+                or (
+                    f"claim_{stable_hash(spec.target_claim)[:12]}"
+                    if state is not None and state.proof_control is not None
+                    else None
+                )
             ),
             fast_lane_tasks_this_round=sum(
                 item.parent_checkpoint_id == parent_checkpoint_id
@@ -6641,9 +6727,15 @@ class ProofMeshOrchestrator:
         if (
             state is not None
             and state.proof_control is not None
-            and decision.rule_id == "fast_path.proof_control_falsification"
+            and (
+                proof_control_task_id is not None
+                or decision.rule_id == "fast_path.proof_control_falsification"
+            )
         ):
-            state.proof_control.record_falsification_result(result)
+            state.proof_control.record_falsification_result(
+                result,
+                task_id=proof_control_task_id,
+            )
         return decision, result
 
     async def _repair_computation_contract(
@@ -8033,8 +8125,23 @@ class ProofMeshOrchestrator:
                     current_round=round_index,
                 )
             )
-            experiment_results: list[dict[str, Any]] = []
-            computation_feedback: list[dict[str, Any]] = []
+            (
+                computation_feedback,
+                experiment_results,
+            ) = await self._run_materialized_falsification_tasks(
+                problem,
+                strategy,
+                agent,
+                state=state,
+                round_index=round_index,
+                path_id=path_id,
+                parent_checkpoint_id=checkpoint.checkpoint_id,
+                meta_review_approved=computation_meta_approved,
+                runner=runner,
+                prompts=prompts,
+                tools=tools,
+                budget_bucket=budget_bucket,
+            )
             (
                 deferred_feedback,
                 deferred_results,
@@ -8064,7 +8171,7 @@ class ProofMeshOrchestrator:
                 and item.get("evidence_strength")
                 == EvidenceStrength.COUNTEREXAMPLE.value
                 and bool(item.get("independently_verified"))
-                for item in deferred_results
+                for item in experiment_results
             )
             delta: ProofDelta | None = None
             result: StructuredCallResult[Any] | None = None
@@ -9188,8 +9295,23 @@ class ProofMeshOrchestrator:
             if previous_attempt and previous_attempt.path_id
             else f"path_{strategy.strategy_id}"
         )
-        experiment_results: list[dict[str, Any]] = []
-        computation_feedback: list[dict[str, Any]] = []
+        (
+            computation_feedback,
+            experiment_results,
+        ) = await self._run_materialized_falsification_tasks(
+            problem,
+            strategy,
+            agent,
+            state=state,
+            round_index=round_index,
+            path_id=path_id,
+            parent_checkpoint_id=None,
+            meta_review_approved=computation_meta_approved,
+            runner=runner,
+            prompts=prompts,
+            tools=tools,
+            budget_bucket=budget_bucket,
+        )
         (
             deferred_feedback,
             deferred_results,
@@ -9227,7 +9349,7 @@ class ProofMeshOrchestrator:
             item.get("outcome") == ExperimentOutcome.COUNTEREXAMPLE_FOUND.value
             and item.get("evidence_strength") == EvidenceStrength.COUNTEREXAMPLE.value
             and bool(item.get("independently_verified"))
-            for item in deferred_results
+            for item in experiment_results
         )
         cumulative_usage = UsageRecord()
         latest_raw_ref: str | None = None
