@@ -68,6 +68,8 @@ class InductionMeasureSelector:
         target_obligation_ids: Sequence[str],
         trigger_features: Sequence[str],
         hints: Sequence[str] = (),
+        source_record_ids: Sequence[str] = (),
+        source_agent_id: str | None = None,
     ) -> list[InductionMeasureProposal]:
         joined = " ".join([*trigger_features, *hints]).casefold()
         candidates: list[tuple[str, str, str, str]] = []
@@ -139,6 +141,8 @@ class InductionMeasureSelector:
                     "occurrences rather than the ambient natural index."
                 ),
                 trigger_features=list(trigger_features),
+                source_record_ids=list(dict.fromkeys(source_record_ids)),
+                source_agent_id=source_agent_id,
                 confidence=0.85 if measure == "occurrence_count" else 0.70,
             )
             if self.validate_well_foundedness(proposal):
@@ -154,8 +158,10 @@ class InductionMeasureSelector:
             and proposal.strict_decrease_argument
         ):
             return False
+        if not all(item.strip() for item in proposal.base_cases):
+            return False
         lowered = proposal.well_founded_domain.casefold()
-        return any(
+        well_founded_domain = any(
             marker in lowered
             for marker in (
                 "nonnegative integer",
@@ -164,6 +170,38 @@ class InductionMeasureSelector:
                 "well-founded",
                 "well founded",
             )
+        )
+        decrease = proposal.strict_decrease_argument.casefold()
+        explicitly_decreasing = any(
+            marker in decrease
+            for marker in (
+                "decreas",
+                "strictly lower",
+                "strictly smaller",
+                "reduce",
+                "remove",
+            )
+        )
+        circular = any(
+            marker in decrease
+            for marker in (
+                "same complexity",
+                "equal complexity",
+                "larger object",
+                "nondecreasing",
+            )
+        )
+        renamed_index = proposal.measure_name.casefold() in {
+            "n",
+            "index",
+            "natural_index",
+            "ambient_index",
+        }
+        return (
+            well_founded_domain
+            and explicitly_decreasing
+            and not circular
+            and not renamed_index
         )
 
     def accept(self, proposal: InductionMeasureProposal) -> InductionMeasureProposal:

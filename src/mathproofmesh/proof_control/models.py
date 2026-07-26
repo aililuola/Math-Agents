@@ -204,6 +204,8 @@ class MinimalBridgeProposal(StrictModel):
     remaining_obligation_ids: list[str] = Field(default_factory=list)
     required_bridge_obligation_ids: list[str] = Field(default_factory=list)
     status: Literal["candidate", "reviewed", "accepted", "rejected"] = "candidate"
+    action_id: str | None = None
+    materialized_obligation_id: str | None = None
 
 
 class IndexScope(StrEnum):
@@ -401,8 +403,33 @@ class InductionMeasureProposal(StrictModel):
     strict_decrease_argument: str
     why_natural_index_is_insufficient: str
     trigger_features: list[str]
+    source_record_ids: list[str] = Field(default_factory=list)
+    source_agent_id: str | None = None
     status: Literal["candidate", "accepted", "rejected"] = "candidate"
+    reviewer_agent_id: str | None = None
+    review_evidence_ids: list[str] = Field(default_factory=list)
+    rejection_reason: str = ""
+    activation_action_id: str | None = None
+    blueprint_node_id: str | None = None
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class InductionBlueprintNode(StrictModel):
+    blueprint_node_id: str = Field(
+        default_factory=lambda: new_id("induction_blueprint")
+    )
+    proposal_id: str
+    route_id: str
+    target_obligation_ids: list[str]
+    measure_name: str
+    well_founded_domain: str
+    base_cases: list[str]
+    induction_step_relation: str
+    strict_decrease_argument: str
+    prohibited_circularity: str
+    reviewer_agent_id: str
+    review_evidence_ids: list[str]
+    status: Literal["active", "retired"] = "active"
 
 
 class ProofFailureClass(StrEnum):
@@ -436,7 +463,18 @@ class BlueprintRewriteRequest(StrictModel):
     proposed_weaker_targets: list[str]
     proposed_bridge_obligation_ids: list[str]
     representation_change_required: bool
-    status: Literal["pending", "accepted", "rejected", "executed"] = "pending"
+    status: Literal[
+        "pending",
+        "accepted",
+        "rejected",
+        "executed",
+        "deferred",
+        "failed",
+    ] = "pending"
+    execution_action_id: str | None = None
+    historical_target_obligation_ids: list[str] = Field(default_factory=list)
+    result_obligation_ids: list[str] = Field(default_factory=list)
+    failure_reason: str = ""
 
 
 class BottleneckCluster(StrictModel):

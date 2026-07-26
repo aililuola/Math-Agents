@@ -17,6 +17,7 @@ from .models import (
     CriticalAssumption,
     FailureClassificationRecord,
     GoalAlignmentContractResult,
+    InductionBlueprintNode,
     InductionMeasureProposal,
     InferenceRiskRecord,
     MinimalBridgeProposal,
@@ -59,6 +60,7 @@ class ProofControlState:
         self.realizer_candidates: dict[str, RealizerCandidate] = {}
         self.realizer_repair_tasks: dict[str, RealizerRepairTask] = {}
         self.induction_measures: dict[str, InductionMeasureProposal] = {}
+        self.induction_blueprints: dict[str, InductionBlueprintNode] = {}
         self.failure_records: dict[str, FailureClassificationRecord] = {}
         self.blueprint_rewrites: dict[str, BlueprintRewriteRequest] = {}
         self.bottleneck_clusters: dict[str, BottleneckCluster] = {}
@@ -104,6 +106,7 @@ class ProofControlState:
             "realizer_candidates": self._dump_models(self.realizer_candidates),
             "realizer_repair_tasks": self._dump_models(self.realizer_repair_tasks),
             "induction_measures": self._dump_models(self.induction_measures),
+            "induction_blueprints": self._dump_models(self.induction_blueprints),
             "failure_records": self._dump_models(self.failure_records),
             "blueprint_rewrites": self._dump_models(self.blueprint_rewrites),
             "bottleneck_clusters": self._dump_models(self.bottleneck_clusters),
@@ -157,6 +160,7 @@ class ProofControlState:
             ("realizer_candidates", RealizerCandidate),
             ("realizer_repair_tasks", RealizerRepairTask),
             ("induction_measures", InductionMeasureProposal),
+            ("induction_blueprints", InductionBlueprintNode),
             ("failure_records", FailureClassificationRecord),
             ("blueprint_rewrites", BlueprintRewriteRequest),
             ("bottleneck_clusters", BottleneckCluster),

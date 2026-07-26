@@ -14,6 +14,7 @@ from ..proof_identity import normalize_text, obligation_identity_text
 from ..schemas import (
     ClaimCard,
     ClaimStatus,
+    GraphEdgeType,
     MemoryTier,
     MessageEnvelope,
     MessageType,
@@ -22,6 +23,7 @@ from ..schemas import (
     ExperimentResult,
     ProofAttempt,
     ProofDelta,
+    ProofGraphEdge,
     ProofObligation,
     ProofStep,
     StrategyCard,
@@ -54,14 +56,17 @@ from .models import (
     ClaimGoalLink,
     ControlActionRecord,
     ControlActionResult,
+    ControlActionStatus,
     ControlActionType,
     CountermodelTaskRecord,
     GateVerdict,
     GoalAlignmentContractResult,
     GoalRelation,
+    InductionBlueprintNode,
     InferenceRiskRecord,
     InferenceRiskType,
     MessageExpectedEffect,
+    MinimalBridgeProposal,
     NegativePatternRecord,
     ProofRole,
     RealizerFailureType,
@@ -181,6 +186,26 @@ class ProofControlLayer:
             ControlActionType.CLOSE_BY_DIRECT_PREMISE,
             self._handle_direct_premise_request,
             postcondition=self._direct_premise_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.REWRITE_BLUEPRINT,
+            self._handle_rewrite_blueprint,
+            postcondition=self._blueprint_rewrite_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.WEAKEN_TARGET,
+            self._handle_weaken_target,
+            postcondition=self._weaken_target_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.CREATE_MINIMAL_BRIDGE,
+            self._handle_create_minimal_bridge,
+            postcondition=self._minimal_bridge_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.ACTIVATE_INDUCTION_MEASURE,
+            self._handle_activate_induction_measure,
+            postcondition=self._induction_activation_postcondition,
         )
 
         self.message_broker.set_proof_control_message_gate(self._message_gate)
@@ -402,6 +427,11 @@ class ProofControlLayer:
         self._register_induction_hints(
             route_id=route_id,
             source_id=attempt.attempt_id,
+            source_agent_id=attempt.agent_id,
+            target_obligation_ids=self._induction_target_obligation_ids(
+                route_id,
+                [*attempt.unresolved_gaps, *attempt.dead_ends],
+            ),
             texts=[
                 *(item.statement for item in attempt.proof_steps),
                 *attempt.unresolved_gaps,
@@ -421,6 +451,15 @@ class ProofControlLayer:
         self._register_induction_hints(
             route_id=route_id,
             source_id=delta.delta_id,
+            source_agent_id=delta.agent_id,
+            target_obligation_ids=self._induction_target_obligation_ids(
+                route_id,
+                [
+                    *(item for item in [delta.current_goal] if item),
+                    *delta.remaining_subgoals,
+                    *delta.known_risks,
+                ],
+            ),
             texts=[
                 *(item.statement for item in delta.new_steps),
                 *delta.remaining_subgoals,
@@ -663,6 +702,14 @@ class ProofControlLayer:
                 if route_id in item.route_ids
                 and item.verification_status != ClaimStatus.VERIFIED
             ],
+            "active_induction_schemes": [
+                {
+                    **item.model_dump(mode="json"),
+                    "authority": "proof_plan_not_fact",
+                }
+                for item in self.state.induction_blueprints.values()
+                if item.route_id == route_id and item.status == "active"
+            ],
             "core_proof_debt": self.route_signals(route_id)["core_proof_debt"],
             "active_goal_link": (
                 link.model_dump(mode="json")
@@ -867,6 +914,153 @@ class ProofControlLayer:
     def record_falsification_result(self, result: ExperimentResult) -> None:
         self.state.fast_lane_outcomes[result.experiment_id] = result.outcome.value
         self.persist()
+
+    def review_induction_measure(
+        self,
+        proposal_id: str,
+        *,
+        reviewer_agent_id: str,
+        approved: bool,
+        review_evidence_ids: Sequence[str],
+        current_round: int,
+        rejection_reason: str = "",
+    ) -> ControlActionRecord:
+        proposal = self.state.induction_measures[proposal_id]
+        if not approved:
+            proposal.status = "rejected"
+            proposal.reviewer_agent_id = reviewer_agent_id or None
+            proposal.review_evidence_ids = list(dict.fromkeys(review_evidence_ids))
+            proposal.rejection_reason = (
+                rejection_reason.strip() or "independent review rejected the measure"
+            )
+            self._emit(
+                "induction_measure_rejected",
+                proposal.model_dump(mode="json"),
+            )
+            self.persist()
+            action = self.action_dispatcher.propose(
+                ControlActionType.ACTIVATE_INDUCTION_MEASURE,
+                source_record_ids=[proposal.proposal_id],
+                route_ids=[proposal.route_id],
+                target_obligation_ids=proposal.target_obligation_ids,
+                payload={
+                    "proposal_id": proposal.proposal_id,
+                    "reviewer_agent_id": reviewer_agent_id,
+                    "review_evidence_ids": list(review_evidence_ids),
+                    "approved": False,
+                },
+                current_round=current_round,
+            )
+            return self.action_dispatcher.defer(
+                action.action_id,
+                reason=proposal.rejection_reason,
+            )
+        if not reviewer_agent_id.strip():
+            raise ValueError("induction activation requires an independent reviewer")
+        if (
+            proposal.source_agent_id is not None
+            and reviewer_agent_id == proposal.source_agent_id
+        ):
+            raise ValueError(
+                "induction activation reviewer must be independent of the proposer"
+            )
+        evidence = list(dict.fromkeys(review_evidence_ids))
+        if not evidence:
+            raise ValueError("induction activation requires review evidence")
+        if not self.induction.validate_well_foundedness(proposal):
+            raise ValueError("induction measure is not explicitly well founded")
+        action = self.action_dispatcher.propose(
+            ControlActionType.ACTIVATE_INDUCTION_MEASURE,
+            source_record_ids=[proposal.proposal_id],
+            route_ids=[proposal.route_id],
+            target_obligation_ids=proposal.target_obligation_ids,
+            payload={
+                "proposal_id": proposal.proposal_id,
+                "reviewer_agent_id": reviewer_agent_id,
+                "review_evidence_ids": evidence,
+                "approved": True,
+            },
+            current_round=current_round,
+        )
+        return self.action_dispatcher.execute_sync(
+            action.action_id,
+            current_round=current_round,
+        )
+
+    def materialize_minimal_bridge(
+        self,
+        proposal: MinimalBridgeProposal,
+        *,
+        route_id: str | None,
+        binding_id: str | None,
+        current_round: int,
+    ) -> ControlActionRecord:
+        stored = self.state.minimal_bridge_proposals.get(proposal.proposal_id)
+        if stored is None:
+            self.state.minimal_bridge_proposals[proposal.proposal_id] = proposal
+            stored = proposal
+        action = self.action_dispatcher.propose(
+            ControlActionType.CREATE_MINIMAL_BRIDGE,
+            source_record_ids=[stored.proposal_id],
+            route_ids=[route_id] if route_id is not None else [],
+            target_obligation_ids=[stored.target_obligation_id],
+            payload={
+                "proposal_id": stored.proposal_id,
+                "binding_id": binding_id,
+            },
+            current_round=current_round,
+        )
+        stored.action_id = action.action_id
+        return self.action_dispatcher.execute_sync(
+            action.action_id,
+            current_round=current_round,
+        )
+
+    def dispatch_blueprint_rewrite(
+        self,
+        request_id: str,
+        *,
+        strategy_id: str,
+        binding_id: str | None,
+        current_round: int,
+    ) -> ControlActionRecord:
+        request = self.state.blueprint_rewrites[request_id]
+        route_ids = (
+            [request.route_id] if self._control_route_exists(request.route_id) else []
+        )
+        target_ids = [
+            target_id
+            for target_id in [
+                *request.proposed_weaker_targets,
+                *request.proposed_bridge_obligation_ids,
+            ]
+            if self._control_obligation_exists(target_id)
+        ]
+        if binding_id is not None:
+            binding = self.state.route_target_bindings[binding_id]
+            target_ids.extend(
+                [
+                    binding.direct_target_obligation_id,
+                    binding.main_goal_obligation_id,
+                ]
+            )
+        action = self.action_dispatcher.propose(
+            ControlActionType.REWRITE_BLUEPRINT,
+            source_record_ids=[request.request_id],
+            route_ids=route_ids,
+            target_obligation_ids=list(dict.fromkeys(target_ids)),
+            payload={
+                "blueprint_rewrite_request_id": request.request_id,
+                "strategy_id": strategy_id,
+                "binding_id": binding_id,
+            },
+            current_round=current_round,
+        )
+        request.execution_action_id = action.action_id
+        return self.action_dispatcher.execute_sync(
+            action.action_id,
+            current_round=current_round,
+        )
 
     def export_state(self) -> dict[str, Any]:
         return self.state.export_state()
@@ -1142,32 +1336,94 @@ class ProofControlLayer:
         *,
         route_id: str | None,
         source_id: str,
+        source_agent_id: str | None,
+        target_obligation_ids: Sequence[str],
         texts: Sequence[str],
     ) -> None:
         if route_id is None or not self.control_config.induction.enabled:
+            return
+        targets = [
+            target_id
+            for target_id in dict.fromkeys(target_obligation_ids)
+            if self._control_obligation_exists(target_id)
+            and self.proof_graph.get_obligation(target_id).status
+            in {"open", "tentative", "blocked"}
+        ]
+        if not targets:
             return
         triggers = self.induction.detect_trigger(*texts)
         if not triggers:
             return
         existing_sources = {
-            tuple(item.trigger_features)
+            (tuple(item.trigger_features), tuple(item.target_obligation_ids))
             for item in self.state.induction_measures.values()
             if item.route_id == route_id
         }
         for proposal in self.induction.propose_candidates(
             route_id=route_id,
-            target_obligation_ids=self._main_goal_ids(),
+            target_obligation_ids=targets,
             trigger_features=triggers,
             hints=[source_id, *texts[:4]],
+            source_record_ids=[source_id],
+            source_agent_id=source_agent_id,
         ):
-            if tuple(proposal.trigger_features) in existing_sources:
+            signature = (
+                tuple(proposal.trigger_features),
+                tuple(proposal.target_obligation_ids),
+            )
+            if signature in existing_sources:
                 continue
             self.state.induction_measures[proposal.proposal_id] = proposal
-            existing_sources.add(tuple(proposal.trigger_features))
+            existing_sources.add(signature)
             self._emit(
                 "induction_measure_proposed",
                 proposal.model_dump(mode="json"),
             )
+
+    def _induction_target_obligation_ids(
+        self,
+        route_id: str | None,
+        candidate_statements: Sequence[str],
+    ) -> list[str]:
+        if route_id is None:
+            return []
+        candidates = {
+            obligation_identity_text(statement)
+            for statement in candidate_statements
+            if obligation_identity_text(statement)
+        }
+        open_route_obligations = [
+            item
+            for item in self.proof_graph.obligations
+            if item.status in {"open", "tentative", "blocked"}
+            and route_id in item.route_ids
+        ]
+        exact = [
+            item.obligation_id
+            for item in open_route_obligations
+            if obligation_identity_text(item.normalized_statement) in candidates
+        ]
+        if exact:
+            return exact[:1]
+        try:
+            route = self.route_registry.get(route_id)
+        except KeyError:
+            return []
+        binding = self._route_target_binding_for_strategy(route.strategy_id)
+        if binding is not None:
+            target = self.proof_graph.get_obligation(
+                binding.direct_target_obligation_id
+            )
+            if target.status in {"open", "tentative", "blocked"}:
+                return [target.obligation_id]
+        non_main = [
+            item
+            for item in open_route_obligations
+            if item.kind != ObligationKind.MAIN_GOAL
+        ]
+        if len(non_main) == 1:
+            return [non_main[0].obligation_id]
+        return []
 
     def _register_abstract_realizer_if_explicit(
         self, delta: ProofDelta, *, route_id: str | None
@@ -1674,6 +1930,21 @@ class ProofControlLayer:
             "blueprint_rewrite_requested",
             request.model_dump(mode="json"),
         )
+        route = self.route_registry.get(route_id)
+        binding = self._route_target_binding_for_strategy(route.strategy_id)
+        self.dispatch_blueprint_rewrite(
+            request.request_id,
+            strategy_id=route.strategy_id,
+            binding_id=binding.binding_id if binding is not None else None,
+            current_round=max(
+                (
+                    item.segment_index
+                    for item in self.state.continue_gate_records
+                    if item.route_id == route_id
+                ),
+                default=0,
+            ),
+        )
 
     @staticmethod
     def _failure_fingerprint(report: VerificationReport) -> str | None:
@@ -1743,6 +2014,9 @@ class ProofControlLayer:
     ) -> ControlActionResult:
         obligation = ProofObligation.model_validate(action.payload["obligation"])
         materialized = self.proof_graph.add_obligation(obligation)
+        parent_id = action.payload.get("parent_main_goal_id")
+        if isinstance(parent_id, str) and parent_id:
+            self._ensure_implication_edge(materialized.obligation_id, parent_id)
         return ControlActionResult(
             result_refs=[materialized.obligation_id],
             postcondition_met=True,
@@ -1761,6 +2035,50 @@ class ProofControlLayer:
             if obligation.kind == ObligationKind.MAIN_GOAL:
                 return False
         return bool(result.result_refs)
+
+    def _ensure_dependency_edge(
+        self,
+        parent_obligation_id: str,
+        dependency_obligation_id: str,
+    ) -> None:
+        if parent_obligation_id == dependency_obligation_id:
+            return
+        if any(
+            edge.source_id == parent_obligation_id
+            and edge.target_id == dependency_obligation_id
+            and edge.edge_type == GraphEdgeType.DEPENDS_ON
+            for edge in self.proof_graph.edges
+        ):
+            return
+        self.proof_graph.add_edge(
+            ProofGraphEdge(
+                source_id=parent_obligation_id,
+                target_id=dependency_obligation_id,
+                edge_type=GraphEdgeType.DEPENDS_ON,
+            )
+        )
+
+    def _ensure_implication_edge(
+        self,
+        source_obligation_id: str,
+        target_obligation_id: str,
+    ) -> None:
+        if source_obligation_id == target_obligation_id:
+            return
+        if any(
+            edge.source_id == source_obligation_id
+            and edge.target_id == target_obligation_id
+            and edge.edge_type == GraphEdgeType.IMPLIES
+            for edge in self.proof_graph.edges
+        ):
+            return
+        self.proof_graph.add_edge(
+            ProofGraphEdge(
+                source_id=source_obligation_id,
+                target_id=target_obligation_id,
+                edge_type=GraphEdgeType.IMPLIES,
+            )
+        )
 
     def _dispatch_route_target_binding(
         self,
@@ -1893,6 +2211,533 @@ class ProofControlLayer:
             for result_ref in result.result_refs
         )
 
+    def _handle_activate_induction_measure(
+        self, action: ControlActionRecord
+    ) -> ControlActionResult:
+        if not bool(action.payload.get("approved")):
+            return ControlActionResult(
+                detail="induction measure was not approved by an independent review"
+            )
+        proposal_id = str(action.payload["proposal_id"])
+        proposal = self.state.induction_measures[proposal_id]
+        reviewer_agent_id = str(action.payload.get("reviewer_agent_id", "")).strip()
+        review_evidence_ids = list(
+            dict.fromkeys(action.payload.get("review_evidence_ids", []))
+        )
+        if not reviewer_agent_id or not review_evidence_ids:
+            return ControlActionResult(
+                detail="induction activation lacks independent review evidence"
+            )
+        if not self.induction.validate_well_foundedness(proposal):
+            return ControlActionResult(
+                detail="induction measure failed deterministic well-foundedness checks"
+            )
+        if set(action.target_obligation_ids) != set(proposal.target_obligation_ids):
+            return ControlActionResult(
+                detail="induction activation target does not match the proposal"
+            )
+        for target_id in proposal.target_obligation_ids:
+            target = self.proof_graph.get_obligation(target_id)
+            if target.status not in {"open", "tentative", "blocked"}:
+                return ControlActionResult(
+                    detail="induction activation target is no longer open"
+                )
+        blueprint_node_id = (
+            "induction_blueprint_"
+            + stable_hash(
+                {
+                    "problem_hash": self.proof_graph.problem_hash,
+                    "proposal_id": proposal.proposal_id,
+                    "route_id": proposal.route_id,
+                    "target_obligation_ids": proposal.target_obligation_ids,
+                }
+            )[:16]
+        )
+        node = InductionBlueprintNode(
+            blueprint_node_id=blueprint_node_id,
+            proposal_id=proposal.proposal_id,
+            route_id=proposal.route_id,
+            target_obligation_ids=list(proposal.target_obligation_ids),
+            measure_name=proposal.measure_name,
+            well_founded_domain=proposal.well_founded_domain,
+            base_cases=list(proposal.base_cases),
+            induction_step_relation=proposal.induction_step_relation,
+            strict_decrease_argument=proposal.strict_decrease_argument,
+            prohibited_circularity=(
+                "Do not invoke the target at the same or a larger measure."
+            ),
+            reviewer_agent_id=reviewer_agent_id,
+            review_evidence_ids=review_evidence_ids,
+        )
+        self.state.induction_blueprints[node.blueprint_node_id] = node
+        proposal.status = "accepted"
+        proposal.reviewer_agent_id = reviewer_agent_id
+        proposal.review_evidence_ids = review_evidence_ids
+        proposal.rejection_reason = ""
+        proposal.activation_action_id = action.action_id
+        proposal.blueprint_node_id = node.blueprint_node_id
+        self._emit(
+            "induction_measure_activated",
+            {
+                "action_id": action.action_id,
+                "proposal_id": proposal.proposal_id,
+                "blueprint_node_id": node.blueprint_node_id,
+                "route_id": node.route_id,
+                "target_obligation_ids": node.target_obligation_ids,
+            },
+        )
+        return ControlActionResult(
+            result_refs=[proposal.proposal_id, node.blueprint_node_id],
+            postcondition_met=True,
+        )
+
+    def _induction_activation_postcondition(
+        self,
+        action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        proposal_id = str(action.payload.get("proposal_id", ""))
+        proposal = self.state.induction_measures.get(proposal_id)
+        if (
+            proposal is None
+            or proposal.status != "accepted"
+            or proposal.activation_action_id != action.action_id
+            or proposal.blueprint_node_id is None
+        ):
+            return False
+        node = self.state.induction_blueprints.get(proposal.blueprint_node_id)
+        return (
+            node is not None
+            and node.status == "active"
+            and node.proposal_id == proposal.proposal_id
+            and node.route_id == proposal.route_id
+            and set(node.target_obligation_ids) == set(proposal.target_obligation_ids)
+            and node.blueprint_node_id in result.result_refs
+        )
+
+    def _handle_weaken_target(self, action: ControlActionRecord) -> ControlActionResult:
+        proposal_id = str(action.payload["proposal_id"])
+        proposal = self.state.minimal_bridge_proposals[proposal_id]
+        binding_id = action.payload.get("binding_id")
+        route_ids = list(action.route_ids)
+        obligation_id = (
+            "obl_weaker_target_"
+            + stable_hash(
+                {
+                    "problem_hash": self.proof_graph.problem_hash,
+                    "proposal_id": proposal.proposal_id,
+                    "statement": normalize_text(proposal.candidate_statement),
+                }
+            )[:16]
+        )
+        materialized = self.proof_graph.add_obligation(
+            ProofObligation(
+                obligation_id=obligation_id,
+                problem_hash=self.proof_graph.problem_hash,
+                route_ids=route_ids,
+                kind=ObligationKind.SUBGOAL,
+                statement=proposal.candidate_statement,
+                normalized_statement=normalize_text(proposal.candidate_statement),
+                priority=0.85,
+                centrality=0.75,
+            )
+        )
+        result_refs = [materialized.obligation_id]
+        if binding_id is not None:
+            binding = self.state.route_target_bindings[str(binding_id)]
+            updated = binding.model_copy(
+                update={
+                    "direct_target_obligation_id": materialized.obligation_id,
+                    "ancestor_obligation_ids": [],
+                    "bridge_obligation_ids": [],
+                    "relation_to_direct_target": GoalRelation.SUFFICIENT,
+                    "relation_to_main_goal": GoalRelation.NECESSARY_ONLY,
+                    "scope_relation_to_direct_target": ScopeRelation.SAME,
+                    "blueprint_path_complete": False,
+                }
+            )
+            bind_action = self.action_dispatcher.propose(
+                ControlActionType.BIND_ROUTE_TARGET,
+                source_record_ids=[proposal.proposal_id],
+                route_ids=[updated.route_id] if updated.route_id is not None else [],
+                target_obligation_ids=[
+                    updated.direct_target_obligation_id,
+                    updated.main_goal_obligation_id,
+                ],
+                payload=updated.model_dump(mode="json"),
+                current_round=action.created_round,
+            )
+            bound = self.action_dispatcher.execute_sync(
+                bind_action.action_id,
+                current_round=action.created_round,
+            )
+            if bound.status != ControlActionStatus.EXECUTED:
+                return ControlActionResult(
+                    detail="weaker target could not be bound to the route"
+                )
+            result_refs.extend(bound.result_refs)
+        proposal.status = "reviewed"
+        proposal.action_id = action.action_id
+        proposal.materialized_obligation_id = materialized.obligation_id
+        return ControlActionResult(
+            result_refs=result_refs,
+            postcondition_met=True,
+        )
+
+    def _weaken_target_postcondition(
+        self,
+        action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        proposal = self.state.minimal_bridge_proposals.get(
+            str(action.payload.get("proposal_id", ""))
+        )
+        if (
+            proposal is None
+            or proposal.status != "reviewed"
+            or proposal.materialized_obligation_id is None
+            or proposal.materialized_obligation_id not in result.result_refs
+        ):
+            return False
+        try:
+            obligation = self.proof_graph.get_obligation(
+                proposal.materialized_obligation_id
+            )
+        except KeyError:
+            return False
+        return obligation.kind != ObligationKind.MAIN_GOAL
+
+    def _handle_create_minimal_bridge(
+        self, action: ControlActionRecord
+    ) -> ControlActionResult:
+        proposal_id = str(action.payload["proposal_id"])
+        proposal = self.state.minimal_bridge_proposals[proposal_id]
+        dependency_ids = [
+            obligation_id
+            for obligation_id in proposal.required_bridge_obligation_ids
+            if self._control_obligation_exists(obligation_id)
+            and obligation_id != proposal.target_obligation_id
+        ]
+        obligation_id = (
+            "obl_minimal_bridge_"
+            + stable_hash(
+                {
+                    "problem_hash": self.proof_graph.problem_hash,
+                    "proposal_id": proposal.proposal_id,
+                    "statement": normalize_text(proposal.candidate_statement),
+                    "target": proposal.target_obligation_id,
+                    "dependencies": dependency_ids,
+                }
+            )[:16]
+        )
+        materialized = self.proof_graph.add_obligation(
+            ProofObligation(
+                obligation_id=obligation_id,
+                problem_hash=self.proof_graph.problem_hash,
+                route_ids=list(action.route_ids),
+                kind=ObligationKind.SUBGOAL,
+                statement=proposal.candidate_statement,
+                normalized_statement=normalize_text(proposal.candidate_statement),
+                dependency_ids=dependency_ids,
+                priority=0.9,
+                centrality=0.85,
+            )
+        )
+        self._ensure_dependency_edge(
+            proposal.target_obligation_id,
+            materialized.obligation_id,
+        )
+        result_refs = [materialized.obligation_id]
+        binding_id = action.payload.get("binding_id")
+        if binding_id is not None:
+            binding = self.state.route_target_bindings[str(binding_id)]
+            updated = binding.model_copy(
+                update={
+                    "ancestor_obligation_ids": [
+                        materialized.obligation_id,
+                        binding.main_goal_obligation_id,
+                    ],
+                    "bridge_obligation_ids": list(
+                        dict.fromkeys(
+                            [
+                                *binding.bridge_obligation_ids,
+                                materialized.obligation_id,
+                            ]
+                        )
+                    ),
+                    "blueprint_path_complete": True,
+                }
+            )
+            bind_action = self.action_dispatcher.propose(
+                ControlActionType.BIND_ROUTE_TARGET,
+                source_record_ids=[proposal.proposal_id],
+                route_ids=[updated.route_id] if updated.route_id is not None else [],
+                target_obligation_ids=[
+                    updated.direct_target_obligation_id,
+                    updated.main_goal_obligation_id,
+                ],
+                payload=updated.model_dump(mode="json"),
+                current_round=action.created_round,
+            )
+            bound = self.action_dispatcher.execute_sync(
+                bind_action.action_id,
+                current_round=action.created_round,
+            )
+            if bound.status != ControlActionStatus.EXECUTED:
+                return ControlActionResult(
+                    detail="minimal bridge could not update the route target binding"
+                )
+            result_refs.extend(bound.result_refs)
+        proposal.status = "accepted"
+        proposal.action_id = action.action_id
+        proposal.materialized_obligation_id = materialized.obligation_id
+        self._emit(
+            "minimal_bridge_materialized",
+            {
+                "action_id": action.action_id,
+                "proposal_id": proposal.proposal_id,
+                "obligation_id": materialized.obligation_id,
+                "target_obligation_id": proposal.target_obligation_id,
+            },
+        )
+        return ControlActionResult(
+            result_refs=result_refs,
+            postcondition_met=True,
+        )
+
+    def _minimal_bridge_postcondition(
+        self,
+        action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        proposal = self.state.minimal_bridge_proposals.get(
+            str(action.payload.get("proposal_id", ""))
+        )
+        if (
+            proposal is None
+            or proposal.status != "accepted"
+            or proposal.materialized_obligation_id is None
+            or proposal.materialized_obligation_id not in result.result_refs
+        ):
+            return False
+        try:
+            obligation = self.proof_graph.get_obligation(
+                proposal.materialized_obligation_id
+            )
+        except KeyError:
+            return False
+        return obligation.kind != ObligationKind.MAIN_GOAL and obligation.status in {
+            "open",
+            "tentative",
+            "blocked",
+        }
+
+    def _handle_rewrite_blueprint(
+        self, action: ControlActionRecord
+    ) -> ControlActionResult:
+        request_id = str(action.payload["blueprint_rewrite_request_id"])
+        request = self.state.blueprint_rewrites[request_id]
+        binding_id = action.payload.get("binding_id")
+        binding = (
+            self.state.route_target_bindings[str(binding_id)]
+            if binding_id is not None
+            else None
+        )
+        result_refs = [request.request_id]
+        historical_targets = [
+            target_id
+            for target_id in (
+                [binding.direct_target_obligation_id] if binding is not None else []
+            )
+            if target_id
+        ]
+        request.historical_target_obligation_ids = list(
+            dict.fromkeys(
+                [*request.historical_target_obligation_ids, *historical_targets]
+            )
+        )
+
+        if request.current_overstrong_targets and request.proposed_weaker_targets:
+            candidate = next(
+                (
+                    value
+                    for value in request.proposed_weaker_targets
+                    if not self._control_obligation_exists(value)
+                ),
+                None,
+            )
+            if candidate:
+                weaker = MinimalBridgeProposal(
+                    proposal_id="weaker_target_"
+                    + stable_hash((request.request_id, candidate))[:16],
+                    overstrong_subject_id=request.current_overstrong_targets[0],
+                    target_obligation_id=(
+                        binding.main_goal_obligation_id
+                        if binding is not None
+                        else action.target_obligation_ids[-1]
+                    ),
+                    candidate_statement=candidate,
+                    relation_to_original="strictly_weaker",
+                )
+                self.state.minimal_bridge_proposals[weaker.proposal_id] = weaker
+                weaken_action = self.action_dispatcher.propose(
+                    ControlActionType.WEAKEN_TARGET,
+                    source_record_ids=[weaker.proposal_id, request.request_id],
+                    route_ids=list(action.route_ids),
+                    target_obligation_ids=[weaker.target_obligation_id],
+                    payload={
+                        "proposal_id": weaker.proposal_id,
+                        "binding_id": binding_id,
+                    },
+                    current_round=action.created_round,
+                )
+                weakened = self.action_dispatcher.execute_sync(
+                    weaken_action.action_id,
+                    current_round=action.created_round,
+                )
+                if weakened.status != ControlActionStatus.EXECUTED:
+                    return ControlActionResult(
+                        detail="blueprint rewrite could not materialize weaker target"
+                    )
+                result_refs.extend(weakened.result_refs)
+                if binding_id is not None:
+                    binding = self.state.route_target_bindings[str(binding_id)]
+
+        bridge_ids = [
+            obligation_id
+            for obligation_id in request.proposed_bridge_obligation_ids
+            if self._control_obligation_exists(obligation_id)
+        ]
+        if not bridge_ids:
+            if binding is not None:
+                direct = self.proof_graph.get_obligation(
+                    binding.direct_target_obligation_id
+                )
+                main = self.proof_graph.get_obligation(binding.main_goal_obligation_id)
+                dependencies = (
+                    [direct.obligation_id]
+                    if direct.obligation_id != main.obligation_id
+                    else []
+                )
+                bridge_statement = (
+                    "Establish an explicit implication from "
+                    f"{direct.normalized_statement} to {main.normalized_statement}."
+                )
+                target_id = main.obligation_id
+            else:
+                if not action.target_obligation_ids:
+                    request.status = "failed"
+                    request.failure_reason = (
+                        "blueprint rewrite has no auditable target obligation"
+                    )
+                    return ControlActionResult(detail=request.failure_reason)
+                target_id = action.target_obligation_ids[-1]
+                target = self.proof_graph.get_obligation(target_id)
+                dependencies = []
+                bridge_statement = (
+                    "Establish a reviewed intermediate implication sufficient for "
+                    f"{target.normalized_statement}."
+                )
+            proposal = MinimalBridgeProposal(
+                proposal_id="minimal_bridge_"
+                + stable_hash(
+                    {
+                        "request_id": request.request_id,
+                        "target_id": target_id,
+                        "dependencies": dependencies,
+                    }
+                )[:16],
+                overstrong_subject_id=str(action.payload.get("strategy_id", "")),
+                target_obligation_id=target_id,
+                candidate_statement=bridge_statement,
+                relation_to_original="strictly_weaker",
+                implication_outline=[*dependencies, target_id],
+                required_bridge_obligation_ids=dependencies,
+            )
+            bridge_action = self.materialize_minimal_bridge(
+                proposal,
+                route_id=action.route_ids[0] if action.route_ids else None,
+                binding_id=str(binding_id) if binding_id is not None else None,
+                current_round=action.created_round,
+            )
+            if bridge_action.status != ControlActionStatus.EXECUTED:
+                return ControlActionResult(
+                    detail="blueprint rewrite could not materialize a minimal bridge"
+                )
+            bridge_ids = [
+                result_ref
+                for result_ref in bridge_action.result_refs
+                if self._control_obligation_exists(result_ref)
+            ]
+            result_refs.extend(bridge_action.result_refs)
+            request.proposed_bridge_obligation_ids = list(
+                dict.fromkeys([*request.proposed_bridge_obligation_ids, *bridge_ids])
+            )
+
+        route = None
+        if self._control_route_exists(request.route_id):
+            route = self.route_registry.get(request.route_id)
+        self.blueprint_rewriter.apply_reviewed_rewrite(
+            request,
+            approved=True,
+            route=route,
+            review_evidence={
+                "control_action_id": action.action_id,
+                "source_record_ids": action.source_record_ids,
+            },
+        )
+        request.execution_action_id = action.action_id
+        request.result_obligation_ids = list(
+            dict.fromkeys([*request.result_obligation_ids, *bridge_ids])
+        )
+        request.failure_reason = ""
+        self._emit(
+            "blueprint_rewrite_executed",
+            {
+                "action_id": action.action_id,
+                "request_id": request.request_id,
+                "result_obligation_ids": request.result_obligation_ids,
+            },
+        )
+        return ControlActionResult(
+            result_refs=list(dict.fromkeys(result_refs)),
+            postcondition_met=True,
+        )
+
+    def _blueprint_rewrite_postcondition(
+        self,
+        action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        request = self.state.blueprint_rewrites.get(
+            str(action.payload.get("blueprint_rewrite_request_id", ""))
+        )
+        if (
+            request is None
+            or request.status != "executed"
+            or request.execution_action_id != action.action_id
+            or request.request_id not in result.result_refs
+        ):
+            return False
+        materialized = [
+            obligation_id
+            for obligation_id in request.result_obligation_ids
+            if self._control_obligation_exists(obligation_id)
+        ]
+        binding_id = action.payload.get("binding_id")
+        binding_complete = (
+            binding_id is not None
+            and str(binding_id) in self.state.route_target_bindings
+            and self.state.route_target_bindings[
+                str(binding_id)
+            ].blueprint_path_complete
+        )
+        route_revised = (
+            self._control_route_exists(request.route_id)
+            and self.route_registry.get(request.route_id).requires_revision
+        )
+        return bool(materialized or binding_complete or route_revised)
+
     def _ensure_route_admission_rewrite(
         self,
         strategy: StrategyCard,
@@ -1943,16 +2788,11 @@ class ProofControlLayer:
                 "blueprint_rewrite_requested",
                 request.model_dump(mode="json"),
             )
-        action = self.action_dispatcher.propose(
-            ControlActionType.REWRITE_BLUEPRINT,
-            source_record_ids=[request.request_id],
-            route_ids=(
-                [binding.route_id]
-                if binding is not None and binding.route_id is not None
-                else []
-            ),
-            target_obligation_ids=record.target_obligation_ids,
-            payload={"blueprint_rewrite_request_id": request.request_id},
+        action = self.dispatch_blueprint_rewrite(
+            request.request_id,
+            strategy_id=strategy.strategy_id,
+            binding_id=binding.binding_id if binding is not None else None,
+            current_round=0,
         )
         self._emit(
             "control_action_materialized",
@@ -2062,6 +2902,7 @@ class ProofControlLayer:
             self.state.realizer_candidates,
             self.state.realizer_repair_tasks,
             self.state.induction_measures,
+            self.state.induction_blueprints,
             self.state.failure_records,
             self.state.blueprint_rewrites,
             self.state.bottleneck_clusters,
