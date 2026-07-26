@@ -29,11 +29,11 @@ compileall(src + tests)
 | `python -m compileall -q src tests benchmarks` | PASS |
 | `ruff check .` | PASS |
 | `ruff format --check .` | PASS |
-| `python -m pytest -q` | **604 passed**（执行 editable `.[dev,server]` 安装，包含 `z3-solver`） |
-| 指定 E2E/resume 组合 | **47 passed** |
+| `python -m pytest -q` | **706 passed**（执行 editable `.[dev,server,desktop]` 安装，包含 `z3-solver`） |
+| E2E/checkpoint/resume 回归 | PASS，包含于 706 项完整测试 |
 | topology Mock benchmark | PASS，21/21 component contracts，0 provider calls |
 | proof-control Mock benchmark | PASS，14/14 component contracts，0 provider calls |
-| Windows desktop package | 0.8.2，17 passed，health check、hidden window smoke 与安装后 health check PASS |
+| Windows desktop package | 0.8.2，17 passed，打包 health check、hidden window smoke 与 Inno Setup 编译 PASS；本次未执行覆盖安装 |
 | deterministic demo | `verified`，23 calls，30,540 tokens |
 | continuation deterministic demo | `verified`，25 calls，32,920 tokens |
 | demo 证明检查点 | 3 条路径，共 6 个 checkpoint（3 个 genesis + 3 个已验证完成段） |
@@ -181,7 +181,7 @@ primary key 正常调用级重试耗尽
 - 最终预算储备根据 `reserve_revision_cycles` 与 `max_revisions` 计算；
 - 调度产物记录每个候选动作的排名、分数、预计成本、未选原因和预算阻断原因。
 
-当前包含上述历史回归在内的完整自动化结果为 `604 passed`。分段确定性完整演示结果仍为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
+当前包含上述历史回归在内的完整自动化结果为 `706 passed`。分段确定性完整演示结果仍为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
 
 ## 6. 终审边界与修订回归验证
 
@@ -222,7 +222,7 @@ python -m hatchling build
 
 ```text
 Python 3.11
-→ pip install -e ".[dev,server]"
+→ pip install -e ".[dev,server,desktop]"
 → bash scripts/validate.sh
 ```
 
@@ -312,9 +312,9 @@ Python 3.11
 最终离线验收结果：
 
 ```text
-pytest: 604 passed
+pytest: 706 passed
 ruff check: PASS
-ruff format --check: PASS (294 files)
+ruff format --check: PASS (305 files)
 compileall: PASS
 topology mock benchmark: PASS
 component contracts: 21/21
