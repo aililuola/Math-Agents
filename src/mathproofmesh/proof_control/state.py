@@ -5,6 +5,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from ..proof_identity import normalize_text
 from .models import (
     AbstractStructureProposal,
     AssumptionChallengerTask,
@@ -41,6 +42,7 @@ from .models import (
     NearMissRecord,
     NegativePatternRecord,
     ObligationDomainRecord,
+    ObligationDomain,
     ObligationSemanticQuality,
     PremiseClosureRecord,
     ProcessFailureDiagnostic,
@@ -52,7 +54,9 @@ from .models import (
     RouteTargetBinding,
     OriginalStrategyArchiveEntry,
     RevisedStrategyResult,
+    ResumeDecision,
     RewriteSemanticAssessment,
+    RouteFreezeRecord,
     ScopeSignature,
     StrategyBlueprint,
     StrategyLineageRecord,
@@ -80,6 +84,8 @@ class ProofControlState:
         self.falsification_tasks: dict[str, FalsificationTaskRecord] = {}
         self.typed_falsification_contracts: dict[str, TypedFalsificationContract] = {}
         self.executable_tasks: dict[str, ExecutableTaskRecord] = {}
+        self.route_freeze_records: dict[str, RouteFreezeRecord] = {}
+        self.resume_decisions: dict[str, ResumeDecision] = {}
         self.negative_patterns: dict[str, NegativePatternRecord] = {}
         self.assumption_domains: dict[str, AssumptionDomainRecord] = {}
         self.obligation_domains: dict[str, ObligationDomainRecord] = {}
@@ -152,6 +158,8 @@ class ProofControlState:
                 self.typed_falsification_contracts
             ),
             "executable_tasks": self._dump_models(self.executable_tasks),
+            "route_freeze_records": self._dump_models(self.route_freeze_records),
+            "resume_decisions": self._dump_models(self.resume_decisions),
             "negative_patterns": self._dump_models(self.negative_patterns),
             "assumption_domains": self._dump_models(self.assumption_domains),
             "obligation_domains": self._dump_models(self.obligation_domains),
@@ -264,6 +272,8 @@ class ProofControlState:
             ("falsification_tasks", FalsificationTaskRecord),
             ("typed_falsification_contracts", TypedFalsificationContract),
             ("executable_tasks", ExecutableTaskRecord),
+            ("route_freeze_records", RouteFreezeRecord),
+            ("resume_decisions", ResumeDecision),
             ("negative_patterns", NegativePatternRecord),
             ("assumption_domains", AssumptionDomainRecord),
             ("obligation_domains", ObligationDomainRecord),
@@ -383,7 +393,66 @@ class ProofControlState:
             }
         else:
             restored._migration_event("fast_lane_outcomes", "expected mapping")
+        restored._migrate_legacy_bridge_obligations(
+            state.get("legacy_bridge_obligations", [])
+        )
         return restored
+
+    def _migrate_legacy_bridge_obligations(self, raw_values: Any) -> None:
+        if raw_values is None:
+            return
+        if not isinstance(raw_values, list):
+            self._migration_event(
+                "legacy_bridge_obligations",
+                "expected list",
+            )
+            return
+        for index, raw_value in enumerate(raw_values):
+            if not isinstance(raw_value, Mapping):
+                self._migration_event(
+                    "legacy_bridge_obligations",
+                    "expected mapping",
+                    str(index),
+                )
+                continue
+            obligation_id = str(
+                raw_value.get("obligation_id") or f"legacy_bridge_{index}"
+            )
+            source = normalize_text(str(raw_value.get("source_statement", "")))
+            target = normalize_text(str(raw_value.get("target_statement", "")))
+            is_self_implication = bool(
+                source and source.casefold() == target.casefold()
+            )
+            if not is_self_implication:
+                continue
+            self.semantic_quarantine[obligation_id] = ObligationSemanticQuality(
+                obligation_id=obligation_id,
+                domain=ObligationDomain.MATHEMATICAL,
+                truth_apt=False,
+                has_explicit_objects=bool(source),
+                has_explicit_relation=False,
+                has_explicit_quantifiers_or_scope=False,
+                is_placeholder=False,
+                is_self_implication=True,
+                duplicates_main_goal=True,
+                has_executable_first_step=False,
+                score=0.0,
+                rejection_reasons=[
+                    "legacy self-implication cannot be treated as proof debt"
+                ],
+                accepted=False,
+                semantic_quarantine=True,
+                eligible_for_core_debt=False,
+                eligible_for_bottleneck=False,
+            )
+            self.events.append(
+                {
+                    "event_type": "legacy_bridge_obligation_quarantined",
+                    "obligation_id": obligation_id,
+                    "source_statement": str(raw_value.get("source_statement", "")),
+                    "target_statement": str(raw_value.get("target_statement", "")),
+                }
+            )
 
     def _restore_list(
         self,

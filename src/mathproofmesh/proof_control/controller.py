@@ -28,6 +28,7 @@ from ..schemas import (
     ProofGraphEdge,
     ProofObligation,
     ProofStep,
+    RouteStatus,
     StrategyCard,
     VerificationReport,
     VerificationVerdict,
@@ -98,7 +99,9 @@ from .models import (
     ObligationSemanticQuality,
     ProofRole,
     RealizerFailureType,
+    ResumeDecision,
     RouteAdmissionRecord,
+    RouteFreezeRecord,
     RouteTargetBinding,
     RouteUpdateTask,
     ScopeRelation,
@@ -116,6 +119,7 @@ from .models import (
 from .near_miss import NearMissLedger
 from .proof_roles import ProofRoleClassifier, core_proof_debt
 from .realizer import AbstractRealizerController
+from .resume_policy import ResumePlanner
 from .scope_guard import ScopeGuard
 from .semantic_quality import ObligationSemanticGate
 from .state import ProofControlState
@@ -126,7 +130,7 @@ from .strategy_blueprint import (
     RewriteSemanticGate,
     StrategyBlueprintCompiler,
 )
-from .tasks import ExecutableTaskController, WakeScheduler
+from .tasks import ExecutableTaskController, RouteWakeController, WakeScheduler
 
 
 class ProofControlLayer:
@@ -208,6 +212,13 @@ class ProofControlLayer:
             self.state.executable_tasks
         )
         self.wake_scheduler = WakeScheduler(self.state.executable_tasks)
+        self.route_wake_controller = RouteWakeController(
+            self.route_registry,
+            self.state.executable_tasks,
+            freeze_records=self.state.route_freeze_records,
+        )
+        self.state.route_freeze_records = self.route_wake_controller.freeze_records
+        self.resume_planner = ResumePlanner(self.state.resume_decisions)
         self.message_utility = MessageUtilityController(
             self.control_config.message_utility,
             proof_graph=proof_graph,
@@ -1977,6 +1988,7 @@ class ProofControlLayer:
             created_round=current_round,
             counterexample_hunter_agent_id=self._counterexample_hunter_agent_id(),
         )
+        self._mark_task_routes_waiting(executable_task, current_round=current_round)
         task.typed_contract_id = contract.contract_id
         task.executable_task_id = executable_task.task_id
         existing = self.state.falsification_tasks.get(task.task_id)
@@ -2143,6 +2155,10 @@ class ProofControlLayer:
                         if "budget" in decision.casefold()
                         else WakeConditionKind.PROVIDER_AVAILABLE
                     ),
+                )
+                self._mark_task_routes_waiting(
+                    executable,
+                    current_round=executable.last_transition_round,
                 )
         self._emit(
             "falsification_task_deferred",
@@ -2385,6 +2401,13 @@ class ProofControlLayer:
         return actions
 
     def pending_route_update_tasks(self) -> list[RouteUpdateTask]:
+        for task in self.state.route_update_tasks.values():
+            if task.status != "deferred" or task.executable_task_id is None:
+                continue
+            executable = self.state.executable_tasks.get(task.executable_task_id)
+            if executable is not None and executable.status == TaskStatus.READY:
+                task.status = "scheduled"
+                task.failure_reason = ""
         return sorted(
             (
                 task
@@ -2401,10 +2424,23 @@ class ProofControlLayer:
     def mark_route_update_presented(
         self,
         task_id: str,
+        *,
+        current_round: int | None = None,
     ) -> RouteUpdateTask:
         task = self.state.route_update_tasks[task_id]
         if task.status == "scheduled":
             task.status = "presented"
+            if task.executable_task_id is not None:
+                executable = self.state.executable_tasks[task.executable_task_id]
+                if executable.status in {TaskStatus.ASSIGNED, TaskStatus.READY}:
+                    self.executable_task_controller.mark_running(
+                        executable.task_id,
+                        current_round=(
+                            current_round
+                            if current_round is not None
+                            else task.scheduled_round
+                        ),
+                    )
             self._emit(
                 "route_update_presented",
                 task.model_dump(mode="json"),
@@ -2418,6 +2454,7 @@ class ProofControlLayer:
         *,
         receipt_ids: Sequence[str],
         used: bool = False,
+        current_round: int | None = None,
     ) -> RouteUpdateTask:
         task = self.state.route_update_tasks[task_id]
         receipts = list(dict.fromkeys(receipt_ids))
@@ -2426,6 +2463,19 @@ class ProofControlLayer:
         task.receipt_ids = receipts
         task.status = "used" if used else "acknowledged"
         task.failure_reason = ""
+        if task.executable_task_id is not None:
+            executable = self.state.executable_tasks[task.executable_task_id]
+            if executable.status not in ExecutableTaskController.TERMINAL_STATUSES:
+                self.executable_task_controller.complete_work(
+                    executable.task_id,
+                    current_round=(
+                        current_round
+                        if current_round is not None
+                        else task.scheduled_round
+                    ),
+                    result_refs=receipts,
+                    reason="route_update_acknowledged",
+                )
         self._emit(
             "route_update_completed",
             task.model_dump(mode="json"),
@@ -2438,12 +2488,52 @@ class ProofControlLayer:
         task_id: str,
         *,
         reason: str,
+        current_round: int | None = None,
     ) -> RouteUpdateTask:
         task = self.state.route_update_tasks[task_id]
         task.status = "failed"
         task.failure_reason = reason.strip() or "route update failed"
+        if task.executable_task_id is not None:
+            executable = self.state.executable_tasks[task.executable_task_id]
+            if executable.status not in ExecutableTaskController.TERMINAL_STATUSES:
+                self.executable_task_controller.fail(
+                    executable.task_id,
+                    current_round=(
+                        current_round
+                        if current_round is not None
+                        else task.scheduled_round
+                    ),
+                    reason=task.failure_reason,
+                )
         self._emit(
             "route_update_failed",
+            task.model_dump(mode="json"),
+        )
+        self.persist()
+        return task
+
+    def defer_route_update_task(
+        self,
+        task_id: str,
+        *,
+        reason: str,
+        current_round: int,
+        wake_kind: WakeConditionKind,
+    ) -> RouteUpdateTask:
+        task = self.state.route_update_tasks[task_id]
+        if task.executable_task_id is None:
+            raise ValueError("route update has no executable task")
+        executable = self.executable_task_controller.defer(
+            task.executable_task_id,
+            current_round=current_round,
+            reason=reason,
+            wake_kind=wake_kind,
+        )
+        task.status = "deferred"
+        task.failure_reason = reason.strip() or "route update deferred"
+        self._mark_task_routes_waiting(executable, current_round=current_round)
+        self._emit(
+            "route_update_deferred",
             task.model_dump(mode="json"),
         )
         self.persist()
@@ -4078,6 +4168,10 @@ class ProofControlLayer:
             counterexample_hunter_agent_id=assigned_agent_id,
             explicit_prompt_ref=f"countermodel_prompt:{source_record_id}",
         )
+        self._mark_task_routes_waiting(
+            executable,
+            current_round=action.created_round,
+        )
         task = CountermodelTaskRecord(
             task_id=task_id,
             source_record_id=source_record_id,
@@ -4440,13 +4534,20 @@ class ProofControlLayer:
             scheduled_round=int(action.payload.get("scheduled_round", 0)),
             action_id=action.action_id,
         )
+        executable = self.executable_task_controller.create_route_update_task(
+            target_obligation_ids=list(action.target_obligation_ids),
+            route_ids=[route_id],
+            created_round=task.scheduled_round,
+            explicit_prompt_ref=("route_update_messages:" + ",".join(task.message_ids)),
+        )
+        task.executable_task_id = executable.task_id
         self.state.route_update_tasks[task.task_id] = task
         self._emit(
             "route_update_scheduled",
             task.model_dump(mode="json"),
         )
         return ControlActionResult(
-            result_refs=[task.task_id, *task.message_ids],
+            result_refs=[task.task_id, executable.task_id, *task.message_ids],
             postcondition_met=True,
         )
 
@@ -5902,6 +6003,251 @@ class ProofControlLayer:
             ),
             None,
         )
+
+    def evaluate_route_wakes(
+        self,
+        *,
+        current_round: int,
+        provider_available: bool = False,
+        budget_available: bool = False,
+        available_fact_ids: Collection[str] = (),
+        changed_obligation_ids: Collection[str] = (),
+        reviewer_available: bool = False,
+        recompiled_task_ids: Collection[str] = (),
+        user_intervention: bool = False,
+        config_changed: bool = False,
+    ) -> list[str]:
+        woken = self.route_wake_controller.evaluate(
+            current_round=current_round,
+            provider_available=provider_available,
+            budget_available=budget_available,
+            available_fact_ids=available_fact_ids,
+            changed_obligation_ids=changed_obligation_ids,
+            reviewer_available=reviewer_available,
+            recompiled_task_ids=recompiled_task_ids,
+            user_intervention=user_intervention,
+            config_changed=config_changed,
+        )
+        if woken:
+            self._emit(
+                "proof_control_routes_woken",
+                {
+                    "round_index": current_round,
+                    "route_ids": [route.route_id for route in woken],
+                },
+            )
+            self.persist()
+        return [route.route_id for route in woken]
+
+    def plan_resume(
+        self,
+        *,
+        checkpoint_state: Mapping[str, Any],
+        config_hash: str,
+        goal_hash: str,
+        hard_stopped: bool,
+        pending_action_ids: Sequence[str],
+        terminal_stagnation_signature: str | None,
+        prior_state_hash: str | None,
+        prior_config_hash: str | None,
+        prior_goal_hash: str | None,
+        prior_terminal_stagnation_signature: str | None,
+        intervention: str | None,
+    ) -> ResumeDecision:
+        decision = self.resume_planner.decide(
+            checkpoint_state=checkpoint_state,
+            config_hash=config_hash,
+            goal_hash=goal_hash,
+            hard_stopped=hard_stopped,
+            pending_action_ids=pending_action_ids,
+            executable_tasks=list(self.state.executable_tasks.values()),
+            terminal_stagnation_signature=terminal_stagnation_signature,
+            prior_state_hash=prior_state_hash,
+            prior_config_hash=prior_config_hash,
+            prior_goal_hash=prior_goal_hash,
+            prior_terminal_stagnation_signature=(prior_terminal_stagnation_signature),
+            intervention=intervention,
+        )
+        self._emit(
+            "proof_control_resume_decided",
+            decision.model_dump(mode="json"),
+        )
+        self.persist()
+        return decision
+
+    def prepare_routes_for_hard_stop(
+        self,
+        *,
+        progress_signature: str,
+        current_round: int,
+    ) -> dict[str, list[str]]:
+        result: dict[str, list[str]] = {
+            "waiting_route_ids": [],
+            "frozen_route_ids": [],
+            "ready_task_ids": [],
+        }
+        live_statuses = {
+            TaskStatus.CREATED,
+            TaskStatus.NEEDS_REWRITE,
+            TaskStatus.ASSIGNED,
+            TaskStatus.READY,
+            TaskStatus.RUNNING,
+            TaskStatus.DEFERRED,
+            TaskStatus.BLOCKED,
+        }
+        active_routes = self.route_registry.active_routes(current_round)
+        route_tasks = {
+            route.route_id: [
+                task
+                for task in self.state.executable_tasks.values()
+                if route.route_id in task.route_ids and task.status in live_statuses
+            ]
+            for route in active_routes
+        }
+        result["ready_task_ids"] = sorted(
+            {
+                task.task_id
+                for tasks in route_tasks.values()
+                for task in tasks
+                if task.status
+                in {
+                    TaskStatus.CREATED,
+                    TaskStatus.ASSIGNED,
+                    TaskStatus.READY,
+                    TaskStatus.RUNNING,
+                }
+                and bool(
+                    task.registered_handler
+                    or task.assigned_agent_id
+                    or task.status == TaskStatus.RUNNING
+                )
+            }
+        )
+        if result["ready_task_ids"]:
+            return result
+        for route in active_routes:
+            tasks = route_tasks[route.route_id]
+            automatic_wait_tasks = [
+                task
+                for task in tasks
+                if any(
+                    not condition.satisfied
+                    and condition.kind != WakeConditionKind.USER_INTERVENTION
+                    for condition in task.wake_conditions
+                )
+            ]
+            if automatic_wait_tasks:
+                for task in automatic_wait_tasks:
+                    self.route_wake_controller.wait_for_task(
+                        route.route_id,
+                        task.task_id,
+                        current_round=current_round,
+                    )
+                result["waiting_route_ids"].append(route.route_id)
+                continue
+            wake_ids = [
+                condition.condition_id
+                for task in tasks
+                for condition in task.wake_conditions
+                if not condition.satisfied
+            ]
+            record = RouteFreezeRecord(
+                route_id=route.route_id,
+                blocker_task_ids=[task.task_id for task in tasks],
+                wake_condition_ids=sorted(set(wake_ids)),
+                requires_user_intervention=True,
+                reason=(
+                    "No automatic repair remains after the certified progress "
+                    f"plateau {progress_signature}."
+                ),
+                created_round=current_round,
+            )
+            self.route_wake_controller.freeze(record)
+            result["frozen_route_ids"].append(route.route_id)
+        for key in result:
+            result[key] = sorted(set(result[key]))
+        self._emit(
+            "proof_control_hard_stop_routes_classified",
+            {
+                "round_index": current_round,
+                "progress_signature": progress_signature,
+                **result,
+            },
+        )
+        self.persist()
+        return result
+
+    def reopen_frozen_routes(
+        self,
+        *,
+        intervention: str,
+        current_round: int,
+    ) -> list[str]:
+        if not intervention.strip():
+            raise ValueError("reopening a frozen route requires an intervention")
+        reopened: list[str] = []
+        for route in self.route_registry.routes:
+            if route.status not in {
+                RouteStatus.FROZEN,
+                RouteStatus.FROZEN_STALLED,
+            }:
+                continue
+            self.route_registry.reactivate(
+                route.route_id,
+                revision_summary=(
+                    f"explicit resume intervention {intervention} at round "
+                    f"{current_round}"
+                ),
+            )
+            reopened.append(route.route_id)
+        if reopened:
+            self._emit(
+                "proof_control_frozen_routes_reopened",
+                {
+                    "intervention": intervention,
+                    "round_index": current_round,
+                    "route_ids": reopened,
+                },
+            )
+            self.persist()
+        return reopened
+
+    def _mark_task_routes_waiting(
+        self,
+        task: ExecutableTaskRecord,
+        *,
+        current_round: int,
+    ) -> None:
+        if not self.active:
+            return
+        if task.status not in {
+            TaskStatus.DEFERRED,
+            TaskStatus.NEEDS_REWRITE,
+            TaskStatus.BLOCKED,
+        }:
+            return
+        if not any(not condition.satisfied for condition in task.wake_conditions):
+            return
+        for route_id in task.route_ids:
+            try:
+                route = self.route_registry.get(route_id)
+                if route.status in {
+                    RouteStatus.FROZEN,
+                    RouteStatus.TERMINAL,
+                    RouteStatus.FROZEN_STALLED,
+                    RouteStatus.REFUTED,
+                    RouteStatus.MERGED,
+                    RouteStatus.ABANDONED,
+                    RouteStatus.COMPLETED,
+                }:
+                    continue
+                self.route_wake_controller.wait_for_task(
+                    route_id,
+                    task.task_id,
+                    current_round=current_round,
+                )
+            except KeyError:
+                continue
 
     @staticmethod
     def _property_strengthening_risk_types() -> set[InferenceRiskType]:

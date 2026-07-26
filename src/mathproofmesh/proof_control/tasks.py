@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
 
-from ..schemas import stable_hash, utc_now_iso
+from ..communication.route_registry import RouteRegistry
+from ..schemas import RouteDescriptor, RouteStatus, stable_hash, utc_now_iso
 from .models import (
     ExecutableTaskRecord,
     FalsificationCompilationStatus,
+    RouteFreezeRecord,
     TaskStatus,
     TypedFalsificationContract,
     WakeCondition,
@@ -52,6 +54,8 @@ class ExecutableTaskController:
         TaskStatus.RUNNING: {
             TaskStatus.COMPLETED,
             TaskStatus.INCONCLUSIVE,
+            TaskStatus.DEFERRED,
+            TaskStatus.BLOCKED,
             TaskStatus.FAILED,
         },
         TaskStatus.DEFERRED: {
@@ -193,6 +197,7 @@ class ExecutableTaskController:
             target_obligation_ids=identity["target_obligation_ids"],
             route_ids=identity["route_ids"],
             assigned_agent_id=counterexample_hunter_agent_id,
+            registered_handler="countermodel_agent_dispatcher",
             explicit_prompt_ref=explicit_prompt_ref,
             created_round=created_round,
             last_transition_round=created_round,
@@ -220,6 +225,82 @@ class ExecutableTaskController:
             reason="counterexample_hunter_unavailable",
             wake_kind=WakeConditionKind.REVIEWER_AVAILABLE,
         )
+
+    def create_route_update_task(
+        self,
+        *,
+        target_claim_ids: Sequence[str] = (),
+        target_obligation_ids: Sequence[str] = (),
+        route_ids: Sequence[str] = (),
+        created_round: int,
+        explicit_prompt_ref: str | None = None,
+    ) -> ExecutableTaskRecord:
+        identity = {
+            "task_kind": "route_update",
+            "target_claim_ids": sorted(set(target_claim_ids)),
+            "target_obligation_ids": sorted(set(target_obligation_ids)),
+            "route_ids": sorted(set(route_ids)),
+            "explicit_prompt_ref": explicit_prompt_ref,
+        }
+        task_id = f"executable_task_{stable_hash(identity)[:20]}"
+        existing = self.tasks.get(task_id)
+        if existing is not None:
+            return existing
+        task = ExecutableTaskRecord(
+            task_id=task_id,
+            task_kind="route_update",
+            status=TaskStatus.READY,
+            target_claim_ids=identity["target_claim_ids"],
+            target_obligation_ids=identity["target_obligation_ids"],
+            route_ids=identity["route_ids"],
+            registered_handler="route_update_dispatcher",
+            explicit_prompt_ref=explicit_prompt_ref,
+            created_round=created_round,
+            last_transition_round=created_round,
+            expires_round=created_round + 4,
+            transition_history=[
+                {
+                    "from": None,
+                    "to": TaskStatus.READY.value,
+                    "round": created_round,
+                    "reason": "registered_route_update_handler_available",
+                }
+            ],
+        )
+        self.tasks[task.task_id] = task
+        return task
+
+    def export_state(self) -> dict[str, object]:
+        return {
+            "schema_version": "0.8.2",
+            "tasks": {
+                task_id: task.model_dump(mode="json")
+                for task_id, task in sorted(self.tasks.items())
+            },
+        }
+
+    @classmethod
+    def from_state(
+        cls,
+        state: Mapping[str, object] | None,
+    ) -> "ExecutableTaskController":
+        if not isinstance(state, Mapping):
+            return cls()
+        raw_tasks = state.get("tasks", state)
+        if not isinstance(raw_tasks, Mapping):
+            return cls()
+        tasks: dict[str, ExecutableTaskRecord] = {}
+        for task_id, raw_task in sorted(
+            raw_tasks.items(), key=lambda item: str(item[0])
+        ):
+            if task_id == "schema_version":
+                continue
+            try:
+                task = ExecutableTaskRecord.model_validate(raw_task)
+            except (TypeError, ValueError):
+                continue
+            tasks[str(task_id)] = task
+        return cls(tasks)
 
     def defer(
         self,
@@ -307,6 +388,30 @@ class ExecutableTaskController:
         return self._transition(
             task,
             TaskStatus.FAILED,
+            current_round=current_round,
+            reason=task.terminal_reason,
+        )
+
+    def complete_work(
+        self,
+        task_id: str,
+        *,
+        current_round: int,
+        result_refs: Sequence[str],
+        reason: str,
+    ) -> ExecutableTaskRecord:
+        task = self.tasks[task_id]
+        if task.status in {TaskStatus.ASSIGNED, TaskStatus.READY}:
+            self.mark_running(task_id, current_round=current_round)
+        if task.status != TaskStatus.RUNNING:
+            raise ValueError("only an executable or running task may complete")
+        task.result_refs = list(dict.fromkeys(result_refs))
+        if not task.result_refs:
+            raise ValueError("task completion requires a result reference")
+        task.terminal_reason = reason.strip() or "task_completed"
+        return self._transition(
+            task,
+            TaskStatus.COMPLETED,
             current_round=current_round,
             reason=task.terminal_reason,
         )
@@ -486,3 +591,176 @@ class WakeScheduler:
             WakeConditionKind.CONFIG_CHANGED: config_changed,
         }
         return checks[condition.kind]
+
+
+class RouteWakeController:
+    """Keep deferred work wakeable without misclassifying a route as terminal."""
+
+    def __init__(
+        self,
+        route_registry: RouteRegistry,
+        tasks: dict[str, ExecutableTaskRecord],
+        *,
+        freeze_records: Mapping[str, RouteFreezeRecord] | None = None,
+    ) -> None:
+        self.route_registry = route_registry
+        self.tasks = tasks
+        self.freeze_records = dict(freeze_records or {})
+        self.scheduler = WakeScheduler(self.tasks)
+
+    def wait_for_task(
+        self,
+        route_id: str,
+        task_id: str,
+        *,
+        current_round: int,
+    ) -> RouteDescriptor:
+        route = self.route_registry.get(route_id)
+        try:
+            task = self.tasks[task_id]
+        except KeyError as exc:
+            raise KeyError(f"unknown executable task: {task_id}") from exc
+        if route_id not in task.route_ids:
+            raise ValueError("waiting task does not belong to the route")
+        if route.status in {
+            RouteStatus.FROZEN,
+            RouteStatus.TERMINAL,
+            RouteStatus.FROZEN_STALLED,
+            RouteStatus.REFUTED,
+            RouteStatus.MERGED,
+            RouteStatus.ABANDONED,
+            RouteStatus.COMPLETED,
+        }:
+            raise ValueError("terminal or frozen route cannot enter automatic waiting")
+        if task.status in ExecutableTaskController.TERMINAL_STATUSES:
+            raise ValueError("a route cannot wait on a terminal task")
+        if not any(not condition.satisfied for condition in task.wake_conditions):
+            raise ValueError("waiting requires an unsatisfied wake condition")
+        route.status = RouteStatus.WAITING
+        route.frozen_reason = (
+            f"waiting for executable task {task_id} from round {current_round}"
+        )
+        route.frozen_signature = stable_hash(
+            {
+                "route_id": route_id,
+                "task_id": task_id,
+                "wake_condition_ids": [
+                    condition.condition_id
+                    for condition in task.wake_conditions
+                    if not condition.satisfied
+                ],
+            }
+        )
+        self.route_registry.recompute_neighbors()
+        return route
+
+    def evaluate(
+        self,
+        *,
+        current_round: int,
+        provider_available: bool = False,
+        budget_available: bool = False,
+        available_fact_ids: Collection[str] = (),
+        changed_obligation_ids: Collection[str] = (),
+        reviewer_available: bool = False,
+        recompiled_task_ids: Collection[str] = (),
+        user_intervention: bool = False,
+        config_changed: bool = False,
+    ) -> list[RouteDescriptor]:
+        already_wakeable = [
+            task
+            for task in self.tasks.values()
+            if task.status
+            in {
+                TaskStatus.CREATED,
+                TaskStatus.ASSIGNED,
+                TaskStatus.READY,
+            }
+        ]
+        newly_woken = self.scheduler.evaluate(
+            current_round=current_round,
+            provider_available=provider_available,
+            budget_available=budget_available,
+            available_fact_ids=available_fact_ids,
+            changed_obligation_ids=changed_obligation_ids,
+            reviewer_available=reviewer_available,
+            recompiled_task_ids=recompiled_task_ids,
+            user_intervention=user_intervention,
+            config_changed=config_changed,
+        )
+        tasks = {
+            task.task_id: task for task in [*already_wakeable, *newly_woken]
+        }.values()
+        woken: dict[str, RouteDescriptor] = {}
+        for task in tasks:
+            for route_id in task.route_ids:
+                try:
+                    route = self.route_registry.get(route_id)
+                except KeyError:
+                    continue
+                if route.status != RouteStatus.WAITING:
+                    continue
+                self.route_registry.reactivate(
+                    route_id,
+                    revision_summary=(
+                        f"wake conditions satisfied for executable task {task.task_id}"
+                    ),
+                )
+                woken[route_id] = route
+        return [woken[key] for key in sorted(woken)]
+
+    def freeze(self, record: RouteFreezeRecord) -> RouteFreezeRecord:
+        route = self.route_registry.get(record.route_id)
+        condition_index = {
+            condition.condition_id: condition
+            for task in self.tasks.values()
+            for condition in task.wake_conditions
+        }
+        unknown_condition_ids = sorted(
+            set(record.wake_condition_ids) - set(condition_index)
+        )
+        if unknown_condition_ids:
+            raise ValueError(
+                "route freeze references unknown wake condition(s): "
+                + ", ".join(unknown_condition_ids)
+            )
+        unknown_task_ids = sorted(set(record.blocker_task_ids) - set(self.tasks))
+        if unknown_task_ids:
+            raise ValueError(
+                "route freeze references unknown blocker task(s): "
+                + ", ".join(unknown_task_ids)
+            )
+        referenced_conditions = [
+            condition_index[condition_id]
+            for condition_id in record.wake_condition_ids
+            if condition_id in condition_index
+        ]
+        automatic_wakes = [
+            condition
+            for condition in referenced_conditions
+            if not condition.satisfied
+            and condition.kind != WakeConditionKind.USER_INTERVENTION
+        ]
+        blocker_tasks = [
+            self.tasks[task_id]
+            for task_id in record.blocker_task_ids
+            if task_id in self.tasks
+        ]
+        blocker_automatic_wakes = [
+            condition
+            for task in blocker_tasks
+            for condition in task.wake_conditions
+            if not condition.satisfied
+            and condition.kind != WakeConditionKind.USER_INTERVENTION
+        ]
+        if automatic_wakes or blocker_automatic_wakes:
+            raise ValueError("route with an automatic wake condition cannot be frozen")
+        if not record.requires_user_intervention:
+            raise ValueError("frozen route requires explicit user intervention")
+        route.status = RouteStatus.FROZEN
+        route.frozen_reason = record.reason.strip() or "explicit intervention required"
+        route.frozen_signature = stable_hash(record.model_dump(mode="json"))
+        route.cooldown_until_round = None
+        self.freeze_records[record.route_id] = record
+        self.route_registry.recompute_neighbors()
+        return record

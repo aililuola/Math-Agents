@@ -89,6 +89,8 @@ from .proof_control.models import (
     GateVerdict,
     MetaPivotStatus,
     ProofRole,
+    ResumeDecisionKind,
+    WakeConditionKind,
 )
 from .proof_identity import (
     attempt_content_fingerprint,
@@ -277,6 +279,7 @@ class SolveState:
     proof_control: ProofControlLayer | None = None
     global_no_progress_rounds: int = 0
     global_meta_pivot_used: bool = False
+    hard_stopped: bool = False
     last_progress_signature: str | None = None
     certified_counterexample_hashes: list[str] = field(default_factory=list)
 
@@ -805,6 +808,12 @@ class ProofMeshOrchestrator:
             # novelty, uncertainty, gaps, stagnation, and protected future call reserves.
             for round_index in range(1, self.config.budget.max_rounds):
                 state.current_round = round_index
+                self._reevaluate_route_wakes(
+                    state,
+                    current_round=round_index,
+                    pool=pool,
+                    runner=runner,
+                )
                 round_task = activity.start_task(
                     "adaptive_round",
                     title=activity.text(
@@ -1815,7 +1824,12 @@ class ProofMeshOrchestrator:
         finally:
             await pool.aclose()
 
-    async def resume(self, run_id: str) -> RunResult:
+    async def resume(
+        self,
+        run_id: str,
+        *,
+        intervention: str | None = None,
+    ) -> RunResult:
         """Resume a stopped run from persisted stage state and verified proof checkpoints."""
         if not self.config.continuation.process_resume_enabled:
             raise RuntimeError(
@@ -2036,6 +2050,212 @@ class ProofMeshOrchestrator:
                 write_run_report(store, result)
                 return result
 
+            if state.proof_control is not None and state.proof_control.active:
+                current_config_hash = stable_hash(self.config.model_dump(mode="json"))
+                prior_decisions = list(
+                    state.proof_control.state.resume_decisions.values()
+                )
+                prior_decision = (
+                    sorted(
+                        prior_decisions,
+                        key=lambda item: item.decision_id,
+                    )[-1]
+                    if prior_decisions
+                    else None
+                )
+                prior_config_hash = str(
+                    payload.get("proof_control_config_hash")
+                    or (
+                        prior_decision.config_hash
+                        if prior_decision is not None
+                        else current_config_hash
+                    )
+                )
+                prior_goal_hash = str(
+                    payload.get("proof_control_goal_hash")
+                    or (
+                        prior_decision.goal_hash
+                        if prior_decision is not None
+                        else problem.goal_hash
+                    )
+                )
+                self._reevaluate_route_wakes(
+                    state,
+                    current_round=state.current_round + 1,
+                    pool=pool,
+                    runner=runner,
+                    user_intervention=intervention is not None,
+                    config_changed=prior_config_hash != current_config_hash,
+                )
+                routes = (
+                    state.route_registry.routes
+                    if state.route_registry is not None
+                    else []
+                )
+                inferred_legacy_hard_stop = bool(
+                    routes
+                    and all(
+                        route.status
+                        in {
+                            RouteStatus.WAITING,
+                            RouteStatus.FROZEN,
+                            RouteStatus.FROZEN_STALLED,
+                            RouteStatus.TERMINAL,
+                            RouteStatus.REFUTED,
+                            RouteStatus.MERGED,
+                            RouteStatus.ABANDONED,
+                            RouteStatus.COMPLETED,
+                        }
+                        for route in routes
+                    )
+                    and state.global_no_progress_rounds
+                    >= self.config.scheduler.global_no_progress_rounds_before_stop
+                )
+                hard_stopped = state.hard_stopped or inferred_legacy_hard_stop
+                pending_action_ids = [
+                    action.action_id
+                    for action in state.proof_control.state.control_actions.values()
+                    if action.status
+                    in {
+                        ControlActionStatus.PROPOSED,
+                        ControlActionStatus.ADMITTED,
+                        ControlActionStatus.EXECUTING,
+                    }
+                ]
+                checkpoint_state = {
+                    "current_round": state.current_round,
+                    "hard_stopped": hard_stopped,
+                    "global_no_progress_rounds": state.global_no_progress_rounds,
+                    "mathematical_progress_signature": (state.last_progress_signature),
+                    "route_statuses": {
+                        route.route_id: route.status.value for route in routes
+                    },
+                }
+                decision = state.proof_control.plan_resume(
+                    checkpoint_state=checkpoint_state,
+                    config_hash=current_config_hash,
+                    goal_hash=problem.goal_hash,
+                    hard_stopped=hard_stopped,
+                    pending_action_ids=pending_action_ids,
+                    terminal_stagnation_signature=state.last_progress_signature,
+                    prior_state_hash=(
+                        prior_decision.state_hash
+                        if prior_decision is not None
+                        else None
+                    ),
+                    prior_config_hash=prior_config_hash,
+                    prior_goal_hash=prior_goal_hash,
+                    prior_terminal_stagnation_signature=(
+                        prior_decision.terminal_stagnation_signature
+                        if prior_decision is not None
+                        else state.last_progress_signature
+                    ),
+                    intervention=intervention,
+                )
+                store.append_event(
+                    "run_resume_policy_decided",
+                    decision.model_dump(mode="json"),
+                )
+                if decision.decision == ResumeDecisionKind.NO_RESUMABLE_WORK:
+                    state.hard_stopped = True
+                    state.research_progress_report = self._build_research_progress_report(
+                        problem,
+                        state,
+                        execution_note=(
+                            "硬停止检查点没有待执行动作、可唤醒任务或显式干预；"
+                            "本次恢复未调用模型。"
+                            if self.config.runtime.output_language.lower().startswith(
+                                "zh"
+                            )
+                            else (
+                                "The hard-stopped checkpoint has no pending "
+                                "action, wakeable task, or explicit intervention; "
+                                "resume made no model calls."
+                            )
+                        ),
+                    )
+                    store.write_json(
+                        "reports",
+                        "research_progress_report",
+                        state.research_progress_report,
+                    )
+                    self._checkpoint(
+                        store,
+                        "resume_no_resumable_work",
+                        state,
+                        memory,
+                        runner,
+                    )
+                    state.checkpoints = store.list_proof_checkpoints()
+                    result = self._build_result(
+                        run_id,
+                        self._run_status(problem, state, store),
+                        problem,
+                        state,
+                        pool.metrics(),
+                        runner,
+                        pool,
+                        store,
+                        memory,
+                        summary_override=(
+                            "硬停止状态没有新增可执行工作；已原样返回研究进展，"
+                            "模型调用数未增加。"
+                            if self.config.runtime.output_language.lower().startswith(
+                                "zh"
+                            )
+                            else (
+                                "No new executable work was available after the "
+                                "hard stop; research progress was returned without "
+                                "additional model calls."
+                            )
+                        ),
+                    )
+                    store.write_json("structured", "run_result", result)
+                    activity.complete_task(
+                        run_task,
+                        title=activity.text(
+                            "无可恢复工作，未调用模型",
+                            "No resumable work; no model calls made",
+                        ),
+                        detail=decision.reason,
+                        stage="run_resume",
+                        importance=ActivityImportance.MAJOR,
+                        metrics={
+                            "resume_decision_id": decision.decision_id,
+                            "no_new_model_calls": True,
+                            "total_calls": result.total_calls,
+                        },
+                    )
+                    activity.finalize()
+                    write_run_report(store, result)
+                    return result
+                state.hard_stopped = False
+                if intervention is not None:
+                    state.proof_control.reopen_frozen_routes(
+                        intervention=intervention,
+                        current_round=state.current_round + 1,
+                    )
+                    if intervention.strip().casefold().replace("-", "_") == (
+                        "reset_stagnation"
+                    ):
+                        state.global_no_progress_rounds = 0
+                        state.global_meta_pivot_used = False
+                    elif intervention.strip().casefold().replace("-", "_") == (
+                        "reopen_with_pivot"
+                    ):
+                        state.proof_control.request_meta_pivot(
+                            source_stagnation_signature=(
+                                state.last_progress_signature
+                                or stable_hash(checkpoint_state)
+                            ),
+                            trigger_round=state.current_round + 1,
+                            requested_mechanisms=[
+                                "meta_replan",
+                                "representation_switch",
+                                "auxiliary_construction",
+                            ],
+                        )
+
             if state.triage is None:
                 state.triage = await self._triage(problem, runner, prompts, store)
             state.capability_domain = infer_capability_domain(
@@ -2079,8 +2299,16 @@ class ProofMeshOrchestrator:
             max_resume_rounds = max(1, self.config.budget.max_rounds)
             if state.last_progress_signature is None:
                 state.last_progress_signature = self._global_progress_signature(state)
-            for resume_round in range(max_resume_rounds):
+            resume_start_round = state.current_round + 1
+            for resume_offset in range(max_resume_rounds):
+                resume_round = resume_start_round + resume_offset
                 state.current_round = resume_round
+                self._reevaluate_route_wakes(
+                    state,
+                    current_round=resume_round,
+                    pool=pool,
+                    runner=runner,
+                )
                 route_update_performed = await self._run_scheduled_route_updates(
                     state,
                     problem=problem,
@@ -3372,6 +3600,7 @@ class ProofMeshOrchestrator:
                 control.fail_route_update_task(
                     task.task_id,
                     reason="target route is no longer registered",
+                    current_round=current_round,
                 )
                 continue
             agents: list[AgentRuntime] = []
@@ -3385,9 +3614,11 @@ class ProofMeshOrchestrator:
                 if not agent.in_cooldown:
                     agents.append(agent)
             if not agents:
-                control.fail_route_update_task(
+                control.defer_route_update_task(
                     task.task_id,
                     reason="target route has no available prover",
+                    current_round=current_round,
+                    wake_kind=WakeConditionKind.REVIEWER_AVAILABLE,
                 )
                 continue
             agent = max(agents, key=lambda item: (item.trust_score, item.id))
@@ -3403,6 +3634,7 @@ class ProofMeshOrchestrator:
                     control.fail_route_update_task(
                         task.task_id,
                         reason=f"delivery {message_id} is missing",
+                        current_round=current_round,
                     )
                     task_failed = True
                     break
@@ -3414,9 +3646,11 @@ class ProofMeshOrchestrator:
                     receipt_ids.append(existing_receipt.receipt_id)
                     continue
                 if runner.ledger.remaining_calls <= 0:
-                    control.fail_route_update_task(
+                    control.defer_route_update_task(
                         task.task_id,
                         reason="no model call remains for the scheduled route update",
+                        current_round=current_round,
+                        wake_kind=WakeConditionKind.BUDGET_AVAILABLE,
                     )
                     task_failed = True
                     break
@@ -3431,10 +3665,14 @@ class ProofMeshOrchestrator:
                     control.fail_route_update_task(
                         task.task_id,
                         reason=str(exc),
+                        current_round=current_round,
                     )
                     task_failed = True
                     break
-                control.mark_route_update_presented(task.task_id)
+                control.mark_route_update_presented(
+                    task.task_id,
+                    current_round=current_round,
+                )
                 requirement = {
                     "message_id": message.message_id,
                     "target_route_id": task.target_route_id,
@@ -3470,9 +3708,15 @@ class ProofMeshOrchestrator:
                         budget_bucket="depth",
                     )
                 except (BudgetExhaustedError, ProviderCircuitOpenError) as exc:
-                    control.fail_route_update_task(
+                    control.defer_route_update_task(
                         task.task_id,
                         reason=f"{type(exc).__name__}: {exc}",
+                        current_round=current_round,
+                        wake_kind=(
+                            WakeConditionKind.BUDGET_AVAILABLE
+                            if isinstance(exc, BudgetExhaustedError)
+                            else WakeConditionKind.PROVIDER_AVAILABLE
+                        ),
                     )
                     task_failed = True
                     break
@@ -3480,6 +3724,7 @@ class ProofMeshOrchestrator:
                     control.fail_route_update_task(
                         task.task_id,
                         reason="route prover did not return a valid semantic receipt",
+                        current_round=current_round,
                     )
                     task_failed = True
                     break
@@ -3502,6 +3747,7 @@ class ProofMeshOrchestrator:
                 task.task_id,
                 receipt_ids=receipt_ids,
                 used=used,
+                current_round=current_round,
             )
             performed = True
         return performed
@@ -4033,6 +4279,48 @@ class ProofMeshOrchestrator:
             }
         )
 
+    def _reevaluate_route_wakes(
+        self,
+        state: SolveState,
+        *,
+        current_round: int,
+        pool: AgentPool,
+        runner: StructuredAgentRunner,
+        user_intervention: bool = False,
+        config_changed: bool = False,
+    ) -> list[str]:
+        control = state.proof_control
+        if control is None or not control.active:
+            return []
+        available_agents: list[AgentRuntime] = []
+        if runner.ledger.remaining_calls > 0:
+            for agent in pool.agents:
+                if agent.in_cooldown:
+                    continue
+                try:
+                    pool.provider_circuit.assert_available(agent.provider_scope)
+                except ProviderCircuitOpenError:
+                    continue
+                available_agents.append(agent)
+        return control.evaluate_route_wakes(
+            current_round=current_round,
+            provider_available=bool(available_agents),
+            budget_available=runner.ledger.remaining_calls > 0,
+            available_fact_ids=(
+                [fact.message_id for fact in state.typed_memory.facts]
+                if state.typed_memory is not None
+                else []
+            ),
+            reviewer_available=any(
+                agent.supports_role("counterexample_hunter")
+                or agent.supports_role("referee")
+                or agent.supports_role("verifier")
+                for agent in available_agents
+            ),
+            user_intervention=user_intervention,
+            config_changed=config_changed,
+        )
+
     def _apply_global_progress_gate(
         self,
         state: SolveState,
@@ -4060,6 +4348,7 @@ class ProofMeshOrchestrator:
         if prior is None or changed:
             state.global_no_progress_rounds = 0
             state.global_meta_pivot_used = False
+            state.hard_stopped = False
         else:
             state.global_no_progress_rounds += 1
         state.last_progress_signature = current
@@ -4182,13 +4471,30 @@ class ProofMeshOrchestrator:
                 progress_signature=current
             ):
                 return False
-        if state.route_registry is not None:
+        route_terminal_policy: dict[str, list[str]] | None = None
+        if control is not None and control.active:
+            route_terminal_policy = control.prepare_routes_for_hard_stop(
+                progress_signature=current,
+                current_round=round_index,
+            )
+            if route_terminal_policy["ready_task_ids"]:
+                store.append_event(
+                    "global_stagnation_stop_blocked_by_executable_task",
+                    {
+                        "round_index": round_index,
+                        "progress_signature": current,
+                        "ready_task_ids": route_terminal_policy["ready_task_ids"],
+                    },
+                )
+                return False
+        elif state.route_registry is not None:
             for route in state.route_registry.active_routes(round_index):
                 state.route_registry.mark_stalled(
                     route.route_id,
                     signature=current,
                     reason="global certified-progress plateau",
                 )
+        state.hard_stopped = True
         store.append_event(
             "global_stagnation_hard_stop",
             {
@@ -4211,6 +4517,7 @@ class ProofMeshOrchestrator:
                     and control.state.meta_pivot_state is not None
                     else ""
                 ),
+                "route_terminal_policy": route_terminal_policy,
             },
         )
         if activity is not None:
@@ -6297,6 +6604,7 @@ class ProofMeshOrchestrator:
             capability_domain=str(payload.get("capability_domain", "algebra")),
             global_no_progress_rounds=int(payload.get("global_no_progress_rounds", 0)),
             global_meta_pivot_used=bool(payload.get("global_meta_pivot_used", False)),
+            hard_stopped=bool(payload.get("hard_stopped", False)),
             last_progress_signature=payload.get("last_progress_signature"),
             certified_counterexample_hashes=[
                 str(item) for item in payload.get("certified_counterexample_hashes", [])
@@ -13602,7 +13910,7 @@ class ProofMeshOrchestrator:
             stage,
             {
                 "schema_version": (
-                    "0.8.1" if state.proof_control is not None else "0.7"
+                    "0.8.2" if state.proof_control is not None else "0.7"
                 ),
                 "triage": state.triage,
                 "strategies": state.strategies,
@@ -13622,7 +13930,16 @@ class ProofMeshOrchestrator:
                 "research_progress_report": state.research_progress_report,
                 "global_no_progress_rounds": state.global_no_progress_rounds,
                 "global_meta_pivot_used": state.global_meta_pivot_used,
+                "hard_stopped": state.hard_stopped,
                 "last_progress_signature": state.last_progress_signature,
+                "proof_control_config_hash": stable_hash(
+                    self.config.model_dump(mode="json")
+                ),
+                "proof_control_goal_hash": (
+                    state.proof_graph.problem_hash
+                    if state.proof_graph is not None
+                    else None
+                ),
                 "certified_counterexample_hashes": (
                     state.certified_counterexample_hashes
                 ),

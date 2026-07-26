@@ -256,6 +256,8 @@ class RouteRegistry:
             RouteStatus.ABANDONED,
             RouteStatus.COMPLETED,
             RouteStatus.REFUTED,
+            RouteStatus.FROZEN,
+            RouteStatus.TERMINAL,
             RouteStatus.FROZEN_STALLED,
         }:
             return
@@ -288,6 +290,8 @@ class RouteRegistry:
             RouteStatus.ABANDONED,
             RouteStatus.COMPLETED,
             RouteStatus.REFUTED,
+            RouteStatus.FROZEN,
+            RouteStatus.TERMINAL,
         }:
             return
         route.status = RouteStatus.ACTIVE
@@ -312,6 +316,9 @@ class RouteRegistry:
             RouteStatus.ABANDONED,
             RouteStatus.COMPLETED,
             RouteStatus.REFUTED,
+            RouteStatus.WAITING,
+            RouteStatus.FROZEN,
+            RouteStatus.TERMINAL,
             RouteStatus.FROZEN_STALLED,
         }:
             return
@@ -332,6 +339,8 @@ class RouteRegistry:
             RouteStatus.ABANDONED,
             RouteStatus.COMPLETED,
             RouteStatus.REFUTED,
+            RouteStatus.FROZEN,
+            RouteStatus.TERMINAL,
         }:
             return
         route.status = RouteStatus.FROZEN_STALLED

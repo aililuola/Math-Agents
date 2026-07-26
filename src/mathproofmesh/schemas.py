@@ -222,7 +222,10 @@ class RouteRole(StrEnum):
 
 class RouteStatus(StrEnum):
     ACTIVE = "active"
+    WAITING = "waiting"
     REPAIR_ONCE = "repair_once"
+    FROZEN = "frozen"
+    TERMINAL = "terminal"
     FROZEN_STALLED = "frozen_stalled"
     REFUTED = "refuted"
     COOLING = "cooling"

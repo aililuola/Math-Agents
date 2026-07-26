@@ -13,6 +13,7 @@ from ..schemas import (
     FailureLevel,
     NoveltySignature,
     QuantifierSpec,
+    RouteStatus as RouteStatus,
     StrategyCard,
     StrictModel,
     VariableBinding,
@@ -139,6 +140,37 @@ class WakeCondition(StrictModel):
     earliest_time: str | None = None
     satisfied: bool = False
     satisfied_at: str | None = None
+
+
+class RouteFreezeRecord(StrictModel):
+    route_id: str
+    blocker_task_ids: list[str] = Field(default_factory=list)
+    wake_condition_ids: list[str] = Field(default_factory=list)
+    requires_user_intervention: bool
+    reason: str
+    created_round: int = Field(ge=0)
+
+
+class ResumeDecisionKind(StrEnum):
+    RESUME_WORK = "resume_work"
+    NO_RESUMABLE_WORK = "no_resumable_work"
+    REOPEN_REQUIRED = "reopen_required"
+
+
+class ResumeDecision(StrictModel):
+    decision_id: str
+    decision: ResumeDecisionKind
+    state_hash: str
+    config_hash: str | None = None
+    goal_hash: str | None = None
+    hard_stopped: bool = False
+    pending_action_ids: list[str] = Field(default_factory=list)
+    wakeable_task_ids: list[str] = Field(default_factory=list)
+    deferred_task_ids: list[str] = Field(default_factory=list)
+    required_interventions: list[str] = Field(default_factory=list)
+    intervention_action_id: str | None = None
+    terminal_stagnation_signature: str | None = None
+    reason: str
 
 
 class ExecutableTaskRecord(StrictModel):
@@ -1030,12 +1062,14 @@ class RouteUpdateTask(StrictModel):
     status: Literal[
         "scheduled",
         "presented",
+        "deferred",
         "acknowledged",
         "used",
         "expired_without_opportunity",
         "failed",
     ] = "scheduled"
     action_id: str
+    executable_task_id: str | None = None
     receipt_ids: list[str] = Field(default_factory=list)
     failure_reason: str = ""
 
