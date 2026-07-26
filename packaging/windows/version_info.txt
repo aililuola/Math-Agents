@@ -16,12 +16,12 @@ VSVersionInfo(
         [
           StringStruct(u'CompanyName', u'MathProofMesh contributors'),
           StringStruct(u'FileDescription', u'MathProofMesh Desktop'),
-          StringStruct(u'FileVersion', u'0.8.1'),
+          StringStruct(u'FileVersion', u'0.8.2'),
           StringStruct(u'InternalName', u'MathProofMesh'),
           StringStruct(u'LegalCopyright', u'Copyright MathProofMesh contributors'),
           StringStruct(u'OriginalFilename', u'MathProofMesh.exe'),
           StringStruct(u'ProductName', u'MathProofMesh'),
-          StringStruct(u'ProductVersion', u'0.8.1')
+          StringStruct(u'ProductVersion', u'0.8.2')
         ]
       )
     ]),

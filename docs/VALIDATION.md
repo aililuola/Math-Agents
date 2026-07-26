@@ -1,6 +1,6 @@
 # 可复现验证记录
 
-**验证日期：2026 年 7 月 25 日。** 本记录严格区分源码静态质量、确定性 Mock/HTTP Mock 行为、Docker 沙箱探针和真实供应商联调。0.8.1 源码、Mock、拓扑与 proof-control benchmark，以及兼容性恢复场景均已执行；整个自动化过程没有读取 API key，也没有发起真实供应商请求。
+**验证日期：2026 年 7 月 26 日。** 本记录严格区分源码静态质量、确定性 Mock/HTTP Mock 行为、Docker 沙箱探针和真实供应商联调。0.8.2 源码、Mock、拓扑与 proof-control benchmark，以及兼容性恢复场景均已执行；整个自动化过程没有读取 API key，也没有发起真实供应商请求。
 
 ## 1. 一键复验
 
@@ -29,11 +29,11 @@ compileall(src + tests)
 | `python -m compileall -q src tests benchmarks` | PASS |
 | `ruff check .` | PASS |
 | `ruff format --check .` | PASS |
-| `python -m pytest -q` | **515 passed**（执行 editable `.[dev,server]` 安装，包含 `z3-solver`） |
-| 指定 E2E/resume 组合 | **17 passed** |
+| `python -m pytest -q` | **604 passed**（执行 editable `.[dev,server]` 安装，包含 `z3-solver`） |
+| 指定 E2E/resume 组合 | **47 passed** |
 | topology Mock benchmark | PASS，21/21 component contracts，0 provider calls |
 | proof-control Mock benchmark | PASS，14/14 component contracts，0 provider calls |
-| Windows desktop package | 17 passed，health check 与 hidden window smoke PASS |
+| Windows desktop package | 0.8.2，17 passed，health check、hidden window smoke 与安装后 health check PASS |
 | deterministic demo | `verified`，23 calls，30,540 tokens |
 | continuation deterministic demo | `verified`，25 calls，32,920 tokens |
 | demo 证明检查点 | 3 条路径，共 6 个 checkpoint（3 个 genesis + 3 个已验证完成段） |
@@ -69,6 +69,28 @@ P0 Inspiration Engine 的每个要求均有确定性覆盖：触发策略、Repr
 13 个通用修复工作包均由确定性回归覆盖：Route Admission 与最近子义务绑定、Goal Alignment 硬约束、Claim 单调生命周期、性质强化风险、幂等动作物化、Induction 激活、Common-Mode、义务分域与 Bottleneck、Fast Lane、通信 Liveness、NearMiss、Inspiration Review 和 Meta Pivot。
 
 `off` 保留 v0.7 行为且不创建 proof-control sidecar；`shadow` 只记录；`active` 执行动作。旧 v0.7 checkpoint 和缺少 v0.8.1 字段的 v0.8.0 sidecar 均可迁移。中断测试覆盖 early checkpoint、mid-pivot，以及消息已排队但 Route Update 尚未调度三种边界，恢复后没有重复物化。
+
+## 2C. 0.8.2 数学语义、任务执行与恢复验收
+
+13 个修复工作包均先由失败回归复现，再通过独立 Phase 提交闭合：
+Strategy Blueprint 先于 Route Admission；rewrite 必须产生非平凡子策略和
+lineage；依赖使用 local step、local claim、Fact、obligation 与 message 的
+类型化命名空间；Route Referee 的逐 Claim disposition 幂等写入 Claim
+ledger；Countermodel/Falsification 编译为有 executor、wake condition、expiry
+和终态的可执行任务；Meta Pivot 只有产生材料化状态效果才可进入
+`executed`；Verifier issue 映射为结构化 inference risk；obligation 入图前执行
+数学语义质量门；数学、搜索、过程、协议、工具、验证与安全义务严格分域；
+零效用普通消息保持 route-local；Route 的 `WAITING`、`FROZEN`、wake 和
+intervention 状态可恢复；terminal hard-stop 在无可执行工作时 resume 为零次
+provider 调用；Planner 原始领域策略先归档，generic fallback 只能作为受同一
+语义门约束的子候选。
+
+合成门只允许完整、详细验证通过、结构完整且置信度达标的候选进入
+synthesis。候选已覆盖的证明债务可以按 evidence lineage 局部收缩，但显式
+dependency、未准入 Fact、invalid link、risk 与 conflict 仍然 fail closed。
+旧 v0.7 YAML/checkpoint、v0.8.0 sidecar 和 v0.8.1 checkpoint 均通过迁移测试；
+新 sidecar 不进入已有数学对象内容哈希，ProofControlLayer 仍不能写 Fact 或
+直接关闭 obligation。
 
 ## 3. 断线、接力与进程恢复验证
 
@@ -159,7 +181,7 @@ primary key 正常调用级重试耗尽
 - 最终预算储备根据 `reserve_revision_cycles` 与 `max_revisions` 计算；
 - 调度产物记录每个候选动作的排名、分数、预计成本、未选原因和预算阻断原因。
 
-当前包含上述历史回归在内的完整自动化结果为 `515 passed`。分段确定性完整演示结果仍为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
+当前包含上述历史回归在内的完整自动化结果为 `604 passed`。分段确定性完整演示结果仍为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
 
 ## 6. 终审边界与修订回归验证
 
@@ -290,9 +312,9 @@ Python 3.11
 最终离线验收结果：
 
 ```text
-pytest: 515 passed
+pytest: 604 passed
 ruff check: PASS
-ruff format --check: PASS (272 files)
+ruff format --check: PASS (294 files)
 compileall: PASS
 topology mock benchmark: PASS
 component contracts: 21/21
