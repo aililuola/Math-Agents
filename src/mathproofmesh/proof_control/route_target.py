@@ -17,6 +17,7 @@ from .models import (
     GoalRelation,
     ObligationDomain,
     ObligationDomainRecord,
+    ObligationSemanticQuality,
     RouteTargetBinding,
     ScopeRelation,
 )
@@ -27,6 +28,9 @@ def choose_nearest_target_obligation(
     proof_graph: ProofGraphStore,
     goal_links: Mapping[str, ClaimGoalLink],
     obligation_domains: Mapping[str, ObligationDomainRecord] | None = None,
+    obligation_semantic_quality: (
+        Mapping[str, ObligationSemanticQuality] | None
+    ) = None,
 ) -> RouteTargetBinding:
     """Bind a route to the nearest auditable open mathematical target."""
 
@@ -35,6 +39,7 @@ def choose_nearest_target_obligation(
         raise ValueError("route target binding requires a main-goal obligation")
     main_id = main_ids[0]
     obligation_domains = obligation_domains or {}
+    obligation_semantic_quality = obligation_semantic_quality or {}
     open_obligations = [
         item
         for item in proof_graph.obligations
@@ -43,6 +48,10 @@ def choose_nearest_target_obligation(
             item.obligation_id not in obligation_domains
             or obligation_domains[item.obligation_id].domain
             == ObligationDomain.MATHEMATICAL
+        )
+        and (
+            item.obligation_id not in obligation_semantic_quality
+            or obligation_semantic_quality[item.obligation_id].eligible_for_core_debt
         )
     ]
     if not open_obligations:

@@ -18,6 +18,7 @@ from .models import (
     InferenceRiskRecord,
     ObligationDomain,
     ObligationDomainRecord,
+    ObligationSemanticQuality,
     ProofRole,
 )
 
@@ -87,10 +88,12 @@ def core_proof_debt(
     inference_risks: dict[str, InferenceRiskRecord] | None = None,
     critical_assumptions: dict[str, CriticalAssumption] | None = None,
     obligation_domains: dict[str, ObligationDomainRecord] | None = None,
+    obligation_semantic_quality: dict[str, ObligationSemanticQuality] | None = None,
 ) -> float:
     cfg = config or CoreDebtControlConfig()
     roles = proof_roles or {}
     domains = obligation_domains or {}
+    semantic_quality = obligation_semantic_quality or {}
     core = [
         item
         for item in graph.obligations_in_core_closure(
@@ -99,6 +102,8 @@ def core_proof_debt(
         )
         if item.obligation_id not in domains
         or domains[item.obligation_id].domain == ObligationDomain.MATHEMATICAL
+        if item.obligation_id not in semantic_quality
+        or semantic_quality[item.obligation_id].eligible_for_core_debt
     ]
     core_ids = {item.obligation_id for item in core}
     debt = 0.0

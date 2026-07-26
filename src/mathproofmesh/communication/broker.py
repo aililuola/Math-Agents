@@ -71,6 +71,9 @@ class MessageBroker:
         self._proof_control_message_gate: (
             Callable[[MessageEnvelope, int], tuple[bool, str | None]] | None
         ) = None
+        self._proof_control_broadcast_gate: (
+            Callable[[MessageEnvelope, int], bool] | None
+        ) = None
 
     @property
     def decisions(self) -> list[BrokerDecision]:
@@ -91,6 +94,14 @@ class MessageBroker:
         """Attach an optional additive gate; legacy Broker policy remains authoritative."""
 
         self._proof_control_message_gate = gate
+
+    def set_proof_control_broadcast_gate(
+        self,
+        gate: Callable[[MessageEnvelope, int], bool] | None,
+    ) -> None:
+        """Attach an optional delivery gate without rejecting local content."""
+
+        self._proof_control_broadcast_gate = gate
 
     def utility_record(
         self, message_id: str, target_route_id: str
@@ -458,9 +469,19 @@ class MessageBroker:
             existing.artifact_refs = list(
                 dict.fromkeys(existing.artifact_refs + message.artifact_refs)
             )
-            candidate_targets = list(
-                message.target_route_ids
-            ) or self.route_registry.neighbors(existing.source_route_id, current_round)
+            broadcast_allowed = (
+                self._proof_control_broadcast_gate is None
+                or self._proof_control_broadcast_gate(existing, current_round)
+            )
+            candidate_targets = (
+                list(message.target_route_ids)
+                or self.route_registry.neighbors(
+                    existing.source_route_id,
+                    current_round,
+                )
+                if broadcast_allowed
+                else []
+            )
             existing_targets = {
                 str(delivery["target_route_id"])
                 for delivery in self._deliveries.values()
@@ -515,8 +536,15 @@ class MessageBroker:
             explicit.extend(
                 self.typed_memory.affected_routes_for_counterexample(message)
             )
-        candidate_targets = explicit or self.route_registry.neighbors(
-            message.source_route_id, current_round
+        broadcast_allowed = (
+            self._proof_control_broadcast_gate is None
+            or self._proof_control_broadcast_gate(message, current_round)
+        )
+        candidate_targets = (
+            explicit
+            or self.route_registry.neighbors(message.source_route_id, current_round)
+            if broadcast_allowed
+            else []
         )
         source_neighbors = set(
             self.route_registry.neighbors(message.source_route_id, current_round)

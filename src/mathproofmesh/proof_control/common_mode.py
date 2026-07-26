@@ -237,6 +237,26 @@ class CriticalAssumptionMatrix:
             "premise_eligible": False,
         }
 
+    def semantic_family_key(
+        self,
+        statement: str,
+        *,
+        scope_signature_id: str | None,
+        mechanism_chain: Sequence[str] = (),
+        proof_graph_neighborhood: Sequence[str] = (),
+    ) -> str:
+        identity = {
+            "semantic_tags": sorted(
+                self._semantic_tags(self._normalize_assumption(statement))
+            ),
+            "scope_signature_id": scope_signature_id,
+            "mechanism_chain": [
+                normalize_text(item).casefold() for item in mechanism_chain
+            ],
+            "proof_graph_neighborhood": sorted(set(proof_graph_neighborhood)),
+        }
+        return f"assumption_family_key_{stable_hash(identity)[:20]}"
+
     def risk_families(self) -> list[AssumptionFamily]:
         return sorted(
             (
@@ -362,11 +382,16 @@ class CriticalAssumptionMatrix:
     @staticmethod
     def _semantic_tags(statement: str) -> set[str]:
         aliases = {
+            "admits": "admission",
+            "each": "universal",
+            "every": "universal",
+            "has": "admission",
             "preserve": "preservation",
             "preserves": "preservation",
             "preserved": "preservation",
             "invariant": "preservation",
             "invariance": "preservation",
+            "one": "unique",
             "transform": "transformation",
             "transforms": "transformation",
         }

@@ -16,6 +16,8 @@ from .models import (
     BlueprintRewriteRequest,
     BottleneckBridgeTask,
     BottleneckCluster,
+    BroadcastDecision,
+    BroadcastDecisionRecord,
     ClaimGoalLink,
     ClaimRefereeDisposition,
     ClaimRefereeRecord,
@@ -55,6 +57,7 @@ from .models import (
     ObjectScope,
     ObligationDomain,
     ObligationDomainRecord,
+    ObligationSemanticQuality,
     ProcessFailureDiagnostic,
     ProofFailureClass,
     ProofRole,
@@ -85,6 +88,7 @@ from .strategy_blueprint import (
     StrategyBlueprintCompiler,
 )
 from .state import ProofControlState
+from .semantic_quality import ObligationSemanticGate
 from .falsification import (
     FastLaneEligibility,
     FalsificationContractCompiler,
@@ -114,6 +118,8 @@ __all__ = [
     "BlueprintRewriteRequest",
     "BottleneckBridgeTask",
     "BottleneckCluster",
+    "BroadcastDecision",
+    "BroadcastDecisionRecord",
     "ClaimGoalLink",
     "ClaimRefereeDisposition",
     "ClaimRefereeRecord",
@@ -161,6 +167,8 @@ __all__ = [
     "OriginalStrategyArchive",
     "ObligationDomain",
     "ObligationDomainRecord",
+    "ObligationSemanticGate",
+    "ObligationSemanticQuality",
     "ProcessFailureDiagnostic",
     "ProofControlState",
     "ProofControlLayer",

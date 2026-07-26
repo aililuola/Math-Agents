@@ -147,21 +147,21 @@ def test_semantic_obligations_materialize_cluster(tmp_path) -> None:
     first = graph.add_obligation(
         _obligation(
             "bottleneck-a",
-            "Establish the shared local relation.",
+            "Every local object satisfies the shared relation.",
             route_ids=[routes[0].route_id],
         )
     )
     second = graph.add_obligation(
         _obligation(
             "bottleneck-b",
-            "Establish the shared local relation.",
+            "Every local object satisfies the shared relation.",
             route_ids=[routes[1].route_id],
         )
     )
     graph.add_obligation(
         _obligation(
             "main-cluster",
-            "Derive the final conclusion.",
+            "Every admissible object satisfies the final relation.",
             route_ids=[item.route_id for item in routes],
             kind=ObligationKind.MAIN_GOAL,
         )

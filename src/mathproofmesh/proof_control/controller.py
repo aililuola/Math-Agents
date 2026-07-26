@@ -64,6 +64,7 @@ from .models import (
     BlueprintRewriteRequest,
     BottleneckBridgeTask,
     BottleneckCluster,
+    BroadcastDecision,
     ClaimRefereeDisposition,
     ClaimRefereeRecord,
     ClaimGoalLink,
@@ -94,6 +95,7 @@ from .models import (
     NegativePatternRecord,
     ObligationDomain,
     ObligationDomainRecord,
+    ObligationSemanticQuality,
     ProofRole,
     RealizerFailureType,
     RouteAdmissionRecord,
@@ -115,6 +117,7 @@ from .near_miss import NearMissLedger
 from .proof_roles import ProofRoleClassifier, core_proof_debt
 from .realizer import AbstractRealizerController
 from .scope_guard import ScopeGuard
+from .semantic_quality import ObligationSemanticGate
 from .state import ProofControlState
 from .route_target import choose_nearest_target_obligation
 from .strategy_blueprint import (
@@ -163,6 +166,7 @@ class ProofControlLayer:
         )
 
         self.scope_guard = ScopeGuard(self.control_config.scope_guard)
+        self.obligation_semantic_gate = ObligationSemanticGate()
         self.goal_alignment = GoalAlignmentAnalyzer(proof_graph, self.scope_guard)
         self.goal_alignment_contract = GoalAlignmentContract(
             self.control_config.goal_alignment,
@@ -209,6 +213,7 @@ class ProofControlLayer:
             proof_graph=proof_graph,
             contracts=self.state.utility_contracts,
             receipts=self.state.usage_receipts,
+            broadcast_decisions=self.state.broadcast_decisions,
         )
         self.near_misses = NearMissLedger(
             self.control_config.near_miss,
@@ -301,6 +306,9 @@ class ProofControlLayer:
         )
 
         self.message_broker.set_proof_control_message_gate(self._message_gate)
+        self.message_broker.set_proof_control_broadcast_gate(
+            self._message_broadcast_allowed
+        )
         self.proof_graph.set_proof_control_pre_close_policy(self._pre_close_policy)
 
     @property
@@ -431,22 +439,33 @@ class ProofControlLayer:
                 or node.node_id in existing_ids
             ):
                 continue
-            obligation = self.proof_graph.add_obligation(
-                ProofObligation(
-                    obligation_id=node.node_id,
-                    problem_hash=self.proof_graph.problem_hash,
-                    route_ids=[route_id],
-                    kind=kind_map.get(node.kind.value, ObligationKind.LEMMA),
-                    statement=node.statement,
-                    normalized_statement=node.normalized_statement,
-                    assumptions=list(node.assumptions),
-                    quantifiers=list(node.quantifiers),
-                    status="tentative",
-                    priority=0.75,
-                    centrality=0.65,
-                )
+            candidate = ProofObligation(
+                obligation_id=node.node_id,
+                problem_hash=self.proof_graph.problem_hash,
+                route_ids=[route_id],
+                kind=kind_map.get(node.kind.value, ObligationKind.LEMMA),
+                statement=node.statement,
+                normalized_statement=node.normalized_statement,
+                assumptions=list(node.assumptions),
+                quantifiers=list(node.quantifiers),
+                status="tentative",
+                priority=0.75,
+                centrality=0.65,
             )
-            self._ensure_obligation_domain(obligation, source_kind="mathematical")
+            quality = self._assess_obligation_quality(
+                candidate,
+                source_kind=(
+                    "countermodel_task"
+                    if node.kind.value == "countermodel_task"
+                    else "computation"
+                    if node.kind.value == "computation_task"
+                    else "strategy_blueprint"
+                ),
+                executable_first_step=node.executable_first_step,
+            )
+            if not quality.accepted:
+                continue
+            self.proof_graph.add_obligation(candidate)
 
     def _blueprint_route_id(self, strategy: StrategyCard) -> str:
         route = self.route_registry.route_for_strategy(strategy.strategy_id)
@@ -463,9 +482,25 @@ class ProofControlLayer:
         compilation: StrategyBlueprintCompilation,
     ) -> RouteTargetBinding:
         blueprint = compilation.blueprint
-        direct_id = blueprint.direct_target_node_ids[0]
+        direct_id = next(
+            (
+                node_id
+                for node_id in blueprint.direct_target_node_ids
+                if self._control_obligation_exists(node_id)
+                and (
+                    node_id not in self.state.obligation_semantic_quality
+                    or self.state.obligation_semantic_quality[node_id].accepted
+                )
+            ),
+            None,
+        )
+        if direct_id is None:
+            raise ValueError("blueprint has no semantically admissible direct target")
         outgoing = {
-            edge.source_node_id: edge.target_node_id for edge in compilation.edges
+            edge.source_node_id: edge.target_node_id
+            for edge in compilation.edges
+            if self._control_obligation_exists(edge.source_node_id)
+            and self._control_obligation_exists(edge.target_node_id)
         }
         path = [direct_id]
         while path[-1] != blueprint.main_goal_node_id:
@@ -524,12 +559,19 @@ class ProofControlLayer:
         for node in compilation.nodes:
             if node.node_id == compilation.blueprint.main_goal_node_id:
                 continue
+            if not self._control_obligation_exists(node.node_id):
+                continue
             obligation = self.proof_graph.get_obligation(node.node_id)
             if route_id not in obligation.route_ids:
                 obligation.route_ids.append(route_id)
             if obligation.status == "tentative":
                 obligation.status = "open"
         for edge in compilation.edges:
+            if not (
+                self._control_obligation_exists(edge.source_node_id)
+                and self._control_obligation_exists(edge.target_node_id)
+            ):
+                continue
             self._ensure_dependency_edge(
                 edge.target_node_id,
                 edge.source_node_id,
@@ -570,6 +612,7 @@ class ProofControlLayer:
                     self.proof_graph,
                     self.state.goal_links,
                     self.state.obligation_domains,
+                    self.state.obligation_semantic_quality,
                 )
             except ValueError as exc:
                 self._emit(
@@ -807,9 +850,21 @@ class ProofControlLayer:
         )
         return registered
 
-    def register_obligation(self, obligation: ProofObligation) -> ClaimGoalLink | None:
-        domain = self._ensure_obligation_domain(obligation)
-        if domain.domain != ObligationDomain.MATHEMATICAL:
+    def register_obligation(
+        self,
+        obligation: ProofObligation,
+        *,
+        source_kind: str | None = None,
+        source_statement: str | None = None,
+        executable_first_step: str | None = None,
+    ) -> ClaimGoalLink | None:
+        quality = self._assess_obligation_quality(
+            obligation,
+            source_kind=source_kind,
+            source_statement=source_statement,
+            executable_first_step=executable_first_step,
+        )
+        if not quality.accepted:
             return None
         signature = self._scope_for_obligation(obligation)
         if obligation.kind == ObligationKind.MAIN_GOAL:
@@ -835,6 +890,49 @@ class ProofControlLayer:
             target_scope=self._scope_for_obligation(target),
         )
         return self._register_goal_link(obligation, link)
+
+    def _assess_obligation_quality(
+        self,
+        obligation: ProofObligation,
+        *,
+        source_kind: str | None,
+        source_statement: str | None = None,
+        executable_first_step: str | None = None,
+    ) -> ObligationSemanticQuality:
+        quality = self.obligation_semantic_gate.assess(
+            obligation,
+            source_kind=source_kind,
+            main_goal=self._main_goal(),
+            source_statement=source_statement,
+            executable_first_step=executable_first_step,
+        )
+        self.state.obligation_semantic_quality[obligation.obligation_id] = quality
+        domain = self._ensure_obligation_domain(
+            obligation,
+            source_kind=source_kind,
+        )
+        if domain.domain != quality.domain:
+            domain = domain.model_copy(
+                update={
+                    "domain": quality.domain,
+                    "inferred_from": "semantic_quality_gate",
+                    "confidence": max(domain.confidence, quality.score),
+                }
+            )
+            self.state.obligation_domains[obligation.obligation_id] = domain
+        if quality.semantic_quarantine:
+            self.state.semantic_quarantine[obligation.obligation_id] = quality
+            self._emit(
+                "obligation_semantic_quarantined",
+                quality.model_dump(mode="json"),
+            )
+        else:
+            self.state.semantic_quarantine.pop(obligation.obligation_id, None)
+            self._emit(
+                "obligation_semantic_accepted",
+                quality.model_dump(mode="json"),
+            )
+        return quality
 
     def register_attempt(self, attempt: ProofAttempt) -> None:
         if not self.control_config.enabled or self.control_config.mode == "off":
@@ -1416,6 +1514,7 @@ class ProofControlLayer:
                 self.proof_graph,
                 scope_signatures=self.state.scope_signatures,
                 obligation_domains=self.state.obligation_domains,
+                semantic_quality=self.state.obligation_semantic_quality,
             )
             existing_members = {
                 tuple(item.member_obligation_ids)
@@ -1450,8 +1549,7 @@ class ProofControlLayer:
             [
                 item
                 for item in self.proof_graph.obligations
-                if self.state.obligation_domains[item.obligation_id].domain
-                == ObligationDomain.MATHEMATICAL
+                if self._eligible_mathematical_obligation(item)
             ],
         )
         self.state.assumption_domains = dict(self.common_mode.domain_records)
@@ -1491,7 +1589,11 @@ class ProofControlLayer:
         history = self.state.core_debt_history.get(route_id, [])
         debt = history[-1] if history else self._update_core_debt(route_id)
         reduction = max(0.0, history[-2] - history[-1]) if len(history) >= 2 else 0.0
-        core_items = self.proof_graph.obligations_in_core_closure(route_id=route_id)
+        core_items = [
+            item
+            for item in self.proof_graph.obligations_in_core_closure(route_id=route_id)
+            if self._eligible_mathematical_obligation(item)
+        ]
         closed_core = [item for item in core_items if item.status == "closed"]
         route = self.route_registry.get(route_id)
         admission = self.state.route_admissions.get(route.strategy_id)
@@ -1525,8 +1627,7 @@ class ProofControlLayer:
                 route_id=route_id,
                 open_only=True,
             )
-            if self._ensure_obligation_domain(item).domain
-            == ObligationDomain.MATHEMATICAL
+            if self._eligible_mathematical_obligation(item)
         ]
         route = self.route_registry.get(route_id)
         return {
@@ -1588,18 +1689,36 @@ class ProofControlLayer:
             for obligation_id in self.proof_graph.core_dependency_closure()
             if self.state.obligation_domains[obligation_id].domain
             == ObligationDomain.MATHEMATICAL
+            and (
+                obligation_id not in self.state.obligation_semantic_quality
+                or self.state.obligation_semantic_quality[
+                    obligation_id
+                ].eligible_for_core_debt
+            )
         }
         obligations = {
             item.obligation_id: item
             for item in self.proof_graph.obligations
             if self.state.obligation_domains[item.obligation_id].domain
             == ObligationDomain.MATHEMATICAL
+            and (
+                item.obligation_id not in self.state.obligation_semantic_quality
+                or self.state.obligation_semantic_quality[
+                    item.obligation_id
+                ].eligible_for_core_debt
+            )
         }
         for strategy in strategies:
             compilation = self.compile_strategy_blueprint(strategy)
             binding = None
             if compilation is not None and compilation.blueprint.status == "accepted":
-                binding = self._binding_from_blueprint(strategy, compilation)
+                try:
+                    binding = self._binding_from_blueprint(strategy, compilation)
+                except ValueError as exc:
+                    compilation.blueprint.status = "needs_review"
+                    compilation.review_reasons = list(
+                        dict.fromkeys([*compilation.review_reasons, str(exc)])
+                    )
             link = (
                 self.register_strategy(strategy, blueprint_binding=binding)
                 if binding is not None
@@ -1610,6 +1729,12 @@ class ProofControlLayer:
                 for item in self.proof_graph.obligations
                 if self.state.obligation_domains[item.obligation_id].domain
                 == ObligationDomain.MATHEMATICAL
+                and (
+                    item.obligation_id not in self.state.obligation_semantic_quality
+                    or self.state.obligation_semantic_quality[
+                        item.obligation_id
+                    ].eligible_for_core_debt
+                )
             }
             if compilation is None or compilation.blueprint.status != "accepted":
                 record = RouteAdmissionRecord(
@@ -1769,6 +1894,7 @@ class ProofControlLayer:
             candidate_fact_ids=candidate_fact_ids,
             broker_admitted_fact_ids=admitted_fact_ids,
             obligation_domains=self.state.obligation_domains,
+            obligation_semantic_quality=self.state.obligation_semantic_quality,
         )
         self.state.synthesis_readiness_records.append(record)
         if record.verdict in {GateVerdict.BLOCK, GateVerdict.SHADOW_BLOCK}:
@@ -2463,10 +2589,7 @@ class ProofControlLayer:
                 obligation = self.proof_graph.get_obligation(obligation_id)
             except KeyError:
                 return False
-            return (
-                self._ensure_obligation_domain(obligation).domain
-                == ObligationDomain.MATHEMATICAL
-            )
+            return self._eligible_mathematical_obligation(obligation)
 
         mathematical_families = []
         for family in self.state.assumption_families.values():
@@ -3293,11 +3416,11 @@ class ProofControlLayer:
                 obligation = self.proof_graph.get_obligation(candidate_id)
             except KeyError:
                 continue
-            if (
-                obligation.status in {"open", "tentative", "blocked"}
-                and self._ensure_obligation_domain(obligation).domain
-                == ObligationDomain.MATHEMATICAL
-            ):
+            if obligation.status in {
+                "open",
+                "tentative",
+                "blocked",
+            } and self._eligible_mathematical_obligation(obligation):
                 return obligation.obligation_id
         return None
 
@@ -3407,8 +3530,13 @@ class ProofControlLayer:
         ):
             targets = self._utility_targets(message, destinations)
             if not targets:
-                reasons.append(
-                    "cross-route message has no proof-obligation utility target"
+                self._emit(
+                    "message_utility_target_unavailable",
+                    {
+                        "message_id": message.message_id,
+                        "decision": BroadcastDecision.KEEP_LOCAL.value,
+                        "reason": "no proof-obligation utility target",
+                    },
                 )
             else:
                 try:
@@ -3438,6 +3566,30 @@ class ProofControlLayer:
             if self.active:
                 return False, "; ".join(reasons)
         return True, None
+
+    def _message_broadcast_allowed(
+        self,
+        message: MessageEnvelope,
+        current_round: int,
+    ) -> bool:
+        contract = self.message_utility.contract_for_message(
+            message.message_id,
+            current_round=current_round,
+        )
+        decision = self.message_utility.decide_broadcast(
+            message,
+            contract=contract,
+            priority=self.message_broker.message_priority(message),
+            current_round=current_round,
+        )
+        self.state.broadcast_decisions[decision.decision_id] = decision
+        self._emit(
+            "message_broadcast_decided",
+            decision.model_dump(mode="json"),
+        )
+        if self.shadow:
+            return True
+        return decision.decision == BroadcastDecision.BROADCAST
 
     def _pre_close_policy(
         self, message: MessageEnvelope, obligation: ProofObligation
@@ -3487,6 +3639,7 @@ class ProofControlLayer:
             item.obligation_id
             for item in self.proof_graph.obligations
             if item.status in {"open", "tentative", "blocked"}
+            and self._eligible_mathematical_obligation(item)
             and (
                 item.normalized_statement == message.normalized_statement
                 or bool(set(item.route_ids) & destinations)
@@ -3522,8 +3675,7 @@ class ProofControlLayer:
             (
                 item
                 for item in self.proof_graph.obligations
-                if self._ensure_obligation_domain(item).domain
-                == ObligationDomain.MATHEMATICAL
+                if self._eligible_mathematical_obligation(item)
                 and item.normalized_statement == message.normalized_statement
                 and item.assumptions == message.assumptions
             ),
@@ -3538,7 +3690,10 @@ class ProofControlLayer:
         source_kind: str | None = None,
     ) -> ObligationDomainRecord:
         existing = self.state.obligation_domains.get(obligation.obligation_id)
-        if existing is not None:
+        if existing is not None and (
+            source_kind is None
+            or existing.inferred_from == source_kind.strip().casefold()
+        ):
             return existing
         record = classify_obligation_domain(
             obligation,
@@ -3550,6 +3705,16 @@ class ProofControlLayer:
             record.model_dump(mode="json"),
         )
         return record
+
+    def _eligible_mathematical_obligation(
+        self,
+        obligation: ProofObligation,
+    ) -> bool:
+        domain = self._ensure_obligation_domain(obligation)
+        quality = self.state.obligation_semantic_quality.get(obligation.obligation_id)
+        return domain.eligible_for_mathematical_control and (
+            quality is None or quality.eligible_for_core_debt
+        )
 
     def _scope_for_obligation(self, obligation: ProofObligation) -> ScopeSignature:
         signature = self.state.scope_signatures.get(obligation.obligation_id)
@@ -3595,6 +3760,7 @@ class ProofControlLayer:
             inference_risks=self.state.inference_risks,
             critical_assumptions=self.state.critical_assumptions,
             obligation_domains=self.state.obligation_domains,
+            obligation_semantic_quality=self.state.obligation_semantic_quality,
         )
         history = self.state.core_debt_history.setdefault(route_id, [])
         if not history or abs(history[-1] - debt) > 1e-9:
@@ -3711,6 +3877,8 @@ class ProofControlLayer:
             payload={
                 "strategy_id": strategy.strategy_id,
                 "parent_main_goal_id": main_goal_id,
+                "source_kind": "strategy",
+                "executable_first_step": strategy.key_original_step,
                 "obligation": obligation.model_dump(mode="json"),
             },
         )
@@ -3728,8 +3896,31 @@ class ProofControlLayer:
         self, action: ControlActionRecord
     ) -> ControlActionResult:
         obligation = ProofObligation.model_validate(action.payload["obligation"])
-        materialized = self.proof_graph.add_obligation(obligation)
         parent_id = action.payload.get("parent_main_goal_id")
+        parent = (
+            self.proof_graph.get_obligation(parent_id)
+            if isinstance(parent_id, str) and self._control_obligation_exists(parent_id)
+            else None
+        )
+        quality = self._assess_obligation_quality(
+            obligation,
+            source_kind=str(action.payload.get("source_kind", "strategy")),
+            source_statement=parent.normalized_statement
+            if parent is not None
+            else None,
+            executable_first_step=str(
+                action.payload.get("executable_first_step") or ""
+            ),
+        )
+        if not quality.accepted:
+            return ControlActionResult(
+                postcondition_met=False,
+                detail=(
+                    "sub-obligation failed semantic quality: "
+                    + ", ".join(quality.rejection_reasons)
+                ),
+            )
+        materialized = self.proof_graph.add_obligation(obligation)
         if isinstance(parent_id, str) and parent_id:
             self._ensure_implication_edge(materialized.obligation_id, parent_id)
         return ControlActionResult(
@@ -3748,6 +3939,9 @@ class ProofControlLayer:
             except KeyError:
                 return False
             if obligation.kind == ObligationKind.MAIN_GOAL:
+                return False
+            quality = self.state.obligation_semantic_quality.get(obligation_id)
+            if quality is None or not quality.accepted:
                 return False
         return bool(result.result_refs)
 
@@ -4024,12 +4218,12 @@ class ProofControlLayer:
     ) -> ControlActionResult:
         cluster = BottleneckCluster.model_validate(action.payload["cluster"])
         for member_id in cluster.member_obligation_ids:
-            domain = self.state.obligation_domains.get(member_id)
-            if domain is not None and domain.domain != ObligationDomain.MATHEMATICAL:
+            obligation = self.proof_graph.get_obligation(member_id)
+            if not self._eligible_mathematical_obligation(obligation):
                 return ControlActionResult(
-                    detail="non-mathematical obligations cannot enter a bottleneck cluster"
+                    postcondition_met=False,
+                    detail="non-mathematical obligations cannot enter a bottleneck cluster",
                 )
-            self.proof_graph.get_obligation(member_id)
         if cluster.canonical_obligation_id not in cluster.member_obligation_ids:
             return ControlActionResult(
                 detail="bottleneck canonical obligation is not a cluster member"
@@ -4927,18 +5121,38 @@ class ProofControlLayer:
                 }
             )[:16]
         )
-        materialized = self.proof_graph.add_obligation(
-            ProofObligation(
-                obligation_id=obligation_id,
-                problem_hash=self.proof_graph.problem_hash,
-                route_ids=route_ids,
-                kind=ObligationKind.SUBGOAL,
-                statement=proposal.candidate_statement,
-                normalized_statement=normalize_text(proposal.candidate_statement),
-                priority=0.85,
-                centrality=0.75,
-            )
+        candidate = ProofObligation(
+            obligation_id=obligation_id,
+            problem_hash=self.proof_graph.problem_hash,
+            route_ids=route_ids,
+            kind=ObligationKind.SUBGOAL,
+            statement=proposal.candidate_statement,
+            normalized_statement=normalize_text(proposal.candidate_statement),
+            priority=0.85,
+            centrality=0.75,
         )
+        source = (
+            self.proof_graph.get_obligation(proposal.overstrong_subject_id)
+            if self._control_obligation_exists(proposal.overstrong_subject_id)
+            else None
+        )
+        quality = self._assess_obligation_quality(
+            candidate,
+            source_kind="generated_bridge",
+            source_statement=source.normalized_statement
+            if source is not None
+            else None,
+        )
+        if not quality.accepted:
+            proposal.status = "rejected"
+            return ControlActionResult(
+                postcondition_met=False,
+                detail=(
+                    "weaker target failed semantic quality: "
+                    + ", ".join(quality.rejection_reasons)
+                ),
+            )
+        materialized = self.proof_graph.add_obligation(candidate)
         result_refs = [materialized.obligation_id]
         if binding_id is not None:
             binding = self.state.route_target_bindings[str(binding_id)]
@@ -4970,7 +5184,8 @@ class ProofControlLayer:
             )
             if bound.status != ControlActionStatus.EXECUTED:
                 return ControlActionResult(
-                    detail="weaker target could not be bound to the route"
+                    postcondition_met=False,
+                    detail="weaker target could not be bound to the route",
                 )
             result_refs.extend(bound.result_refs)
         proposal.status = "reviewed"
@@ -5002,7 +5217,12 @@ class ProofControlLayer:
             )
         except KeyError:
             return False
-        return obligation.kind != ObligationKind.MAIN_GOAL
+        quality = self.state.obligation_semantic_quality.get(obligation.obligation_id)
+        return (
+            obligation.kind != ObligationKind.MAIN_GOAL
+            and quality is not None
+            and quality.accepted
+        )
 
     def _handle_create_minimal_bridge(
         self, action: ControlActionRecord
@@ -5027,19 +5247,39 @@ class ProofControlLayer:
                 }
             )[:16]
         )
-        materialized = self.proof_graph.add_obligation(
-            ProofObligation(
-                obligation_id=obligation_id,
-                problem_hash=self.proof_graph.problem_hash,
-                route_ids=list(action.route_ids),
-                kind=ObligationKind.SUBGOAL,
-                statement=proposal.candidate_statement,
-                normalized_statement=normalize_text(proposal.candidate_statement),
-                dependency_ids=dependency_ids,
-                priority=0.9,
-                centrality=0.85,
-            )
+        candidate = ProofObligation(
+            obligation_id=obligation_id,
+            problem_hash=self.proof_graph.problem_hash,
+            route_ids=list(action.route_ids),
+            kind=ObligationKind.SUBGOAL,
+            statement=proposal.candidate_statement,
+            normalized_statement=normalize_text(proposal.candidate_statement),
+            dependency_ids=dependency_ids,
+            priority=0.9,
+            centrality=0.85,
         )
+        target = (
+            self.proof_graph.get_obligation(proposal.target_obligation_id)
+            if self._control_obligation_exists(proposal.target_obligation_id)
+            else None
+        )
+        quality = self._assess_obligation_quality(
+            candidate,
+            source_kind="generated_bridge",
+            source_statement=target.normalized_statement
+            if target is not None
+            else None,
+        )
+        if not quality.accepted:
+            proposal.status = "rejected"
+            return ControlActionResult(
+                postcondition_met=False,
+                detail=(
+                    "minimal bridge failed semantic quality: "
+                    + ", ".join(quality.rejection_reasons)
+                ),
+            )
+        materialized = self.proof_graph.add_obligation(candidate)
         self._ensure_dependency_edge(
             proposal.target_obligation_id,
             materialized.obligation_id,
@@ -5082,7 +5322,8 @@ class ProofControlLayer:
             )
             if bound.status != ControlActionStatus.EXECUTED:
                 return ControlActionResult(
-                    detail="minimal bridge could not update the route target binding"
+                    postcondition_met=False,
+                    detail="minimal bridge could not update the route target binding",
                 )
             result_refs.extend(bound.result_refs)
         proposal.status = "accepted"
@@ -5123,11 +5364,13 @@ class ProofControlLayer:
             )
         except KeyError:
             return False
-        return obligation.kind != ObligationKind.MAIN_GOAL and obligation.status in {
-            "open",
-            "tentative",
-            "blocked",
-        }
+        quality = self.state.obligation_semantic_quality.get(obligation.obligation_id)
+        return (
+            obligation.kind != ObligationKind.MAIN_GOAL
+            and obligation.status in {"open", "tentative", "blocked"}
+            and quality is not None
+            and quality.accepted
+        )
 
     def _handle_rewrite_blueprint(
         self, action: ControlActionRecord
@@ -5376,8 +5619,8 @@ class ProofControlLayer:
                     else []
                 )
                 bridge_statement = (
-                    "Establish an explicit implication from "
-                    f"{direct.normalized_statement} to {main.normalized_statement}."
+                    f"If {direct.normalized_statement}, then "
+                    f"{main.normalized_statement}."
                 )
                 target_id = main.obligation_id
             else:
@@ -5386,7 +5629,10 @@ class ProofControlLayer:
                     request.failure_reason = (
                         "blueprint rewrite has no auditable target obligation"
                     )
-                    return ControlActionResult(detail=request.failure_reason)
+                    return ControlActionResult(
+                        postcondition_met=False,
+                        detail=request.failure_reason,
+                    )
                 target_id = action.target_obligation_ids[-1]
                 target = self.proof_graph.get_obligation(target_id)
                 dependencies = []
@@ -5418,7 +5664,8 @@ class ProofControlLayer:
             )
             if bridge_action.status != ControlActionStatus.EXECUTED:
                 return ControlActionResult(
-                    detail="blueprint rewrite could not materialize a minimal bridge"
+                    postcondition_met=False,
+                    detail="blueprint rewrite could not materialize a minimal bridge",
                 )
             bridge_ids = [
                 result_ref
@@ -5617,10 +5864,7 @@ class ProofControlLayer:
             risk.conclusion_id
         ):
             conclusion = self.proof_graph.get_obligation(risk.conclusion_id)
-            if (
-                self._ensure_obligation_domain(conclusion).domain
-                == ObligationDomain.MATHEMATICAL
-            ):
+            if self._eligible_mathematical_obligation(conclusion):
                 return [risk.conclusion_id]
         if risk.route_id is not None:
             try:
@@ -5633,10 +5877,7 @@ class ProofControlLayer:
                     target = self.proof_graph.get_obligation(
                         binding.direct_target_obligation_id
                     )
-                    if (
-                        self._ensure_obligation_domain(target).domain
-                        == ObligationDomain.MATHEMATICAL
-                    ):
+                    if self._eligible_mathematical_obligation(target):
                         return [binding.direct_target_obligation_id]
         return self._main_goal_ids()
 

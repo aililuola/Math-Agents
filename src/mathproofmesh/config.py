@@ -595,6 +595,9 @@ class CommonModeControlConfig(ConfigModel):
 class MessageUtilityControlConfig(ConfigModel):
     enabled: bool = True
     require_utility_contract_for_cross_route: bool = True
+    broadcast_min_expected_core_debt_reduction: float = Field(
+        default=0.0, ge=0.0, le=1000.0
+    )
     max_target_obligations: int = Field(default=8, ge=1, le=64)
     utility_credit_horizon_rounds: int = Field(default=3, ge=1, le=32)
     no_use_cooldown_threshold: int = Field(default=3, ge=1, le=32)

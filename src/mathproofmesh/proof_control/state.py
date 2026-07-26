@@ -15,6 +15,7 @@ from .models import (
     BlueprintNode,
     BottleneckBridgeTask,
     BottleneckCluster,
+    BroadcastDecisionRecord,
     ClaimRefereeRecord,
     ClaimVerificationLedgerEntry,
     ClaimGoalLink,
@@ -40,6 +41,7 @@ from .models import (
     NearMissRecord,
     NegativePatternRecord,
     ObligationDomainRecord,
+    ObligationSemanticQuality,
     PremiseClosureRecord,
     ProcessFailureDiagnostic,
     ProofRole,
@@ -81,6 +83,8 @@ class ProofControlState:
         self.negative_patterns: dict[str, NegativePatternRecord] = {}
         self.assumption_domains: dict[str, AssumptionDomainRecord] = {}
         self.obligation_domains: dict[str, ObligationDomainRecord] = {}
+        self.obligation_semantic_quality: dict[str, ObligationSemanticQuality] = {}
+        self.semantic_quarantine: dict[str, ObligationSemanticQuality] = {}
         self.scope_signatures: dict[str, ScopeSignature] = {}
         self.proof_roles: dict[str, ProofRole] = {}
         self.inference_risks: dict[str, InferenceRiskRecord] = {}
@@ -112,6 +116,7 @@ class ProofControlState:
         self.meta_pivot_outcomes: dict[str, MetaPivotOutcome] = {}
         self.utility_contracts: dict[str, MessageUtilityContract] = {}
         self.usage_receipts: dict[str, MessageUsageReceipt] = {}
+        self.broadcast_decisions: dict[str, BroadcastDecisionRecord] = {}
         self.near_misses: dict[str, NearMissRecord] = {}
         self.route_admissions: dict[str, RouteAdmissionRecord] = {}
         self.continue_gate_records: list[ContinueGateRecord] = []
@@ -150,6 +155,10 @@ class ProofControlState:
             "negative_patterns": self._dump_models(self.negative_patterns),
             "assumption_domains": self._dump_models(self.assumption_domains),
             "obligation_domains": self._dump_models(self.obligation_domains),
+            "obligation_semantic_quality": self._dump_models(
+                self.obligation_semantic_quality
+            ),
+            "semantic_quarantine": self._dump_models(self.semantic_quarantine),
             "scope_signatures": self._dump_models(self.scope_signatures),
             "proof_roles": {
                 key: self.proof_roles[key].value for key in sorted(self.proof_roles)
@@ -202,6 +211,7 @@ class ProofControlState:
             "meta_pivot_outcomes": self._dump_models(self.meta_pivot_outcomes),
             "utility_contracts": self._dump_models(self.utility_contracts),
             "usage_receipts": self._dump_models(self.usage_receipts),
+            "broadcast_decisions": self._dump_models(self.broadcast_decisions),
             "near_misses": self._dump_models(self.near_misses),
             "route_admissions": self._dump_models(self.route_admissions),
             "continue_gate_records": [
@@ -257,6 +267,8 @@ class ProofControlState:
             ("negative_patterns", NegativePatternRecord),
             ("assumption_domains", AssumptionDomainRecord),
             ("obligation_domains", ObligationDomainRecord),
+            ("obligation_semantic_quality", ObligationSemanticQuality),
+            ("semantic_quarantine", ObligationSemanticQuality),
             ("scope_signatures", ScopeSignature),
             ("inference_risks", InferenceRiskRecord),
             ("minimal_bridge_proposals", MinimalBridgeProposal),
@@ -284,6 +296,7 @@ class ProofControlState:
             ("process_diagnostics", ProcessFailureDiagnostic),
             ("utility_contracts", MessageUtilityContract),
             ("usage_receipts", MessageUsageReceipt),
+            ("broadcast_decisions", BroadcastDecisionRecord),
             ("near_misses", NearMissRecord),
             ("route_admissions", RouteAdmissionRecord),
             ("meta_pivot_outcomes", MetaPivotOutcome),

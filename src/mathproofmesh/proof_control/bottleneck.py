@@ -12,6 +12,7 @@ from .models import (
     BottleneckCluster,
     ObligationDomain,
     ObligationDomainRecord,
+    ObligationSemanticQuality,
     ScopeSignature,
 )
 
@@ -27,8 +28,10 @@ class BottleneckCompressor:
         graph: ProofGraphStore,
         *,
         obligation_domains: Mapping[str, ObligationDomainRecord] | None = None,
+        semantic_quality: Mapping[str, ObligationSemanticQuality] | None = None,
     ) -> list[ProofObligation]:
         obligation_domains = obligation_domains or {}
+        semantic_quality = semantic_quality or {}
         return sorted(
             (
                 item
@@ -38,6 +41,10 @@ class BottleneckCompressor:
                     item.obligation_id not in obligation_domains
                     or obligation_domains[item.obligation_id].domain
                     == ObligationDomain.MATHEMATICAL
+                )
+                and (
+                    item.obligation_id not in semantic_quality
+                    or semantic_quality[item.obligation_id].eligible_for_bottleneck
                 )
             ),
             key=lambda item: (
@@ -53,11 +60,13 @@ class BottleneckCompressor:
         *,
         scope_signatures: Mapping[str, ScopeSignature] | None = None,
         obligation_domains: Mapping[str, ObligationDomainRecord] | None = None,
+        semantic_quality: Mapping[str, ObligationSemanticQuality] | None = None,
     ) -> list[list[ProofObligation]]:
         scope_signatures = scope_signatures or {}
         remaining = self.scan_open_obligations(
             graph,
             obligation_domains=obligation_domains,
+            semantic_quality=semantic_quality,
         )
         groups: list[list[ProofObligation]] = []
         while remaining:

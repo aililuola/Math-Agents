@@ -53,11 +53,58 @@ _VERIFICATION_MARKERS = (
     "formalization review",
     "audit the proof",
 )
+_SEARCH_MARKERS = (
+    "find a representation",
+    "find a suitable",
+    "search for",
+    "explore an alternative",
+    "try another route",
+)
+
+_SOURCE_DOMAINS = {
+    "strategy": ObligationDomain.MATHEMATICAL,
+    "strategy_blueprint": ObligationDomain.MATHEMATICAL,
+    "claim": ObligationDomain.MATHEMATICAL,
+    "bridge": ObligationDomain.MATHEMATICAL,
+    "generated_bridge": ObligationDomain.MATHEMATICAL,
+    "counterexample": ObligationDomain.MATHEMATICAL,
+    "mathematical": ObligationDomain.MATHEMATICAL,
+    "search": ObligationDomain.SEARCH,
+    "inspiration_search": ObligationDomain.SEARCH,
+    "countermodel_task": ObligationDomain.SEARCH,
+    "falsification_task": ObligationDomain.SEARCH,
+    "process": ObligationDomain.PROCESS,
+    "checkpoint": ObligationDomain.PROCESS,
+    "workflow": ObligationDomain.PROCESS,
+    "tool": ObligationDomain.TOOL,
+    "computation": ObligationDomain.TOOL,
+    "certificate": ObligationDomain.TOOL,
+    "verification": ObligationDomain.VERIFICATION,
+    "review": ObligationDomain.VERIFICATION,
+    "referee": ObligationDomain.VERIFICATION,
+    "protocol": ObligationDomain.PROTOCOL,
+    "schema": ObligationDomain.PROTOCOL,
+    "safety": ObligationDomain.SAFETY,
+    "credential": ObligationDomain.SAFETY,
+}
+
+_ASSUMPTION_SOURCE_DOMAINS = {
+    key: AssumptionDomain(value.value) for key, value in _SOURCE_DOMAINS.items()
+}
 
 
-def classify_assumption_domain(statement: str) -> AssumptionDomainRecord:
+def classify_assumption_domain(
+    statement: str,
+    *,
+    source_kind: str | None = None,
+) -> AssumptionDomainRecord:
     normalized = normalize_text(statement).casefold()
-    if any(marker in normalized for marker in _SAFETY_MARKERS):
+    explicit_source = (source_kind or "").strip().casefold()
+    if explicit_source in _ASSUMPTION_SOURCE_DOMAINS:
+        domain = _ASSUMPTION_SOURCE_DOMAINS[explicit_source]
+        source = explicit_source
+        confidence = 1.0
+    elif any(marker in normalized for marker in _SAFETY_MARKERS):
         domain = AssumptionDomain.SAFETY
         source = "safety_marker"
         confidence = 1.0
@@ -73,6 +120,14 @@ def classify_assumption_domain(statement: str) -> AssumptionDomainRecord:
         domain = AssumptionDomain.TOOL
         source = "tool_marker"
         confidence = 1.0
+    elif any(marker in normalized for marker in _VERIFICATION_MARKERS):
+        domain = AssumptionDomain.VERIFICATION
+        source = "verification_marker"
+        confidence = 1.0
+    elif any(marker in normalized for marker in _SEARCH_MARKERS):
+        domain = AssumptionDomain.SEARCH
+        source = "search_marker"
+        confidence = 0.95
     else:
         domain = AssumptionDomain.MATHEMATICAL
         source = "mathematical_default"
@@ -91,29 +146,39 @@ def classify_obligation_domain(
     source_kind: str | None = None,
 ) -> ObligationDomainRecord:
     normalized = normalize_text(obligation.normalized_statement).casefold()
-    explicit_source = (source_kind or "").casefold()
+    explicit_source = (source_kind or "").strip().casefold()
     if obligation.kind == ObligationKind.MAIN_GOAL:
         domain = ObligationDomain.MATHEMATICAL
         source = "main_goal_kind"
         confidence = 1.0
-    elif explicit_source in {"process", "checkpoint", "workflow"} or any(
-        marker in normalized for marker in _PROCESS_MARKERS
-    ):
+    elif explicit_source in _SOURCE_DOMAINS:
+        domain = _SOURCE_DOMAINS[explicit_source]
+        source = explicit_source
+        confidence = 1.0
+    elif any(marker in normalized for marker in _SAFETY_MARKERS):
+        domain = ObligationDomain.SAFETY
+        source = "safety_marker"
+        confidence = 1.0
+    elif any(marker in normalized for marker in _PROTOCOL_MARKERS):
+        domain = ObligationDomain.PROTOCOL
+        source = "protocol_marker"
+        confidence = 1.0
+    elif any(marker in normalized for marker in _PROCESS_MARKERS):
         domain = ObligationDomain.PROCESS
-        source = explicit_source or "process_marker"
+        source = "process_marker"
         confidence = 1.0
-    elif explicit_source in {"tool", "computation", "certificate"} or any(
-        marker in normalized for marker in _TOOL_MARKERS
-    ):
+    elif any(marker in normalized for marker in _TOOL_MARKERS):
         domain = ObligationDomain.TOOL
-        source = explicit_source or "tool_marker"
+        source = "tool_marker"
         confidence = 1.0
-    elif explicit_source in {"verification", "review", "referee"} or any(
-        marker in normalized for marker in _VERIFICATION_MARKERS
-    ):
+    elif any(marker in normalized for marker in _VERIFICATION_MARKERS):
         domain = ObligationDomain.VERIFICATION
-        source = explicit_source or "verification_marker"
+        source = "verification_marker"
         confidence = 1.0
+    elif any(marker in normalized for marker in _SEARCH_MARKERS):
+        domain = ObligationDomain.SEARCH
+        source = "search_marker"
+        confidence = 0.95
     else:
         domain = ObligationDomain.MATHEMATICAL
         source = explicit_source or "mathematical_default"

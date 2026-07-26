@@ -28,6 +28,7 @@ from .models import (
     InferenceRiskType,
     ObligationDomain,
     ObligationDomainRecord,
+    ObligationSemanticQuality,
     RouteAdmissionRecord,
     RouteTargetBinding,
     ScopeRelation,
@@ -423,14 +424,20 @@ class SynthesisReadinessGate:
         candidate_fact_ids: Sequence[str] = (),
         broker_admitted_fact_ids: Collection[str] = (),
         obligation_domains: Mapping[str, ObligationDomainRecord] | None = None,
+        obligation_semantic_quality: (
+            Mapping[str, ObligationSemanticQuality] | None
+        ) = None,
     ) -> SynthesisReadinessRecord:
         reasons: list[str] = []
         domains = obligation_domains or {}
+        semantic_quality = obligation_semantic_quality or {}
         mathematical_ids = {
             item.obligation_id
             for item in graph.obligations
             if item.obligation_id not in domains
             or domains[item.obligation_id].domain == ObligationDomain.MATHEMATICAL
+            if item.obligation_id not in semantic_quality
+            or semantic_quality[item.obligation_id].eligible_for_core_debt
         }
         main_goal_ids = set(graph.main_goal_obligation_ids())
         open_core = [

@@ -4,8 +4,10 @@ from collections.abc import Iterable, Sequence
 
 from ..config import MessageUtilityControlConfig
 from ..proof_graph.store import ProofGraphStore
-from ..schemas import MessageEnvelope, MessageType
+from ..schemas import MessageEnvelope, MessagePriority, MessageType, stable_hash
 from .models import (
+    BroadcastDecision,
+    BroadcastDecisionRecord,
     MessageExpectedEffect,
     MessageUsageReceipt,
     MessageUtilityContract,
@@ -27,12 +29,98 @@ class MessageUtilityController:
         proof_graph: ProofGraphStore | None = None,
         contracts: dict[str, MessageUtilityContract] | None = None,
         receipts: dict[str, MessageUsageReceipt] | None = None,
+        broadcast_decisions: dict[str, BroadcastDecisionRecord] | None = None,
     ) -> None:
         self.config = config or MessageUtilityControlConfig()
         self.proof_graph = proof_graph
         self.contracts = contracts if contracts is not None else {}
         self.receipts = receipts if receipts is not None else {}
+        self.broadcast_decisions = (
+            broadcast_decisions if broadcast_decisions is not None else {}
+        )
         self.expired_contract_ids: set[str] = set()
+
+    def decide_broadcast(
+        self,
+        message: MessageEnvelope,
+        *,
+        contract: MessageUtilityContract | None,
+        priority: MessagePriority,
+        current_round: int,
+    ) -> BroadcastDecisionRecord:
+        del current_round
+        existing = next(
+            (
+                item
+                for item in self.broadcast_decisions.values()
+                if item.message_id == message.message_id
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing
+
+        exceptional = message.message_type in self.EXEMPT_MESSAGE_TYPES
+        high_priority = priority in {
+            MessagePriority.CRITICAL,
+            MessagePriority.HIGH,
+        }
+        material_effect = bool(
+            contract is not None
+            and contract.expected_effect
+            in {
+                MessageExpectedEffect.CLOSE,
+                MessageExpectedEffect.REFUTE,
+            }
+        )
+        expected_reduction = (
+            contract.expected_core_debt_reduction if contract is not None else 0.0
+        )
+        positive_utility = (
+            expected_reduction > self.config.broadcast_min_expected_core_debt_reduction
+        )
+
+        if exceptional:
+            decision = BroadcastDecision.BROADCAST
+            reason = "critical_cross_route_control_evidence"
+        elif high_priority:
+            decision = BroadcastDecision.BROADCAST
+            reason = "high_priority_cross_route_evidence"
+        elif material_effect:
+            decision = BroadcastDecision.BROADCAST
+            reason = f"material_effect:{contract.expected_effect.value}"
+        elif positive_utility:
+            decision = BroadcastDecision.BROADCAST
+            reason = "positive_expected_core_debt_reduction"
+        else:
+            decision = BroadcastDecision.KEEP_LOCAL
+            reason = "zero_expected_cross_route_utility"
+
+        decision_id = (
+            "broadcast_decision_"
+            + stable_hash(
+                {
+                    "message_id": message.message_id,
+                    "content_hash": message.content_hash,
+                    "contract_id": contract.contract_id if contract else None,
+                    "priority": priority.value,
+                }
+            )[:20]
+        )
+        record = BroadcastDecisionRecord(
+            decision_id=decision_id,
+            message_id=message.message_id,
+            decision=decision,
+            reason=reason,
+            priority=priority.value,
+            expected_core_debt_reduction=expected_reduction,
+            target_obligation_ids=(
+                list(contract.target_obligation_ids) if contract is not None else []
+            ),
+            consumes_neighbor_quota=decision == BroadcastDecision.BROADCAST,
+        )
+        self.broadcast_decisions[record.decision_id] = record
+        return record
 
     def register_contract(
         self,

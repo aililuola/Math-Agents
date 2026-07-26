@@ -50,17 +50,22 @@ class ProofRole(StrEnum):
 
 class AssumptionDomain(StrEnum):
     MATHEMATICAL = "mathematical"
+    SEARCH = "search"
     PROTOCOL = "protocol"
     PROCESS = "process"
     TOOL = "tool"
+    VERIFICATION = "verification"
     SAFETY = "safety"
 
 
 class ObligationDomain(StrEnum):
     MATHEMATICAL = "mathematical"
+    SEARCH = "search"
     PROCESS = "process"
     TOOL = "tool"
     VERIFICATION = "verification"
+    PROTOCOL = "protocol"
+    SAFETY = "safety"
 
 
 class ControlActionType(StrEnum):
@@ -420,12 +425,43 @@ class AssumptionDomainRecord(StrictModel):
     inferred_from: str
     confidence: float = Field(ge=0.0, le=1.0)
 
+    @property
+    def eligible_for_mathematical_control(self) -> bool:
+        return self.domain == AssumptionDomain.MATHEMATICAL
+
 
 class ObligationDomainRecord(StrictModel):
     obligation_id: str
     domain: ObligationDomain
     inferred_from: str
     confidence: float = Field(ge=0.0, le=1.0)
+
+    @property
+    def eligible_for_mathematical_control(self) -> bool:
+        return self.domain == ObligationDomain.MATHEMATICAL
+
+    @property
+    def eligible_for_route_target(self) -> bool:
+        return self.domain == ObligationDomain.MATHEMATICAL
+
+
+class ObligationSemanticQuality(StrictModel):
+    obligation_id: str
+    domain: ObligationDomain
+    truth_apt: bool
+    has_explicit_objects: bool
+    has_explicit_relation: bool
+    has_explicit_quantifiers_or_scope: bool
+    is_placeholder: bool
+    is_self_implication: bool
+    duplicates_main_goal: bool
+    has_executable_first_step: bool
+    score: float = Field(ge=0.0, le=1.0)
+    rejection_reasons: list[str] = Field(default_factory=list)
+    accepted: bool = False
+    semantic_quarantine: bool = False
+    eligible_for_core_debt: bool = False
+    eligible_for_bottleneck: bool = False
 
 
 class AlignmentExceptionCode(StrEnum):
@@ -1068,6 +1104,23 @@ class MetaPivotOutcome(StrictModel):
     changed_route_ids: list[str] = Field(default_factory=list)
     wake_condition_ids: list[str] = Field(default_factory=list)
     reason: str
+
+
+class BroadcastDecision(StrEnum):
+    BROADCAST = "broadcast"
+    KEEP_LOCAL = "keep_local"
+    REJECT = "reject"
+
+
+class BroadcastDecisionRecord(StrictModel):
+    decision_id: str
+    message_id: str
+    decision: BroadcastDecision
+    reason: str
+    priority: str = "normal"
+    expected_core_debt_reduction: float = Field(default=0.0, ge=0.0)
+    target_obligation_ids: list[str] = Field(default_factory=list)
+    consumes_neighbor_quota: bool = False
 
 
 class MessageUtilityContract(StrictModel):
