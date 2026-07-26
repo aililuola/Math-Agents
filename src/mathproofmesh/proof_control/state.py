@@ -23,14 +23,17 @@ from .models import (
     ContinueGateRecord,
     CriticalAssumption,
     DependencyNormalizationTask,
+    ExecutableTaskRecord,
     FailureClassificationRecord,
     FalsificationTaskRecord,
+    TypedFalsificationContract,
     GoalAlignmentContractResult,
     InductionBlueprintNode,
     InductionMeasureProposal,
     InferenceRiskRecord,
     InspirationReviewDeferral,
     MetaPivotState,
+    MetaPivotOutcome,
     MinimalBridgeProposal,
     MessageUsageReceipt,
     MessageUtilityContract,
@@ -73,6 +76,8 @@ class ProofControlState:
         self.premise_closure_records: dict[str, PremiseClosureRecord] = {}
         self.countermodel_tasks: dict[str, CountermodelTaskRecord] = {}
         self.falsification_tasks: dict[str, FalsificationTaskRecord] = {}
+        self.typed_falsification_contracts: dict[str, TypedFalsificationContract] = {}
+        self.executable_tasks: dict[str, ExecutableTaskRecord] = {}
         self.negative_patterns: dict[str, NegativePatternRecord] = {}
         self.assumption_domains: dict[str, AssumptionDomainRecord] = {}
         self.obligation_domains: dict[str, ObligationDomainRecord] = {}
@@ -104,6 +109,7 @@ class ProofControlState:
         self.inspiration_review_deferrals: dict[str, InspirationReviewDeferral] = {}
         self.process_diagnostics: dict[str, ProcessFailureDiagnostic] = {}
         self.meta_pivot_state: MetaPivotState | None = None
+        self.meta_pivot_outcomes: dict[str, MetaPivotOutcome] = {}
         self.utility_contracts: dict[str, MessageUtilityContract] = {}
         self.usage_receipts: dict[str, MessageUsageReceipt] = {}
         self.near_misses: dict[str, NearMissRecord] = {}
@@ -137,6 +143,10 @@ class ProofControlState:
             "premise_closure_records": self._dump_models(self.premise_closure_records),
             "countermodel_tasks": self._dump_models(self.countermodel_tasks),
             "falsification_tasks": self._dump_models(self.falsification_tasks),
+            "typed_falsification_contracts": self._dump_models(
+                self.typed_falsification_contracts
+            ),
+            "executable_tasks": self._dump_models(self.executable_tasks),
             "negative_patterns": self._dump_models(self.negative_patterns),
             "assumption_domains": self._dump_models(self.assumption_domains),
             "obligation_domains": self._dump_models(self.obligation_domains),
@@ -189,6 +199,7 @@ class ProofControlState:
                 if self.meta_pivot_state is not None
                 else None
             ),
+            "meta_pivot_outcomes": self._dump_models(self.meta_pivot_outcomes),
             "utility_contracts": self._dump_models(self.utility_contracts),
             "usage_receipts": self._dump_models(self.usage_receipts),
             "near_misses": self._dump_models(self.near_misses),
@@ -241,6 +252,8 @@ class ProofControlState:
             ("premise_closure_records", PremiseClosureRecord),
             ("countermodel_tasks", CountermodelTaskRecord),
             ("falsification_tasks", FalsificationTaskRecord),
+            ("typed_falsification_contracts", TypedFalsificationContract),
+            ("executable_tasks", ExecutableTaskRecord),
             ("negative_patterns", NegativePatternRecord),
             ("assumption_domains", AssumptionDomainRecord),
             ("obligation_domains", ObligationDomainRecord),
@@ -273,6 +286,7 @@ class ProofControlState:
             ("usage_receipts", MessageUsageReceipt),
             ("near_misses", NearMissRecord),
             ("route_admissions", RouteAdmissionRecord),
+            ("meta_pivot_outcomes", MetaPivotOutcome),
         )
         for field_name, model_type in model_fields:
             target = getattr(restored, field_name)

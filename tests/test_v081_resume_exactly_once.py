@@ -163,4 +163,4 @@ def test_v080_sidecar_without_v081_fields_migrates_to_empty_defaults() -> None:
     assert restored.route_update_tasks == {}
     assert restored.inspiration_review_deferrals == {}
     assert restored.meta_pivot_state is None
-    assert restored.export_state()["schema_version"] == "0.8.1"
+    assert restored.export_state()["schema_version"] == "0.8.2"

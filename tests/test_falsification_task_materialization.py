@@ -183,7 +183,7 @@ def test_no_counterexample_does_not_verify_universal_claim(tmp_path) -> None:
     assert task.status == "not_refuted"
 
 
-def test_unsupported_falsification_is_deferred_with_reason(tmp_path) -> None:
+def test_unsupported_falsification_has_agent_or_wakeable_task(tmp_path) -> None:
     control, strategy, route, target = _runtime(tmp_path)
     unsupported = strategy.model_copy(
         update={
@@ -200,12 +200,13 @@ def test_unsupported_falsification_is_deferred_with_reason(tmp_path) -> None:
         current_round=1,
     )
 
-    assert action.status == ControlActionStatus.DEFERRED
-    assert action.admission_reason
+    assert action.status == ControlActionStatus.EXECUTED
     task = next(iter(control.state.falsification_tasks.values()))
     assert task.status == "deferred"
     assert task.deferred_reason
     assert task.experiment_spec is None
+    executable = control.state.executable_tasks[task.executable_task_id]
+    assert executable.assigned_agent_id is not None or executable.wake_conditions
 
 
 @pytest.mark.asyncio

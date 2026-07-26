@@ -106,11 +106,24 @@ class FailureClassifier:
                 0.98,
             )
         if any(
+            item.risk_type.value == "wrong_direction"
+            and item.confidence >= self.config.min_classification_confidence
+            for item in open_risks
+        ):
+            return (
+                ProofFailureClass.PLAN,
+                "rewrite_blueprint_in_valid_implication_direction",
+                0.98,
+            )
+        if any(
             item.risk_type.value
             in {
                 "necessary_to_sufficient",
                 "eventual_to_global",
                 "projection_to_original",
+                "quantifier_swap",
+                "scope_mismatch",
+                "ambiguous_semantic_leap",
                 "partial_property_to_total_property",
                 "nonempty_intersection_to_subset_containment",
                 "exists_component_to_all_components",

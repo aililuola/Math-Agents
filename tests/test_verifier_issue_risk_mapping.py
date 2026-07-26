@@ -6,6 +6,16 @@ from mathproofmesh.proof_control.models import (
     StructuredVerifierIssue,
     VerifierIssueCode,
 )
+from mathproofmesh.schemas import (
+    FailureLevel,
+    Severity,
+    VerificationIssue,
+    VerificationReport,
+    VerificationStage,
+    VerificationVerdict,
+)
+
+from v082_helpers import make_control_runtime
 
 
 def _issue(code: VerifierIssueCode) -> StructuredVerifierIssue:
@@ -58,6 +68,15 @@ def test_unknown_scope_high_centrality_opens_ambiguous_risk() -> None:
     assert risks[0].status == "open"
 
 
+def test_risk_blocks_fact_promotion() -> None:
+    risk = InferenceRiskScanner().map_verifier_issue(
+        _issue(VerifierIssueCode.UNSUPPORTED_IMPLICATION),
+        route_id="route-a",
+    )[0]
+
+    assert risk.blocks_fact_promotion
+
+
 def test_cleared_risk_allows_promotion() -> None:
     risk = InferenceRiskScanner().map_verifier_issue(
         _issue(VerifierIssueCode.PROPERTY_STRENGTHENING),
@@ -67,3 +86,37 @@ def test_cleared_risk_allows_promotion() -> None:
     assert risk.blocks_fact_promotion
     cleared = risk.model_copy(update={"status": "cleared"})
     assert not cleared.blocks_fact_promotion
+
+
+def test_verification_report_issue_enters_control_state(tmp_path) -> None:
+    *_runtime, control, _goal = make_control_runtime(tmp_path)
+    report = VerificationReport(
+        report_id="report-integrated",
+        target_id="claim-integrated",
+        target_type="claim",
+        agent_id="verifier-a",
+        stage=VerificationStage.DETAILED,
+        verdict=VerificationVerdict.FAIL,
+        issues=[
+            VerificationIssue(
+                issue_id="issue-integrated",
+                phase="semantic",
+                severity=Severity.ERROR,
+                claim_id="claim-integrated",
+                description="The implication is used in the wrong direction.",
+                issue_code=VerifierIssueCode.WRONG_DIRECTION.value,
+                premise_summary="The reverse implication was established.",
+                conclusion_summary="The forward implication was asserted.",
+            )
+        ],
+        failure_level=FailureLevel.PLAN,
+        confidence=0.98,
+        concise_feedback="Rewrite the implication in the proved direction.",
+    )
+
+    control.process_verification_report(report)
+
+    risks = list(control.state.inference_risks.values())
+    assert len(risks) == 1
+    assert risks[0].risk_type == InferenceRiskType.WRONG_DIRECTION
+    assert risks[0].source_issue_ids == ["issue-integrated"]

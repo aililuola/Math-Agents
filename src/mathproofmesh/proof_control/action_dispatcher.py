@@ -257,6 +257,10 @@ class ControlActionDispatcher:
             raise
 
         action.result_refs = sorted(set(result.result_refs))
+        if action.status == ControlActionStatus.DEFERRED:
+            action.executed_round = None
+            self._checkpoint(action)
+            return action
         postcondition_met = (
             result.postcondition_met
             and bool(action.result_refs)
@@ -337,6 +341,10 @@ class ControlActionDispatcher:
             raise
 
         action.result_refs = sorted(set(result.result_refs))
+        if action.status == ControlActionStatus.DEFERRED:
+            action.executed_round = None
+            self._checkpoint(action)
+            return action
         postcondition_met = (
             result.postcondition_met
             and bool(action.result_refs)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping, Sequence
+import inspect
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any
 
 from ..activity import ActivityStream
@@ -41,6 +42,7 @@ from .dependencies import DependencyResolver, migrate_legacy_dependencies
 from .domains import classify_obligation_domain
 from .failure_control import BlueprintRewriter, FailureClassifier
 from .falsification import (
+    FalsificationContractCompiler,
     FalsificationTaskMaterializer,
     classify_falsification_result,
 )
@@ -74,6 +76,7 @@ from .models import (
     CountermodelTaskRecord,
     DependencyRef,
     DependencyResolutionResult,
+    ExecutableTaskRecord,
     FalsificationTaskRecord,
     GateVerdict,
     GoalAlignmentContractResult,
@@ -83,6 +86,8 @@ from .models import (
     InferenceRiskType,
     InspirationReviewDeferral,
     MetaPivotState,
+    MetaPivotEffect,
+    MetaPivotOutcome,
     MetaPivotStatus,
     MessageExpectedEffect,
     MinimalBridgeProposal,
@@ -99,6 +104,11 @@ from .models import (
     SynthesisReadinessRecord,
     StrategyBlueprintCompilation,
     StrategyRevisionReason,
+    StructuredVerifierIssue,
+    TaskStatus,
+    VerifierIssueCode,
+    WakeCondition,
+    WakeConditionKind,
     RewriteSemanticVerdict,
 )
 from .near_miss import NearMissLedger
@@ -113,6 +123,7 @@ from .strategy_blueprint import (
     RewriteSemanticGate,
     StrategyBlueprintCompiler,
 )
+from .tasks import ExecutableTaskController, WakeScheduler
 
 
 class ProofControlLayer:
@@ -139,9 +150,7 @@ class ProofControlLayer:
         self.message_broker = message_broker
         self.route_registry = route_registry
         self.state = state or ProofControlState()
-        self._meta_pivot_executor: (
-            Callable[[MetaPivotState], Awaitable[Mapping[str, Any]]] | None
-        ) = None
+        self._meta_pivot_executor: Callable[..., Any] | None = None
         self._meta_pivot_execution_round = 0
         self.action_dispatcher = ControlActionDispatcher(
             problem_hash=proof_graph.problem_hash,
@@ -190,6 +199,11 @@ class ProofControlLayer:
         self.bottlenecks = BottleneckCompressor(self.control_config.bottleneck)
         self.common_mode = CriticalAssumptionMatrix(self.control_config.common_mode)
         self.falsification_tasks = FalsificationTaskMaterializer(config)
+        self.falsification_contracts = FalsificationContractCompiler()
+        self.executable_task_controller = ExecutableTaskController(
+            self.state.executable_tasks
+        )
+        self.wake_scheduler = WakeScheduler(self.state.executable_tasks)
         self.message_utility = MessageUtilityController(
             self.control_config.message_utility,
             proof_graph=proof_graph,
@@ -728,6 +742,50 @@ class ProofControlLayer:
         )
         return registered
 
+    def claim_fact_promotion_allowed(
+        self,
+        claim: ClaimCard,
+        *,
+        route_id: str | None = None,
+    ) -> bool:
+        self.register_claim(claim, route_id=route_id)
+        signature = self.state.scope_signatures.get(claim.claim_id)
+        ledger_entry = self.state.claim_verification_ledger.get(claim.claim_id)
+        referee_scope_verified = bool(
+            ledger_entry is not None
+            and any(
+                (record := self.state.claim_referee_records.get(review_id)) is not None
+                and record.disposition == ClaimRefereeDisposition.ACCEPT
+                and record.scope_valid
+                and record.quantifiers_valid
+                for review_id in ledger_entry.referee_review_ids
+            )
+        )
+        scope_known = referee_scope_verified or bool(
+            signature is not None
+            and signature.normalization_confidence
+            >= self.control_config.scope_guard.risk_confidence_threshold
+        )
+        referenced_by_count = sum(
+            claim.claim_id in item.dependencies
+            for item in self.claim_lifecycle.claims.values()
+            if item.claim_id != claim.claim_id
+        )
+        self._register_risks(
+            self.risk_scanner.critical_step_semantic_scan(
+                subject_id=claim.claim_id,
+                scope_known=scope_known,
+                centrality=1.0,
+                referenced_by_count=referenced_by_count,
+                preparing_fact_promotion=True,
+                route_id=route_id,
+            )
+        )
+        return not any(
+            risk.subject_id == claim.claim_id and risk.blocks_fact_promotion
+            for risk in self.state.inference_risks.values()
+        )
+
     def register_message(self, message: MessageEnvelope) -> ClaimGoalLink | None:
         existing = self._goal_link_for_subject(message.message_id)
         if existing is not None:
@@ -1178,6 +1236,15 @@ class ProofControlLayer:
             if delta is not None
             else None
         )
+        structured_issues = self._structured_verifier_issues(report)
+        self._register_risks(
+            risk
+            for issue in structured_issues
+            for risk in self.risk_scanner.map_verifier_issue(
+                issue,
+                route_id=route_id,
+            )
+        )
         if route_id is None:
             return
         subject_ids = {
@@ -1194,8 +1261,11 @@ class ProofControlLayer:
             ),
         }
         if report.verdict == VerificationVerdict.PASS:
+            current_issue_ids = {item.issue_id for item in structured_issues}
             for risk in self.state.inference_risks.values():
                 if risk.subject_id in subject_ids and risk.status == "open":
+                    if current_issue_ids.intersection(risk.source_issue_ids):
+                        continue
                     if risk.risk_type in self._property_strengthening_risk_types():
                         if not self._verified_risk_bridges(risk):
                             continue
@@ -1232,6 +1302,66 @@ class ProofControlLayer:
             self._emit("failure_classified", failure.model_dump(mode="json"))
             self._record_realizer_failure(report, route_id=route_id)
         self._update_core_debt(route_id)
+
+    def _structured_verifier_issues(
+        self,
+        report: VerificationReport,
+    ) -> list[StructuredVerifierIssue]:
+        structured: dict[str, StructuredVerifierIssue] = {}
+        for raw_issue in report.structured_issues:
+            try:
+                issue = (
+                    raw_issue
+                    if isinstance(raw_issue, StructuredVerifierIssue)
+                    else StructuredVerifierIssue.model_validate(raw_issue)
+                )
+            except (TypeError, ValueError):
+                continue
+            structured[issue.issue_id] = issue
+
+        for issue in report.issues:
+            raw_code = issue.issue_code
+            if raw_code is None:
+                raw_code = self.risk_scanner.infer_issue_code(
+                    " ".join(
+                        value
+                        for value in (
+                            issue.description,
+                            issue.repair_hint or "",
+                            issue.premise_summary,
+                            issue.conclusion_summary,
+                        )
+                        if value
+                    )
+                )
+            try:
+                code = (
+                    raw_code
+                    if isinstance(raw_code, VerifierIssueCode)
+                    else VerifierIssueCode(str(raw_code))
+                    if raw_code is not None
+                    else None
+                )
+            except ValueError:
+                code = VerifierIssueCode.OTHER
+            if code is None:
+                continue
+            mapped = StructuredVerifierIssue(
+                issue_id=issue.issue_id,
+                report_id=report.report_id,
+                target_id=issue.claim_id or report.target_id,
+                step_id=issue.step_id,
+                code=code,
+                premise_summary=(issue.premise_summary or issue.description),
+                conclusion_summary=(
+                    issue.conclusion_summary
+                    or issue.repair_hint
+                    or "the reported conclusion"
+                ),
+                confidence=report.confidence,
+            )
+            structured[mapped.issue_id] = mapped
+        return list(structured.values())
 
     def resolve_inference_risk_with_bridges(
         self,
@@ -1707,9 +1837,29 @@ class ProofControlLayer:
             target_claim_id=target_claim_id,
             route_id=route_id,
         )
+        contract = self.falsification_contracts.compile(
+            strategy.falsification_test,
+            target_subject_id=target_claim_id or target_obligation_id,
+            max_cases=(self.control_config.falsification_fast_lane.max_cases),
+        )
+        self.state.typed_falsification_contracts[contract.contract_id] = contract
+        executable_task = self.executable_task_controller.create_falsification_task(
+            contract,
+            target_claim_ids=([target_claim_id] if target_claim_id is not None else []),
+            target_obligation_ids=[target_obligation_id],
+            route_ids=[route_id] if route_id is not None else [],
+            created_round=current_round,
+            counterexample_hunter_agent_id=self._counterexample_hunter_agent_id(),
+        )
+        task.typed_contract_id = contract.contract_id
+        task.executable_task_id = executable_task.task_id
         existing = self.state.falsification_tasks.get(task.task_id)
         if existing is not None:
             task = existing
+            if task.typed_contract_id is None:
+                task.typed_contract_id = contract.contract_id
+            if task.executable_task_id is None:
+                task.executable_task_id = executable_task.task_id
         else:
             self.state.falsification_tasks[task.task_id] = task
         action = self.action_dispatcher.propose(
@@ -1721,12 +1871,6 @@ class ProofControlLayer:
             current_round=current_round,
         )
         task.action_id = action.action_id
-        if task.experiment_spec is None:
-            task.status = "deferred"
-            return self.action_dispatcher.defer(
-                action.action_id,
-                reason=task.deferred_reason,
-            )
         return self.action_dispatcher.execute_sync(
             action.action_id,
             current_round=current_round,
@@ -1755,6 +1899,12 @@ class ProofControlLayer:
         task = self.state.falsification_tasks[task_id]
         if task.status == "admitted":
             task.status = "running"
+            if task.executable_task_id is not None:
+                executable = self.state.executable_tasks[task.executable_task_id]
+                self.executable_task_controller.mark_running(
+                    executable.task_id,
+                    current_round=executable.last_transition_round,
+                )
             self.persist()
 
     def record_falsification_result(
@@ -1788,6 +1938,19 @@ class ProofControlLayer:
         disposition = classify_falsification_result(result)
         if task is not None:
             task.result_experiment_id = result.experiment_id
+            executable = (
+                self.state.executable_tasks.get(task.executable_task_id)
+                if task.executable_task_id is not None
+                else None
+            )
+            if executable is not None and executable.status in {
+                TaskStatus.ASSIGNED,
+                TaskStatus.READY,
+            }:
+                self.executable_task_controller.mark_running(
+                    executable.task_id,
+                    current_round=executable.last_transition_round,
+                )
             if disposition.conclusive_refutation:
                 task.status = "counterexample_found"
                 if (
@@ -1806,6 +1969,20 @@ class ProofControlLayer:
                 task.status = "not_refuted"
             else:
                 task.status = "failed"
+            if executable is not None and executable.status == TaskStatus.RUNNING:
+                if task.status == "failed":
+                    self.executable_task_controller.fail(
+                        executable.task_id,
+                        current_round=executable.last_transition_round,
+                        reason=disposition.reason,
+                    )
+                else:
+                    self.executable_task_controller.complete(
+                        executable.task_id,
+                        current_round=executable.last_transition_round,
+                        result_refs=[result.experiment_id],
+                        counterexample_found=disposition.conclusive_refutation,
+                    )
         self._emit(
             disposition.event_type,
             {
@@ -1828,6 +2005,19 @@ class ProofControlLayer:
         task = self.state.falsification_tasks[task_id]
         task.status = "deferred"
         task.deferred_reason = reason
+        if task.executable_task_id is not None:
+            executable = self.state.executable_tasks[task.executable_task_id]
+            if executable.status not in ExecutableTaskController.TERMINAL_STATUSES:
+                self.executable_task_controller.defer(
+                    executable.task_id,
+                    current_round=executable.last_transition_round,
+                    reason=reason,
+                    wake_kind=(
+                        WakeConditionKind.BUDGET_AVAILABLE
+                        if "budget" in decision.casefold()
+                        else WakeConditionKind.PROVIDER_AVAILABLE
+                    ),
+                )
         self._emit(
             "falsification_task_deferred",
             {
@@ -1847,6 +2037,14 @@ class ProofControlLayer:
         task = self.state.falsification_tasks[task_id]
         task.status = "failed"
         task.deferred_reason = f"{type(error).__name__}: {error}"
+        if task.executable_task_id is not None:
+            executable = self.state.executable_tasks[task.executable_task_id]
+            if executable.status not in ExecutableTaskController.TERMINAL_STATUSES:
+                self.executable_task_controller.fail(
+                    executable.task_id,
+                    current_round=executable.last_transition_round,
+                    reason=task.deferred_reason,
+                )
         self._emit(
             "falsification_task_failed",
             {
@@ -2378,10 +2576,7 @@ class ProofControlLayer:
         self,
         *,
         current_round: int,
-        executor: Callable[
-            [MetaPivotState],
-            Awaitable[Mapping[str, Any]],
-        ],
+        executor: Callable[..., Any],
     ) -> MetaPivotState:
         pivot = self.state.meta_pivot_state
         if pivot is None:
@@ -3674,22 +3869,45 @@ class ProofControlLayer:
             else action.target_obligation_ids[0]
         )
         task_id = f"countermodel_task_{action.idempotency_key[:16]}"
+        risk = self.state.inference_risks.get(source_record_id)
+        assigned_agent_id = self._counterexample_hunter_agent_id()
+        executable = self.executable_task_controller.create_countermodel_task(
+            source_record_id=source_record_id,
+            target_claim_ids=(
+                [risk.subject_id]
+                if risk is not None and risk.subject_id in self.claim_lifecycle.claims
+                else []
+            ),
+            target_obligation_ids=[target_obligation_id],
+            route_ids=list(action.route_ids),
+            created_round=action.created_round,
+            counterexample_hunter_agent_id=assigned_agent_id,
+            explicit_prompt_ref=f"countermodel_prompt:{source_record_id}",
+        )
         task = CountermodelTaskRecord(
             task_id=task_id,
             source_record_id=source_record_id,
             source_goal_link_id=str(link_id) if link_id is not None else None,
             target_obligation_id=target_obligation_id,
             route_ids=list(action.route_ids),
-            status="pending",
+            status="assigned" if assigned_agent_id is not None else "deferred",
+            reason=(
+                "counterexample hunter assigned"
+                if assigned_agent_id is not None
+                else "awaiting an available counterexample hunter"
+            ),
+            assigned_agent_id=assigned_agent_id,
+            executable_task_id=executable.task_id,
         )
         self.state.countermodel_tasks[task_id] = task
         if link is not None:
-            link.countermodel_status = "pending"
-        risk = self.state.inference_risks.get(source_record_id)
+            link.countermodel_status = (
+                "pending" if assigned_agent_id is not None else "deferred"
+            )
         if risk is not None:
             risk.countermodel_task_id = task_id
         return ControlActionResult(
-            result_refs=[task_id],
+            result_refs=[task_id, executable.task_id],
             postcondition_met=True,
         )
 
@@ -3698,11 +3916,41 @@ class ProofControlLayer:
         _action: ControlActionRecord,
         result: ControlActionResult,
     ) -> bool:
-        return bool(result.result_refs) and all(
-            result_ref in self.state.countermodel_tasks
-            and self.state.countermodel_tasks[result_ref].status
-            in {"pending", "deferred", "inapplicable", "completed"}
+        tasks = [
+            self.state.countermodel_tasks[result_ref]
             for result_ref in result.result_refs
+            if result_ref in self.state.countermodel_tasks
+        ]
+        if len(tasks) != 1:
+            return False
+        task = tasks[0]
+        executable = (
+            self.state.executable_tasks.get(task.executable_task_id)
+            if task.executable_task_id is not None
+            else None
+        )
+        return (
+            task.status
+            in {
+                "assigned",
+                "ready",
+                "running",
+                "deferred",
+                "inapplicable",
+                "completed",
+                "inconclusive",
+                "failed",
+                "expired",
+            }
+            and executable is not None
+            and task.task_id in result.result_refs
+            and executable.task_id in result.result_refs
+            and (
+                executable.assigned_agent_id is not None
+                or executable.registered_handler is not None
+                or bool(executable.wake_conditions)
+                or executable.status in ExecutableTaskController.TERMINAL_STATUSES
+            )
         )
 
     def _handle_direct_premise_request(
@@ -3865,7 +4113,32 @@ class ProofControlLayer:
     ) -> ControlActionResult:
         task_id = str(action.payload["task_id"])
         task = self.state.falsification_tasks[task_id]
+        executable = (
+            self.state.executable_tasks.get(task.executable_task_id)
+            if task.executable_task_id is not None
+            else None
+        )
         if task.experiment_spec is None or task.computation_plan is None:
+            if executable is not None and (
+                executable.assigned_agent_id is not None
+                or executable.wake_conditions
+                or executable.terminal_reason is not None
+            ):
+                task.status = "deferred"
+                task.action_id = action.action_id
+                self._emit(
+                    "falsification_task_routed",
+                    {
+                        "action_id": action.action_id,
+                        "task_id": task.task_id,
+                        "executable_task_id": executable.task_id,
+                        "status": executable.status.value,
+                    },
+                )
+                return ControlActionResult(
+                    result_refs=[task.task_id, executable.task_id],
+                    postcondition_met=True,
+                )
             return ControlActionResult(
                 detail=task.deferred_reason
                 or "falsification request has no typed finite computation plan"
@@ -3886,7 +4159,11 @@ class ProofControlLayer:
             },
         )
         return ControlActionResult(
-            result_refs=[task.task_id, task.computation_plan.plan_id],
+            result_refs=[
+                task.task_id,
+                task.computation_plan.plan_id,
+                *([executable.task_id] if executable is not None else []),
+            ],
             postcondition_met=True,
         )
 
@@ -3898,6 +4175,23 @@ class ProofControlLayer:
         task = self.state.falsification_tasks.get(
             str(action.payload.get("task_id", ""))
         )
+        executable = (
+            self.state.executable_tasks.get(task.executable_task_id)
+            if task is not None and task.executable_task_id is not None
+            else None
+        )
+        if task is not None and task.experiment_spec is None and executable is not None:
+            return (
+                task.status == "deferred"
+                and task.action_id == action.action_id
+                and task.task_id in result.result_refs
+                and executable.task_id in result.result_refs
+                and (
+                    executable.assigned_agent_id is not None
+                    or bool(executable.wake_conditions)
+                    or executable.terminal_reason is not None
+                )
+            )
         return (
             task is not None
             and task.status == "admitted"
@@ -3906,6 +4200,8 @@ class ProofControlLayer:
             and task.computation_plan is not None
             and task.task_id in result.result_refs
             and task.computation_plan.plan_id in result.result_refs
+            and executable is not None
+            and executable.task_id in result.result_refs
         )
 
     def _handle_schedule_route_update(
@@ -4093,59 +4389,375 @@ class ProofControlLayer:
             pivot.model_dump(mode="json"),
         )
         self.persist()
-        try:
-            raw_result = await self._meta_pivot_executor(pivot)
-            created_route_ids = list(
-                dict.fromkeys(
-                    str(value)
-                    for value in raw_result.get("created_route_ids", [])
-                    if str(value)
-                )
+        attempts = await self._run_meta_pivot_mechanisms(pivot)
+        outcome = self._summarize_meta_pivot_attempts(pivot, attempts)
+        self.state.meta_pivot_outcomes[pivot.pivot_id] = outcome
+        self._materialize_meta_pivot_tasks(
+            pivot,
+            outcome,
+            current_round=self._meta_pivot_execution_round,
+        )
+        pivot.created_route_ids = list(outcome.new_route_ids)
+        pivot.result_fact_ids = list(outcome.new_fact_ids)
+        pivot.result_obligation_ids = list(outcome.new_obligation_ids)
+        pivot.revised_strategy_ids = list(outcome.revised_strategy_ids)
+        pivot.new_task_ids = list(outcome.new_task_ids)
+        pivot.new_counterexample_ids = list(outcome.new_counterexample_ids)
+        pivot.changed_route_ids = list(outcome.changed_route_ids)
+        result_refs = list(
+            dict.fromkeys(
+                [
+                    pivot.pivot_id,
+                    *outcome.new_route_ids,
+                    *outcome.revised_strategy_ids,
+                    *outcome.new_obligation_ids,
+                    *outcome.new_task_ids,
+                    *outcome.new_fact_ids,
+                    *outcome.new_counterexample_ids,
+                    *outcome.changed_route_ids,
+                    *outcome.wake_condition_ids,
+                ]
             )
-            result_fact_ids = list(
-                dict.fromkeys(
-                    str(value)
-                    for value in raw_result.get("result_fact_ids", [])
-                    if str(value)
-                )
-            )
-            result_obligation_ids = list(
-                dict.fromkeys(
-                    str(value)
-                    for value in raw_result.get("result_obligation_ids", [])
-                    if str(value)
-                )
-            )
-        except Exception as exc:
-            pivot.status = MetaPivotStatus.FAILED
-            pivot.failure_reason = f"{type(exc).__name__}: {exc}"
+        )
+        action.result_refs = result_refs
+
+        if outcome.effect == MetaPivotEffect.EFFECTIVE:
+            pivot.status = MetaPivotStatus.EXECUTED
+            pivot.executed_round = self._meta_pivot_execution_round
+            pivot.failure_reason = ""
             self._emit(
-                "meta_pivot_failed",
-                pivot.model_dump(mode="json"),
+                "meta_pivot_executed",
+                {
+                    **pivot.model_dump(mode="json"),
+                    "outcome": outcome.model_dump(mode="json"),
+                },
             )
             self.persist()
-            raise
-        pivot.created_route_ids = created_route_ids
-        pivot.result_fact_ids = result_fact_ids
-        pivot.result_obligation_ids = result_obligation_ids
-        pivot.status = MetaPivotStatus.EXECUTED
-        pivot.executed_round = self._meta_pivot_execution_round
-        pivot.failure_reason = ""
+            return ControlActionResult(
+                result_refs=result_refs,
+                postcondition_met=True,
+            )
+
+        if outcome.effect == MetaPivotEffect.DEFERRED:
+            pivot.status = MetaPivotStatus.ADMITTED
+            pivot.executed_round = None
+            pivot.failure_reason = ""
+            self.action_dispatcher.defer(
+                action.action_id,
+                reason=outcome.reason,
+            )
+            self._emit(
+                "meta_pivot_deferred",
+                {
+                    **pivot.model_dump(mode="json"),
+                    "outcome": outcome.model_dump(mode="json"),
+                },
+            )
+            self.persist()
+            return ControlActionResult(
+                result_refs=result_refs,
+                postcondition_met=True,
+                detail=outcome.reason,
+            )
+
+        pivot.status = MetaPivotStatus.FAILED
+        pivot.executed_round = None
+        pivot.failure_reason = outcome.reason
         self._emit(
-            "meta_pivot_executed",
-            pivot.model_dump(mode="json"),
+            "meta_pivot_failed",
+            {
+                **pivot.model_dump(mode="json"),
+                "outcome": outcome.model_dump(mode="json"),
+            },
         )
-        action.result_refs = [
-            pivot.pivot_id,
-            *created_route_ids,
-            *result_fact_ids,
-            *result_obligation_ids,
-        ]
         self.persist()
         return ControlActionResult(
-            result_refs=list(action.result_refs),
-            postcondition_met=True,
+            result_refs=result_refs,
+            postcondition_met=False,
+            detail=outcome.reason,
         )
+
+    async def _run_meta_pivot_mechanisms(
+        self,
+        pivot: MetaPivotState,
+    ) -> list[Mapping[str, Any]]:
+        executor = self._meta_pivot_executor
+        if executor is None:
+            return [
+                {
+                    "mechanism": "unavailable",
+                    "effect": MetaPivotEffect.FAILED.value,
+                    "reason": "meta pivot has no execution authority",
+                }
+            ]
+        mechanisms = list(pivot.requested_mechanisms) or ["meta_replan"]
+        try:
+            signature = inspect.signature(executor)
+            signature.bind(pivot, mechanisms[0])
+            accepts_mechanism = True
+        except (TypeError, ValueError):
+            accepts_mechanism = False
+
+        if not accepts_mechanism:
+            try:
+                raw_result = executor(pivot)
+                if inspect.isawaitable(raw_result):
+                    raw_result = await raw_result
+            except Exception as exc:
+                return [
+                    {
+                        "mechanism": mechanisms[0],
+                        "effect": MetaPivotEffect.FAILED.value,
+                        "reason": f"{type(exc).__name__}: {exc}",
+                    }
+                ]
+            if not isinstance(raw_result, Mapping):
+                return [
+                    {
+                        "mechanism": mechanisms[0],
+                        "effect": MetaPivotEffect.FAILED.value,
+                        "reason": "meta pivot executor returned a non-mapping result",
+                    }
+                ]
+            raw_attempts = raw_result.get("attempts")
+            if isinstance(raw_attempts, Sequence) and not isinstance(
+                raw_attempts, (str, bytes)
+            ):
+                attempts: list[Mapping[str, Any]] = []
+                for index, item in enumerate(raw_attempts):
+                    mechanism = (
+                        mechanisms[index]
+                        if index < len(mechanisms)
+                        else f"attempt_{index + 1}"
+                    )
+                    if not isinstance(item, Mapping):
+                        attempts.append(
+                            {
+                                "mechanism": mechanism,
+                                "effect": MetaPivotEffect.FAILED.value,
+                                "reason": "meta pivot attempt was not a mapping",
+                            }
+                        )
+                        continue
+                    attempts.append({"mechanism": mechanism, **dict(item)})
+                return attempts
+            return [{"mechanism": mechanisms[0], **dict(raw_result)}]
+
+        attempts = []
+        for mechanism in mechanisms:
+            try:
+                raw_result = executor(pivot, mechanism)
+                if inspect.isawaitable(raw_result):
+                    raw_result = await raw_result
+                if not isinstance(raw_result, Mapping):
+                    raise TypeError(
+                        "meta pivot mechanism returned a non-mapping result"
+                    )
+                attempt = {"mechanism": mechanism, **dict(raw_result)}
+            except Exception as exc:
+                attempt = {
+                    "mechanism": mechanism,
+                    "effect": MetaPivotEffect.FAILED.value,
+                    "reason": f"{type(exc).__name__}: {exc}",
+                }
+            attempts.append(attempt)
+            if (
+                str(attempt.get("effect", "")).casefold()
+                == MetaPivotEffect.EFFECTIVE.value
+                and self._meta_pivot_material_refs(attempt)
+            ):
+                break
+        return attempts
+
+    def _summarize_meta_pivot_attempts(
+        self,
+        pivot: MetaPivotState,
+        attempts: Sequence[Mapping[str, Any]],
+    ) -> MetaPivotOutcome:
+        attempted_mechanisms: list[str] = []
+        completed_mechanisms: list[str] = []
+        unavailable_mechanisms: dict[str, str] = {}
+        collected: dict[str, list[str]] = {
+            "new_route_ids": [],
+            "revised_strategy_ids": [],
+            "new_obligation_ids": [],
+            "new_task_ids": [],
+            "new_fact_ids": [],
+            "new_counterexample_ids": [],
+            "changed_route_ids": [],
+            "wake_condition_ids": [],
+        }
+        reasons: list[str] = []
+        deferred = False
+        explicit_failures = 0
+
+        for index, attempt in enumerate(attempts):
+            mechanism = str(
+                attempt.get(
+                    "mechanism",
+                    pivot.requested_mechanisms[index]
+                    if index < len(pivot.requested_mechanisms)
+                    else f"attempt_{index + 1}",
+                )
+            )
+            if mechanism not in attempted_mechanisms:
+                attempted_mechanisms.append(mechanism)
+            reason = str(attempt.get("reason", "")).strip()
+            if reason:
+                reasons.append(f"{mechanism}: {reason}")
+            effect = str(attempt.get("effect", "")).casefold()
+            refs = self._meta_pivot_material_refs(attempt)
+
+            for field_name, values in refs.items():
+                collected[field_name].extend(values)
+            collected["wake_condition_ids"].extend(
+                self._meta_pivot_id_values(attempt, "wake_condition_ids")
+            )
+
+            if effect == MetaPivotEffect.DEFERRED.value:
+                deferred = True
+                unavailable_mechanisms[mechanism] = reason or "mechanism deferred"
+                continue
+            if effect == MetaPivotEffect.FAILED.value:
+                explicit_failures += 1
+                unavailable_mechanisms[mechanism] = reason or "mechanism failed"
+                continue
+            if effect in {"unavailable", MetaPivotEffect.EMPTY.value}:
+                unavailable_mechanisms[mechanism] = (
+                    reason or "mechanism produced no material state"
+                )
+                continue
+            if any(refs.values()):
+                completed_mechanisms.append(mechanism)
+                break
+            unavailable_mechanisms[mechanism] = (
+                reason or "mechanism produced no material state"
+            )
+
+        collected = {
+            key: list(dict.fromkeys(values)) for key, values in collected.items()
+        }
+        if completed_mechanisms:
+            effect = MetaPivotEffect.EFFECTIVE
+            reason = reasons[-1] if reasons else "meta pivot changed proof state"
+        elif deferred and collected["wake_condition_ids"]:
+            effect = MetaPivotEffect.DEFERRED
+            reason = reasons[-1] if reasons else "meta pivot is waiting to wake"
+        elif explicit_failures and explicit_failures == len(attempted_mechanisms):
+            effect = MetaPivotEffect.FAILED
+            reason = reasons[-1] if reasons else "all meta pivot mechanisms failed"
+        else:
+            effect = MetaPivotEffect.EMPTY
+            reason = (
+                "; ".join(reasons)
+                if reasons
+                else "all meta pivot mechanisms produced no material state"
+            )
+        return MetaPivotOutcome(
+            pivot_id=pivot.pivot_id,
+            effect=effect,
+            attempted_mechanisms=attempted_mechanisms,
+            completed_mechanisms=completed_mechanisms,
+            unavailable_mechanisms=unavailable_mechanisms,
+            new_route_ids=collected["new_route_ids"],
+            revised_strategy_ids=collected["revised_strategy_ids"],
+            new_obligation_ids=collected["new_obligation_ids"],
+            new_task_ids=collected["new_task_ids"],
+            new_fact_ids=collected["new_fact_ids"],
+            new_counterexample_ids=collected["new_counterexample_ids"],
+            changed_route_ids=collected["changed_route_ids"],
+            wake_condition_ids=collected["wake_condition_ids"],
+            reason=reason,
+        )
+
+    def _materialize_meta_pivot_tasks(
+        self,
+        pivot: MetaPivotState,
+        outcome: MetaPivotOutcome,
+        *,
+        current_round: int,
+    ) -> None:
+        for task_id in outcome.new_task_ids:
+            if task_id in self.state.executable_tasks:
+                continue
+            wake_conditions = (
+                [
+                    WakeCondition(
+                        condition_id=condition_id,
+                        kind=WakeConditionKind.USER_INTERVENTION,
+                        earliest_round=current_round + 1,
+                    )
+                    for condition_id in outcome.wake_condition_ids
+                ]
+                if outcome.effect == MetaPivotEffect.DEFERRED
+                else []
+            )
+            status = (
+                TaskStatus.DEFERRED
+                if outcome.effect == MetaPivotEffect.DEFERRED
+                else TaskStatus.READY
+            )
+            self.state.executable_tasks[task_id] = ExecutableTaskRecord(
+                task_id=task_id,
+                task_kind="meta_pivot_step",
+                status=status,
+                registered_handler="meta_pivot_executor",
+                explicit_prompt_ref=f"meta_pivot:{pivot.pivot_id}",
+                wake_conditions=wake_conditions,
+                created_round=current_round,
+                last_transition_round=current_round,
+                expires_round=current_round + 4,
+                transition_history=[
+                    {
+                        "from": None,
+                        "to": status.value,
+                        "round": current_round,
+                        "reason": "meta_pivot_materialized_task",
+                    }
+                ],
+            )
+
+    @classmethod
+    def _meta_pivot_material_refs(
+        cls,
+        result: Mapping[str, Any],
+    ) -> dict[str, list[str]]:
+        return {
+            "new_route_ids": cls._meta_pivot_id_values(
+                result, "new_route_ids", "created_route_ids"
+            ),
+            "revised_strategy_ids": cls._meta_pivot_id_values(
+                result, "revised_strategy_ids"
+            ),
+            "new_obligation_ids": cls._meta_pivot_id_values(
+                result, "new_obligation_ids", "result_obligation_ids"
+            ),
+            "new_task_ids": cls._meta_pivot_id_values(result, "new_task_ids"),
+            "new_fact_ids": cls._meta_pivot_id_values(
+                result, "new_fact_ids", "result_fact_ids"
+            ),
+            "new_counterexample_ids": cls._meta_pivot_id_values(
+                result, "new_counterexample_ids"
+            ),
+            "changed_route_ids": cls._meta_pivot_id_values(result, "changed_route_ids"),
+        }
+
+    @staticmethod
+    def _meta_pivot_id_values(
+        result: Mapping[str, Any],
+        *field_names: str,
+    ) -> list[str]:
+        values: list[str] = []
+        for field_name in field_names:
+            raw_values = result.get(field_name, [])
+            if isinstance(raw_values, (str, bytes)):
+                raw_values = [raw_values]
+            if not isinstance(raw_values, Sequence):
+                continue
+            values.extend(
+                str(value).strip() for value in raw_values if str(value).strip()
+            )
+        return list(dict.fromkeys(values))
 
     def _meta_pivot_postcondition(
         self,
@@ -4153,11 +4765,44 @@ class ProofControlLayer:
         result: ControlActionResult,
     ) -> bool:
         pivot = self.state.meta_pivot_state
+        outcome = (
+            self.state.meta_pivot_outcomes.get(pivot.pivot_id)
+            if pivot is not None
+            else None
+        )
+        if outcome is not None:
+            material_refs = {
+                *outcome.new_route_ids,
+                *outcome.revised_strategy_ids,
+                *outcome.new_obligation_ids,
+                *outcome.new_task_ids,
+                *outcome.new_fact_ids,
+                *outcome.new_counterexample_ids,
+                *outcome.changed_route_ids,
+            }
+            return (
+                outcome.effect == MetaPivotEffect.EFFECTIVE
+                and bool(material_refs)
+                and pivot is not None
+                and pivot.status == MetaPivotStatus.EXECUTED
+                and pivot.action_id == action.action_id
+                and pivot.pivot_id in result.result_refs
+                and material_refs.issubset(result.result_refs)
+            )
         return (
             pivot is not None
             and pivot.status == MetaPivotStatus.EXECUTED
             and pivot.action_id == action.action_id
             and pivot.pivot_id in result.result_refs
+            and bool(
+                pivot.created_route_ids
+                or pivot.result_fact_ids
+                or pivot.result_obligation_ids
+                or pivot.revised_strategy_ids
+                or pivot.new_task_ids
+                or pivot.new_counterexample_ids
+                or pivot.changed_route_ids
+            )
             and set(pivot.created_route_ids).issubset(result.result_refs)
             and set(pivot.result_fact_ids).issubset(result.result_refs)
             and set(pivot.result_obligation_ids).issubset(result.result_refs)
@@ -5007,6 +5652,16 @@ class ProofControlLayer:
                 return False
         return True
 
+    def _counterexample_hunter_agent_id(self) -> str | None:
+        return next(
+            (
+                agent.id
+                for agent in self.config.agents
+                if agent.enabled and "counterexample_hunter" in agent.roles
+            ),
+            None,
+        )
+
     @staticmethod
     def _property_strengthening_risk_types() -> set[InferenceRiskType]:
         return {
@@ -5035,6 +5690,8 @@ class ProofControlLayer:
             self.state.premise_closure_records,
             self.state.countermodel_tasks,
             self.state.falsification_tasks,
+            self.state.typed_falsification_contracts,
+            self.state.executable_tasks,
             self.state.negative_patterns,
             self.state.assumption_domains,
             self.state.obligation_domains,
@@ -5061,6 +5718,7 @@ class ProofControlLayer:
             self.state.route_update_tasks,
             self.state.inspiration_review_deferrals,
             self.state.route_admissions,
+            self.state.meta_pivot_outcomes,
         )
         if any(source_id in values for values in state_mappings):
             return True

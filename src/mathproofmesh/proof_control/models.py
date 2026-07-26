@@ -101,6 +101,68 @@ class MetaPivotStatus(StrEnum):
     FAILED = "failed"
 
 
+class TaskStatus(StrEnum):
+    CREATED = "created"
+    NEEDS_REWRITE = "needs_rewrite"
+    ASSIGNED = "assigned"
+    READY = "ready"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    INCONCLUSIVE = "inconclusive"
+    DEFERRED = "deferred"
+    BLOCKED = "blocked"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+class WakeConditionKind(StrEnum):
+    PROVIDER_AVAILABLE = "provider_available"
+    BUDGET_AVAILABLE = "budget_available"
+    DEPENDENCY_FACT_AVAILABLE = "dependency_fact_available"
+    OBLIGATION_STATE_CHANGED = "obligation_state_changed"
+    REVIEWER_AVAILABLE = "reviewer_available"
+    TASK_RECOMPILED = "task_recompiled"
+    USER_INTERVENTION = "user_intervention"
+    CONFIG_CHANGED = "config_changed"
+
+
+class WakeCondition(StrictModel):
+    condition_id: str
+    kind: WakeConditionKind
+    target_id: str | None = None
+    earliest_round: int | None = Field(default=None, ge=0)
+    earliest_time: str | None = None
+    satisfied: bool = False
+    satisfied_at: str | None = None
+
+
+class ExecutableTaskRecord(StrictModel):
+    task_id: str
+    task_kind: Literal[
+        "countermodel",
+        "falsification",
+        "route_update",
+        "inspiration_review",
+        "meta_pivot_step",
+    ]
+    status: TaskStatus
+    target_claim_ids: list[str] = Field(default_factory=list)
+    target_obligation_ids: list[str] = Field(default_factory=list)
+    route_ids: list[str] = Field(default_factory=list)
+    assigned_agent_id: str | None = None
+    registered_handler: str | None = None
+    typed_contract_ref: str | None = None
+    explicit_prompt_ref: str | None = None
+    wake_conditions: list[WakeCondition] = Field(default_factory=list)
+    created_round: int = Field(ge=0)
+    last_transition_round: int = Field(ge=0)
+    expires_round: int | None = Field(default=None, ge=0)
+    result_refs: list[str] = Field(default_factory=list)
+    terminal_reason: str | None = None
+    verifies_target_claim: Literal[False] = False
+    transition_history: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class BlueprintNodeKind(StrEnum):
     GIVEN = "given"
     CLAIM = "claim"
@@ -420,9 +482,22 @@ class CountermodelTaskRecord(StrictModel):
     source_goal_link_id: str | None = None
     target_obligation_id: str
     route_ids: list[str] = Field(default_factory=list)
-    status: Literal["pending", "deferred", "inapplicable", "completed"] = "pending"
+    status: Literal[
+        "pending",
+        "assigned",
+        "ready",
+        "running",
+        "deferred",
+        "inapplicable",
+        "completed",
+        "inconclusive",
+        "failed",
+        "expired",
+    ] = "pending"
     reason: str = ""
     result_refs: list[str] = Field(default_factory=list)
+    assigned_agent_id: str | None = None
+    executable_task_id: str | None = None
 
 
 class ClaimGoalLink(StrictModel):
@@ -539,6 +614,11 @@ class InferenceRiskType(StrEnum):
     SOME_WITNESS_TO_ALL_WITNESSES = "some_witness_to_all_witnesses"
     COVERAGE_TO_EXHAUSTIVENESS = "coverage_to_exhaustiveness"
     AT_LEAST_ONE_TO_ONLY_FROM_SET = "at_least_one_to_only_from_set"
+    WRONG_DIRECTION = "wrong_direction"
+    QUANTIFIER_SWAP = "quantifier_swap"
+    DEPENDENCY_MISSING = "dependency_missing"
+    SCOPE_MISMATCH = "scope_mismatch"
+    AMBIGUOUS_SEMANTIC_LEAP = "ambiguous_semantic_leap"
 
 
 class SetRelationKind(StrEnum):
@@ -572,6 +652,32 @@ class RelationSignature(StrictModel):
     ] = "unknown"
 
 
+class VerifierIssueCode(StrEnum):
+    UNSUPPORTED_IMPLICATION = "unsupported_implication"
+    WRONG_DIRECTION = "wrong_direction"
+    FINITE_TO_UNIVERSAL = "finite_to_universal"
+    EVENTUAL_TO_GLOBAL = "eventual_to_global"
+    MISSING_UNIFORMITY = "missing_uniformity"
+    QUANTIFIER_SWAP = "quantifier_swap"
+    PROPERTY_STRENGTHENING = "property_strengthening"
+    UNVERIFIED_CANDIDATE_BOUND = "unverified_candidate_bound"
+    DEPENDENCY_MISSING = "dependency_missing"
+    SCOPE_MISMATCH = "scope_mismatch"
+    OTHER = "other"
+
+
+class StructuredVerifierIssue(StrictModel):
+    issue_id: str
+    report_id: str
+    target_id: str
+    step_id: str | None = None
+    code: VerifierIssueCode
+    premise_summary: str
+    conclusion_summary: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    suggested_risk_type: InferenceRiskType | None = None
+
+
 class InferenceRiskRecord(StrictModel):
     risk_id: str = Field(default_factory=lambda: new_id("risk"))
     route_id: str | None = None
@@ -587,6 +693,12 @@ class InferenceRiskRecord(StrictModel):
     required_bridge_obligation_ids: list[str] = Field(default_factory=list)
     premise_relation_signatures: list[RelationSignature] = Field(default_factory=list)
     conclusion_relation_signature: RelationSignature | None = None
+    source_issue_ids: list[str] = Field(default_factory=list)
+    recommended_control_action: str = "create_countermodel"
+
+    @property
+    def blocks_fact_promotion(self) -> bool:
+        return self.status == "open"
 
 
 class NegativePatternRecord(StrictModel):
@@ -817,6 +929,27 @@ class BottleneckBridgeTask(StrictModel):
     status: Literal["open", "resolved", "cancelled"] = "open"
 
 
+class FalsificationCompilationStatus(StrEnum):
+    EXECUTABLE = "executable"
+    NEEDS_REWRITE = "needs_rewrite"
+    NON_AUTOMATABLE = "non_automatable"
+
+
+class TypedFalsificationContract(StrictModel):
+    contract_id: str
+    target_subject_id: str
+    parameters: list[dict[str, Any]] = Field(default_factory=list)
+    finite_domains: dict[str, list[int] | dict[str, int]] = Field(default_factory=dict)
+    exact_relation: dict[str, Any] = Field(default_factory=dict)
+    counterexample_predicate: dict[str, Any] = Field(default_factory=dict)
+    registered_handler: str | None = None
+    max_cases: int = Field(default=0, ge=0)
+    expected_if_found: str
+    expected_if_not_found: str
+    status: FalsificationCompilationStatus
+    compile_reason: str
+
+
 class FalsificationTaskRecord(StrictModel):
     task_id: str = Field(default_factory=lambda: new_id("falsification_task"))
     source_kind: Literal["strategy", "goal_link", "inference_risk"]
@@ -840,6 +973,8 @@ class FalsificationTaskRecord(StrictModel):
     deferred_reason: str = ""
     result_experiment_id: str | None = None
     action_id: str | None = None
+    typed_contract_id: str | None = None
+    executable_task_id: str | None = None
 
 
 class MessageExpectedEffect(StrEnum):
@@ -900,11 +1035,39 @@ class MetaPivotState(StrictModel):
     created_route_ids: list[str] = Field(default_factory=list)
     result_fact_ids: list[str] = Field(default_factory=list)
     result_obligation_ids: list[str] = Field(default_factory=list)
+    revised_strategy_ids: list[str] = Field(default_factory=list)
+    new_task_ids: list[str] = Field(default_factory=list)
+    new_counterexample_ids: list[str] = Field(default_factory=list)
+    changed_route_ids: list[str] = Field(default_factory=list)
     no_progress_after_pivot: bool | None = None
     failure_reason: str = ""
     action_id: str | None = None
     executed_round: int | None = Field(default=None, ge=0)
     evaluated_round: int | None = Field(default=None, ge=0)
+
+
+class MetaPivotEffect(StrEnum):
+    EFFECTIVE = "effective"
+    EMPTY = "empty"
+    DEFERRED = "deferred"
+    FAILED = "failed"
+
+
+class MetaPivotOutcome(StrictModel):
+    pivot_id: str
+    effect: MetaPivotEffect
+    attempted_mechanisms: list[str] = Field(default_factory=list)
+    completed_mechanisms: list[str] = Field(default_factory=list)
+    unavailable_mechanisms: dict[str, str] = Field(default_factory=dict)
+    new_route_ids: list[str] = Field(default_factory=list)
+    revised_strategy_ids: list[str] = Field(default_factory=list)
+    new_obligation_ids: list[str] = Field(default_factory=list)
+    new_task_ids: list[str] = Field(default_factory=list)
+    new_fact_ids: list[str] = Field(default_factory=list)
+    new_counterexample_ids: list[str] = Field(default_factory=list)
+    changed_route_ids: list[str] = Field(default_factory=list)
+    wake_condition_ids: list[str] = Field(default_factory=list)
+    reason: str
 
 
 class MessageUtilityContract(StrictModel):

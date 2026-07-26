@@ -51,8 +51,8 @@ async def test_mock_proof_control_modes_are_auditable_and_offline(
         config.runtime.run_root, f"proof-control-{mode}"
     ).latest_stage_checkpoint()
 
-    assert sidecar["schema_version"] == "0.8.1"
-    assert summary["schema_version"] == "0.8.1"
+    assert sidecar["schema_version"] == "0.8.2"
+    assert summary["schema_version"] == "0.8.2"
     assert summary["mode"] == mode
     assert {
         "goal_alignment",

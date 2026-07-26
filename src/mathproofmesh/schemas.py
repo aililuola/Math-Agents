@@ -2374,6 +2374,9 @@ class VerificationIssue(StrictModel):
     description: str
     counterexample: str | None = None
     repair_hint: str | None = None
+    issue_code: str | None = None
+    premise_summary: str = ""
+    conclusion_summary: str = ""
 
 
 class BlindVerificationReport(StrictModel):
@@ -2383,6 +2386,7 @@ class BlindVerificationReport(StrictModel):
     verdict: VerificationVerdict
     first_error_step: str | None = None
     issues: list[VerificationIssue] = Field(default_factory=list)
+    structured_issues: list[Any] = Field(default_factory=list)
     checked_dependencies: list[str] = Field(default_factory=list)
     tool_requests: list[ToolRequest] = Field(default_factory=list)
     tool_results: list[ToolResult] = Field(default_factory=list)
@@ -2413,6 +2417,7 @@ class VerificationReport(StrictModel):
     verdict: VerificationVerdict
     first_error_step: str | None = None
     issues: list[VerificationIssue] = Field(default_factory=list)
+    structured_issues: list[Any] = Field(default_factory=list)
     checked_dependencies: list[str] = Field(default_factory=list)
     tool_requests: list[ToolRequest] = Field(default_factory=list)
     tool_results: list[ToolResult] = Field(default_factory=list)

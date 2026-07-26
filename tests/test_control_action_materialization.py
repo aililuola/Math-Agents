@@ -157,6 +157,30 @@ async def test_failed_action_has_explicit_failure_reason() -> None:
     )
 
 
+async def test_handler_can_materialize_a_deferred_action() -> None:
+    dispatcher = ControlActionDispatcher(problem_hash=PROBLEM_HASH)
+
+    def defer_with_wake(action):
+        dispatcher.defer(action.action_id, reason="waiting for an explicit wake")
+        return ControlActionResult(
+            result_refs=["wake-a"],
+            postcondition_met=True,
+        )
+
+    dispatcher.register_handler(
+        ControlActionType.EXECUTE_META_PIVOT,
+        defer_with_wake,
+        postcondition=lambda _action, _result: False,
+    )
+    action = dispatcher.propose(ControlActionType.EXECUTE_META_PIVOT)
+
+    deferred = await dispatcher.execute(action.action_id, current_round=1)
+
+    assert deferred.status == ControlActionStatus.DEFERRED
+    assert deferred.result_refs == ["wake-a"]
+    assert deferred.executed_round is None
+
+
 def _control_runtime(tmp_path):
     config = make_proof_control_config(tmp_path / "runs", mode="active")
     store, registry, memory, graph, broker = make_broker_runtime(

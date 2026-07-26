@@ -21,8 +21,10 @@ from ..schemas import (
 )
 from .models import (
     ClaimGoalLink,
+    FalsificationCompilationStatus,
     FalsificationTaskRecord,
     InferenceRiskRecord,
+    TypedFalsificationContract,
 )
 
 
@@ -50,6 +52,106 @@ class FalsificationDisposition:
     conclusive_refutation: bool
     claim_status_changed: bool
     reason: str
+
+
+class FalsificationContractCompiler:
+    """Compile a narrow declarative relation without executing free-form text."""
+
+    _NEGATED_RELATIONS = {
+        "eq": "ne",
+        "ne": "eq",
+        "lt": "ge",
+        "le": "gt",
+        "gt": "le",
+        "ge": "lt",
+    }
+
+    def compile(
+        self,
+        request_text: str,
+        *,
+        target_subject_id: str,
+        max_cases: int = 4096,
+    ) -> TypedFalsificationContract:
+        normalized = " ".join(request_text.split())
+        identity = {
+            "target_subject_id": target_subject_id,
+            "request_text": normalized,
+            "max_cases": max_cases,
+        }
+        contract_id = f"falsification_contract_{stable_hash(identity)[:20]}"
+        match = FalsificationTaskMaterializer._FINITE_RELATION.fullmatch(normalized)
+        if match is None:
+            looks_structured = normalized.casefold().startswith(("check ", "test "))
+            return TypedFalsificationContract(
+                contract_id=contract_id,
+                target_subject_id=target_subject_id,
+                max_cases=max_cases,
+                expected_if_found="Record an exact counterexample and invalidate only its target.",
+                expected_if_not_found=(
+                    "Retain an unverified or bounded Insight; do not verify the Claim."
+                ),
+                status=(
+                    FalsificationCompilationStatus.NEEDS_REWRITE
+                    if looks_structured
+                    else FalsificationCompilationStatus.NON_AUTOMATABLE
+                ),
+                compile_reason=(
+                    "The request resembles a finite test but lacks a complete typed "
+                    "interval or relation."
+                    if looks_structured
+                    else "No registered deterministic finite relation was identified."
+                ),
+            )
+        lower = int(match.group("lower"))
+        upper = int(match.group("upper"))
+        cases = max(0, upper - lower + 1)
+        relation = FalsificationTaskMaterializer._RELATIONS[match.group("relation")]
+        if upper < lower or cases > max_cases:
+            return TypedFalsificationContract(
+                contract_id=contract_id,
+                target_subject_id=target_subject_id,
+                parameters=[{"name": match.group("variable"), "type": "integer"}],
+                finite_domains={match.group("variable"): {"min": lower, "max": upper}},
+                exact_relation={
+                    "lhs": match.group("lhs").strip(),
+                    "rhs": match.group("rhs").strip(),
+                    "relation": relation,
+                },
+                max_cases=max_cases,
+                expected_if_found="Record an exact counterexample.",
+                expected_if_not_found="Do not infer a universal theorem.",
+                status=FalsificationCompilationStatus.NEEDS_REWRITE,
+                compile_reason=(
+                    "The finite domain is empty or exceeds the declared case bound."
+                ),
+            )
+        exact_relation = {
+            "lhs": match.group("lhs").strip(),
+            "rhs": match.group("rhs").strip(),
+            "relation": relation,
+        }
+        return TypedFalsificationContract(
+            contract_id=contract_id,
+            target_subject_id=target_subject_id,
+            parameters=[{"name": match.group("variable"), "type": "integer"}],
+            finite_domains={match.group("variable"): {"min": lower, "max": upper}},
+            exact_relation=exact_relation,
+            counterexample_predicate={
+                **exact_relation,
+                "relation": self._NEGATED_RELATIONS[relation],
+            },
+            registered_handler="bounded_integer_search",
+            max_cases=max_cases,
+            expected_if_found=(
+                "Record an exact counterexample and invalidate only the targeted Claim."
+            ),
+            expected_if_not_found=(
+                "Record bounded not-refuted evidence as Insight; do not verify the Claim."
+            ),
+            status=FalsificationCompilationStatus.EXECUTABLE,
+            compile_reason="A registered exact finite integer relation was compiled.",
+        )
 
 
 class FalsificationTaskMaterializer:

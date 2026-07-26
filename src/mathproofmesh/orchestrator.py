@@ -3122,10 +3122,22 @@ class ProofMeshOrchestrator:
             proof_control_requires_referee_ledger = bool(
                 state.proof_control is not None and state.proof_control.active
             )
+            claim_fact_risk_free = bool(
+                not proof_control_requires_referee_ledger
+                or claim.status != ClaimStatus.VERIFIED
+                or (
+                    state.proof_control is not None
+                    and state.proof_control.claim_fact_promotion_allowed(
+                        claim,
+                        route_id=route_id,
+                    )
+                )
+            )
             if (
                 claim.status == ClaimStatus.VERIFIED
                 and referee_id is not None
                 and team_global_allowed
+                and claim_fact_risk_free
                 and (
                     not proof_control_requires_referee_ledger
                     or referee_ledger_allows_fact

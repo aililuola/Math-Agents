@@ -54,7 +54,7 @@ async def test_v081_control_modes_complete_offline_end_to_end(
 
     sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    assert sidecar["schema_version"] == "0.8.1"
+    assert sidecar["schema_version"] == "0.8.2"
     assert summary["mode"] == mode
     assert "meta_pivot_state" in sidecar
     assert "meta_pivot" in summary

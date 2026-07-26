@@ -164,7 +164,7 @@ def test_failed_meta_pivot_has_explicit_reason(tmp_path) -> None:
     assert action.status == ControlActionStatus.FAILED
 
 
-def test_stop_allowed_only_after_evaluated_no_progress(tmp_path) -> None:
+def test_stop_allowed_after_empty_pivot(tmp_path) -> None:
     config, store, control, orchestrator, state = _runtime(tmp_path)
     signature = orchestrator._global_progress_signature(state)
     control.request_meta_pivot(
@@ -180,16 +180,14 @@ def test_stop_allowed_only_after_evaluated_no_progress(tmp_path) -> None:
             "result_obligation_ids": [],
         }
 
-    asyncio.run(
+    pivot = asyncio.run(
         control.execute_pending_meta_pivot(
             current_round=3,
             executor=execute,
         )
     )
-    control.evaluate_meta_pivot(
-        progress_signature=signature,
-        current_round=3,
-    )
+    assert pivot.status == MetaPivotStatus.FAILED
+    assert control.meta_pivot_allows_stagnation_stop(progress_signature=signature)
     state.last_progress_signature = signature
     state.global_no_progress_rounds = (
         config.scheduler.global_no_progress_rounds_before_stop - 1
