@@ -87,7 +87,7 @@ def test_four_failure_classes_map_to_existing_actions() -> None:
         route_id="route-a",
         goal_link=_link(
             GoalRelation.UNKNOWN,
-            scope=ScopeRelation.CLAIM_WEAKER,
+            scope=ScopeRelation.INCOMPARABLE,
         ),
     )
 

@@ -3,13 +3,14 @@ from __future__ import annotations
 import ast
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from ..config import ComputationConfig
+from ..config import ComputationConfig, VerificationConfig
 from ..schemas import (
     EvidenceStrength,
     ExperimentOutcome,
@@ -211,6 +212,50 @@ def build_docker_command(config: ComputationConfig, workdir: Path) -> list[str]:
             f"assert len(out)<={config.max_output_chars},'output limit exceeded';"
             "sys.stdout.write(out)"
         ),
+    ]
+
+
+def build_lean_docker_command(
+    config: VerificationConfig,
+    workdir: Path,
+    *,
+    docker_executable: str = "docker",
+) -> list[str]:
+    """Build the networkless, read-only Lean verification command."""
+
+    if not config.lean_sandbox_image:
+        raise RuntimeError("lean_sandbox_image is not configured")
+    lean_command = shlex.split(config.lean_command)
+    if not lean_command:
+        raise RuntimeError("lean_command is empty")
+    return [
+        docker_executable,
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--pids-limit",
+        str(config.lean_sandbox_pids_limit),
+        "--memory",
+        f"{config.lean_sandbox_memory_mb}m",
+        "--cpus",
+        str(config.lean_sandbox_cpus),
+        "--user",
+        "65532:65532",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,size=128m",
+        "--mount",
+        f"type=bind,src={workdir},dst=/work,readonly",
+        "--workdir",
+        "/work",
+        config.lean_sandbox_image,
+        *lean_command,
+        "/work/Main.lean",
     ]
 
 

@@ -52,6 +52,7 @@ from .schemas import (
     ProofAttempt,
     ProofCheckpoint,
     ProofDelta,
+    PropositionNormalizationBatch,
     RepresentationCandidate,
     ReverseGoalPlan,
     StrategySet,
@@ -534,11 +535,30 @@ def _validated_model_example(
     return example
 
 
+def _strip_schema_noise(value: Any) -> Any:
+    """Drop auto-generated `title` entries from a JSON schema.
+
+    Pydantic stamps a title on every model and field; they carry no
+    instruction the field name does not, and across the large nested
+    response models they cost thousands of prompt tokens per call.
+    Descriptions and defaults are kept — they are real instructions.
+    """
+    if isinstance(value, dict):
+        return {
+            key: _strip_schema_noise(item)
+            for key, item in value.items()
+            if key != "title"
+        }
+    if isinstance(value, list):
+        return [_strip_schema_noise(item) for item in value]
+    return value
+
+
 def _schema(model: Type[BaseModel]) -> str:
     schema = model.model_json_schema()
     example = _validated_model_example(model, schema)
     return (
-        f"{json.dumps(schema, ensure_ascii=False, indent=2)}\n\n"
+        f"{json.dumps(_strip_schema_noise(schema), ensure_ascii=False, indent=2)}\n\n"
         "MINIMAL JSON SHAPE EXAMPLE (replace placeholders; leave all hash fields "
         "empty because the server computes them):\n"
         f"{json.dumps(example, ensure_ascii=False, indent=2)}"
@@ -635,6 +655,82 @@ JSON SCHEMA:
             "triage", COMMON_SYSTEM, user, TriageResult, temperature=0.0
         )
 
+    def normalize_statements(
+        self,
+        problem: ProblemContract,
+        statements: list[dict[str, Any]],
+    ) -> PromptBundle:
+        """Batched form-repair of blueprint statements the deterministic
+        semantic gate marked NEEDS_NORMALIZATION.
+
+        The reviewer restates each item with explicit objects, quantifiers,
+        relation, and scope. It must not prove, refute, strengthen, weaken,
+        or otherwise change the mathematics, and must not output private
+        chain of thought.
+        """
+        user = f"""
+[STAGE:statement_normalization]
+You are a structural reviewer. Each statement below is believed to be a mathematical proposition, but the deterministic parser could not extract explicit objects, a relation, or a quantifier/scope from its current wording.
+For every input item, return the same mathematics restated explicitly:
+1. Name the mathematical objects (sets, sequences, integers, functions).
+2. Make every quantifier explicit ("对任意"/"存在"/"for all"/"there exists"), including quantifiers that were implicit in a predicate such as "递增"/"increasing".
+3. State the relation with an explicit relation symbol or relation word (=, ≤, ∈, 整除, divides, ...).
+4. Preserve the language of the original statement.
+Never prove or refute a statement, never judge whether it is true, never add or remove mathematical content, and never merge two statements. If an item is not a mathematical proposition at all (it is a search instruction or process text), set is_mathematical_proposition=false and copy the original text unchanged.
+The needs field of each item lists what the parser could not find; address exactly those gaps.
+
+IMMUTABLE PROBLEM CONTRACT:
+{_json(problem)}
+
+STATEMENTS TO NORMALIZE:
+{_json(statements)}
+
+JSON SCHEMA:
+{_schema(PropositionNormalizationBatch)}
+""".strip()
+        return PromptBundle(
+            "statement_normalization",
+            COMMON_SYSTEM,
+            user,
+            PropositionNormalizationBatch,
+            temperature=0.0,
+        )
+
+    _TECHNIQUE_MENU = {
+        "combinatorics": (
+            "invariants/monovariants, double counting, extremal principle, "
+            "pigeonhole, probabilistic method, generating functions, "
+            "bijections, graph modelling"
+        ),
+        "number_theory": (
+            "modular arithmetic and orders, lifting the exponent, p-adic "
+            "valuation, infinite descent, CRT, bounding between consecutive "
+            "powers, multiplicative structure"
+        ),
+        "algebra": (
+            "clever substitution, symmetrization, SOS decomposition, "
+            "homogenization, tangent-line trick, telescoping, roots of "
+            "unity filter, polynomial identities"
+        ),
+        "inequality": (
+            "SOS, homogenization/normalization, tangent-line trick, "
+            "smoothing/mixing, Schur/SOS-Schur, convexity and Jensen, "
+            "rearrangement"
+        ),
+        "functional_equation": (
+            "substitution families, injectivity/surjectivity arguments, "
+            "fixed points, Cauchy-type reductions, symmetry swaps"
+        ),
+        "geometry": (
+            "complex numbers, inversion, projective/cross-ratio, "
+            "barycentric coordinates, spiral similarity, radical axes"
+        ),
+        "analysis": (
+            "monotone/bounded convergence, compactness, extremal choice, "
+            "continuity/discreteness interplay, telescoping estimates"
+        ),
+    }
+
     def strategies(
         self,
         problem: ProblemContract,
@@ -642,8 +738,10 @@ JSON SCHEMA:
         count: int,
         prior_strategy_titles: list[str] | None = None,
         regulator_feedback: list[str] | None = None,
+        forbidden_mechanisms: list[str] | None = None,
     ) -> PromptBundle:
         prior_strategy_titles = prior_strategy_titles or []
+        forbidden_mechanisms = forbidden_mechanisms or []
         calculation_contracts = (
             experiment_tool_catalog(problem.allowed_tools)
             if self.computation_enabled
@@ -655,12 +753,21 @@ JSON SCHEMA:
             default_kind="required_action_or_unresolved_conflict",
             default_status="open",
         )
+        problem_kind = getattr(triage.problem_kind, "value", str(triage.problem_kind))
+        technique_menu = self._TECHNIQUE_MENU.get(
+            problem_kind.casefold(),
+            "; ".join(sorted(set(self._TECHNIQUE_MENU.values()))[:3]),
+        )
         user = f"""
 [STAGE:strategy_generation]
 Generate up to {count} genuinely distinct and feasible solution strategies for the immutable problem.
 Optimize each strategy for the explicit task_requirements and deliverables in the contract. Do not add a proof deliverable that the user did not request. For a computation-and-conjecture task, plan one exact bounded computation plus a scoped candidate statement and stop before attempting the separately listed proof obligation.
 The strategies must differ in their decisive mathematical mechanism, not merely wording or notation.
 Do not pad the list with invented weak variants. If the mathematical space supports fewer sound approaches, return fewer.
+Before choosing mechanisms, write 2-4 EQUIVALENT REFORMULATIONS of the goal (contrapositive, a strengthened induction-friendly statement, a generalization with a parameter, a dual/complementary counting view) and let at least one strategy attack a reformulation rather than the literal statement — hard problems are usually solved through the right restatement.
+TECHNIQUE MENU for this problem kind ({problem_kind}): {technique_menu}. Treat the menu as a checklist of candidate decisive mechanisms, not a limit; combining or transcending menu items is encouraged, but never ignore an applicable classical technique.
+For every strategy, fill key_original_step with the single most non-routine transformation the route depends on — the step a competent student would NOT find automatically. A strategy whose key_original_step is routine is a weak variant.
+FORBIDDEN MECHANISMS (already produced by earlier sampling; do not rename them): {_json(forbidden_mechanisms)}
 For every strategy, state the bottleneck, the intended falsification test, the expected intermediate lemmas, and why it is independent of the others.
 List the smallest load-bearing claims in critical_claims. Mark a claim "required" only when refuting it invalidates the route; give each one a precise low-cost falsification test and a preferred deterministic tool when applicable.
 You may record narrowly described ComputationHint items for later consideration, but hints are non-executable and must not replace the strategy's abstract mathematical mechanism.
@@ -706,7 +813,9 @@ JSON SCHEMA:
         remaining_call_budget: int = 0,
         experiment_results: list[dict[str, Any]] | None = None,
         computation_feedback: list[dict[str, Any]] | None = None,
+        negative_knowledge: list[dict[str, Any]] | None = None,
     ) -> PromptBundle:
+        negative_knowledge = negative_knowledge or []
         feedback_directives = _feedback_directives(
             targeted_feedback,
             source="path_review_or_failure_record",
@@ -754,6 +863,9 @@ ASSIGNED STRATEGY:
 VERIFIED LEMMA LIBRARY (facts only; may be empty):
 {_json(verified_claims)}
 
+NEGATIVE KNOWLEDGE FROM ALL ROUTES (refuted claims with their counterexamples and dead ends other explorers already hit; never premises, never targets — spend zero calls re-deriving or re-attempting them):
+{_json(negative_knowledge)}
+
 NON-AUTHORITATIVE TARGETED REVIEW DIRECTIVES FOR THIS PATH:
 {_json(feedback_directives)}
 
@@ -776,6 +888,7 @@ STRUCTURED EXPERIMENT RESULTS FROM THIS SAME PATH:
 Interpret the mathematical consequence of any experiment result before submitting an attempt. not_refuted and bounded_evidence are not proofs. Do not place experimental output directly into proposed_lemmas or present it as a proved step.
 After a successful discover_pattern result, put at least one concrete, falsifiable hypothesis in candidate_conjectures. Link it to the exact experiment_id, state why bounded evidence is not proof, and name the separate symbolic proof obligation. Leave candidate evidence_refs empty for the server.
 After a confirmed counterexample, immediately correct or abandon the affected route and set experiment_impact to execution, plan, or strategy according to its scope.
+Fill attempt.proof_sketch (<=4000 chars) with your global route map: the intended chain of lemmas, the technique planned for each, and where the hardest step lies. The sketch is non-authoritative and is re-shown to you on every later segment of this path, so invest in it — it is the only channel that survives between your calls.
 
 REMAINING GLOBAL CALL BUDGET: {remaining_call_budget}
 OUTPUT LANGUAGE: {self.output_language}
@@ -852,6 +965,7 @@ JSON SCHEMA:
         experiment_results: list[dict[str, Any]] | None = None,
         computation_feedback: list[dict[str, Any]] | None = None,
         previous_working_checkpoint: dict[str, Any] | None = None,
+        negative_knowledge: list[dict[str, Any]] | None = None,
     ) -> PromptBundle:
         feedback_directives = _feedback_directives(
             targeted_feedback,
@@ -861,6 +975,7 @@ JSON SCHEMA:
         )
         experiment_results = experiment_results or []
         computation_feedback = computation_feedback or []
+        negative_knowledge = negative_knowledge or []
         computation_contracts = (
             experiment_tool_catalog(problem.allowed_tools)
             if self.computation_enabled
@@ -878,6 +993,7 @@ You are explorer {agent_id}. Continue one proof path from a verified external ch
 The checkpoint is authoritative mathematical state, not a suggestion. Do not re-prove committed steps unless you identify an explicit contradiction; if a contradiction exists, report it in detected_conflicts and do not silently overwrite the checkpoint.
 Produce at most {max_new_steps} new logically complete proof steps and at most {max_new_claims} new reusable claims. Each new step must name all dependencies and may depend only on committed step IDs, verified claim IDs, explicit external theorems, or earlier steps in this same delta.
 Put existing checkpoint references only in `referenced_checkpoint_step_ids` as string IDs. Put newly proved mathematics only in `new_steps` as complete ProofStep objects; never place a bare step ID in `new_steps`.
+Type every step: use step_type=assumption_intro/assumption_discharge for proof-by-contradiction scaffolding, case_split/case_close with a branch_label (for example "case d=1") for case analyses, definition/construction for auxiliary objects, and derivation otherwise. When every branch of a case_split is case_closed, restate the merged conclusion in a derivation step; when the last assumption is discharged, return active_assumptions=[] explicitly.
 Every entry in `new_claims[].proof_steps` must also be a complete ProofStep object, normally copied from `new_steps`; never put a string such as `"s14"` there. Bare IDs belong only in `dependencies` or `referenced_checkpoint_step_ids`.
 Encode every external theorem dependency as `external:<exact theorem name>` and state its applicable hypotheses in the step justification. A bare theorem title is not a valid dependency ID.
 Work on the checkpoint's current_goal first. Finish a coherent subgoal rather than emitting a long unfinished transcript.
@@ -887,9 +1003,11 @@ For numeric_counterexample, set exact_arithmetic=false; sampled non-refutation i
 Use argument names and semantics exactly as declared below. Never invent aliases or send arguments that a tool contract does not list.
 For every new ProofStep that relies on an explicit value obtained by finite computation, fill ProofStep.calculation_checks with an assertion-checking typed ToolRequest in the same response. A symbolic minimum proof, symbolic finite classification, and routine displayed algebra do not require a tool by themselves. The local gate runs required checks before checkpoint review and blocks missing, malformed, inconclusive, or refuted calculations. Leave calculation_evidence_refs empty for the server.
 CHECKPOINT POLICY: {checkpoint_policy}. When this is "verified_subgoal", completed_subgoal must explicitly name the coherent subgoal completed by this delta unless the full proof is complete or a contradiction with the checkpoint is being reported.
+If you removed a subgoal from remaining_subgoals, it must be the one named in completed_subgoal; never silently drop an unproven subgoal.
 Set proof_complete=true only when the original immutable problem is fully solved, candidate_final_answer is self-contained, and remaining_subgoals is empty.
 The response must retain problem_hash, path_id, strategy_id, parent_checkpoint_id, round_index, and segment_index exactly as supplied.
 Reason privately, but output only the next auditable mathematical delta; never output hidden scratch work.
+CONTINUITY CHANNEL: the checkpoint's proof_sketch is your route map and working_notes are YOUR OWN notes from the previous segment (plans, failed directions, technique ideas). They are non-authoritative, never dependencies, never evidence — but read them first so you do not rebuild your plan from scratch. Update delta.working_notes (<=4000 chars) with what your NEXT segment needs to know: what you plan next, what failed and why, which technique you intend for the remaining subgoals.
 
 IMMUTABLE PROBLEM CONTRACT:
 {_json(problem)}
@@ -906,6 +1024,9 @@ to repair or continue the same route without repeating useful local work):
 
 VERIFIED LEMMA LIBRARY:
 {_json(verified_claims)}
+
+NEGATIVE KNOWLEDGE FROM ALL ROUTES (refuted claims with counterexamples and dead ends; never premises, never targets — do not re-derive them):
+{_json(negative_knowledge)}
 
 NON-AUTHORITATIVE TARGETED REVIEW DIRECTIVES:
 {_json(feedback_directives)}
@@ -1042,6 +1163,20 @@ JSON SCHEMA:
     ) -> PromptBundle:
         experiment_results = experiment_results or []
         tool_results = tool_results or []
+        rollback_instruction = (
+            """
+SPECIAL ROLLBACK REVIEW:
+This delta adds no proof steps and asks to roll back the latest committed
+checkpoint because detected_conflicts is nonempty. PASS authorizes a rollback;
+it does not append the delta. Return PASS only if you independently verify a
+concrete contradiction in a step introduced by the latest checkpoint segment.
+Put that exact step_id in first_error_step and checked_dependencies. A vague
+concern, an error in an older ancestor, or the author's unsupported assertion
+must be FAIL or UNCERTAIN.
+""".strip()
+            if delta.detected_conflicts and not delta.new_steps
+            else ""
+        )
         user = f"""
 [STAGE:checkpoint_verification]
 You are independent checkpoint verifier {verifier_id}. The delta author is a different agent.
@@ -1055,6 +1190,8 @@ Decide whether the proposed proof delta may be committed as the next persistent 
 7. Return PASS only when the entire delta is safe to append to the verified checkpoint. Otherwise return FAIL or UNCERTAIN and give a focused repair instruction.
 8. Inspect independent_replay_audit for every decisive counterexample/certificate represented in EXPERIMENT RESULTS, then verify its mathematical mapping yourself. A failed replay blocks PASS. A not_refuted, heuristic, or bounded_evidence result cannot justify PASS. For an exhaustive certificate, verify that its finite reduction really covers the original claim.
 Set target_id to the delta_id, target_type="proof_delta", agent_id={verifier_id!r}, and stage="detailed".
+
+{rollback_instruction}
 
 IMMUTABLE PROBLEM CONTRACT:
 {_json(problem)}
@@ -1136,6 +1273,7 @@ Perform inexpensive gatekeeping before detailed proof checking:
 4. Check that the proof follows the assigned plan when a plan is supplied.
 5. Inspect theorem use structurally: the exact invoked form and applicability conditions must be present. Do not demand a bibliographic source for a standard named theorem, but do flag any missing hypothesis or unverifiable theorem use.
 6. Ensure nontrivial steps are explicitly marked and not hidden behind vague language.
+7. MANDATORY theorem-admission check: for every `external:<theorem>` dependency, judge whether the cited theorem is equivalent to, or strictly stronger than, the target proposition — citing a theorem that directly contains the goal trivializes the problem and is a STRATEGY-level failure, not a valid proof. Also verify no hard constraint in the problem contract's hard_constraints list is violated by any cited theorem or tool; a violated hard constraint is a STRATEGY-level failure.
 Do not perform an expensive line-by-line re-proof unless needed to identify a structural failure.
 Set problem_integrity_ok=false for any change to the problem. Classify failure_level as execution, plan, or strategy.
 
@@ -1180,6 +1318,8 @@ You are independent detailed verifier {verifier_id}. Check the mathematical proc
 For every proof step: restate the exact assertion, identify its dependencies, test whether the justification implies it, verify algebra/inequalities/case coverage, and inspect boundary conditions.
 Locate the first invalid or unjustified step. A later correct conclusion does not repair an earlier gap.
 Try actively to falsify decisive claims by small cases, extremal cases, dimensional checks, substitutions, or counterexamples.
+DEVIL'S ADVOCATE OBLIGATION: identify the single weakest key step and mount your strongest concrete refutation attempt against it (a candidate counterexample, an unchecked degenerate case, a quantifier-order slip, a division-by-zero branch, a limit/summation exchange); record what you tried and why it failed to break the step. A PASS without a recorded refutation attempt on the weakest step is invalid.
+Your PASS must list every step ID you actually checked in checked_dependencies; an empty checked_dependencies with a PASS verdict will be downgraded automatically.
 Use the verified lemma library only when every hypothesis is matched explicitly.
 When a deterministic calculation would materially resolve uncertainty, emit a narrowly scoped ToolRequest. Never request arbitrary code execution.
 Return PASS only when every required step is supported. Use UNCERTAIN rather than guessing when a deep theorem or computation remains unverified.

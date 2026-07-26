@@ -28,6 +28,7 @@ class ClaimLifecycleController:
         "scope_mismatch",
         "quantifier_mismatch",
         "content_hash_mismatch",
+        "checkpoint_rolled_back",
     }
 
     def __init__(
@@ -216,6 +217,7 @@ class ClaimLifecycleController:
             for issue in report.issues
             if issue.claim_id is not None and bool(issue.counterexample)
         }
+        checked_ids = set(report.checked_dependencies)
         for claim in related:
             entry = self.register_claim(claim)
             if report.verdict != VerificationVerdict.PASS:
@@ -230,12 +232,28 @@ class ClaimLifecycleController:
                 report_id=report.report_id,
             )
             if report.verdict == VerificationVerdict.PASS:
-                self.record_checkpoint_verification(
-                    claim.claim_id,
-                    report_ids=[report.report_id],
-                    confidence=report.confidence,
-                    independent=False,
+                # An attempt-level PASS is not a per-claim audit. Only claims
+                # the reviewer explicitly checked, or that already carry
+                # delta-level verification, may be promoted; a blanket
+                # promotion turned unreviewed PROPOSED claims into VERIFIED.
+                individually_supported = (
+                    claim.claim_id in checked_ids
+                    or entry.state
+                    in {
+                        ClaimVerificationState.LOCALLY_VERIFIED,
+                        ClaimVerificationState.INDEPENDENTLY_VERIFIED,
+                        ClaimVerificationState.REFEREE_ACCEPTED,
+                        ClaimVerificationState.FACT_CANDIDATE,
+                        ClaimVerificationState.FACT,
+                    }
                 )
+                if individually_supported:
+                    self.record_checkpoint_verification(
+                        claim.claim_id,
+                        report_ids=[report.report_id],
+                        confidence=report.confidence,
+                        independent=False,
+                    )
             if claim.claim_id in explicit_counterexamples:
                 self.invalidate_claim(
                     claim.claim_id,
@@ -293,6 +311,18 @@ class ClaimLifecycleController:
     ) -> ClaimVerificationLedgerEntry:
         claim = self.claims[claim_id]
         entry = self.register_claim(claim)
+        if entry.state in {
+            ClaimVerificationState.INVALIDATED,
+            ClaimVerificationState.REJECTED,
+        }:
+            # A refuted claim never resurrects through checkpoint bookkeeping,
+            # and bookkeeping must never crash the run over it either.
+            self._record_same_state(
+                entry,
+                reason="checkpoint_verification_ignored_for_rejected_claim",
+                report_id=(report_ids[0] if report_ids else None),
+            )
+            return entry
         unique_ids = sorted(set(report_ids))
         if independent:
             entry.independent_report_ids = sorted(

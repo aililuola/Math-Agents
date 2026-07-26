@@ -69,6 +69,12 @@ async def test_mock_proof_control_modes_are_auditable_and_offline(
         "synthesis_readiness_block_rate",
     } <= summary.keys()
     assert sidecar["route_admissions"]
+    assert sidecar["goal_alignment_contracts"]
+    if mode == "active":
+        assert any(
+            contract["final_verdict"] == GateVerdict.PASS.value
+            for contract in sidecar["goal_alignment_contracts"].values()
+        )
     assert sidecar["synthesis_readiness_records"]
     assert checkpoint is not None
     assert checkpoint[1]["schema_version"] == "0.8.2"
@@ -161,11 +167,22 @@ async def test_active_proof_control_runs_with_active_inspiration(
             context = _sanitized_context(messages)
             segment = int(context.get("authoritative_ids", {}).get("segment_index", 1))
             if segment == 1 and continuation_calls <= 2:
+                checkpoint_subgoals = list(
+                    context.get("checkpoint", {}).get("remaining_subgoals", [])
+                )
+                completed_subgoal = (
+                    checkpoint_subgoals[0]
+                    if checkpoint_subgoals
+                    else "Establish one local identity."
+                )
                 payload["action"] = "submit_delta"
                 payload["delta"].update(
                     {
-                        "completed_subgoal": "Establish one local identity.",
-                        "remaining_subgoals": ["Find a mechanism-level bridge."],
+                        "completed_subgoal": completed_subgoal,
+                        "remaining_subgoals": [
+                            *checkpoint_subgoals[1:],
+                            "Find a mechanism-level bridge.",
+                        ],
                         "current_goal": "Find a mechanism-level bridge.",
                         "candidate_final_answer": None,
                         "proof_complete": False,

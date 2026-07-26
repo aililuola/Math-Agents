@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 
 from ..proof_identity import normalize_text, obligation_identity_text
 from ..schemas import NoveltySignature, ProofObligation, StrategyCard, stable_hash
+from .semantic_quality import ObligationSemanticGate
 from .models import (
     BlueprintEdge,
     BlueprintNode,
@@ -105,7 +106,15 @@ class StrategyBlueprintCompiler:
         candidates.extend(
             ("critical_claim", item.statement) for item in strategy.critical_claims
         )
-        candidates.append(("bottleneck", strategy.bottleneck))
+        # The bottleneck is planning metadata ("the difficulty is proving X").
+        # It only becomes a mathematical node when it is itself a truth-apt
+        # proposition; otherwise it stays on the StrategyCard as metadata.
+        bottleneck_quality = ObligationSemanticGate().assess_statement(
+            strategy.bottleneck,
+            source_kind="strategy_blueprint",
+        )
+        if bottleneck_quality.accepted:
+            candidates.append(("bottleneck", strategy.bottleneck))
 
         unique: list[tuple[str, str, str]] = []
         seen: set[str] = set()
@@ -191,6 +200,7 @@ class StrategyBlueprintCompiler:
                     source_node_id=source_id,
                     target_node_id=target_id,
                     relation="implies",
+                    origin="list_order_guess",
                     implication_outline=[
                         f"Establish {source.normalized_statement}.",
                         (
@@ -241,8 +251,14 @@ class StrategyBlueprintCompiler:
             node_ids=[item.node_id for item in nodes],
             edge_ids=[item.edge_id for item in edges],
             main_goal_node_id=main_node.node_id,
+            # Every non-main node is a direct-target candidate, in path
+            # order. Admission iterates this list and binds the first
+            # semantically admissible node, so one unparseable first lemma
+            # no longer kills the whole strategy.
             direct_target_node_ids=(
-                [path_nodes[0].node_id] if path_nodes else [main_node.node_id]
+                [item.node_id for item in path_nodes]
+                if path_nodes
+                else [main_node.node_id]
             ),
             root_entry_node_ids=([path_nodes[0].node_id] if path_nodes else []),
             open_gap_node_ids=[item.node_id for item in path_nodes],

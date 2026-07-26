@@ -97,27 +97,6 @@ class BottleneckCompressor:
                 )
         return groups
 
-    async def review_ambiguous_clusters(
-        self,
-        candidates: Sequence[tuple[ProofObligation, ProofObligation]],
-        *,
-        runner: Any,
-        prompt_factory: Any,
-    ) -> list[BottleneckCluster]:
-        reviewed: list[BottleneckCluster] = []
-        for left, right in candidates:
-            result = await runner.call(
-                "structural_verifier",
-                prompt_factory.review_bottleneck_cluster(
-                    left=left,
-                    right=right,
-                ),
-            )
-            artifact = getattr(result, "artifact", result)
-            if isinstance(artifact, BottleneckCluster):
-                reviewed.append(artifact)
-        return reviewed
-
     def materialize_clusters(
         self,
         graph: ProofGraphStore,

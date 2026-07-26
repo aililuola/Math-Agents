@@ -149,6 +149,11 @@ class BudgetConfig(ConfigModel):
     depth_share: float = Field(default=0.35, ge=0.0, le=1.0)
     verification_share: float = Field(default=0.25, ge=0.0, le=1.0)
     synthesis_share: float = Field(default=0.10, ge=0.0, le=1.0)
+    # Optional test-time compute scaling. It remains off unless a caller opts
+    # in explicitly, preserving all v0.8 budget defaults.
+    scale_budget_with_difficulty: bool = False
+    hard_problem_call_multiplier: float = Field(default=2.0, ge=1.0, le=8.0)
+    hard_problem_extra_rounds: int = Field(default=2, ge=0, le=16)
 
     @model_validator(mode="after")
     def validate_shares_and_paths(self) -> "BudgetConfig":
@@ -634,6 +639,15 @@ class FalsificationFastLaneControlConfig(ConfigModel):
     )
 
 
+class BlueprintReviewControlConfig(ConfigModel):
+    """Hard bounds for route-admission review and repair work."""
+
+    max_review_calls_per_round: int = Field(default=2, ge=0, le=16)
+    max_nodes_per_batch: int = Field(default=12, ge=1, le=128)
+    max_repair_rounds: int = Field(default=2, ge=0, le=8)
+    max_batch_repair_items: int = Field(default=12, ge=1, le=128)
+
+
 class RouteAdmissionControlConfig(ConfigModel):
     enabled: bool = True
     mode: Literal["off", "shadow", "active"] = "shadow"
@@ -644,6 +658,16 @@ class RouteAdmissionControlConfig(ConfigModel):
     require_mechanism_novelty: bool = True
     max_regeneration_attempts: int = Field(default=1, ge=0, le=4)
     fail_closed_if_all_rejected: bool = True
+    # Batched LLM repair of NEEDS_NORMALIZATION blueprint statements before
+    # burning a full planner regeneration on the same doomed pipeline.
+    semantic_repair_enabled: bool = True
+    max_semantic_repair_calls: int = Field(default=2, ge=0, le=8)
+    # Hard ceiling as a fraction of the run's total call budget; the
+    # effective cap is min(max_semantic_repair_calls, fraction * total).
+    semantic_repair_budget_fraction: float = Field(default=0.1, ge=0.0, le=0.5)
+    blueprint_review: BlueprintReviewControlConfig = Field(
+        default_factory=BlueprintReviewControlConfig
+    )
 
 
 class ContinueGateControlConfig(ConfigModel):
@@ -782,7 +806,19 @@ class VerificationConfig(ConfigModel):
     enable_numeric_counterexamples: bool = True
     enable_lean: bool = False
     lean_command: str = "lake env lean"
+    lean_sandbox_required: Literal[True] = True
+    lean_sandbox_image: str | None = None
+    lean_sandbox_memory_mb: int = Field(default=1024, ge=128, le=8192)
+    lean_sandbox_pids_limit: int = Field(default=128, ge=16, le=1024)
+    lean_sandbox_cpus: float = Field(default=1.0, gt=0.0, le=8.0)
     external_tool_timeout_seconds: float = Field(default=20.0, ge=1.0, le=600.0)
+
+    @field_validator("lean_sandbox_image")
+    @classmethod
+    def require_pinned_lean_image(cls, value: str | None) -> str | None:
+        if value is not None and "@sha256:" not in value:
+            raise ValueError("lean_sandbox_image must be pinned by sha256 digest")
+        return value
 
 
 class ContinuationConfig(ConfigModel):
@@ -799,6 +835,10 @@ class ContinuationConfig(ConfigModel):
     max_segments_per_path: int = Field(default=12, ge=1, le=128)
     verify_each_delta: bool = True
     delta_verifier_replicas: int = Field(default=1, ge=1, le=4)
+    # Proof search is tree search: when the author reports a contradiction
+    # with the committed checkpoint, roll the resume pointer back one
+    # segment and branch, instead of abandoning the whole path.
+    allow_checkpoint_rollback: bool = True
     checkpoint_pass_threshold: float = Field(default=0.78, ge=0.0, le=1.0)
     resume_on_disconnect: bool = True
     allow_cross_agent_failover: bool = True
@@ -966,6 +1006,13 @@ class RuntimeConfig(ConfigModel):
     max_parallel_calls: int = Field(default=8, ge=1, le=128)
     parse_retries: int = Field(default=1, ge=0, le=5)
     request_retries: int = Field(default=3, ge=0, le=10)
+    # Two-phase generation: phase 1 spends the whole output budget on free-form
+    # mathematics, phase 2 formats that write-up into the required JSON schema.
+    # Off by default; when off the single-phase path is byte-for-byte unchanged.
+    two_phase_output: bool = False
+    two_phase_stages: list[str] = Field(
+        default_factory=lambda: ["independent_exploration", "proof_continuation"]
+    )
     checkpoint_every_stage: bool = True
     save_raw_provider_responses: bool = True
     redact_prompts_in_console: bool = True

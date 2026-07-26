@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import math
 import re
 from dataclasses import dataclass, asdict
 from typing import Iterable
@@ -46,6 +48,132 @@ def jaccard_similarity(a: str, b: str) -> float:
     if not fa or not fb:
         return 0.0
     return len(fa & fb) / len(fa | fb)
+
+
+# Fixed table of LaTeX commands whose operator meaning survives normalization.
+_MATH_COMMAND_MAP = {
+    "le": "<=",
+    "ge": ">=",
+    "ne": "!=",
+    "in": "∈",
+    "subseteq": "⊆",
+    "mid": "|",
+    "cdot": "*",
+    "times": "*",
+    "forall": "对任意",
+    "exists": "存在",
+}
+
+# Multi-letter function words that must never be alpha-renamed and whose LaTeX
+# command form (\sin, \gcd, ...) keeps its name instead of being deleted.
+_MATH_FUNCTION_WORDS = {
+    "sin",
+    "cos",
+    "tan",
+    "log",
+    "exp",
+    "gcd",
+    "lcm",
+    "mod",
+    "max",
+    "min",
+    "sum",
+    "prod",
+    "deg",
+    "ord",
+}
+
+_LATEX_COMMAND_RE = re.compile(r"\\([a-zA-Z]+)")
+_SUBSCRIPT_BRACE_RE = re.compile(r"_\{([^{}]*)\}")
+# A candidate variable token: a letter run, optionally with a numeric
+# subscript (a_1, x_2). Only single-letter bases are renamed.
+_MATH_TOKEN_RE = re.compile(r"[a-zA-Z]+(?:_[0-9]+)?")
+
+
+def _math_normalize(text: str) -> str:
+    """Canonicalize math notation before lexical tokenization.
+
+    LaTeX commands from the fixed table become their operator meaning, other
+    backslash commands are deleted while their arguments survive, ``$`` and
+    brace markup is stripped, and every distinct single-letter variable (with
+    an optional numeric subscript such as ``a_1``) is alpha-renamed to
+    ``v1, v2, ...`` in order of first appearance, so that ``f(x)+g(y)`` and
+    ``u(s)+w(t)`` normalize identically. Multi-letter identifiers (``sin``,
+    ``gcd``, ...) are never renamed.
+    """
+
+    def replace_command(match: re.Match[str]) -> str:
+        name = match.group(1)
+        mapped = _MATH_COMMAND_MAP.get(name.lower())
+        if mapped is not None:
+            return f" {mapped} "
+        if name.lower() in _MATH_FUNCTION_WORDS:
+            return f" {name.lower()} "
+        return " "
+
+    normalized = _LATEX_COMMAND_RE.sub(replace_command, text)
+    normalized = normalized.replace("$", " ")
+    normalized = _SUBSCRIPT_BRACE_RE.sub(r"_\1", normalized)
+    normalized = normalized.replace("{", " ").replace("}", " ")
+
+    rename: dict[str, str] = {}
+
+    def replace_token(match: re.Match[str]) -> str:
+        token = match.group(0)
+        base = token.split("_", 1)[0]
+        if len(base) > 1:
+            return token
+        if token not in rename:
+            rename[token] = f"v{len(rename) + 1}"
+        return rename[token]
+
+    return _MATH_TOKEN_RE.sub(replace_token, normalized)
+
+
+def _math_embedding(text: str, *, dimensions: int = 128) -> tuple[float, ...]:
+    """Build a deterministic local embedding from normalized math features."""
+
+    normalized = _math_normalize(text).casefold()
+    tokens = sorted(_features(normalized))
+    compact = re.sub(r"\s+", " ", normalized).strip()
+    tokens.extend(
+        f"tri:{compact[index : index + 3]}" for index in range(max(0, len(compact) - 2))
+    )
+    vector = [0.0] * dimensions
+    for token in tokens:
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        index = int.from_bytes(digest[:4], "big") % dimensions
+        sign = 1.0 if digest[4] & 1 else -1.0
+        vector[index] += sign
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm:
+        vector = [value / norm for value in vector]
+    return tuple(vector)
+
+
+def _cosine_similarity(a: tuple[float, ...], b: tuple[float, ...]) -> float:
+    if not any(a) and not any(b):
+        return 1.0
+    if not any(a) or not any(b):
+        return 0.0
+    return max(0.0, min(1.0, sum(left * right for left, right in zip(a, b))))
+
+
+def math_similarity(a: str, b: str) -> float:
+    """Blend normalized structural overlap with a local math embedding.
+
+    LaTeX markup and variable naming no longer distort the comparison:
+    ``$a_{n+1} \\le a_n + C$`` and ``b_{k+1} <= b_k + D`` compare as the same
+    mechanism. Used only inside topology's own similarity computations; the
+    plain :func:`jaccard_similarity` keeps its historical behavior for other
+    modules that import it.
+    """
+
+    normalized_a = _math_normalize(a)
+    normalized_b = _math_normalize(b)
+    structural = jaccard_similarity(normalized_a, normalized_b)
+    embedded = _cosine_similarity(_math_embedding(a), _math_embedding(b))
+    return 0.8 * structural + 0.2 * embedded
 
 
 def strategy_text(strategy: StrategyCard) -> str:
@@ -147,9 +275,7 @@ class SparseTopologyRouter:
             def diversity_score(candidate: StrategyCard) -> float:
                 min_distance = min(
                     1.0
-                    - jaccard_similarity(
-                        strategy_text(candidate), strategy_text(existing)
-                    )
+                    - math_similarity(strategy_text(candidate), strategy_text(existing))
                     for existing in selected
                 )
                 feasibility = (
@@ -255,7 +381,7 @@ class SparseTopologyRouter:
         ranked = sorted(
             verified,
             key=lambda c: (
-                jaccard_similarity(
+                math_similarity(
                     query, f"{c.statement} {c.conclusion} {' '.join(c.tags)}"
                 ),
                 c.verification_confidence or 0.0,

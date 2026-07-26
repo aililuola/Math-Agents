@@ -95,8 +95,7 @@ class FailureClassifier:
                 1.0,
             )
         if goal_link is not None and (
-            goal_link.scope_relation
-            in {ScopeRelation.CLAIM_WEAKER, ScopeRelation.INCOMPARABLE}
+            goal_link.scope_relation == ScopeRelation.INCOMPARABLE
             or goal_link.relation
             in {GoalRelation.UNRELATED, GoalRelation.HEURISTIC_ONLY}
         ):

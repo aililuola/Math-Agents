@@ -79,9 +79,10 @@ async def test_rejected_route_local_claim_never_enters_any_global_stage(
         payload = demo_responder(schema_name, messages, schema)
         text = "\n".join(item["content"] for item in messages)
         if schema_name == "ClaimBatch":
-            for claim in payload["claims"]:
+            for index, claim in enumerate(payload["claims"]):
                 claim.update(
                     {
+                        "claim_id": f"claim-marker-{index}",
                         "statement": MARKER,
                         "conclusion": MARKER,
                         "dependencies": [],
@@ -133,6 +134,15 @@ async def test_rejected_route_local_claim_never_enters_any_global_stage(
             )
         ):
             global_prompts.append(text)
+            # An attempt-level PASS no longer promotes claims wholesale; the
+            # reviewer must explicitly vouch for each claim it checked.
+            if "[STAGE:detailed_verification]" in text:
+                payload["checked_dependencies"] = sorted(
+                    {
+                        *payload.get("checked_dependencies", []),
+                        *[f"claim-marker-{index}" for index in range(6)],
+                    }
+                )
         elif schema_name == "ContinuationTurn":
             context = _context(messages)
             assert context.get("verified_legacy_claims") == []

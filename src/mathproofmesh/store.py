@@ -243,6 +243,146 @@ class ArtifactStore:
         with latest_path.open("r", encoding="utf-8") as f:
             return ProofCheckpoint.model_validate(json.load(f))
 
+    def load_proof_checkpoint(
+        self,
+        path_id: str,
+        checkpoint_id: str,
+    ) -> ProofCheckpoint | None:
+        """Load one immutable checkpoint from a path's retained history."""
+
+        path_dir = self.root / "checkpoints" / "proof" / _safe_name(path_id)
+        if not path_dir.exists():
+            return None
+        for candidate_path in sorted(path_dir.glob("[0-9][0-9][0-9][0-9]_*.json")):
+            try:
+                with candidate_path.open("r", encoding="utf-8") as handle:
+                    candidate = ProofCheckpoint.model_validate(json.load(handle))
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            if candidate.checkpoint_id == checkpoint_id:
+                return candidate
+        return None
+
+    def activate_proof_checkpoint(
+        self,
+        path_id: str,
+        checkpoint_id: str,
+        *,
+        reason: str,
+    ) -> ProofCheckpoint:
+        """Atomically select any retained verified checkpoint as resume head."""
+
+        checkpoint = self.load_proof_checkpoint(path_id, checkpoint_id)
+        if checkpoint is None:
+            raise KeyError(
+                f"unknown proof checkpoint {checkpoint_id!r} on path {path_id!r}"
+            )
+        if checkpoint.status not in {
+            CheckpointStatus.VERIFIED,
+            CheckpointStatus.COMMITTED,
+        }:
+            raise ValueError("only verified checkpoints may become resume heads")
+        path_dir = self.root / "checkpoints" / "proof" / _safe_name(path_id)
+        latest_path = path_dir / "latest.json"
+        previous = self.load_latest_proof_checkpoint(path_id)
+        if previous is not None and previous.checkpoint_id == checkpoint.checkpoint_id:
+            return checkpoint
+        content = json.dumps(
+            _to_jsonable(checkpoint), ensure_ascii=False, indent=2, sort_keys=True
+        )
+        self._atomic_write(latest_path, content)
+        self.append_event(
+            "proof_checkpoint_activated",
+            {
+                "path_id": path_id,
+                "from_checkpoint_id": (
+                    previous.checkpoint_id if previous is not None else None
+                ),
+                "to_checkpoint_id": checkpoint.checkpoint_id,
+                "reason": reason,
+            },
+        )
+        return checkpoint
+
+    def list_proof_checkpoint_frontier(
+        self,
+        path_id: str,
+    ) -> list[ProofCheckpoint]:
+        """Return retained leaf checkpoints for deterministic branch search."""
+
+        retained = self.list_proof_checkpoints(path_id, include_abandoned=True)
+        parent_ids = {
+            item.parent_checkpoint_id
+            for item in retained
+            if item.parent_checkpoint_id is not None
+        }
+        return [item for item in retained if item.checkpoint_id not in parent_ids]
+
+    def select_best_proof_checkpoint(
+        self,
+        path_id: str,
+    ) -> ProofCheckpoint | None:
+        """Choose the strongest retained leaf without changing active state."""
+
+        frontier = self.list_proof_checkpoint_frontier(path_id)
+        if not frontier:
+            return None
+        return max(
+            frontier,
+            key=lambda item: (
+                item.proof_complete,
+                -len(item.remaining_subgoals),
+                len(item.verified_steps),
+                len(item.verified_claim_ids),
+                -len(item.known_risks),
+                item.segment_index,
+                item.created_at,
+                item.checkpoint_id,
+            ),
+        )
+
+    def rollback_proof_checkpoint(
+        self,
+        path_id: str,
+        *,
+        reason: str,
+    ) -> ProofCheckpoint | None:
+        """Move the path's resume pointer back to the parent checkpoint.
+
+        Proof search is tree search: when a committed step turns out to be
+        wrong, the correct prefix must stay reusable instead of the whole
+        path being abandoned. The abandoned descendant stays on disk as
+        history; the next committed delta from the restored parent starts a
+        new branch (same path, different checkpoint ID at that segment).
+        """
+        path_dir = self.root / "checkpoints" / "proof" / _safe_name(path_id)
+        latest_path = path_dir / "latest.json"
+        if not latest_path.exists():
+            return None
+        with latest_path.open("r", encoding="utf-8") as handle:
+            latest = ProofCheckpoint.model_validate(json.load(handle))
+        if latest.parent_checkpoint_id is None:
+            return None
+        parent = self.load_proof_checkpoint(path_id, latest.parent_checkpoint_id)
+        if parent is None:
+            return None
+        content = json.dumps(
+            _to_jsonable(parent), ensure_ascii=False, indent=2, sort_keys=True
+        )
+        self._atomic_write(latest_path, content)
+        self.append_event(
+            "proof_checkpoint_rolled_back",
+            {
+                "path_id": path_id,
+                "from_checkpoint_id": latest.checkpoint_id,
+                "to_checkpoint_id": parent.checkpoint_id,
+                "from_segment_index": latest.segment_index,
+                "to_segment_index": parent.segment_index,
+                "reason": reason,
+            },
+        )
+        return parent
+
     def save_working_checkpoint(self, checkpoint: WorkingProofCheckpoint) -> str:
         """Persist route-local work without advancing the verified resume pointer."""
 
@@ -315,8 +455,19 @@ class ArtifactStore:
         )
 
     def list_proof_checkpoints(
-        self, path_id: str | None = None
+        self,
+        path_id: str | None = None,
+        *,
+        include_abandoned: bool = False,
     ) -> list[ProofCheckpoint]:
+        """List active checkpoint lineages, or retained branch history on request.
+
+        Rollback preserves immutable descendant files for audit, but normal
+        consumers must see only the lineage reachable from each path's current
+        ``latest.json`` pointer. Otherwise an abandoned descendant can regain
+        authority during resume or final synthesis.
+        """
+
         proof_root = self.root / "checkpoints" / "proof"
         if not proof_root.exists():
             return []
@@ -329,12 +480,43 @@ class ArtifactStore:
         for root in roots:
             if not root.exists():
                 continue
+            path_checkpoints: list[ProofCheckpoint] = []
             for path in sorted(root.glob("[0-9][0-9][0-9][0-9]_*.json")):
                 try:
                     with path.open("r", encoding="utf-8") as f:
-                        checkpoints.append(ProofCheckpoint.model_validate(json.load(f)))
+                        path_checkpoints.append(
+                            ProofCheckpoint.model_validate(json.load(f))
+                        )
                 except (OSError, ValueError, json.JSONDecodeError):
                     continue
+            if include_abandoned:
+                checkpoints.extend(path_checkpoints)
+                continue
+            latest_path = root / "latest.json"
+            if not latest_path.exists():
+                # Legacy runs may predate the latest-pointer file.
+                checkpoints.extend(path_checkpoints)
+                continue
+            try:
+                with latest_path.open("r", encoding="utf-8") as handle:
+                    latest = ProofCheckpoint.model_validate(json.load(handle))
+            except (OSError, ValueError, json.JSONDecodeError):
+                checkpoints.extend(path_checkpoints)
+                continue
+            by_id = {item.checkpoint_id: item for item in path_checkpoints}
+            by_id.setdefault(latest.checkpoint_id, latest)
+            active_ids: set[str] = set()
+            cursor: ProofCheckpoint | None = latest
+            while cursor is not None and cursor.checkpoint_id not in active_ids:
+                active_ids.add(cursor.checkpoint_id)
+                cursor = (
+                    by_id.get(cursor.parent_checkpoint_id)
+                    if cursor.parent_checkpoint_id is not None
+                    else None
+                )
+            checkpoints.extend(
+                item for item in path_checkpoints if item.checkpoint_id in active_ids
+            )
         return sorted(
             checkpoints,
             key=lambda item: (item.path_id, item.segment_index, item.created_at),

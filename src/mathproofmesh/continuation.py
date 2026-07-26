@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 
 from .proof_identity import (
     canonical_obligation_statement,
@@ -38,6 +38,7 @@ def make_genesis_checkpoint(
     strategy: StrategyCard,
     *,
     source_agent_id: str | None = None,
+    proof_sketch: str = "",
 ) -> ProofCheckpoint:
     """Create the first immutable resume point for one strategy path."""
     path_id = f"path_{strategy.strategy_id}"
@@ -58,6 +59,7 @@ def make_genesis_checkpoint(
         known_risks=[strategy.bottleneck, strategy.falsification_test],
         proof_complete=False,
         status=CheckpointStatus.COMMITTED,
+        proof_sketch=proof_sketch[:4000],
     )
 
 
@@ -67,8 +69,16 @@ def local_delta_verification(
     delta: ProofDelta,
     *,
     verifier_id: str = "local-integrity-guard",
+    shared_dependency_ids: Collection[str] = (),
 ) -> VerificationReport:
-    """Deterministic structural checks before any model may approve a checkpoint."""
+    """Deterministic structural checks before any model may approve a checkpoint.
+
+    ``shared_dependency_ids`` is the exact set of cross-path IDs the caller
+    injected into the author's prompt (verified lemma-library claim IDs,
+    delivered broker message IDs). The prompt tells the explorer it may
+    depend on them, so the guard must accept them — rejecting them
+    deterministically banned cross-route lemma reuse.
+    """
     issues: list[VerificationIssue] = []
 
     def issue(
@@ -107,12 +117,13 @@ def local_delta_verification(
 
     committed_step_ids = {step.step_id for step in checkpoint.verified_steps}
     committed_claim_ids = set(checkpoint.verified_claim_ids)
+    shared_ids = set(shared_dependency_ids)
     new_step_ids: set[str] = set()
     for step in delta.new_steps:
         if step.step_id in committed_step_ids or step.step_id in new_step_ids:
             issue(f"Duplicate proof step ID {step.step_id!r}.", step_id=step.step_id)
             continue
-        allowed = committed_step_ids | committed_claim_ids | new_step_ids
+        allowed = committed_step_ids | committed_claim_ids | shared_ids | new_step_ids
         for dependency in step.dependencies:
             if dependency in allowed or dependency.startswith("external:"):
                 continue
@@ -130,7 +141,11 @@ def local_delta_verification(
         # delta, and may depend on earlier claims in topological order. Adding the
         # current ID after validation still rejects self-dependencies and cycles.
         allowed_claim_dependencies = (
-            committed_step_ids | new_step_ids | committed_claim_ids | new_claim_ids
+            committed_step_ids
+            | new_step_ids
+            | committed_claim_ids
+            | shared_ids
+            | new_claim_ids
         )
         for dependency in claim.dependencies:
             if dependency in allowed_claim_dependencies or dependency.startswith(
@@ -148,6 +163,31 @@ def local_delta_verification(
         issue("A complete proof must contain a final answer and no remaining subgoals.")
     if not delta.ready_for_verification:
         issue("The author marked the delta as not ready for verification.")
+
+    # Subgoal ledger reconciliation: the author fully rewrites
+    # remaining_subgoals, so silently dropping an unproven subgoal would
+    # smuggle it out of the proof obligations. Every removed subgoal must be
+    # accounted for by the declared completed_subgoal (or proof completion).
+    if not delta.proof_complete:
+        removed = {
+            " ".join(item.casefold().split()) for item in checkpoint.remaining_subgoals
+        } - {" ".join(item.casefold().split()) for item in delta.remaining_subgoals}
+        completed = " ".join((delta.completed_subgoal or "").casefold().split())
+        unaccounted = {
+            item
+            for item in removed
+            if not completed or (item not in completed and completed not in item)
+        }
+        if removed and not completed:
+            issue(
+                "The delta removed remaining subgoals without declaring a "
+                "completed_subgoal: " + "; ".join(sorted(removed))[:400]
+            )
+        elif unaccounted:
+            issue(
+                "The delta silently dropped subgoals not covered by its "
+                "completed_subgoal: " + "; ".join(sorted(unaccounted))[:400]
+            )
 
     verdict = VerificationVerdict.FAIL if issues else VerificationVerdict.PASS
     return VerificationReport(
@@ -192,7 +232,15 @@ def merge_verified_delta(
         if claim.claim_id not in claim_ids:
             claim_ids.append(claim.claim_id)
 
-    assumptions = delta.active_assumptions or list(checkpoint.active_assumptions)
+    # None means "not restated" and inherits; an explicit empty list means
+    # every assumption was discharged. The old `or` fallback made discharging
+    # the last assumption (end of a contradiction or case split)
+    # structurally impossible.
+    assumptions = (
+        list(checkpoint.active_assumptions)
+        if delta.active_assumptions is None
+        else list(delta.active_assumptions)
+    )
     risks = _deduplicate(
         [*checkpoint.known_risks, *delta.known_risks, *delta.detected_conflicts]
     )
@@ -217,6 +265,8 @@ def merge_verified_delta(
         status=CheckpointStatus.COMMITTED,
         verification_report_ids=[report.report_id for report in reports],
         failover_chain=list(failover_chain or []),
+        working_notes=delta.working_notes or checkpoint.working_notes,
+        proof_sketch=checkpoint.proof_sketch,
     )
 
 
@@ -340,6 +390,8 @@ def attempt_from_checkpoint(
         unresolved_gaps=[] if checkpoint.proof_complete else unresolved,
         falsification_checks=[strategy.falsification_test],
         self_confidence=1.0 if checkpoint.proof_complete else 0.7,
+        proof_sketch=checkpoint.proof_sketch
+        or (previous_attempt.proof_sketch if previous_attempt else ""),
         path_id=checkpoint.path_id,
         latest_checkpoint_id=checkpoint.checkpoint_id,
         checkpoint_ids=checkpoint_ids,

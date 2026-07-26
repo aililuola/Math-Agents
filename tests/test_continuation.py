@@ -383,9 +383,7 @@ async def test_two_verified_segments_advance_in_one_exploration_action(
             return payload
         delta = payload["delta"] if schema_name == "ContinuationTurn" else payload
         if delta["segment_index"] == 1:
-            delta["completed_subgoal"] = (
-                "Establish the consecutive-square difference identity."
-            )
+            delta["completed_subgoal"] = "difference of consecutive squares"
             delta["new_steps"] = delta["new_steps"][:1]
             delta["remaining_subgoals"] = ["Telescope the identity from k=1 to n."]
             delta["current_goal"] = "Telescope the identity from k=1 to n."
@@ -486,9 +484,7 @@ async def test_resume_after_budget_interruption_uses_committed_checkpoint(
         match = re.search(r"segment_index=(\d+)", text)
         segment = int(match.group(1)) if match else 1
         if segment == 1:
-            payload["completed_subgoal"] = (
-                "Establish the consecutive-square difference identity."
-            )
+            payload["completed_subgoal"] = "difference of consecutive squares"
             payload["new_steps"] = payload["new_steps"][:1]
             payload["remaining_subgoals"] = ["Telescope the identity from k=1 to n."]
             payload["current_goal"] = "Telescope the identity from k=1 to n."

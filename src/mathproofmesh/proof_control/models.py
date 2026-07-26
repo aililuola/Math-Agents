@@ -130,6 +130,11 @@ class WakeConditionKind(StrEnum):
     TASK_RECOMPILED = "task_recompiled"
     USER_INTERVENTION = "user_intervention"
     CONFIG_CHANGED = "config_changed"
+    # Fires when the scheduler advances to a new round. A task deferred only
+    # because a per-round quota was exhausted must wake on the next round,
+    # not on REVIEWER_AVAILABLE (which is instantly true again in a
+    # single-provider deployment and would livelock the queue).
+    ROUND_ADVANCED = "round_advanced"
 
 
 class WakeCondition(StrictModel):
@@ -181,6 +186,12 @@ class ExecutableTaskRecord(StrictModel):
         "route_update",
         "inspiration_review",
         "meta_pivot_step",
+        "normalize_nodes",
+        "blueprint_review",
+        "repair_direct_target",
+        "edge_review",
+        "generate_plan",
+        "batch_repair",
     ]
     status: TaskStatus
     target_claim_ids: list[str] = Field(default_factory=list)
@@ -246,6 +257,16 @@ class BlueprintEdge(StrictModel):
     ]
     implication_outline: list[str] = Field(default_factory=list)
     verified: bool = False
+    # Where the edge came from. "list_order_guess" edges are ordering
+    # hypotheses produced by the compiler, not reviewed implications; they
+    # must never be treated as verified mathematical dependencies.
+    origin: Literal[
+        "planner_structured",
+        "definition_dependency",
+        "explicit_strategy_outline",
+        "list_order_guess",
+        "review_generated",
+    ] = "list_order_guess"
 
 
 class StrategyBlueprint(StrictModel):
@@ -275,6 +296,9 @@ class StrategyBlueprintCompilation(StrictModel):
     nodes: list[BlueprintNode]
     edges: list[BlueprintEdge]
     review_reasons: list[str] = Field(default_factory=list)
+    # Obligation IDs this compilation actually added to the active proof
+    # graph, so a later admission BLOCK can retract exactly those drafts.
+    materialized_obligation_ids: list[str] = Field(default_factory=list)
 
 
 class BlueprintSemanticAssessment(StrictModel):
@@ -477,6 +501,13 @@ class ObligationDomainRecord(StrictModel):
         return self.domain == ObligationDomain.MATHEMATICAL
 
 
+class ObligationSemanticVerdict(StrEnum):
+    ACCEPT = "accept"
+    NEEDS_NORMALIZATION = "needs_normalization"
+    SEARCH_OR_PROCESS_TASK = "search_or_process_task"
+    REJECT = "reject"
+
+
 class ObligationSemanticQuality(StrictModel):
     obligation_id: str
     domain: ObligationDomain
@@ -494,6 +525,22 @@ class ObligationSemanticQuality(StrictModel):
     semantic_quarantine: bool = False
     eligible_for_core_debt: bool = False
     eligible_for_bottleneck: bool = False
+    verdict: ObligationSemanticVerdict | None = None
+    normalization_needs: list[str] = Field(default_factory=list)
+    implicit_quantifiers_detected: bool = False
+
+    @property
+    def effective_verdict(self) -> ObligationSemanticVerdict:
+        """Verdict for records written before the four-state gate existed."""
+        if self.verdict is not None:
+            return self.verdict
+        if self.accepted:
+            return ObligationSemanticVerdict.ACCEPT
+        return ObligationSemanticVerdict.REJECT
+
+    @property
+    def needs_normalization(self) -> bool:
+        return self.effective_verdict == ObligationSemanticVerdict.NEEDS_NORMALIZATION
 
 
 class AlignmentExceptionCode(StrEnum):

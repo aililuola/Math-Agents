@@ -63,6 +63,8 @@ class MessageBroker:
         self._receipts: dict[str, MessageReceipt] = {}
         self._utility_records: dict[str, dict[str, Any]] = {}
         self._review_provenance: dict[str, dict[str, Any]] = {}
+        self._invalidated_messages: dict[str, str] = {}
+        self._invalidated_deliveries: dict[str, dict[str, Any]] = {}
         self._isolation_pending: dict[str, list[str]] = defaultdict(list)
         self._round_route_counts: dict[str, int] = defaultdict(int)
         self._round_global_counts: dict[int, int] = defaultdict(int)
@@ -282,6 +284,8 @@ class MessageBroker:
             else self._dedup.get(self._dedup_key(message))
         )
         if message_id is None:
+            return False
+        if message_id in self._invalidated_messages:
             return False
         if current_round is None:
             return True
@@ -585,6 +589,7 @@ class MessageBroker:
 
         self._messages[message.message_id] = message
         self._dedup[duplicate_key] = message.message_id
+        self._invalidated_messages.pop(message.message_id, None)
         if referee_agent_id is not None:
             self._review_provenance[message.message_id] = {
                 "referee_agent_id": referee_agent_id,
@@ -884,7 +889,7 @@ class MessageBroker:
     def is_globally_admitted_fact(self, message_id: str) -> bool:
         """Return whether a live typed fact passed this broker and an independent referee."""
         message = self._messages.get(message_id)
-        if message is None:
+        if message is None or message_id in self._invalidated_messages:
             return False
         if message.memory_tier != MemoryTier.FACT:
             return False
@@ -906,6 +911,58 @@ class MessageBroker:
             for message in self._messages.values()
             if self.is_globally_admitted_fact(message.message_id)
         ]
+
+    def invalidate_messages(
+        self,
+        message_ids: list[str],
+        *,
+        reason: str,
+    ) -> list[str]:
+        """Retain audit history while removing messages from live delivery."""
+
+        invalidated = {
+            message_id for message_id in message_ids if message_id in self._messages
+        }
+        if not invalidated:
+            return []
+        self._dedup = {
+            key: message_id
+            for key, message_id in self._dedup.items()
+            if message_id not in invalidated
+        }
+        for message_id in invalidated:
+            self._invalidated_messages[message_id] = reason
+            self._isolation_pending.pop(message_id, None)
+        invalidated_delivery_keys: list[str] = []
+        for key, delivery in self._deliveries.items():
+            if delivery.get("message_id") not in invalidated:
+                continue
+            archived = dict(delivery)
+            archived["status"] = ReceiptStatus.REJECTED.value
+            archived["delivery_state"] = DeliveryState.INVALIDATED.value
+            archived["invalidation_reason"] = reason
+            self._invalidated_deliveries[key] = archived
+            invalidated_delivery_keys.append(key)
+        for key in invalidated_delivery_keys:
+            delivery = self._deliveries.pop(key)
+            target_route_id = str(delivery.get("target_route_id", ""))
+            if target_route_id in self._route_queues:
+                self._route_queues[target_route_id] = [
+                    queued_key
+                    for queued_key in self._route_queues[target_route_id]
+                    if queued_key != key
+                ]
+            self._receipts.pop(key, None)
+            self._utility_records.pop(key, None)
+        payload = {
+            "message_ids": sorted(invalidated),
+            "delivery_keys": sorted(invalidated_delivery_keys),
+            "reason": reason,
+        }
+        self._emit_delivery_event("broker_messages_invalidated", payload)
+        if self.store is not None:
+            self.store.write_json("communication", "broker_state", self.export_state())
+        return sorted(invalidated)
 
     def expire(self, current_round: int) -> list[str]:
         expired: list[str] = []
@@ -957,6 +1014,8 @@ class MessageBroker:
             },
             "utility_records": dict(self._utility_records),
             "review_provenance": dict(self._review_provenance),
+            "invalidated_messages": dict(self._invalidated_messages),
+            "invalidated_deliveries": dict(self._invalidated_deliveries),
             "isolation_pending": dict(self._isolation_pending),
             "round_route_counts": dict(self._round_route_counts),
             "round_global_counts": dict(self._round_global_counts),
@@ -1033,6 +1092,14 @@ class MessageBroker:
         broker._review_provenance = {
             str(key): dict(value)
             for key, value in dict(state.get("review_provenance", {})).items()
+        }
+        broker._invalidated_messages = {
+            str(key): str(value)
+            for key, value in dict(state.get("invalidated_messages", {})).items()
+        }
+        broker._invalidated_deliveries = {
+            str(key): dict(value)
+            for key, value in dict(state.get("invalidated_deliveries", {})).items()
         }
         broker._isolation_pending = defaultdict(
             list,

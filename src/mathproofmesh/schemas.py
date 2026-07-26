@@ -171,6 +171,8 @@ class ComputationMethod(StrEnum):
     CANDIDATE_PERIOD_CHECK = "candidate_period_check"
     EXACT_GEOMETRY = "exact_geometry"
     NUMERIC_COUNTEREXAMPLE = "numeric_counterexample"
+    REAL_INEQUALITY = "real_inequality"
+    NUMBER_THEORY_CHECK = "number_theory_check"
     SANDBOXED_PYTHON = "sandboxed_python"
     LEAN_CHECK = "lean_check"
 
@@ -264,6 +266,7 @@ class DeliveryState(StrEnum):
     ACKNOWLEDGED = "acknowledged"
     USED = "used"
     EXPIRED_WITHOUT_OPPORTUNITY = "expired_without_opportunity"
+    INVALIDATED = "invalidated"
 
 
 class EvidenceType(StrEnum):
@@ -1519,6 +1522,10 @@ class ExperimentResult(StrictModel):
     path_id: str | None = None
     parent_checkpoint_id: str | None = None
     target_claim: str
+    # Structured binding of the refuted/confirmed claim to a claim or step
+    # ID, so a confirmed counterexample cannot be escaped by rewording the
+    # claim text.
+    target_claim_id: str | None = None
     method: ComputationMethod
     outcome: ExperimentOutcome
     evidence_strength: EvidenceStrength
@@ -1986,6 +1993,24 @@ class StrategySet(StrictModel):
         return value
 
 
+class PropositionNormalizationItem(StrictModel):
+    """One repaired statement from the batched semantic normalizer.
+
+    The normalizer restates form only: explicit objects, quantifiers,
+    relation, and scope. It must never prove, refute, strengthen, or weaken
+    the mathematics of the original statement.
+    """
+
+    original_statement: str
+    normalized_statement: str
+    is_mathematical_proposition: bool = True
+    note: str = ""
+
+
+class PropositionNormalizationBatch(StrictModel):
+    items: list[PropositionNormalizationItem] = Field(default_factory=list)
+
+
 class ProofStep(StrictModel):
     step_id: str
     statement: str
@@ -1997,6 +2022,19 @@ class ProofStep(StrictModel):
     calculation_evidence_refs: list[EvidenceRef] = Field(default_factory=list)
     citations: list[CitationRecord] = Field(default_factory=list)
     is_key_step: bool = False
+    # Scope semantics: typed steps let deterministic guards (and a future
+    # formal backend) mechanically track assumption discharge and case
+    # exhaustiveness instead of trusting prose.
+    step_type: Literal[
+        "derivation",
+        "assumption_intro",
+        "assumption_discharge",
+        "case_split",
+        "case_close",
+        "definition",
+        "construction",
+    ] = "derivation"
+    branch_label: str | None = None
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
 
     def checkpoint_payload(self) -> dict[str, Any]:
@@ -2117,6 +2155,11 @@ class ProofAttempt(StrictModel):
     unresolved_gaps: list[str] = Field(default_factory=list)
     falsification_checks: list[str] = Field(default_factory=list)
     self_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    # A global route map produced on the first exploration turn
+    # (Draft-Sketch-Prove style): the intended lemma chain and techniques.
+    # Non-authoritative; persisted on the path and re-injected into every
+    # continuation segment.
+    proof_sketch: str = Field(default="", max_length=4000)
     path_id: str | None = None
     latest_checkpoint_id: str | None = None
     checkpoint_ids: list[str] = Field(default_factory=list)
@@ -2149,7 +2192,9 @@ class ProofDelta(StrictModel):
     new_steps: list[ProofStep] = Field(default_factory=list)
     new_claims: list[ClaimCard] = Field(default_factory=list)
     candidate_conjectures: list[CandidateConjecture] = Field(default_factory=list)
-    active_assumptions: list[str] = Field(default_factory=list)
+    # None inherits the parent checkpoint's assumptions; an explicit empty
+    # list discharges them all (end of a contradiction or case analysis).
+    active_assumptions: list[str] | None = None
     dependency_refs: list[Any] = Field(default_factory=list)
     remaining_subgoals: list[str] = Field(default_factory=list)
     current_goal: str | None = None
@@ -2159,6 +2204,11 @@ class ProofDelta(StrictModel):
     proof_complete: bool = False
     ready_for_verification: bool = True
     normalization_notes: list[str] = Field(default_factory=list)
+    # Non-authoritative scratch plan for the author's own next segment:
+    # route map, failed directions, planned techniques. Never a dependency,
+    # never verified, never evidence — it only fights the cold-start caused
+    # by provider reasoning being discarded between segments.
+    working_notes: str = Field(default="", max_length=4000)
     self_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     raw_artifact_ref: str | None = None
     usage: UsageRecord = Field(default_factory=UsageRecord)
@@ -2261,6 +2311,10 @@ class ProofCheckpoint(StrictModel):
     status: CheckpointStatus = CheckpointStatus.COMMITTED
     verification_report_ids: list[str] = Field(default_factory=list)
     failover_chain: list[str] = Field(default_factory=list)
+    # Non-authoritative continuity channels, excluded from the content hash:
+    # the author's latest scratch plan and the route-level proof sketch.
+    working_notes: str = Field(default="", max_length=4000)
+    proof_sketch: str = Field(default="", max_length=4000)
     created_at: str = Field(default_factory=utc_now_iso)
     content_hash: str = ""
 
@@ -2592,8 +2646,16 @@ class ExecutionStatus(StrEnum):
     FAILED = "failed"
 
 
+class FormalizationCoverageReport(StrictModel):
+    total_step_count: int = Field(default=0, ge=0)
+    formally_certified_step_ids: list[str] = Field(default_factory=list)
+    coverage: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
 class ResearchProgressReport(StrictModel):
     problem_hash: str
+    termination_reason: str | None = None
+    formalization_coverage: FormalizationCoverageReport | None = None
     valid_partial_attempt_ids: list[str] = Field(default_factory=list)
     strongest_partial_attempt_id: str | None = None
     verified_step_ids: list[str] = Field(default_factory=list)
@@ -2630,10 +2692,12 @@ class RunResult(StrictModel):
     deliverable_assessments: list[DeliverableAssessment] = Field(default_factory=list)
     math_status: MathStatus = MathStatus.INCONCLUSIVE
     execution_status: ExecutionStatus = ExecutionStatus.COMPLETED
+    termination_reason: str | None = None
     problem: ProblemContract
     final_proof: FinalProof | None = None
     final_verification: VerificationReport | None = None
     research_progress_report: ResearchProgressReport | None = None
+    formalization_coverage: FormalizationCoverageReport | None = None
     attempts: list[ProofAttempt] = Field(default_factory=list)
     claims: list[ClaimCard] = Field(default_factory=list)
     verification_reports: list[VerificationReport] = Field(default_factory=list)

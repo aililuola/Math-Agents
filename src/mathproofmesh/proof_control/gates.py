@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ..config import (
     ContinueGateControlConfig,
@@ -218,17 +218,6 @@ class RouteAdmissionGate:
             ),
         )
 
-    async def review_ambiguous(
-        self,
-        *,
-        runner: Any,
-        prompt: Any,
-        role: str = "structural_verifier",
-    ) -> RouteAdmissionRecord | None:
-        result = await runner.call(role, prompt)
-        artifact = getattr(result, "artifact", result)
-        return artifact if isinstance(artifact, RouteAdmissionRecord) else None
-
     @staticmethod
     def blocks_runtime(record: RouteAdmissionRecord) -> bool:
         return record.verdict in {GateVerdict.BLOCK, GateVerdict.REWRITE}
@@ -245,8 +234,11 @@ class RouteAdmissionGate:
         }[link.relation]
         scope_penalty = {
             ScopeRelation.SAME: 0.0,
+            # A lemma target being weaker than the main goal is expected —
+            # that is what a lemma is — so it is penalized less than an
+            # over-strong target, which risks proving more than needed.
             ScopeRelation.CLAIM_STRONGER: 0.15,
-            ScopeRelation.CLAIM_WEAKER: 0.35,
+            ScopeRelation.CLAIM_WEAKER: 0.0,
             ScopeRelation.INCOMPARABLE: 0.50,
             ScopeRelation.UNKNOWN: 0.20,
         }[link.scope_relation]
@@ -481,14 +473,15 @@ class SynthesisReadinessGate:
         ):
             reasons.append("high-centrality contradictions remain unresolved")
 
+        # CLAIM_WEAKER is the normal scope of a lemma link and must not block
+        # synthesis; only necessary-only bridges and incomparable scopes do.
         invalid_links = [
             item
             for item in goal_links
             if item.target_obligation_id in mathematical_ids
             and (
                 item.relation == GoalRelation.NECESSARY_ONLY
-                or item.scope_relation
-                in {ScopeRelation.CLAIM_WEAKER, ScopeRelation.INCOMPARABLE}
+                or item.scope_relation == ScopeRelation.INCOMPARABLE
             )
         ]
         if self.config.require_no_necessary_only_bridge_as_sufficient and invalid_links:

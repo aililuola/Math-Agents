@@ -101,6 +101,9 @@ agents:
 budget:
   max_total_calls: 450
   max_rounds: 24
+  # Opt-in test-time compute scaling for olympiad/research-rated problems;
+  # token and cost ceilings are never scaled.
+  scale_budget_with_difficulty: false
   initial_paths: 6
   # Leave room for active inspiration and surprise routes after initialization.
   max_paths: 12
@@ -351,6 +354,7 @@ computation:
   bounded_typed_probe_max_cases: 25000
   soft_experiments_per_path: 2
   hard_experiments_per_path: 6
+  # Preserve the shipped one-cycle default; experiments may opt in explicitly.
   max_compute_cycles_per_segment: 1
   max_contract_repairs_per_segment: 1
   contract_repair_max_output_tokens: 8192

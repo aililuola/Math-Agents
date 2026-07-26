@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from mathproofmesh.proof_control.models import (
     ControlActionStatus,
     ControlActionType,
@@ -56,6 +58,30 @@ def test_internal_self_implication_obligation_rejected() -> None:
 
     assert quality.is_self_implication
     assert not quality.accepted
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "P ⇒ P",
+        "P ⇔ P",
+        "P ↔ P",
+        r"P \implies P",
+        r"P \iff P",
+        r"P \rightarrow P",
+        r"P \leftrightarrow P",
+        "P implies P",
+        "P iff P",
+        "P蕴含P",
+        "P当且仅当P",
+    ],
+)
+def test_symbolic_self_implication_obligation_rejected(statement: str) -> None:
+    quality = ObligationSemanticGate().assess_statement(statement)
+
+    assert quality.is_self_implication
+    assert not quality.accepted
+    assert "self_implication" in quality.rejection_reasons
 
 
 def test_placeholder_search_text_not_mathematical_obligation() -> None:

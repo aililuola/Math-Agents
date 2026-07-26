@@ -608,14 +608,3 @@ class InferenceRiskScanner:
                 "At least one admissible member does not identify the only possible members.",
                 1.0,
             )
-
-    async def review_ambiguous(
-        self,
-        runner: Any,
-        prompt: Any,
-        *,
-        role: str = "structural_verifier",
-    ) -> InferenceRiskRecord | None:
-        result = await runner.call(role, prompt)
-        artifact = getattr(result, "artifact", result)
-        return artifact if isinstance(artifact, InferenceRiskRecord) else None

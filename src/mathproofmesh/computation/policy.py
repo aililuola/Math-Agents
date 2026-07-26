@@ -44,12 +44,17 @@ class ComputationGate:
         ComputationMethod.BOUNDED_GREEDY_SEQUENCE,
         ComputationMethod.CANDIDATE_PERIOD_CHECK,
         ComputationMethod.EXACT_GEOMETRY,
+        ComputationMethod.REAL_INEQUALITY,
+        ComputationMethod.NUMBER_THEORY_CHECK,
         ComputationMethod.NUMERIC_COUNTEREXAMPLE,
         ComputationMethod.LEAN_CHECK,
     }
+    # real_inequality is excluded from the cheap-probe fast path: its cost is
+    # bounded by a solver timeout rather than an enumerable case count.
     _BOUNDED_TYPED_PROBE_METHODS = _TYPED_METHODS - {
         ComputationMethod.NUMERIC_COUNTEREXAMPLE,
         ComputationMethod.LEAN_CHECK,
+        ComputationMethod.REAL_INEQUALITY,
     }
 
     def __init__(

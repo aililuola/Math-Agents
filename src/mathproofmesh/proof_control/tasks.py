@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
+from typing import Literal
 
 from ..communication.route_registry import RouteRegistry
 from ..schemas import RouteDescriptor, RouteStatus, stable_hash, utc_now_iso
@@ -167,6 +168,117 @@ class ExecutableTaskController:
             wake_kind=WakeConditionKind.REVIEWER_AVAILABLE,
         )
 
+    def create_semantic_repair_task(
+        self,
+        *,
+        target_obligation_ids: Sequence[str],
+        strategy_ids: Sequence[str] = (),
+        created_round: int,
+        assigned_agent_id: str | None = None,
+    ) -> ExecutableTaskRecord:
+        """Create the audit record for a batched statement-normalization call.
+
+        Semantic repair happens synchronously inside the admission phase, so
+        the task never uses the +4 round expiry (a repair queued at round 0
+        must not silently expire before anything served it). Its terminal
+        state is always explicit: completed, failed, or budget-refused.
+        """
+        identity = {
+            "task_kind": "normalize_nodes",
+            "target_obligation_ids": sorted(set(target_obligation_ids)),
+            "strategy_ids": sorted(set(strategy_ids)),
+        }
+        task_id = f"executable_task_{stable_hash(identity)[:20]}"
+        existing = self.tasks.get(task_id)
+        if existing is not None:
+            return existing
+        task = ExecutableTaskRecord(
+            task_id=task_id,
+            task_kind="normalize_nodes",
+            status=TaskStatus.CREATED,
+            target_obligation_ids=identity["target_obligation_ids"],
+            route_ids=identity["strategy_ids"],
+            assigned_agent_id=assigned_agent_id,
+            registered_handler="batched_statement_normalizer",
+            created_round=created_round,
+            last_transition_round=created_round,
+            expires_round=None,
+            transition_history=[
+                {
+                    "from": None,
+                    "to": TaskStatus.CREATED.value,
+                    "round": created_round,
+                    "reason": "semantic_repair_queued",
+                }
+            ],
+        )
+        self.tasks[task.task_id] = task
+        return self._transition(
+            task,
+            TaskStatus.READY,
+            current_round=created_round,
+            reason="batched_normalizer_ready",
+        )
+
+    def create_admission_review_task(
+        self,
+        *,
+        task_kind: Literal[
+            "blueprint_review",
+            "repair_direct_target",
+            "edge_review",
+            "generate_plan",
+            "batch_repair",
+        ],
+        target_obligation_ids: Sequence[str],
+        strategy_ids: Sequence[str] = (),
+        created_round: int,
+        assigned_agent_id: str | None = None,
+        prompt_ref: str | None = None,
+    ) -> ExecutableTaskRecord:
+        """Create one durable, idempotent route-admission review action."""
+
+        handler_by_kind = {
+            "blueprint_review": "route_admission_review_dispatcher",
+            "repair_direct_target": "route_admission_review_dispatcher",
+            "edge_review": "route_admission_review_dispatcher",
+            "generate_plan": "strategy_planner_dispatcher",
+            "batch_repair": "batched_statement_normalizer",
+        }
+        identity = {
+            "task_kind": task_kind,
+            "target_obligation_ids": sorted(set(target_obligation_ids)),
+            "strategy_ids": sorted(set(strategy_ids)),
+            "prompt_ref": prompt_ref,
+        }
+        task_id = f"executable_task_{stable_hash(identity)[:20]}"
+        existing = self.tasks.get(task_id)
+        if existing is not None:
+            return existing
+        task = ExecutableTaskRecord(
+            task_id=task_id,
+            task_kind=task_kind,
+            status=TaskStatus.READY,
+            target_obligation_ids=identity["target_obligation_ids"],
+            route_ids=identity["strategy_ids"],
+            assigned_agent_id=assigned_agent_id,
+            registered_handler=handler_by_kind[task_kind],
+            explicit_prompt_ref=prompt_ref,
+            created_round=created_round,
+            last_transition_round=created_round,
+            expires_round=None,
+            transition_history=[
+                {
+                    "from": None,
+                    "to": TaskStatus.READY.value,
+                    "round": created_round,
+                    "reason": "registered_admission_review_handler_available",
+                }
+            ],
+        )
+        self.tasks[task.task_id] = task
+        return task
+
     def create_countermodel_task(
         self,
         *,
@@ -177,6 +289,7 @@ class ExecutableTaskController:
         created_round: int,
         counterexample_hunter_agent_id: str | None = None,
         explicit_prompt_ref: str | None = None,
+        expires_round: int | None = None,
     ) -> ExecutableTaskRecord:
         identity = {
             "task_kind": "countermodel",
@@ -201,7 +314,9 @@ class ExecutableTaskController:
             explicit_prompt_ref=explicit_prompt_ref,
             created_round=created_round,
             last_transition_round=created_round,
-            expires_round=created_round + 4,
+            expires_round=(
+                expires_round if expires_round is not None else created_round + 4
+            ),
             transition_history=[
                 {
                     "from": None,
@@ -589,6 +704,8 @@ class WakeScheduler:
             ),
             WakeConditionKind.USER_INTERVENTION: user_intervention,
             WakeConditionKind.CONFIG_CHANGED: config_changed,
+            # ``evaluate`` has already enforced earliest_round.
+            WakeConditionKind.ROUND_ADVANCED: True,
         }
         return checks[condition.kind]
 

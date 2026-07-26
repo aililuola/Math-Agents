@@ -343,9 +343,101 @@ class ProofGraphStore:
         self._record("obligation_reopened", obligation)
         return obligation
 
+    def invalidate_evidence_messages(
+        self,
+        message_ids: Iterable[str],
+        *,
+        reason: str,
+    ) -> list[str]:
+        """Remove rolled-back evidence from the live graph and reopen its closures."""
+
+        self._ensure_mutable()
+        invalidated = set(message_ids)
+        if not invalidated:
+            return []
+        for message_id in invalidated:
+            self._claim_nodes.pop(message_id, None)
+        self._edges = {
+            edge_id: edge
+            for edge_id, edge in self._edges.items()
+            if edge.source_id not in invalidated
+            and edge.target_id not in invalidated
+            and edge.evidence_message_id not in invalidated
+        }
+        reopened: list[str] = []
+        for obligation in self._obligations.values():
+            obligation.evidence_message_ids = [
+                message_id
+                for message_id in obligation.evidence_message_ids
+                if message_id not in invalidated
+            ]
+            obligation.dependency_ids = [
+                dependency_id
+                for dependency_id in obligation.dependency_ids
+                if dependency_id not in invalidated
+            ]
+            if (
+                obligation.status in {"closed", "refuted"}
+                and not obligation.evidence_message_ids
+            ):
+                obligation.status = "open"
+                reopened.append(obligation.obligation_id)
+        self._record(
+            "proof_evidence_invalidated",
+            {
+                "message_ids": sorted(invalidated),
+                "reopened_obligation_ids": sorted(reopened),
+                "reason": reason,
+            },
+        )
+        return sorted(reopened)
+
     def get_obligation(self, obligation_id: str) -> ProofObligation:
         obligation_id = self._obligation_aliases.get(obligation_id, obligation_id)
         return self._obligations[obligation_id]
+
+    def retract_tentative_obligation(
+        self,
+        obligation_id: str,
+        *,
+        route_id: str | None = None,
+        reason: str = "",
+    ) -> ProofObligation | None:
+        """Remove a draft obligation whose route admission was blocked.
+
+        Only tentative, evidence-free, edge-free obligations may be
+        retracted, and only when they belong exclusively to the blocked
+        route. Anything another route references stays in the graph.
+        """
+        self._ensure_mutable()
+        obligation_id = self._obligation_aliases.get(obligation_id, obligation_id)
+        obligation = self._obligations.get(obligation_id)
+        if obligation is None or obligation.status != "tentative":
+            return None
+        if obligation.evidence_message_ids:
+            return None
+        if route_id is not None and set(obligation.route_ids) - {route_id}:
+            return None
+        if any(
+            edge.source_id == obligation_id or edge.target_id == obligation_id
+            for edge in self._edges.values()
+        ):
+            return None
+        del self._obligations[obligation_id]
+        index = self._obligation_content_index.get(obligation.content_hash, [])
+        if obligation_id in index:
+            index.remove(obligation_id)
+            if not index:
+                self._obligation_content_index.pop(obligation.content_hash, None)
+        self._record(
+            "obligation_retracted",
+            {
+                "obligation_id": obligation_id,
+                "reason": reason,
+                "statement": obligation.statement,
+            },
+        )
+        return obligation
 
     def record_event(self, event_type: str, payload: Any) -> None:
         self._record(event_type, payload)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from ..config import GoalAlignmentControlConfig, RouteAdmissionControlConfig
 from ..proof_identity import obligation_identity_text
@@ -158,17 +158,6 @@ class GoalAlignmentAnalyzer:
         }:
             return GoalRelation.UNKNOWN, scope_relation, 0.85
         return GoalRelation.UNKNOWN, scope_relation, 0.5
-
-    async def model_review_ambiguous(
-        self,
-        runner: Any,
-        prompt: Any,
-        *,
-        role: str = "structural_verifier",
-    ) -> ClaimGoalLink | None:
-        result = await runner.call(role, prompt)
-        artifact = getattr(result, "artifact", result)
-        return artifact if isinstance(artifact, ClaimGoalLink) else None
 
     def _assess(
         self,

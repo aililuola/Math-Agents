@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -47,6 +47,8 @@ from .handlers.geometry import run_exact_geometry
 from .handlers.graph import run_graph_certificate
 from .handlers.integer_search import run_bounded_integer_search
 from .handlers.modular import run_modular
+from .handlers.number_theory import run_number_theory
+from .handlers.real_inequality import run_real_inequality
 from .handlers.recurrence import run_recurrence_check
 from .handlers.sequence import (
     run_bounded_greedy_sequence,
@@ -60,10 +62,34 @@ from .handlers.symbolic import (
     sympy_simplify_payload,
 )
 from .policy import ComputationContext, ComputationGate
-from .sandbox import SandboxExecutionError, run_sandboxed_python
+from .sandbox import (
+    SandboxExecutionError,
+    _find_docker_executable,
+    build_lean_docker_command,
+    run_sandboxed_python,
+)
 
 
-TOOL_VERSION = "mathproofmesh-computation/0.7.0"
+TOOL_VERSION = "mathproofmesh-computation/0.8.2"
+
+_LEAN_PLACEHOLDER_PATTERN = re.compile(r"\b(?:sorry|admit)\b", re.IGNORECASE)
+_LEAN_AXIOM_PATTERN = re.compile(r"\baxiom\b", re.IGNORECASE)
+
+
+def _lean_incomplete_marker(source: str, *compiler_outputs: str) -> str | None:
+    """Return the token that disqualifies a zero exit code as a formal certificate.
+
+    Lean exits with code 0 even when the fragment leans on ``sorry``/``admit``
+    placeholders (it only warns) or when the source introduces a new ``axiom``,
+    so acceptance must additionally scan the source and the compiler output.
+    """
+    if _LEAN_AXIOM_PATTERN.search(source):
+        return "axiom"
+    for text in (source, *compiler_outputs):
+        match = _LEAN_PLACEHOLDER_PATTERN.search(text)
+        if match:
+            return match.group(0).lower()
+    return None
 
 
 class ComputationBroker:
@@ -1047,6 +1073,10 @@ class ComputationBroker:
             return run_candidate_period_check(spec)
         if spec.method == ComputationMethod.EXACT_GEOMETRY:
             return run_exact_geometry(spec)
+        if spec.method == ComputationMethod.REAL_INEQUALITY:
+            return run_real_inequality(spec)
+        if spec.method == ComputationMethod.NUMBER_THEORY_CHECK:
+            return run_number_theory(spec)
         if spec.method == ComputationMethod.SANDBOXED_PYTHON:
             if program is None:
                 raise ValueError("sandboxed_python requires an ExperimentProgram")
@@ -1065,11 +1095,17 @@ class ComputationBroker:
                     ],
                 )
             return HandlerEvidence(
-                outcome=ExperimentOutcome.COUNTEREXAMPLE_FOUND,
-                evidence_strength=EvidenceStrength.COUNTEREXAMPLE,
-                counterexample={"lean_rejection": payload},
-                independently_verified=True,
-                verification_notes=["Lean rejected the submitted formal fragment."],
+                outcome=ExperimentOutcome.INCONCLUSIVE,
+                evidence_strength=EvidenceStrength.HEURISTIC,
+                scope={"lean_returncode": payload["returncode"]},
+                raw_output={"lean_rejection": payload},
+                independently_verified=False,
+                verification_notes=[
+                    "Lean did not accept the submitted fragment as a complete "
+                    "formal proof; a formalization failure only shows that this "
+                    "particular encoding did not certify and does not refute "
+                    "the target claim."
+                ],
             )
         raise ValueError(f"unsupported computation method: {spec.method.value}")
 
@@ -1101,9 +1137,13 @@ class ComputationBroker:
             ComputationMethod.POLYNOMIAL_FACTOR,
             ComputationMethod.MODULAR_EXHAUSTIVE,
             ComputationMethod.RECURRENCE_CHECK,
+            ComputationMethod.NUMBER_THEORY_CHECK,
         }:
             return method.value, f"sympy/{sp.__version__};{TOOL_VERSION}"
-        if method == ComputationMethod.BOUNDED_INTEGER_SEARCH:
+        if method in {
+            ComputationMethod.BOUNDED_INTEGER_SEARCH,
+            ComputationMethod.REAL_INEQUALITY,
+        }:
             try:
                 dependency = version("z3-solver")
             except PackageNotFoundError:
@@ -1118,27 +1158,10 @@ class ComputationBroker:
         if method == ComputationMethod.LEAN_CHECK:
             command = shlex.split(self.config.verification.lean_command)
             command_hash = stable_hash(command)[:16]
-            executable = shutil.which(command[0]) if command else None
-            lean_version = "disabled"
-            if self.config.verification.enable_lean:
-                lean_version = "missing"
-                if executable is not None:
-                    try:
-                        completed = subprocess.run(
-                            [executable, *command[1:], "--version"],
-                            capture_output=True,
-                            text=True,
-                            timeout=min(
-                                5.0,
-                                self.config.verification.external_tool_timeout_seconds,
-                            ),
-                            check=False,
-                        )
-                        version_text = (completed.stdout or completed.stderr).strip()
-                        if completed.returncode == 0 and version_text:
-                            lean_version = stable_hash(version_text)[:16]
-                    except (OSError, subprocess.SubprocessError):
-                        lean_version = "unavailable"
+            image = self.config.verification.lean_sandbox_image
+            lean_version = (
+                f"sandbox-{stable_hash(image)[:16]}" if image else "unconfigured"
+            )
             return (
                 method.value,
                 f"lean/{lean_version};command/{command_hash};{TOOL_VERSION}",
@@ -1246,16 +1269,37 @@ class ComputationBroker:
         if not self.config.verification.enable_lean:
             raise RuntimeError("Lean execution is disabled")
         command = shlex.split(self.config.verification.lean_command)
-        executable = shutil.which(command[0])
-        if executable is None:
-            raise RuntimeError(f"Lean executable not found: {command[0]}")
+        if not command:
+            raise RuntimeError("Lean command is empty")
         source = str(args["source"])
         with tempfile.TemporaryDirectory(prefix="mathproofmesh_lean_") as tmpdir:
             path = Path(tmpdir) / "Main.lean"
             path.write_text(source, encoding="utf-8")
+            if not self.config.verification.lean_sandbox_image:
+                return {
+                    "returncode": -1,
+                    "stdout": "",
+                    "stderr": "",
+                    "accepted": False,
+                    "reason": "lean_sandbox_unconfigured",
+                }
+            docker = _find_docker_executable()
+            if docker is None:
+                return {
+                    "returncode": -1,
+                    "stdout": "",
+                    "stderr": "",
+                    "accepted": False,
+                    "reason": "lean_sandbox_unavailable",
+                }
+            execution_command = build_lean_docker_command(
+                self.config.verification,
+                Path(tmpdir),
+                docker_executable=docker,
+            )
             completed = subprocess.run(
-                [*command, str(path)],
-                cwd=tmpdir,
+                execution_command,
+                cwd=None,
                 capture_output=True,
                 text=True,
                 timeout=self.config.verification.external_tool_timeout_seconds,
@@ -1263,12 +1307,19 @@ class ComputationBroker:
             )
         stdout = completed.stdout.replace(tmpdir, "<sandbox>")
         stderr = completed.stderr.replace(tmpdir, "<sandbox>")
-        return {
+        payload = {
             "returncode": completed.returncode,
             "stdout": stdout[-20_000:],
             "stderr": stderr[-20_000:],
             "accepted": completed.returncode == 0,
         }
+        if payload["accepted"]:
+            marker = _lean_incomplete_marker(source, stdout, stderr)
+            if marker is not None:
+                payload["accepted"] = False
+                payload["reason"] = "lean_incomplete_proof_marker"
+                payload["marker"] = marker
+        return payload
 
 
 class ToolBroker(ComputationBroker):

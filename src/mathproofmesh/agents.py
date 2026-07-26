@@ -48,6 +48,82 @@ def _reasoning_trace_secrets(config: SystemConfig) -> list[str]:
     return secrets
 
 
+_TWO_PHASE_SCHEMA_MARKER = "JSON SCHEMA:"
+_TWO_PHASE_FORMAT_STAGE_SUFFIX = "_format"
+_TWO_PHASE_FORMAT_SYSTEM = (
+    "You convert a completed mathematical write-up into the required JSON "
+    "structure. Do not add, remove, strengthen or weaken any mathematics. "
+    "Copy bookkeeping IDs exactly as supplied. Return exactly one JSON object "
+    "conforming to the supplied JSON Schema, with no markdown fences or prose "
+    "outside the JSON object. Inside JSON strings, escape every LaTeX "
+    "backslash as `\\\\`."
+)
+_TWO_PHASE_FREEFORM_INSTRUCTION = (
+    "OUTPUT FORMAT FOR THIS CALL (two-phase mode, phase 1 of 2):\n"
+    "Do NOT return JSON in this call; ignore every earlier instruction about "
+    "returning a JSON object or escaping for JSON. Write the complete "
+    "mathematical work-up in free natural language instead: the goal you "
+    "attack, every definition you introduce, every proof step with its full "
+    "justification and explicit dependencies, every new reusable claim, "
+    "remaining gaps or subgoals, and your working notes for the next segment. "
+    "Keep every mathematical and bookkeeping requirement from the "
+    "instructions above (including the stage, all IDs, and the output "
+    "language); only the output format changes. Be explicit and "
+    "self-contained: a separate formatting call will convert this write-up "
+    "verbatim into the required JSON structure and cannot ask you questions."
+)
+
+
+def split_trailing_schema_block(user_prompt: str) -> tuple[str, str] | None:
+    """Split a factory user prompt into (head, trailing "JSON SCHEMA:..." block)."""
+
+    index = user_prompt.rfind(_TWO_PHASE_SCHEMA_MARKER)
+    if index < 0:
+        return None
+    return user_prompt[:index].rstrip(), user_prompt[index:].strip()
+
+
+def _two_phase_bookkeeping_block(head: str) -> str:
+    """Extract the bookkeeping-ID lines the formatting call must copy verbatim."""
+
+    marker = "AUTHORITATIVE IDS:"
+    index = head.find(marker)
+    if index >= 0:
+        return head[index:].strip()
+    prefixes = (
+        "The response must retain",
+        "REMAINING GLOBAL CALL BUDGET:",
+        "OUTPUT LANGUAGE:",
+    )
+    lines = [
+        line.strip() for line in head.splitlines() if line.strip().startswith(prefixes)
+    ]
+    return "\n".join(lines)
+
+
+def _two_phase_format_user(
+    stage: str, head: str, schema_block: str, phase1_text: str
+) -> str:
+    sections = [
+        f"[STAGE:{stage}{_TWO_PHASE_FORMAT_STAGE_SUFFIX}]\n"
+        "Convert the completed mathematical write-up below into exactly one "
+        "JSON object conforming to the schema. Preserve the mathematics "
+        "verbatim: do not add, remove, strengthen or weaken any claim, step, "
+        "justification, or caveat, and never invent content that the write-up "
+        "does not state. Copy the bookkeeping IDs below exactly as given."
+    ]
+    bookkeeping = _two_phase_bookkeeping_block(head)
+    if bookkeeping:
+        sections.append(f"BOOKKEEPING IDS AND SETTINGS (copy exactly):\n{bookkeeping}")
+    sections.append(schema_block)
+    sections.append(
+        "COMPLETED MATHEMATICAL WRITE-UP (phase-1 output; convert faithfully, "
+        "do not solve anything new):\n"
+        f"{phase1_text}"
+    )
+    return "\n\n".join(sections)
+
+
 class BudgetExhaustedError(RuntimeError):
     pass
 
@@ -278,6 +354,18 @@ class StructuredAgentRunner:
         reserve_artifact_recovery: bool = False,
     ) -> StructuredCallResult[Any]:
         assert_blind_prompt_safe(bundle)
+        if self._two_phase_applies(bundle):
+            return await self._call_two_phase(
+                role,
+                bundle,
+                fixed_agent=fixed_agent,
+                exclude=exclude,
+                specialty_hints=specialty_hints,
+                prefer_provider_not=prefer_provider_not,
+                budget_bucket=budget_bucket,
+                budget_reservation_id=budget_reservation_id,
+                capacity_reservation_id=capacity_reservation_id,
+            )
         agent = fixed_agent or self.pool.select(
             role,
             exclude=exclude,
@@ -380,7 +468,9 @@ class StructuredAgentRunner:
                         "Do not change mathematical content except where needed to satisfy field types and required fields. "
                         "A ClaimCard.proof_steps entry must be a complete ProofStep object, not a string ID. "
                         "Never invent a missing final answer: use proof_complete=false and submit_delta when only a "
-                        "reviewable proof prefix exists."
+                        "reviewable proof prefix exists. "
+                        "If the malformed output looks truncated (unbalanced braces or a trailing incomplete token), "
+                        "return the honest partial structure rather than inventing the missing content."
                     )
                     repair_user = (
                         f"[STAGE:{bundle.stage}_json_repair]\n"
@@ -388,7 +478,11 @@ class StructuredAgentRunner:
                         "MINIMAL JSON SHAPE EXAMPLE:\n"
                         f"{json.dumps(_validated_model_example(bundle.response_model, schema), ensure_ascii=False, indent=2)}\n\n"
                         f"MALFORMED OUTPUT:\n{response_text}\n\n"
-                        f"VALIDATION ERROR:\n{last_error}"
+                        f"VALIDATION ERROR:\n{last_error}\n\n"
+                        "ORIGINAL TASK CONTEXT (immutable excerpt for reference only; "
+                        "do not answer it, only preserve its mathematical content):\n"
+                        f"[STAGE:{bundle.stage}]\n"
+                        f"{bundle.user[:1200]}"
                     )
                     messages = [
                         {"role": "system", "content": repair_system},
@@ -587,6 +681,47 @@ class StructuredAgentRunner:
                         usage=total_usage,
                     )
                 except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+                    if finish_reason == "length":
+                        # A truncated artifact must never reach JSON repair: the
+                        # repair model cannot recover the missing tail and would
+                        # fabricate it. Route to the same bounded recovery as an
+                        # empty budget-exhausted response.
+                        recovery_tokens = (
+                            tier_policy.artifact_recovery_tokens
+                            if tier_policy is not None
+                            else self.config.continuation.post_failure_bottleneck_max_output_tokens
+                        )
+                        self._record_runner_failure(agent, "reasoning_budget_exhausted")
+                        self.store.append_event(
+                            "reasoning_budget_exhausted",
+                            {
+                                "stage": bundle.stage,
+                                "agent_id": agent.id,
+                                "raw_ref": raw_ref,
+                                "output_tokens": response.output_tokens,
+                                "max_output_tokens": effective_max_output_tokens,
+                                "finish_reason": finish_reason,
+                                "truncated": True,
+                                "parse_error": str(exc),
+                                "artifact_recovery_tokens": recovery_tokens,
+                                "capacity_reservation_id": recovery_reservation_id,
+                                "recovery": "bounded_non_thinking_diagnostic_from_external_checkpoint",
+                            },
+                        )
+                        raise ReasoningBudgetExhaustedError(
+                            f"{agent.id} exhausted {effective_max_output_tokens} "
+                            "output tokens; the truncated artifact failed to parse "
+                            "and was not sent to JSON repair",
+                            usage=self._copy_usage(total_usage),
+                            progress={
+                                "approx_output_tokens": response.output_tokens,
+                                "content_characters": len(response.text),
+                                "finish_reason": finish_reason,
+                                "truncated": True,
+                                "artifact_recovery_tokens": recovery_tokens,
+                                "capacity_reservation_id": recovery_reservation_id,
+                            },
+                        ) from exc
                     self.ledger.release_capacity(recovery_reservation_id)
                     recovery_reservation_id = None
                     self._record_runner_failure(agent, "schema")
@@ -821,6 +956,290 @@ class StructuredAgentRunner:
             usage=failed_usage,
             progress=failure_progress,
         )
+
+    def _two_phase_applies(self, bundle: PromptBundle) -> bool:
+        runtime = self.config.runtime
+        if not runtime.two_phase_output:
+            return False
+        if bundle.stage.endswith(_TWO_PHASE_FORMAT_STAGE_SUFFIX):
+            # The internally generated formatting stage must never recurse.
+            return False
+        if bundle.stage not in runtime.two_phase_stages:
+            return False
+        return _TWO_PHASE_SCHEMA_MARKER in bundle.user
+
+    async def _call_two_phase(
+        self,
+        role: str,
+        bundle: PromptBundle,
+        *,
+        fixed_agent: AgentRuntime | None,
+        exclude: set[str] | None,
+        specialty_hints: list[str] | None,
+        prefer_provider_not: str | None,
+        budget_bucket: str,
+        budget_reservation_id: str | None,
+        capacity_reservation_id: str | None,
+    ) -> StructuredCallResult[Any]:
+        """Phase 1 writes free-form mathematics; phase 2 formats it as JSON.
+
+        Both phases are separate ledger entries in the same budget bucket. The
+        deep-route artifact-recovery capacity reservation is intentionally not
+        made here: free text truncates gracefully, so a truncated phase-1
+        write-up still proceeds to formatting instead of a bounded diagnostic.
+        """
+
+        split = split_trailing_schema_block(bundle.user)
+        if split is None:  # pragma: no cover - guarded by _two_phase_applies
+            raise StructuredOutputError(
+                f"stage {bundle.stage} has no trailing JSON schema block"
+            )
+        head, schema_block = split
+        agent = fixed_agent or self.pool.select(
+            role,
+            exclude=exclude,
+            specialty_hints=specialty_hints,
+            prefer_provider_not=prefer_provider_not,
+        )
+        phase1_user = f"{head}\n\n{_TWO_PHASE_FREEFORM_INSTRUCTION}"
+        phase1_prompt_ref = self.store.save_prompt(
+            f"{bundle.stage}_two_phase_freeform", agent.id, bundle.system, phase1_user
+        )
+        messages = [
+            {"role": "system", "content": bundle.system},
+            {"role": "user", "content": phase1_user},
+        ]
+        effective_max_output_tokens = self._effective_output_limit(
+            bundle, agent, repair=False
+        )
+        tier_policy = self._tier_policy_for_bundle(bundle, effective_max_output_tokens)
+        thinking_enabled, reasoning_effort = self._thinking_policy(
+            bundle,
+            effective_max_output_tokens=effective_max_output_tokens,
+            repair=False,
+        )
+        activity_task: str | None = None
+        if (
+            self.activity is not None
+            and self.config.runtime.activity_include_agent_calls
+        ):
+            activity_task = self.activity.start_task(
+                "agent_call",
+                title=stage_label(bundle.stage, self.config.runtime.output_language),
+                detail=(
+                    f"{agent.id} 正在自由撰写数学推理（两阶段输出：第 1/2 步）"
+                    if self.activity.is_zh
+                    else (
+                        f"{agent.id} is writing free-form mathematics "
+                        "(two-phase output, phase 1/2)"
+                    )
+                ),
+                stage=bundle.stage,
+                agent_id=agent.id,
+                importance=ActivityImportance.NORMAL,
+                metrics={
+                    "role": role,
+                    "response_model": bundle.response_model.__name__,
+                    "budget_bucket": budget_bucket,
+                    "two_phase": True,
+                },
+            )
+        self.ledger.start(
+            bundle.stage,
+            budget_bucket,
+            reservation_id=budget_reservation_id,
+            capacity_reservation_id=capacity_reservation_id,
+        )
+        self.persist_runtime_state()
+        try:
+            response = await self._call_with_activity_heartbeat(
+                agent,
+                messages,
+                temperature=bundle.temperature,
+                max_output_tokens=effective_max_output_tokens,
+                json_mode=False,
+                schema_name=bundle.response_model.__name__,
+                schema=None,
+                thinking_enabled=thinking_enabled,
+                reasoning_effort=reasoning_effort,
+                activity_task=activity_task,
+                stage=bundle.stage,
+                tier_policy=tier_policy,
+            )
+            phase1_cost = (
+                response.input_tokens
+                / 1_000_000
+                * agent.config.pricing.input_per_million
+                + response.output_tokens
+                / 1_000_000
+                * agent.config.pricing.output_per_million
+            )
+            phase1_usage = UsageRecord(
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+                total_tokens=response.total_tokens,
+                estimated_cost_usd=phase1_cost,
+                latency_ms=response.latency_ms,
+            )
+            phase1_raw = self.store.write_content_addressed(
+                "raw",
+                {
+                    "agent_id": agent.id,
+                    "provider": response.provider,
+                    "model": response.model,
+                    "request_id": response.request_id,
+                    "stage": bundle.stage,
+                    "two_phase": "freeform",
+                    "text": response.text,
+                    "usage": {
+                        "input_tokens": response.input_tokens,
+                        "output_tokens": response.output_tokens,
+                        "latency_ms": response.latency_ms,
+                    },
+                    "provider_metadata": (
+                        response.raw
+                        if self.config.runtime.save_raw_provider_responses
+                        else {}
+                    ),
+                    "request_policy": {
+                        "thinking_enabled": thinking_enabled,
+                        "reasoning_effort": reasoning_effort,
+                        "max_output_tokens": effective_max_output_tokens,
+                    },
+                },
+                summary=(
+                    f"Raw phase-1 free-form response for {bundle.stage} from {agent.id}"
+                ),
+            )
+            self.persist_runtime_state()
+            phase1_text = response.text.strip()
+            finish_reason = str(response.raw.get("finish_reason") or "")
+            if not phase1_text:
+                recovery_tokens = (
+                    tier_policy.artifact_recovery_tokens
+                    if tier_policy is not None
+                    else self.config.continuation.post_failure_bottleneck_max_output_tokens
+                )
+                self._record_runner_failure(agent, "reasoning_budget_exhausted")
+                self.store.append_event(
+                    "reasoning_budget_exhausted",
+                    {
+                        "stage": bundle.stage,
+                        "agent_id": agent.id,
+                        "raw_ref": phase1_raw.artifact_ref,
+                        "output_tokens": response.output_tokens,
+                        "max_output_tokens": effective_max_output_tokens,
+                        "finish_reason": finish_reason,
+                        "two_phase": "freeform",
+                        "artifact_recovery_tokens": recovery_tokens,
+                        "recovery": "bounded_non_thinking_diagnostic_from_external_checkpoint",
+                    },
+                )
+                raise ReasoningBudgetExhaustedError(
+                    f"{agent.id} exhausted {effective_max_output_tokens} output "
+                    "tokens without returning a phase-1 mathematical write-up",
+                    usage=self._copy_usage(phase1_usage),
+                    progress={
+                        "approx_output_tokens": response.output_tokens,
+                        "content_characters": 0,
+                        "finish_reason": finish_reason,
+                        "artifact_recovery_tokens": recovery_tokens,
+                    },
+                )
+            self.store.append_event(
+                "two_phase_freeform_completed",
+                {
+                    "stage": bundle.stage,
+                    "agent_id": agent.id,
+                    "raw_ref": phase1_raw.artifact_ref,
+                    "prompt_ref": phase1_prompt_ref,
+                    "finish_reason": finish_reason,
+                    "usage": phase1_usage,
+                },
+            )
+            if activity_task and self.activity is not None:
+                self.activity.complete_task(
+                    activity_task,
+                    title=stage_label(
+                        bundle.stage, self.config.runtime.output_language
+                    ),
+                    detail=(
+                        f"{agent.id} 完成自由推理，准备第 2 步结构化转换"
+                        if self.activity.is_zh
+                        else (
+                            f"{agent.id} finished the free-form write-up; "
+                            "formatting phase follows"
+                        )
+                    ),
+                    event_type="agent_call_completed",
+                    stage=bundle.stage,
+                    agent_id=agent.id,
+                    importance=ActivityImportance.NORMAL,
+                    metrics={
+                        "input_tokens": phase1_usage.input_tokens,
+                        "output_tokens": phase1_usage.output_tokens,
+                        "total_tokens": phase1_usage.total_tokens,
+                        "latency_ms": phase1_usage.latency_ms,
+                        "two_phase": True,
+                    },
+                )
+        except Exception as exc:
+            self.persist_runtime_state()
+            if activity_task and self.activity is not None:
+                self.activity.fail_task(
+                    activity_task,
+                    title=stage_label(
+                        bundle.stage, self.config.runtime.output_language
+                    ),
+                    detail=(
+                        f"{agent.id} 未完成自由推理阶段：{type(exc).__name__}"
+                        if self.activity.is_zh
+                        else (
+                            f"{agent.id} did not complete the free-form phase: "
+                            f"{type(exc).__name__}"
+                        )
+                    ),
+                    event_type="agent_call_failed",
+                    stage=bundle.stage,
+                    agent_id=agent.id,
+                    importance=ActivityImportance.NORMAL,
+                    metrics={"error_type": type(exc).__name__},
+                )
+            raise
+
+        format_bundle = PromptBundle(
+            stage=f"{bundle.stage}{_TWO_PHASE_FORMAT_STAGE_SUFFIX}",
+            system=_TWO_PHASE_FORMAT_SYSTEM,
+            user=_two_phase_format_user(bundle.stage, head, schema_block, phase1_text),
+            response_model=bundle.response_model,
+            temperature=0.0,
+            max_output_tokens=bundle.max_output_tokens,
+            output_tier=bundle.output_tier,
+        )
+        result = await self.call(
+            role,
+            format_bundle,
+            fixed_agent=agent,
+            budget_bucket=budget_bucket,
+            budget_reservation_id=budget_reservation_id,
+            capacity_reservation_id=capacity_reservation_id,
+        )
+        result.usage = self._sum_usage(phase1_usage, result.usage)
+        if hasattr(result.value, "usage"):
+            result.value.usage = self._copy_usage(result.usage)
+        self.store.append_event(
+            "two_phase_completed",
+            {
+                "stage": bundle.stage,
+                "agent_id": agent.id,
+                "phase1_raw_ref": phase1_raw.artifact_ref,
+                "phase1_prompt_ref": phase1_prompt_ref,
+                "phase2_raw_ref": result.raw_ref,
+                "phase2_prompt_ref": result.prompt_ref,
+                "usage": result.usage,
+            },
+        )
+        return result
 
     def _effective_output_limit(
         self,

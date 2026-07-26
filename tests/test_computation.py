@@ -5,8 +5,9 @@ from typing import Any
 
 import pytest
 
+from mathproofmesh import __version__
 from mathproofmesh.activity import ActivityStream, collapse_activity_events
-from mathproofmesh.computation.broker import ToolBroker
+from mathproofmesh.computation.broker import TOOL_VERSION, ToolBroker
 from mathproofmesh.computation.handlers.base import HandlerEvidence
 from mathproofmesh.computation.policy import ComputationContext
 from mathproofmesh.computation.sandbox import (
@@ -81,6 +82,36 @@ def _enabled_broker(demo_config, artifact_store) -> ToolBroker:
     config = demo_config.model_copy(deep=True)
     config.computation.enabled = True
     return ToolBroker(config, artifact_store)
+
+
+def test_computation_semantic_version_invalidates_old_cache_identity(
+    demo_config, artifact_store
+) -> None:
+    broker = _enabled_broker(demo_config, artifact_store)
+    old_spec = _spec("graph_certificate")
+    new_spec = _spec("graph_certificate")
+    tool_name, current_identity = broker._tool_identity(new_spec.method)
+
+    assert TOOL_VERSION == f"mathproofmesh-computation/{__version__}"
+    assert TOOL_VERSION in current_identity
+
+    old_spec.bind_runtime_fingerprint(
+        {
+            "tool_name": tool_name,
+            "tool_version": current_identity.replace(
+                TOOL_VERSION,
+                "mathproofmesh-computation/0.7.0",
+            ),
+        }
+    )
+    new_spec.bind_runtime_fingerprint(
+        {
+            "tool_name": tool_name,
+            "tool_version": current_identity,
+        }
+    )
+
+    assert old_spec.request_hash != new_spec.request_hash
 
 
 def test_exact_relation_and_impact_classification_fail_closed() -> None:
@@ -833,7 +864,7 @@ def test_exact_handlers_reject_ambiguous_integer_and_geometry_inputs(
     assert "-1, 0, or 1" in (geometry_result.error or "")
 
 
-def test_partial_modular_domain_is_bounded_and_invalid_graph_certificate_refutes(
+def test_partial_modular_domain_is_bounded_and_invalid_graph_certificate_is_inconclusive(
     demo_config, artifact_store
 ) -> None:
     broker = _enabled_broker(demo_config, artifact_store)
@@ -872,8 +903,14 @@ def test_partial_modular_domain_is_bounded_and_invalid_graph_certificate_refutes
     invalid_result = broker.run_experiment(
         invalid_graph, broker.decide(invalid_graph, context)
     )
-    assert invalid_result.outcome == ExperimentOutcome.COUNTEREXAMPLE_FOUND
-    assert invalid_result.independently_verified is True
+    # An invalid supplied coloring does not refute the colorability claim.
+    assert invalid_result.outcome == ExperimentOutcome.INCONCLUSIVE
+    assert invalid_result.evidence_strength == EvidenceStrength.HEURISTIC
+    assert invalid_result.independently_verified is False
+    assert any(
+        "does not refute the existence claim" in note
+        for note in invalid_result.verification_notes
+    )
 
 
 def test_sandbox_policy_rejects_dangerous_code_and_builds_isolated_docker_command(

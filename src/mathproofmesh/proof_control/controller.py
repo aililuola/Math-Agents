@@ -398,8 +398,17 @@ class ProofControlLayer:
             main_goal=main_goal,
         )
         self.state.strategy_blueprints[strategy.strategy_id] = compilation.blueprint
+        # The main-goal node is shared by every blueprint; never let a later
+        # compilation overwrite its provenance record.
         self.state.blueprint_nodes.update(
-            {item.node_id: item for item in compilation.nodes}
+            {
+                item.node_id: item
+                for item in compilation.nodes
+                if not (
+                    item.source_field == "main_goal"
+                    and item.node_id in self.state.blueprint_nodes
+                )
+            }
         )
         self.state.blueprint_edges.update(
             {item.edge_id: item for item in compilation.edges}
@@ -435,6 +444,7 @@ class ProofControlLayer:
     ) -> None:
         existing_ids = {item.obligation_id for item in self.proof_graph.obligations}
         route_id = self._blueprint_route_id(strategy)
+        materialized: list[str] = []
         kind_map = {
             "claim": ObligationKind.SUBGOAL,
             "lemma": ObligationKind.LEMMA,
@@ -477,6 +487,44 @@ class ProofControlLayer:
             if not quality.accepted:
                 continue
             self.proof_graph.add_obligation(candidate)
+            materialized.append(candidate.obligation_id)
+        compilation.materialized_obligation_ids = materialized
+
+    def _retract_blocked_blueprint(
+        self,
+        strategy: StrategyCard,
+        compilation: StrategyBlueprintCompilation | None,
+        *,
+        reason: str,
+    ) -> None:
+        """Undo draft materialization for a strategy whose admission failed.
+
+        Keeps the active proof graph and every count derived from it (open
+        obligations, research gaps) free of blueprints that never became
+        routes.
+        """
+        if compilation is None or not compilation.materialized_obligation_ids:
+            return
+        route_id = self._blueprint_route_id(strategy)
+        retracted: list[str] = []
+        for obligation_id in compilation.materialized_obligation_ids:
+            removed = self.proof_graph.retract_tentative_obligation(
+                obligation_id,
+                route_id=route_id,
+                reason=reason,
+            )
+            if removed is not None:
+                retracted.append(obligation_id)
+        if retracted:
+            self._emit(
+                "blueprint_draft_retracted",
+                {
+                    "strategy_id": strategy.strategy_id,
+                    "blueprint_id": compilation.blueprint.blueprint_id,
+                    "obligation_ids": retracted,
+                    "reason": reason,
+                },
+            )
 
     def _blueprint_route_id(self, strategy: StrategyCard) -> str:
         route = self.route_registry.route_for_strategy(strategy.strategy_id)
@@ -506,7 +554,30 @@ class ProofControlLayer:
             None,
         )
         if direct_id is None:
-            raise ValueError("blueprint has no semantically admissible direct target")
+            details: list[str] = []
+            for node_id in blueprint.direct_target_node_ids[:6]:
+                node = self.state.blueprint_nodes.get(node_id)
+                statement = (node.statement if node is not None else node_id)[:90]
+                quality = self.state.obligation_semantic_quality.get(node_id)
+                if quality is not None and quality.needs_normalization:
+                    needs = ", ".join(quality.normalization_needs) or "structure"
+                    details.append(
+                        f"candidate needs normalization ({needs}); keep the "
+                        f"mathematics, restate with explicit objects/quantifiers/"
+                        f"relation: {statement!r}"
+                    )
+                elif quality is not None and quality.rejection_reasons:
+                    details.append(
+                        f"candidate rejected "
+                        f"({', '.join(quality.rejection_reasons[:4])}): {statement!r}"
+                    )
+                else:
+                    details.append(f"candidate not materialized: {statement!r}")
+            raise ValueError(
+                "blueprint has no semantically admissible direct target "
+                "[system parsing issue, not a mathematical defect — keep the "
+                "same mathematical strategy]; " + "; ".join(details)
+            )
         outgoing = {
             edge.source_node_id: edge.target_node_id
             for edge in compilation.edges
@@ -1761,6 +1832,12 @@ class ProofControlLayer:
                         else ["strategy blueprint is unavailable or invalid"]
                     ),
                 )
+                if self.active:
+                    self._retract_blocked_blueprint(
+                        strategy,
+                        compilation,
+                        reason="blueprint not admissible",
+                    )
             elif link is None:
                 record = RouteAdmissionRecord(
                     strategy_id=strategy.strategy_id,
@@ -1771,6 +1848,12 @@ class ProofControlLayer:
                     target_obligation_ids=[],
                     reasons=["blueprint direct target could not be aligned"],
                 )
+                if self.active:
+                    self._retract_blocked_blueprint(
+                        strategy,
+                        compilation,
+                        reason="direct target alignment failed",
+                    )
             else:
                 binding = binding or self._route_target_binding_for_strategy(
                     strategy.strategy_id
@@ -1816,6 +1899,12 @@ class ProofControlLayer:
                     "route_admission_blocked",
                     record.model_dump(mode="json"),
                 )
+                if self.active:
+                    self._retract_blocked_blueprint(
+                        strategy,
+                        compilation,
+                        reason=f"route admission {record.verdict.value}",
+                    )
             elif record.verdict == GateVerdict.SHADOW_BLOCK:
                 self._emit(
                     "route_admission_shadow_blocked",
@@ -1831,6 +1920,78 @@ class ProofControlLayer:
                 existing_signatures.append(strategy.tags)
         self.persist()
         return admitted, records
+
+    def normalization_backlog(
+        self,
+        strategies: Sequence[StrategyCard],
+    ) -> list[dict[str, Any]]:
+        """Statements the deterministic gate marked NEEDS_NORMALIZATION.
+
+        These are believed-mathematical statements whose objects, relation,
+        or quantifier/scope could not be extracted; a batched reviewer can
+        restate them without touching the mathematics.
+        """
+        backlog: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for strategy in strategies:
+            blueprint = self.state.strategy_blueprints.get(strategy.strategy_id)
+            if blueprint is None:
+                continue
+            for node_id in blueprint.node_ids:
+                quality = self.state.obligation_semantic_quality.get(node_id)
+                if quality is None or not quality.needs_normalization:
+                    continue
+                node = self.state.blueprint_nodes.get(node_id)
+                if node is None:
+                    continue
+                key = node.statement.strip()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                backlog.append(
+                    {
+                        "statement": key,
+                        "needs": list(quality.normalization_needs),
+                        "strategy_id": strategy.strategy_id,
+                        "node_id": node_id,
+                    }
+                )
+        return backlog
+
+    @staticmethod
+    def apply_normalized_statements(
+        strategies: Sequence[StrategyCard],
+        replacements: dict[str, str],
+    ) -> list[StrategyCard]:
+        """Rewrite strategy statements with reviewer-normalized forms.
+
+        Replacement is by exact original text; anything the reviewer marked
+        non-mathematical or left unchanged is not touched.
+        """
+
+        def swap(text: str) -> str:
+            replacement = replacements.get(text.strip())
+            return replacement if replacement else text
+
+        updated: list[StrategyCard] = []
+        for strategy in strategies:
+            updated.append(
+                strategy.model_copy(
+                    update={
+                        "expected_lemmas": [
+                            swap(item) for item in strategy.expected_lemmas
+                        ],
+                        "bottleneck": swap(strategy.bottleneck),
+                        "critical_claims": [
+                            claim.model_copy(
+                                update={"statement": swap(claim.statement)}
+                            )
+                            for claim in strategy.critical_claims
+                        ],
+                    }
+                )
+            )
+        return updated
 
     def allow_deepen(
         self,
@@ -2917,7 +3078,9 @@ class ProofControlLayer:
     def summary(self) -> dict[str, Any]:
         links = list(self.state.goal_links.values())
         aligned_relations = {GoalRelation.EQUIVALENT, GoalRelation.SUFFICIENT}
-        invalid_scopes = {ScopeRelation.CLAIM_WEAKER, ScopeRelation.INCOMPARABLE}
+        # A lemma being weaker than the main goal is the defining property of
+        # a lemma, not an alignment failure; only INCOMPARABLE scope blocks.
+        invalid_scopes = {ScopeRelation.INCOMPARABLE}
         alignment_pass = sum(
             item.relation in aligned_relations
             and item.scope_relation not in invalid_scopes
@@ -2932,6 +3095,9 @@ class ProofControlLayer:
             }
             or item.scope_relation in invalid_scopes
             for item in links
+        )
+        lemma_weaker_expected = sum(
+            item.scope_relation == ScopeRelation.CLAIM_WEAKER for item in links
         )
         facts = self.message_broker.admitted_facts()
         core_fact_roles = {
@@ -2988,6 +3154,7 @@ class ProofControlLayer:
                 "pass": alignment_pass,
                 "block": alignment_block,
                 "ambiguous": max(0, len(links) - alignment_pass - alignment_block),
+                "lemma_weaker_expected": lemma_weaker_expected,
             },
             "overstrong_targets": sum(
                 item.scope_relation == ScopeRelation.CLAIM_STRONGER for item in links
@@ -3108,6 +3275,8 @@ class ProofControlLayer:
         subject: StrategyCard | ClaimCard | MessageEnvelope | ProofObligation,
         link: ClaimGoalLink,
     ) -> ClaimGoalLink:
+        if link.scope_relation == ScopeRelation.CLAIM_WEAKER:
+            link = self._materialize_weaker_claim_bridge(subject, link)
         self.state.goal_links[link.link_id] = link
         self._emit("goal_link_created", link.model_dump(mode="json"))
         if link.scope_relation == ScopeRelation.CLAIM_STRONGER:
@@ -3130,10 +3299,7 @@ class ProofControlLayer:
                     "status": "pending_audited_candidate",
                 },
             )
-        if link.scope_relation in {
-            ScopeRelation.CLAIM_WEAKER,
-            ScopeRelation.INCOMPARABLE,
-        }:
+        if link.scope_relation == ScopeRelation.INCOMPARABLE:
             self._emit(
                 "scope_mismatch_detected",
                 link.model_dump(mode="json"),
@@ -3146,6 +3312,112 @@ class ProofControlLayer:
         )
         self._register_risks(self.risk_scanner.scan_goal_link(link))
         return link
+
+    def _materialize_weaker_claim_bridge(
+        self,
+        subject: StrategyCard | ClaimCard | MessageEnvelope | ProofObligation,
+        link: ClaimGoalLink,
+    ) -> ClaimGoalLink:
+        """Represent the missing weaker-claim implication as open work.
+
+        A weaker lemma is not a scope error. It is useful partial progress
+        provided the remaining implication to the requested target stays
+        explicit and cannot be mistaken for a closed obligation.
+        """
+
+        try:
+            target = self.proof_graph.get_obligation(link.target_obligation_id)
+        except KeyError:
+            return link
+        if isinstance(subject, StrategyCard):
+            subject_statement = subject.bottleneck or subject.core_idea
+        elif isinstance(subject, (ClaimCard, MessageEnvelope)):
+            subject_statement = subject.conclusion or subject.statement
+        else:
+            subject_statement = subject.statement
+        subject_statement = normalize_text(subject_statement)
+        target_statement = normalize_text(target.statement)
+        if (
+            not subject_statement
+            or not target_statement
+            or obligation_identity_text(subject_statement)
+            == obligation_identity_text(target_statement)
+        ):
+            return link
+        bridge_id = (
+            "obl_weaker_bridge_"
+            + stable_hash(
+                {
+                    "subject_id": link.subject_id,
+                    "target_obligation_id": link.target_obligation_id,
+                    "subject_statement": subject_statement,
+                    "target_statement": target_statement,
+                }
+            )[:20]
+        )
+        if self.proof_graph.frozen:
+            self._emit(
+                "weaker_claim_bridge_deferred",
+                {
+                    "bridge_obligation_id": bridge_id,
+                    "subject_id": link.subject_id,
+                    "target_obligation_id": link.target_obligation_id,
+                    "reason": "proof_graph_frozen",
+                },
+            )
+            return link
+        route_ids = set(target.route_ids)
+        if isinstance(subject, MessageEnvelope):
+            route_ids.add(subject.source_route_id)
+        elif isinstance(subject, ProofObligation):
+            route_ids.update(subject.route_ids)
+        elif isinstance(subject, StrategyCard):
+            route_ids.update(
+                binding.route_id
+                for binding in self.state.route_target_bindings.values()
+                if binding.strategy_id == subject.strategy_id
+                and binding.route_id is not None
+            )
+        bridge = self.proof_graph.add_obligation(
+            ProofObligation(
+                obligation_id=bridge_id,
+                problem_hash=target.problem_hash,
+                route_ids=sorted(route_ids),
+                kind=ObligationKind.LEMMA,
+                statement=f"If {subject_statement}, then {target_statement}",
+                normalized_statement=normalize_text(
+                    f"If {subject_statement}, then {target_statement}"
+                ),
+                status="open",
+                priority=max(0.5, target.priority),
+                centrality=target.centrality,
+            )
+        )
+        required = list(
+            dict.fromkeys([*link.required_bridge_obligation_ids, bridge.obligation_id])
+        )
+        remaining = list(
+            dict.fromkeys(
+                [*link.remaining_obligation_ids_if_proved, bridge.obligation_id]
+            )
+        )
+        updated = link.model_copy(
+            update={
+                "required_bridge_obligation_ids": required,
+                "remaining_obligation_ids_if_proved": remaining,
+            }
+        )
+        self._emit(
+            "weaker_claim_bridge_registered",
+            {
+                "link_id": link.link_id,
+                "subject_id": link.subject_id,
+                "target_obligation_id": link.target_obligation_id,
+                "bridge_obligation_id": bridge.obligation_id,
+                "status": bridge.status,
+            },
+        )
+        return updated
 
     def _register_steps(
         self,
@@ -3312,7 +3584,7 @@ class ProofControlLayer:
                 or "reduce the active construction obligation"
             ),
             removable_components=[],
-            preserved_constraints=delta.active_assumptions,
+            preserved_constraints=list(delta.active_assumptions or []),
             target_obligation_ids=self._main_goal_ids(),
             evidence_refs=(
                 [delta.raw_artifact_ref] if delta.raw_artifact_ref is not None else []
