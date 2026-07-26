@@ -606,6 +606,47 @@ class MessageExpectedEffect(StrEnum):
     PROVIDE_CONSTRUCTION = "provide_construction"
 
 
+class RouteUpdateTask(StrictModel):
+    task_id: str = Field(default_factory=lambda: new_id("route_update"))
+    target_route_id: str
+    message_ids: list[str]
+    priority: Literal["critical", "high"]
+    scheduled_round: int = Field(ge=0)
+    status: Literal[
+        "scheduled",
+        "presented",
+        "acknowledged",
+        "used",
+        "expired_without_opportunity",
+        "failed",
+    ] = "scheduled"
+    action_id: str
+    receipt_ids: list[str] = Field(default_factory=list)
+    failure_reason: str = ""
+
+
+class InspirationReviewDeferral(StrictModel):
+    deferral_id: str = Field(default_factory=lambda: new_id("inspiration_review"))
+    proposal_id: str
+    task_id: str | None = None
+    reason: str
+    review_status: Literal["deferred", "reassigned", "completed"] = "deferred"
+    reviewed: bool = False
+    assigned_reviewer_agent_id: str | None = None
+    defer_action_id: str | None = None
+    reassign_action_id: str | None = None
+
+
+class ProcessFailureDiagnostic(StrictModel):
+    diagnostic_id: str = Field(default_factory=lambda: new_id("process_failure"))
+    source_report_id: str
+    route_id: str
+    target_obligation_id: str | None = None
+    domain: Literal["process", "execution"]
+    reason: str
+    evidence: list[str] = Field(default_factory=list)
+
+
 class MessageUtilityContract(StrictModel):
     contract_id: str = Field(default_factory=lambda: new_id("utility_contract"))
     message_id: str
@@ -646,6 +687,14 @@ class NearMissRecord(StrictModel):
     suggested_induction_measures: list[str]
     verifier_report_ids: list[str]
     verifier_confidence: float = Field(ge=0.0, le=1.0)
+    repair_module: Literal[
+        "realizer_repair",
+        "induction_selector",
+        "minimal_bridge",
+        "scope_goal_rewrite",
+        "bounded_local_repair",
+    ] = "bounded_local_repair"
+    authoritative: Literal[False] = False
 
 
 class GateVerdict(StrEnum):

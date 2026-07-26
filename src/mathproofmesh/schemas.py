@@ -247,6 +247,22 @@ class MessageType(StrEnum):
     ROUTE_CHECKPOINT = "route_checkpoint"
 
 
+class MessagePriority(StrEnum):
+    CRITICAL = "critical"
+    HIGH = "high"
+    NORMAL = "normal"
+    LOW = "low"
+
+
+class DeliveryState(StrEnum):
+    QUEUED = "queued"
+    SCHEDULED = "scheduled"
+    PRESENTED = "presented"
+    ACKNOWLEDGED = "acknowledged"
+    USED = "used"
+    EXPIRED_WITHOUT_OPPORTUNITY = "expired_without_opportunity"
+
+
 class EvidenceType(StrEnum):
     UNVERIFIED_IDEA = "unverified_idea"
     NUMERICAL_HEURISTIC = "numerical_heuristic"
@@ -688,6 +704,71 @@ class NoveltySignature(StrictModel):
         return self
 
 
+class MechanismChainSignature(StrictModel):
+    representation: list[str] = Field(default_factory=list)
+    transformations: list[str] = Field(default_factory=list)
+    bridge_pattern: list[str] = Field(default_factory=list)
+    terminal_argument: list[str] = Field(default_factory=list)
+    chain_hash: str = ""
+
+    def normalized_payload(self) -> dict[str, list[str]]:
+        def normalize(values: list[str]) -> list[str]:
+            return list(
+                dict.fromkeys(
+                    " ".join(value.casefold().split())
+                    for value in values
+                    if value.strip()
+                )
+            )
+
+        return {
+            "representation": normalize(self.representation),
+            "transformations": normalize(self.transformations),
+            "bridge_pattern": normalize(self.bridge_pattern),
+            "terminal_argument": normalize(self.terminal_argument),
+        }
+
+    @property
+    def complete(self) -> bool:
+        payload = self.normalized_payload()
+        populated_stages = sum(bool(values) for values in payload.values())
+        component_count = sum(len(values) for values in payload.values())
+        return populated_stages >= 3 and component_count >= 4
+
+    @model_validator(mode="after")
+    def set_chain_hash(self) -> "MechanismChainSignature":
+        expected = stable_hash(self.normalized_payload())
+        if self.chain_hash and self.chain_hash != expected:
+            raise ValueError("mechanism chain hash mismatch")
+        object.__setattr__(self, "chain_hash", expected)
+        return self
+
+    @classmethod
+    def from_novelty_signature(
+        cls,
+        signature: NoveltySignature,
+    ) -> "MechanismChainSignature":
+        return cls(
+            representation=list(signature.representation_tags),
+            transformations=list(signature.key_transformations),
+            bridge_pattern=list(signature.mechanism_tags),
+            terminal_argument=list(signature.proof_principles),
+        )
+
+    def to_novelty_signature(
+        self,
+        *,
+        targeted_obligation_ids: list[str] | None = None,
+    ) -> NoveltySignature:
+        return NoveltySignature(
+            representation_tags=list(self.representation),
+            mechanism_tags=list(self.bridge_pattern),
+            key_transformations=list(self.transformations),
+            proof_principles=list(self.terminal_argument),
+            targeted_obligation_ids=list(targeted_obligation_ids or []),
+        )
+
+
 class InspirationTrigger(StrictModel):
     trigger_id: str = Field(default_factory=lambda: new_id("trigger"))
     trigger_type: InspirationTriggerType
@@ -1070,6 +1151,15 @@ class InspirationReview(StrictModel):
         "request_bridge_verification",
     ]
     confidence: float = Field(ge=0.0, le=1.0)
+    review_status: Literal["completed", "deferred"] = "completed"
+    deferred_reason: str = ""
+    review_action_id: str | None = None
+
+    @model_validator(mode="after")
+    def deferred_review_requires_reason(self) -> "InspirationReview":
+        if self.review_status == "deferred" and not self.deferred_reason.strip():
+            raise ValueError("deferred inspiration review requires a reason")
+        return self
 
 
 class InspirationTask(StrictModel):

@@ -74,6 +74,7 @@ from .models import (
     InductionBlueprintNode,
     InferenceRiskRecord,
     InferenceRiskType,
+    InspirationReviewDeferral,
     MessageExpectedEffect,
     MinimalBridgeProposal,
     NegativePatternRecord,
@@ -83,6 +84,7 @@ from .models import (
     RealizerFailureType,
     RouteAdmissionRecord,
     RouteTargetBinding,
+    RouteUpdateTask,
     ScopeRelation,
     ScopeSignature,
     SynthesisReadinessRecord,
@@ -233,6 +235,21 @@ class ProofControlLayer:
             ControlActionType.MATERIALIZE_FALSIFICATION_TASK,
             self._handle_materialize_falsification_task,
             postcondition=self._falsification_task_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.SCHEDULE_ROUTE_UPDATE,
+            self._handle_schedule_route_update,
+            postcondition=self._route_update_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.DEFER_INSPIRATION_REVIEW,
+            self._handle_defer_inspiration_review,
+            postcondition=self._inspiration_review_deferred_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.REASSIGN_INSPIRATION_REVIEW,
+            self._handle_reassign_inspiration_review,
+            postcondition=self._inspiration_review_reassigned_postcondition,
         )
 
         self.message_broker.set_proof_control_message_gate(self._message_gate)
@@ -712,6 +729,7 @@ class ProofControlLayer:
                 "message_utility_contract_expired",
                 {"contract_id": contract_id, "round": current_round},
             )
+        self.schedule_pending_route_updates(current_round=current_round)
         self.persist()
 
     def route_signals(self, route_id: str) -> dict[str, object]:
@@ -1345,6 +1363,301 @@ class ProofControlLayer:
             current_round=current_round,
         )
 
+    def schedule_pending_route_updates(
+        self,
+        *,
+        current_round: int,
+    ) -> list[ControlActionRecord]:
+        """Reserve one explicit processing turn per route with queued high-value work."""
+
+        pending_by_route: dict[str, list[dict[str, Any]]] = {}
+        for delivery in self.message_broker.deliveries_requiring_route_update():
+            route_id = str(delivery["target_route_id"])
+            pending_by_route.setdefault(route_id, []).append(delivery)
+
+        actions: list[ControlActionRecord] = []
+        for route_id, deliveries in sorted(pending_by_route.items()):
+            selected = deliveries[:1]
+            message_ids = [str(item["message_id"]) for item in selected]
+            priority = str(selected[0]["priority"])
+            action = self.action_dispatcher.propose(
+                ControlActionType.SCHEDULE_ROUTE_UPDATE,
+                source_record_ids=message_ids,
+                route_ids=[route_id],
+                payload={
+                    "target_route_id": route_id,
+                    "message_ids": message_ids,
+                    "priority": priority,
+                    "scheduled_round": current_round,
+                },
+                current_round=current_round,
+            )
+            actions.append(
+                self.action_dispatcher.execute_sync(
+                    action.action_id,
+                    current_round=current_round,
+                )
+            )
+        return actions
+
+    def pending_route_update_tasks(self) -> list[RouteUpdateTask]:
+        return sorted(
+            (
+                task
+                for task in self.state.route_update_tasks.values()
+                if task.status in {"scheduled", "presented"}
+            ),
+            key=lambda item: (
+                item.scheduled_round,
+                item.target_route_id,
+                item.task_id,
+            ),
+        )
+
+    def mark_route_update_presented(
+        self,
+        task_id: str,
+    ) -> RouteUpdateTask:
+        task = self.state.route_update_tasks[task_id]
+        if task.status == "scheduled":
+            task.status = "presented"
+            self._emit(
+                "route_update_presented",
+                task.model_dump(mode="json"),
+            )
+            self.persist()
+        return task
+
+    def complete_route_update_task(
+        self,
+        task_id: str,
+        *,
+        receipt_ids: Sequence[str],
+        used: bool = False,
+    ) -> RouteUpdateTask:
+        task = self.state.route_update_tasks[task_id]
+        receipts = list(dict.fromkeys(receipt_ids))
+        if not receipts:
+            raise ValueError("route update completion requires a semantic receipt")
+        task.receipt_ids = receipts
+        task.status = "used" if used else "acknowledged"
+        task.failure_reason = ""
+        self._emit(
+            "route_update_completed",
+            task.model_dump(mode="json"),
+        )
+        self.persist()
+        return task
+
+    def fail_route_update_task(
+        self,
+        task_id: str,
+        *,
+        reason: str,
+    ) -> RouteUpdateTask:
+        task = self.state.route_update_tasks[task_id]
+        task.status = "failed"
+        task.failure_reason = reason.strip() or "route update failed"
+        self._emit(
+            "route_update_failed",
+            task.model_dump(mode="json"),
+        )
+        self.persist()
+        return task
+
+    def defer_inspiration_review(
+        self,
+        *,
+        proposal_id: str,
+        task_id: str | None,
+        reason: str,
+        current_round: int,
+    ) -> ControlActionRecord:
+        reason = reason.strip()
+        if not reason:
+            raise ValueError("inspiration review deferral requires a reason")
+        deferral_id = (
+            "inspiration_review_"
+            + stable_hash(
+                {
+                    "problem_hash": self.proof_graph.problem_hash,
+                    "proposal_id": proposal_id,
+                    "task_id": task_id,
+                }
+            )[:16]
+        )
+        record = self.state.inspiration_review_deferrals.get(deferral_id)
+        if record is None:
+            record = InspirationReviewDeferral(
+                deferral_id=deferral_id,
+                proposal_id=proposal_id,
+                task_id=task_id,
+                reason=reason,
+            )
+            self.state.inspiration_review_deferrals[deferral_id] = record
+        elif not record.reviewed:
+            record.reason = reason
+        action = self.action_dispatcher.propose(
+            ControlActionType.DEFER_INSPIRATION_REVIEW,
+            source_record_ids=[record.deferral_id],
+            payload={
+                "deferral_id": record.deferral_id,
+                "proposal_id": proposal_id,
+                "reason": reason,
+            },
+            current_round=current_round,
+        )
+        record.defer_action_id = action.action_id
+        return self.action_dispatcher.execute_sync(
+            action.action_id,
+            current_round=current_round,
+        )
+
+    def complete_inspiration_review(
+        self,
+        *,
+        proposal_id: str,
+        reviewer_agent_id: str,
+    ) -> InspirationReviewDeferral | None:
+        record = next(
+            (
+                item
+                for item in reversed(
+                    list(self.state.inspiration_review_deferrals.values())
+                )
+                if item.proposal_id == proposal_id
+            ),
+            None,
+        )
+        if record is None:
+            return None
+        reviewer_agent_id = reviewer_agent_id.strip()
+        if not reviewer_agent_id:
+            raise ValueError("completed inspiration review requires a reviewer")
+        if (
+            record.assigned_reviewer_agent_id is not None
+            and record.assigned_reviewer_agent_id != reviewer_agent_id
+        ):
+            raise ValueError("completed inspiration review used the wrong assignee")
+        record.review_status = "completed"
+        record.reviewed = True
+        record.assigned_reviewer_agent_id = reviewer_agent_id
+        self._emit(
+            "inspiration_review_completed",
+            record.model_dump(mode="json"),
+        )
+        self.persist()
+        return record
+
+    def reassign_inspiration_review(
+        self,
+        *,
+        proposal_id: str,
+        reviewer_agent_id: str,
+        current_round: int,
+    ) -> ControlActionRecord:
+        reviewer_agent_id = reviewer_agent_id.strip()
+        if not reviewer_agent_id:
+            raise ValueError("inspiration review reassignment requires a reviewer")
+        record = next(
+            (
+                item
+                for item in reversed(
+                    list(self.state.inspiration_review_deferrals.values())
+                )
+                if item.proposal_id == proposal_id
+            ),
+            None,
+        )
+        if record is None:
+            raise ValueError("proposal has no deferred inspiration review")
+        action = self.action_dispatcher.propose(
+            ControlActionType.REASSIGN_INSPIRATION_REVIEW,
+            source_record_ids=[record.deferral_id],
+            payload={
+                "deferral_id": record.deferral_id,
+                "proposal_id": proposal_id,
+                "reviewer_agent_id": reviewer_agent_id,
+            },
+            current_round=current_round,
+        )
+        record.reassign_action_id = action.action_id
+        return self.action_dispatcher.execute_sync(
+            action.action_id,
+            current_round=current_round,
+        )
+
+    def inspiration_context(
+        self,
+        *,
+        target_obligation_ids: Sequence[str] = (),
+    ) -> dict[str, Any]:
+        """Expose bounded mathematical control evidence, never protocol diagnostics."""
+
+        targets = set(target_obligation_ids)
+
+        def mathematical_target(obligation_id: str | None) -> bool:
+            if obligation_id is None:
+                return False
+            if targets and obligation_id not in targets:
+                return False
+            try:
+                obligation = self.proof_graph.get_obligation(obligation_id)
+            except KeyError:
+                return False
+            return (
+                self._ensure_obligation_domain(obligation).domain
+                == ObligationDomain.MATHEMATICAL
+            )
+
+        mathematical_families = []
+        for family in self.state.assumption_families.values():
+            members = [
+                self.state.critical_assumptions.get(assumption_id)
+                for assumption_id in family.member_assumption_ids
+            ]
+            if not members or any(
+                member is None or member.domain.value != "mathematical"
+                for member in members
+            ):
+                continue
+            mathematical_families.append(family.model_dump(mode="json"))
+
+        return {
+            "authority": "non_authoritative_control_context",
+            "common_mode_assumption_families": mathematical_families[:8],
+            "verified_near_miss_salvage": [
+                {
+                    "near_miss_id": item.near_miss_id,
+                    "target_obligation_id": item.target_obligation_id,
+                    "abstract_idea": item.abstract_idea,
+                    "concrete_candidate": item.concrete_candidate,
+                    "failed_constraints": list(item.failed_constraints),
+                    "salvageable_components": list(item.salvageable_components),
+                    "repair_module": item.repair_module,
+                    "suggested_repair_operators": list(item.suggested_repair_operators),
+                    "verifier_confidence": item.verifier_confidence,
+                }
+                for item in self.state.near_misses.values()
+                if mathematical_target(item.target_obligation_id)
+            ][:8],
+            "active_induction_measures": [
+                item.model_dump(mode="json")
+                for item in self.state.induction_blueprints.values()
+                if item.status == "active"
+                and any(
+                    mathematical_target(target_id)
+                    for target_id in item.target_obligation_ids
+                )
+            ][:8],
+            "minimal_bridge_requests": [
+                item.model_dump(mode="json")
+                for item in self.state.minimal_bridge_proposals.values()
+                if item.status in {"candidate", "reviewed"}
+                and mathematical_target(item.target_obligation_id)
+            ][:8],
+        }
+
     def export_state(self) -> dict[str, Any]:
         return self.state.export_state()
 
@@ -1853,17 +2166,15 @@ class ProofControlLayer:
             if delta is not None
             else []
         )
+        target_obligation_id = self._near_miss_target_obligation_id(
+            report,
+            route_id=route_id,
+        )
         record = self.near_misses.extract_deterministic(
             report,
             route_id=route_id,
-            target_obligation_id=(
-                self._main_goal_ids()[0] if self._main_goal_ids() else None
-            ),
-            abstract_idea=(
-                steps[0].justification
-                if steps
-                else "preserve the route mechanism before the first failed step"
-            ),
+            target_obligation_id=target_obligation_id,
+            abstract_idea=(steps[0].justification if steps else ""),
             concrete_candidate=(
                 attempt.final_answer
                 if attempt is not None and attempt.final_answer
@@ -1871,7 +2182,7 @@ class ProofControlLayer:
                 if delta is not None and delta.candidate_final_answer
                 else steps[-1].statement
                 if steps
-                else report.target_id
+                else ""
             ),
             preserved_properties=[
                 item.statement
@@ -1884,13 +2195,75 @@ class ProofControlLayer:
                 for item in steps
                 if item.step_id != report.first_error_step
             ][:4],
-            suggested_repair_operators=["replace_realizer_preserve_structure"],
         )
         if record is not None:
             added = self.near_misses.add(record)
             self.state.near_misses[added.near_miss_id] = added
             self._emit("near_miss_recorded", added.model_dump(mode="json"))
+            if added.repair_module == "induction_selector":
+                self._register_induction_hints(
+                    route_id=route_id,
+                    source_id=added.near_miss_id,
+                    source_agent_id=report.agent_id,
+                    target_obligation_ids=[added.target_obligation_id],
+                    texts=[
+                        added.abstract_idea,
+                        added.concrete_candidate,
+                        *added.failed_constraints,
+                    ],
+                )
+        else:
+            diagnostic = self.near_misses.process_diagnostic(
+                report,
+                route_id=route_id,
+                target_obligation_id=target_obligation_id,
+            )
+            if diagnostic is not None:
+                self.state.process_diagnostics[diagnostic.diagnostic_id] = diagnostic
+                self._emit(
+                    "process_failure_diagnostic_recorded",
+                    diagnostic.model_dump(mode="json"),
+                )
         return record
+
+    def _near_miss_target_obligation_id(
+        self,
+        report: VerificationReport,
+        *,
+        route_id: str,
+    ) -> str | None:
+        candidate_ids = [
+            report.target_id,
+            *(issue.claim_id for issue in report.issues if issue.claim_id is not None),
+        ]
+        try:
+            route = self.route_registry.get(route_id)
+        except KeyError:
+            route = None
+        if route is not None:
+            binding = self._route_target_binding_for_strategy(route.strategy_id)
+            if binding is not None:
+                candidate_ids.append(binding.direct_target_obligation_id)
+        candidate_ids.extend(
+            item.obligation_id
+            for item in self.proof_graph.obligations_in_core_closure(
+                route_id=route_id,
+                open_only=True,
+            )
+        )
+        candidate_ids.extend(self._main_goal_ids())
+        for candidate_id in dict.fromkeys(candidate_ids):
+            try:
+                obligation = self.proof_graph.get_obligation(candidate_id)
+            except KeyError:
+                continue
+            if (
+                obligation.status in {"open", "tentative", "blocked"}
+                and self._ensure_obligation_domain(obligation).domain
+                == ObligationDomain.MATHEMATICAL
+            ):
+                return obligation.obligation_id
+        return None
 
     def _record_realizer_failure(
         self, report: VerificationReport, *, route_id: str
@@ -2694,6 +3067,165 @@ class ProofControlLayer:
             and task.computation_plan.plan_id in result.result_refs
         )
 
+    def _handle_schedule_route_update(
+        self,
+        action: ControlActionRecord,
+    ) -> ControlActionResult:
+        route_id = str(action.payload["target_route_id"])
+        message_ids = list(dict.fromkeys(action.payload.get("message_ids", [])))
+        priority = str(action.payload.get("priority", ""))
+        if priority not in {"critical", "high"}:
+            return ControlActionResult(
+                postcondition_met=False,
+                detail="route updates are reserved for critical or high messages",
+            )
+        if not message_ids:
+            return ControlActionResult(
+                postcondition_met=False,
+                detail="route update has no message to process",
+            )
+        for message_id in message_ids:
+            self.message_broker.schedule_route_update(
+                str(message_id),
+                route_id,
+                action_id=action.action_id,
+            )
+        task_id = (
+            "route_update_"
+            + stable_hash(
+                {
+                    "problem_hash": self.proof_graph.problem_hash,
+                    "route_id": route_id,
+                    "message_ids": message_ids,
+                    "action_id": action.action_id,
+                }
+            )[:16]
+        )
+        task = RouteUpdateTask(
+            task_id=task_id,
+            target_route_id=route_id,
+            message_ids=[str(item) for item in message_ids],
+            priority=priority,
+            scheduled_round=int(action.payload.get("scheduled_round", 0)),
+            action_id=action.action_id,
+        )
+        self.state.route_update_tasks[task.task_id] = task
+        self._emit(
+            "route_update_scheduled",
+            task.model_dump(mode="json"),
+        )
+        return ControlActionResult(
+            result_refs=[task.task_id, *task.message_ids],
+            postcondition_met=True,
+        )
+
+    def _route_update_postcondition(
+        self,
+        action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        task = next(
+            (
+                item
+                for item in self.state.route_update_tasks.values()
+                if item.action_id == action.action_id
+            ),
+            None,
+        )
+        if task is None or task.task_id not in result.result_refs:
+            return False
+        return all(
+            (
+                delivery := self.message_broker.delivery_record(
+                    message_id,
+                    task.target_route_id,
+                )
+            )
+            is not None
+            and delivery.get("route_update_action_id") == action.action_id
+            and delivery.get("delivery_state") == "scheduled"
+            for message_id in task.message_ids
+        )
+
+    def _handle_defer_inspiration_review(
+        self,
+        action: ControlActionRecord,
+    ) -> ControlActionResult:
+        deferral_id = str(action.payload["deferral_id"])
+        record = self.state.inspiration_review_deferrals[deferral_id]
+        record.review_status = "deferred"
+        record.reviewed = False
+        record.reason = str(action.payload.get("reason", record.reason))
+        record.assigned_reviewer_agent_id = None
+        record.defer_action_id = action.action_id
+        self._emit(
+            "inspiration_review_deferred",
+            record.model_dump(mode="json"),
+        )
+        return ControlActionResult(
+            result_refs=[record.deferral_id],
+            postcondition_met=True,
+        )
+
+    def _inspiration_review_deferred_postcondition(
+        self,
+        action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        record = self.state.inspiration_review_deferrals.get(
+            str(action.payload.get("deferral_id", ""))
+        )
+        return (
+            record is not None
+            and record.review_status == "deferred"
+            and not record.reviewed
+            and record.defer_action_id == action.action_id
+            and record.deferral_id in result.result_refs
+        )
+
+    def _handle_reassign_inspiration_review(
+        self,
+        action: ControlActionRecord,
+    ) -> ControlActionResult:
+        deferral_id = str(action.payload["deferral_id"])
+        reviewer_agent_id = str(action.payload["reviewer_agent_id"]).strip()
+        if not reviewer_agent_id:
+            return ControlActionResult(
+                postcondition_met=False,
+                detail="inspiration review reassignment has no reviewer",
+            )
+        record = self.state.inspiration_review_deferrals[deferral_id]
+        record.review_status = "reassigned"
+        record.reviewed = False
+        record.assigned_reviewer_agent_id = reviewer_agent_id
+        record.reassign_action_id = action.action_id
+        self._emit(
+            "inspiration_review_reassigned",
+            record.model_dump(mode="json"),
+        )
+        return ControlActionResult(
+            result_refs=[record.deferral_id, reviewer_agent_id],
+            postcondition_met=True,
+        )
+
+    def _inspiration_review_reassigned_postcondition(
+        self,
+        action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        record = self.state.inspiration_review_deferrals.get(
+            str(action.payload.get("deferral_id", ""))
+        )
+        reviewer_agent_id = str(action.payload.get("reviewer_agent_id", ""))
+        return (
+            record is not None
+            and record.review_status == "reassigned"
+            and not record.reviewed
+            and record.assigned_reviewer_agent_id == reviewer_agent_id
+            and record.reassign_action_id == action.action_id
+            and record.deferral_id in result.result_refs
+        )
+
     def _handle_activate_induction_measure(
         self, action: ControlActionRecord
     ) -> ControlActionResult:
@@ -3411,6 +3943,9 @@ class ProofControlLayer:
             self.state.utility_contracts,
             self.state.usage_receipts,
             self.state.near_misses,
+            self.state.process_diagnostics,
+            self.state.route_update_tasks,
+            self.state.inspiration_review_deferrals,
             self.state.route_admissions,
         )
         if any(source_id in values for values in state_mappings):

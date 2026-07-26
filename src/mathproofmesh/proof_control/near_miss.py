@@ -5,7 +5,39 @@ from typing import Any
 
 from ..config import NearMissControlConfig
 from ..schemas import VerificationReport, VerificationVerdict, stable_hash
-from .models import NearMissRecord
+from .models import NearMissRecord, ProcessFailureDiagnostic
+
+_PROCESS_PHASE_MARKERS = (
+    "budget",
+    "checkpoint",
+    "cooldown",
+    "json",
+    "network",
+    "parse",
+    "protocol",
+    "provider",
+    "reviewer",
+    "schema",
+    "serialization",
+)
+_PROCESS_TEXT_MARKERS = (
+    "entire proof is incomplete",
+    "final answer is empty",
+    "whole proof is incomplete",
+    "budget exhausted",
+    "checkpoint format",
+    "json format",
+    "network failure",
+    "provider cooldown",
+    "reviewer call failed",
+)
+_EXECUTION_MARKERS = (
+    "budget",
+    "cooldown",
+    "network",
+    "provider",
+    "reviewer",
+)
 
 
 class NearMissLedger:
@@ -45,6 +77,14 @@ class NearMissLedger:
             return None
         if not report.first_error_step and not report.issues:
             return None
+        if self._process_reason(report) is not None:
+            return None
+        if not target_obligation_id or not target_obligation_id.strip():
+            return None
+        if not self._specific_mathematical_text(abstract_idea, report):
+            return None
+        if not self._specific_mathematical_text(concrete_candidate, report):
+            return None
         salvage = list(dict.fromkeys([*preserved_properties, *salvageable_components]))
         if self.config.extraction_requires_salvageable_component and not salvage:
             return None
@@ -52,11 +92,24 @@ class NearMissLedger:
             item.description for item in report.issues if item.description
         ]
         constraints = list(dict.fromkeys([*failed_constraints, *issue_constraints]))
+        if not constraints:
+            return None
         first_type = (
             report.issues[0].phase if report.issues else report.failure_level.value
         )
         repair_hints = [item.repair_hint for item in report.issues if item.repair_hint]
-        operators = list(dict.fromkeys([*suggested_repair_operators, *repair_hints]))
+        repair_module, default_operator = self._repair_route(report)
+        operators = list(
+            dict.fromkeys(
+                [
+                    *suggested_repair_operators,
+                    *repair_hints,
+                    default_operator,
+                ]
+            )
+        )
+        if not operators:
+            return None
         return NearMissRecord(
             near_miss_id=(
                 "near_miss_"
@@ -82,6 +135,147 @@ class NearMissLedger:
             suggested_induction_measures=list(suggested_induction_measures),
             verifier_report_ids=[report.report_id],
             verifier_confidence=report.confidence,
+            repair_module=repair_module,
+        )
+
+    def process_diagnostic(
+        self,
+        report: VerificationReport,
+        *,
+        route_id: str,
+        target_obligation_id: str | None = None,
+    ) -> ProcessFailureDiagnostic | None:
+        reason = self._process_reason(report)
+        if reason is None:
+            return None
+        normalized = reason.casefold()
+        domain = (
+            "execution"
+            if any(marker in normalized for marker in _EXECUTION_MARKERS)
+            else "process"
+        )
+        return ProcessFailureDiagnostic(
+            diagnostic_id=(
+                "process_failure_"
+                + stable_hash(
+                    {
+                        "report_id": report.report_id,
+                        "route_id": route_id,
+                        "target_obligation_id": target_obligation_id,
+                        "reason": reason,
+                    }
+                )[:12]
+            ),
+            source_report_id=report.report_id,
+            route_id=route_id,
+            target_obligation_id=target_obligation_id,
+            domain=domain,
+            reason=reason,
+            evidence=[
+                item.description for item in report.issues if item.description.strip()
+            ],
+        )
+
+    @staticmethod
+    def _specific_mathematical_text(
+        value: str,
+        report: VerificationReport,
+    ) -> bool:
+        normalized = " ".join(value.split()).casefold()
+        if len(normalized) < 8:
+            return False
+        if normalized == report.target_id.casefold():
+            return False
+        return normalized not in {
+            "preserve the route mechanism before the first failed step",
+            "repair the proof",
+            "complete the proof",
+            "try again",
+        }
+
+    @staticmethod
+    def _process_reason(report: VerificationReport) -> str | None:
+        phases = " ".join(item.phase for item in report.issues).casefold()
+        descriptions = " ".join(
+            [
+                report.concise_feedback,
+                *(item.description for item in report.issues),
+            ]
+        ).casefold()
+        if any(marker in phases for marker in _PROCESS_PHASE_MARKERS):
+            return report.concise_feedback
+        if any(marker in descriptions for marker in _PROCESS_TEXT_MARKERS):
+            return report.concise_feedback
+        return None
+
+    @staticmethod
+    def _repair_route(report: VerificationReport) -> tuple[str, str]:
+        semantic_failure = " ".join(
+            [
+                *(item.phase for item in report.issues),
+                *(item.description for item in report.issues),
+            ]
+        ).casefold()
+        if any(
+            marker in semantic_failure
+            for marker in (
+                "admissib",
+                "boundary",
+                "degener",
+                "lower bound",
+                "lower-bound",
+                "upper bound",
+                "upper-bound",
+                "realizer",
+            )
+        ):
+            return (
+                "realizer_repair",
+                "repair_candidate_under_failed_constraint",
+            )
+        if any(
+            marker in semantic_failure
+            for marker in (
+                "first occurrence",
+                "first-occurrence",
+                "induct",
+                "recurrence",
+                "repeated feature",
+                "structural recurrence",
+            )
+        ):
+            return (
+                "induction_selector",
+                "select_well_founded_measure_and_split_base_case",
+            )
+        if any(
+            marker in semantic_failure
+            for marker in (
+                "implication",
+                "logical gap",
+                "logical_gap",
+                "missing bridge",
+            )
+        ):
+            return (
+                "minimal_bridge",
+                "materialize_minimal_implication_bridge",
+            )
+        if any(
+            marker in semantic_failure
+            for marker in (
+                "quantifier",
+                "scope",
+                "target mismatch",
+            )
+        ):
+            return (
+                "scope_goal_rewrite",
+                "rewrite_scope_or_rebind_goal",
+            )
+        return (
+            "bounded_local_repair",
+            "repair_first_failed_mathematical_step",
         )
 
     async def extract_ambiguous(

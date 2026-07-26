@@ -10,10 +10,13 @@ from ..config import SystemConfig
 from ..schemas import (
     BrokerDecision,
     ClaimStatus,
+    DeliveryState,
     EvidenceType,
     MemoryTier,
     MessageEnvelope,
+    MessagePriority,
     MessageReceipt,
+    MessageType,
     ReceiptStatus,
     stable_hash,
 )
@@ -63,6 +66,8 @@ class MessageBroker:
         self._isolation_pending: dict[str, list[str]] = defaultdict(list)
         self._round_route_counts: dict[str, int] = defaultdict(int)
         self._round_global_counts: dict[int, int] = defaultdict(int)
+        self._round_route_priority_counts: dict[str, int] = defaultdict(int)
+        self._round_global_priority_counts: dict[str, int] = defaultdict(int)
         self._proof_control_message_gate: (
             Callable[[MessageEnvelope, int], tuple[bool, str | None]] | None
         ) = None
@@ -98,6 +103,162 @@ class MessageBroker:
     ) -> dict[str, Any] | None:
         delivery = self._deliveries.get(delivery_key(message_id, target_route_id))
         return dict(delivery) if delivery is not None else None
+
+    def receipt_record(
+        self,
+        message_id: str,
+        target_route_id: str,
+    ) -> MessageReceipt | None:
+        return self._receipts.get(delivery_key(message_id, target_route_id))
+
+    def deliveries_requiring_route_update(self) -> list[dict[str, Any]]:
+        high_value = {
+            MessagePriority.CRITICAL.value,
+            MessagePriority.HIGH.value,
+        }
+        return sorted(
+            (
+                dict(delivery)
+                for delivery in self._deliveries.values()
+                if delivery.get("status") == "pending"
+                and delivery.get("priority") in high_value
+                and int(delivery.get("processing_opportunities", 0)) == 0
+                and not bool(delivery.get("prompt_consumed", False))
+                and delivery.get("delivery_state", DeliveryState.QUEUED.value)
+                == DeliveryState.QUEUED.value
+            ),
+            key=lambda item: (
+                self._priority_rank(str(item.get("priority", "low"))),
+                int(item.get("delivered_round", 0)),
+                str(item.get("delivery_key", "")),
+            ),
+        )
+
+    def schedule_route_update(
+        self,
+        message_id: str,
+        target_route_id: str,
+        *,
+        action_id: str,
+    ) -> dict[str, Any]:
+        key = delivery_key(message_id, target_route_id)
+        delivery = self._deliveries.get(key)
+        if delivery is None:
+            raise ValueError("route update does not correspond to a delivery")
+        if delivery["status"] != "pending":
+            raise ValueError("only a pending delivery can schedule a route update")
+        if int(delivery.get("processing_opportunities", 0)) != 0:
+            raise ValueError("delivery already had a natural processing opportunity")
+        existing_action = delivery.get("route_update_action_id")
+        if existing_action not in {None, action_id}:
+            raise ValueError("delivery already belongs to another route update")
+        delivery["route_update_action_id"] = action_id
+        delivery["delivery_state"] = DeliveryState.SCHEDULED.value
+        self._emit_delivery_event(
+            "message_route_update_scheduled",
+            {
+                "message_id": message_id,
+                "target_route_id": target_route_id,
+                "action_id": action_id,
+            },
+        )
+        return dict(delivery)
+
+    def present_scheduled_route_update(
+        self,
+        message_id: str,
+        target_route_id: str,
+        *,
+        action_id: str,
+        current_round: int,
+    ) -> MessageEnvelope:
+        self.route_registry.get(target_route_id)
+        key = delivery_key(message_id, target_route_id)
+        delivery = self._deliveries.get(key)
+        if delivery is None:
+            raise ValueError("route update does not correspond to a delivery")
+        if delivery.get("route_update_action_id") != action_id:
+            raise ValueError("route update action does not own this delivery")
+        if (
+            delivery["status"] == "pending"
+            and delivery["prompt_consumed"]
+            and delivery.get("delivery_state") == DeliveryState.PRESENTED.value
+        ):
+            return self._messages[message_id]
+        if delivery["status"] != "pending" or delivery["prompt_consumed"]:
+            raise ValueError("route update delivery is no longer pending")
+        if delivery.get("delivery_state") != DeliveryState.SCHEDULED.value:
+            raise ValueError("delivery is not scheduled for a route update")
+        self.expire(current_round)
+        if delivery["status"] != "pending":
+            raise ValueError("route update delivery expired before presentation")
+        delivery["processing_opportunities"] = (
+            int(delivery.get("processing_opportunities", 0)) + 1
+        )
+        delivery["prompt_consumed"] = True
+        delivery["delivery_state"] = DeliveryState.PRESENTED.value
+        message = self._messages[message_id]
+        self._emit_delivery_event(
+            "message_route_update_presented",
+            {
+                "message_id": message_id,
+                "source_route_id": message.source_route_id,
+                "target_route_id": target_route_id,
+                "message_type": message.message_type.value,
+                "memory_tier": message.memory_tier.value,
+                "delivered_round": delivery["delivered_round"],
+                "presented_round": current_round,
+                "action_id": action_id,
+            },
+        )
+        return message
+
+    @staticmethod
+    def _priority_rank(priority: str) -> int:
+        return {
+            MessagePriority.CRITICAL.value: 0,
+            MessagePriority.HIGH.value: 1,
+            MessagePriority.NORMAL.value: 2,
+            MessagePriority.LOW.value: 3,
+        }.get(priority, 3)
+
+    def message_priority(self, message: MessageEnvelope) -> MessagePriority:
+        if (
+            message.evidence_type == EvidenceType.COUNTEREXAMPLE
+            or message.message_type
+            in {
+                MessageType.COUNTEREXAMPLE,
+                MessageType.CONTRADICTION_NOTICE,
+            }
+        ):
+            return MessagePriority.CRITICAL
+        if (
+            message.memory_tier == MemoryTier.FACT
+            and message.verification_status == ClaimStatus.VERIFIED
+        ):
+            return MessagePriority.HIGH
+        high_centrality = False
+        for dependency_id in message.dependencies:
+            try:
+                obligation = self.proof_graph.get_obligation(dependency_id)
+            except KeyError:
+                continue
+            if obligation.centrality >= 0.7:
+                high_centrality = True
+                break
+        if high_centrality and message.message_type in {
+            MessageType.BRIDGE_LEMMA_REQUEST,
+            MessageType.PROOF_OBLIGATION,
+        }:
+            return MessagePriority.HIGH
+        if message.message_type in {
+            MessageType.PROOF_OBLIGATION,
+            MessageType.REPAIR_REQUEST,
+            MessageType.BRIDGE_LEMMA_REQUEST,
+            MessageType.STRATEGY_REWRITE_REQUEST,
+        }:
+            return MessagePriority.NORMAL
+        return MessagePriority.LOW
 
     def contains(
         self, message: MessageEnvelope, *, current_round: int | None = None
@@ -187,6 +348,58 @@ class MessageBroker:
                 stage="message_broker",
                 metrics=metrics,
             )
+
+    def _priority_slot_available(
+        self,
+        message: MessageEnvelope,
+        target_route_id: str,
+        current_round: int,
+    ) -> tuple[bool, str]:
+        priority = self.message_priority(message)
+        route_key = f"{current_round}:{target_route_id}"
+        route_limit = self.config.topology.cross_route.max_messages_per_route_per_round
+
+        def reserved_slots(
+            counts: dict[str, int],
+            *,
+            key_prefix: str,
+            limit: int,
+        ) -> int:
+            if priority in {MessagePriority.CRITICAL, MessagePriority.HIGH}:
+                return 0
+            high_value_missing = (
+                counts[f"{key_prefix}:{MessagePriority.CRITICAL.value}"]
+                + counts[f"{key_prefix}:{MessagePriority.HIGH.value}"]
+                == 0
+            )
+            normal_missing = counts[f"{key_prefix}:{MessagePriority.NORMAL.value}"] == 0
+            requested = int(high_value_missing)
+            if priority == MessagePriority.LOW:
+                requested += int(normal_missing)
+            if requested == 0 or limit <= 0:
+                return 0
+            return min(requested, max(1, limit - 1))
+
+        route_reserves = reserved_slots(
+            self._round_route_priority_counts,
+            key_prefix=route_key,
+            limit=route_limit,
+        )
+        if self._round_route_counts[route_key] >= max(0, route_limit - route_reserves):
+            return False, f"{priority.value} priority slot unavailable"
+
+        global_limit = self.config.topology.cross_route.max_global_messages_per_round
+        global_reserves = reserved_slots(
+            self._round_global_priority_counts,
+            key_prefix=str(current_round),
+            limit=global_limit,
+        )
+        if self._round_global_counts[current_round] >= max(
+            0,
+            global_limit - global_reserves,
+        ):
+            return False, f"global {priority.value} priority slot unavailable"
+        return True, ""
 
     def publish(
         self,
@@ -332,18 +545,13 @@ class MessageBroker:
             if len(selected) >= max_neighbors:
                 rejected[target] = "neighbor cap reached"
                 continue
-            route_count_key = f"{current_round}:{target}"
-            if (
-                self._round_route_counts[route_count_key]
-                >= cross.max_messages_per_route_per_round
-            ):
-                rejected[target] = "per-route round message cap reached"
-                continue
-            if (
-                self._round_global_counts[current_round]
-                >= cross.max_global_messages_per_round
-            ):
-                rejected[target] = "global round message cap reached"
+            slot_available, slot_reason = self._priority_slot_available(
+                message,
+                target,
+                current_round,
+            )
+            if not slot_available:
+                rejected[target] = slot_reason
                 continue
             selected.append(target)
 
@@ -397,6 +605,7 @@ class MessageBroker:
         key = delivery_key(message.message_id, target_route_id)
         if key in self._deliveries:
             return
+        priority = self.message_priority(message)
         self._deliveries[key] = {
             "delivery_key": key,
             "message_id": message.message_id,
@@ -405,6 +614,8 @@ class MessageBroker:
             "prompt_consumed": False,
             "acknowledged": False,
             "status": "pending",
+            "delivery_state": DeliveryState.QUEUED.value,
+            "priority": priority.value,
             "receipt_token": secrets.token_urlsafe(24),
             "processing_opportunities": 0,
         }
@@ -414,24 +625,24 @@ class MessageBroker:
         count_key = f"{current_round}:{target_route_id}"
         self._round_route_counts[count_key] += 1
         self._round_global_counts[current_round] += 1
+        self._round_route_priority_counts[f"{count_key}:{priority.value}"] += 1
+        self._round_global_priority_counts[f"{current_round}:{priority.value}"] += 1
 
     def _release_isolation(self, current_round: int) -> None:
         if current_round < self.config.topology.cross_route.initial_isolation_rounds:
             return
-        cross = self.config.topology.cross_route
         for message_id, targets in list(self._isolation_pending.items()):
             message = self._messages.get(message_id)
             if message is None:
                 continue
             deferred: list[str] = []
             for target in targets:
-                route_key = f"{current_round}:{target}"
-                if (
-                    self._round_route_counts[route_key]
-                    >= cross.max_messages_per_route_per_round
-                    or self._round_global_counts[current_round]
-                    >= cross.max_global_messages_per_round
-                ):
+                slot_available, _reason = self._priority_slot_available(
+                    message,
+                    target,
+                    current_round,
+                )
+                if not slot_available:
                     deferred.append(target)
                     continue
                 self._enqueue(message, target, current_round)
@@ -449,12 +660,6 @@ class MessageBroker:
     ) -> list[MessageEnvelope]:
         self.route_registry.get(route_id)
         self._release_isolation(current_round)
-        for key in self._route_queues.get(route_id, []):
-            delivery = self._deliveries[key]
-            if delivery["status"] == "pending":
-                delivery["processing_opportunities"] = (
-                    int(delivery.get("processing_opportunities", 0)) + 1
-                )
         self.expire(current_round)
         limit = max_messages
         if limit is None:
@@ -463,10 +668,7 @@ class MessageBroker:
         queue = sorted(
             self._route_queues.get(route_id, []),
             key=lambda key: (
-                0
-                if self._messages[self._deliveries[key]["message_id"]].evidence_type
-                == EvidenceType.COUNTEREXAMPLE
-                else 1,
+                self._priority_rank(str(self._deliveries[key].get("priority", "low"))),
                 self._deliveries[key]["delivered_round"],
                 key,
             ),
@@ -477,7 +679,11 @@ class MessageBroker:
                 continue
             message = self._messages[delivery["message_id"]]
             result.append(message)
+            delivery["processing_opportunities"] = (
+                int(delivery.get("processing_opportunities", 0)) + 1
+            )
             delivery["prompt_consumed"] = True
+            delivery["delivery_state"] = DeliveryState.PRESENTED.value
             self._emit_delivery_event(
                 "message_delivered",
                 {
@@ -535,6 +741,7 @@ class MessageBroker:
             )
         delivery["acknowledged"] = True
         delivery["status"] = receipt.status.value
+        delivery["delivery_state"] = DeliveryState.ACKNOWLEDGED.value
         self._receipts[key] = receipt
         self._emit_delivery_event("message_acknowledged", receipt)
 
@@ -600,6 +807,9 @@ class MessageBroker:
             "score": score,
         }
         self._utility_records[key] = record
+        delivery = self._deliveries.get(key)
+        if delivery is not None:
+            delivery["delivery_state"] = DeliveryState.USED.value
         self._emit_delivery_event("message_used", record)
         return True
 
@@ -675,8 +885,18 @@ class MessageBroker:
             if delivery["status"] != "pending":
                 continue
             message = self._messages[delivery["message_id"]]
-            if int(delivery.get("processing_opportunities", 0)) > message.ttl_rounds:
+            opportunities = int(delivery.get("processing_opportunities", 0))
+            no_opportunity_expired = (
+                opportunities == 0
+                and current_round - int(delivery.get("delivered_round", current_round))
+                > message.ttl_rounds
+            )
+            if no_opportunity_expired or opportunities > message.ttl_rounds:
                 delivery["status"] = ReceiptStatus.EXPIRED.value
+                if no_opportunity_expired:
+                    delivery["delivery_state"] = (
+                        DeliveryState.EXPIRED_WITHOUT_OPPORTUNITY.value
+                    )
                 expired.append(key)
                 self._emit_delivery_event(
                     "message_expired",
@@ -684,9 +904,8 @@ class MessageBroker:
                         "message_id": message.message_id,
                         "target_route_id": delivery["target_route_id"],
                         "current_round": current_round,
-                        "processing_opportunities": delivery.get(
-                            "processing_opportunities", 0
-                        ),
+                        "processing_opportunities": opportunities,
+                        "delivery_state": delivery.get("delivery_state"),
                     },
                 )
         return expired
@@ -713,6 +932,8 @@ class MessageBroker:
             "isolation_pending": dict(self._isolation_pending),
             "round_route_counts": dict(self._round_route_counts),
             "round_global_counts": dict(self._round_global_counts),
+            "round_route_priority_counts": dict(self._round_route_priority_counts),
+            "round_global_priority_counts": dict(self._round_global_priority_counts),
         }
 
     @classmethod
@@ -749,6 +970,23 @@ class MessageBroker:
             str(key): dict(value)
             for key, value in dict(state.get("deliveries", {})).items()
         }
+        for delivery in broker._deliveries.values():
+            message = broker._messages.get(str(delivery.get("message_id", "")))
+            if message is not None:
+                delivery.setdefault(
+                    "priority",
+                    broker.message_priority(message).value,
+                )
+            if "delivery_state" not in delivery:
+                key = str(delivery.get("delivery_key", ""))
+                if key in state.get("utility_records", {}):
+                    delivery["delivery_state"] = DeliveryState.USED.value
+                elif bool(delivery.get("acknowledged", False)):
+                    delivery["delivery_state"] = DeliveryState.ACKNOWLEDGED.value
+                elif bool(delivery.get("prompt_consumed", False)):
+                    delivery["delivery_state"] = DeliveryState.PRESENTED.value
+                else:
+                    delivery["delivery_state"] = DeliveryState.QUEUED.value
         broker._route_queues = defaultdict(
             list,
             {
@@ -789,4 +1027,33 @@ class MessageBroker:
                 for key, value in dict(state.get("round_global_counts", {})).items()
             },
         )
+        broker._round_route_priority_counts = defaultdict(
+            int,
+            {
+                str(key): int(value)
+                for key, value in dict(
+                    state.get("round_route_priority_counts", {})
+                ).items()
+            },
+        )
+        broker._round_global_priority_counts = defaultdict(
+            int,
+            {
+                str(key): int(value)
+                for key, value in dict(
+                    state.get("round_global_priority_counts", {})
+                ).items()
+            },
+        )
+        if not state.get("round_route_priority_counts"):
+            for delivery in broker._deliveries.values():
+                priority = str(delivery.get("priority", MessagePriority.LOW.value))
+                route_key = (
+                    f"{int(delivery.get('delivered_round', 0))}:"
+                    f"{delivery.get('target_route_id', '')}"
+                )
+                broker._round_route_priority_counts[f"{route_key}:{priority}"] += 1
+                broker._round_global_priority_counts[
+                    f"{int(delivery.get('delivered_round', 0))}:{priority}"
+                ] += 1
         return broker

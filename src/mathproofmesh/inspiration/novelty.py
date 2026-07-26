@@ -4,7 +4,12 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from ..config import InspirationConfig
-from ..schemas import InspirationProposal, InspirationReview, NoveltySignature
+from ..schemas import (
+    InspirationProposal,
+    InspirationReview,
+    MechanismChainSignature,
+    NoveltySignature,
+)
 from .ontology import MechanismNormalizer
 
 
@@ -25,6 +30,7 @@ class NoveltyAssessment:
     duplicate: bool
     nearest_hash: str | None
     dimension_similarities: dict[str, float]
+    mechanism_chain_similarity: float = 0.0
 
 
 class NoveltyGate:
@@ -105,12 +111,33 @@ class NoveltyGate:
     ) -> NoveltyAssessment:
         nearest_hash: str | None = None
         maximum = 0.0
+        maximum_chain_similarity = 0.0
+        duplicate = False
         nearest_dimensions: dict[str, float] = {}
         for other in existing:
             normalized_candidate = self.normalizer.normalize_signature(candidate)
             normalized_other = self.normalizer.normalize_signature(other)
             similarity, dimensions = self.similarity(
                 normalized_candidate, normalized_other
+            )
+            chain_similarity = self._mechanism_chain_similarity(candidate, other)
+            maximum_chain_similarity = max(
+                maximum_chain_similarity,
+                chain_similarity,
+            )
+            structurally_comparable = (
+                self._shared_structural_dimensions(
+                    normalized_candidate,
+                    normalized_other,
+                )
+                >= 2
+            )
+            duplicate = duplicate or (
+                chain_similarity >= self.config.mechanism_duplicate_threshold
+                or (
+                    structurally_comparable
+                    and similarity >= self.config.mechanism_duplicate_threshold
+                )
             )
             if similarity >= maximum:
                 maximum = similarity
@@ -120,9 +147,50 @@ class NoveltyGate:
         return NoveltyAssessment(
             novelty_score=max(0.0, min(1.0, novelty)),
             maximum_similarity=maximum,
-            duplicate=maximum >= self.config.mechanism_duplicate_threshold,
+            duplicate=duplicate,
             nearest_hash=nearest_hash,
             dimension_similarities=nearest_dimensions,
+            mechanism_chain_similarity=maximum_chain_similarity,
+        )
+
+    @staticmethod
+    def _mechanism_chain_similarity(
+        left: NoveltySignature,
+        right: NoveltySignature,
+    ) -> float:
+        left_chain = MechanismChainSignature.from_novelty_signature(left)
+        right_chain = MechanismChainSignature.from_novelty_signature(right)
+        if not left_chain.complete or not right_chain.complete:
+            return 0.0
+        left_payload = left_chain.normalized_payload()
+        right_payload = right_chain.normalized_payload()
+        return (
+            sum(
+                _jaccard(left_payload[stage], right_payload[stage])
+                for stage in (
+                    "representation",
+                    "transformations",
+                    "bridge_pattern",
+                    "terminal_argument",
+                )
+            )
+            / 4.0
+        )
+
+    @staticmethod
+    def _shared_structural_dimensions(
+        left: NoveltySignature,
+        right: NoveltySignature,
+    ) -> int:
+        return sum(
+            bool(getattr(left, field_name)) and bool(getattr(right, field_name))
+            for field_name in (
+                "representation_tags",
+                "mechanism_tags",
+                "core_objects",
+                "key_transformations",
+                "proof_principles",
+            )
         )
 
 

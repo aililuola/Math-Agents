@@ -82,7 +82,7 @@ from .proof_graph.contradictions import ContradictionBroker
 from .proof_graph.matching import DuplicateRouteDetector
 from .proof_graph.store import ProofGraphStore
 from .proof_control.controller import ProofControlLayer
-from .proof_control.models import GateVerdict, ProofRole
+from .proof_control.models import ControlActionStatus, GateVerdict, ProofRole
 from .proof_identity import (
     attempt_content_fingerprint,
     canonical_obligation_statement,
@@ -787,6 +787,20 @@ class ProofMeshOrchestrator:
                     importance=ActivityImportance.MAJOR,
                     metrics={"round_index": round_index},
                 )
+                self._sync_hierarchical_artifacts(
+                    state,
+                    problem=problem,
+                    memory=memory,
+                    current_round=round_index,
+                    store=store,
+                )
+                route_update_performed = await self._run_scheduled_route_updates(
+                    state,
+                    problem=problem,
+                    current_round=round_index,
+                    runner=runner,
+                    prompts=prompts,
+                )
                 if self._has_synthesis_ready_candidate(state):
                     # A supported candidate exists; preserve calls for synthesis/final audit.
                     if allocator.should_protect_finish(
@@ -808,13 +822,6 @@ class ProofMeshOrchestrator:
                         )
                         break
 
-                self._sync_hierarchical_artifacts(
-                    state,
-                    problem=problem,
-                    memory=memory,
-                    current_round=round_index,
-                    store=store,
-                )
                 graph_signals = self._hierarchical_graph_signals(state)
                 await self._run_inspiration_round(
                     state,
@@ -920,7 +927,7 @@ class ProofMeshOrchestrator:
                         },
                     )
 
-                performed = False
+                performed = route_update_performed
                 for action in decision.actions:
                     if action.action in {ActionKind.STOP, ActionKind.SYNTHESIZE}:
                         continue
@@ -1168,6 +1175,16 @@ class ProofMeshOrchestrator:
                     memory=memory,
                     current_round=round_index,
                     store=store,
+                )
+                performed = (
+                    await self._run_scheduled_route_updates(
+                        state,
+                        problem=problem,
+                        current_round=round_index,
+                        runner=runner,
+                        prompts=prompts,
+                    )
+                    or performed
                 )
                 hard_stagnation_stop = self._apply_global_progress_gate(
                     state,
@@ -2639,6 +2656,11 @@ class ProofMeshOrchestrator:
         inspiration_state = payload.get("inspiration_engine")
         if isinstance(inspiration_state, dict):
             state.inspiration_engine.restore_state(inspiration_state)
+        state.inspiration_engine.proof_control_context_provider = (
+            state.proof_control.inspiration_context
+            if state.proof_control is not None
+            else None
+        )
 
         if checkpoint_payload is not None and not all(
             isinstance(payload.get(key), dict)
@@ -3169,6 +3191,163 @@ class ProofMeshOrchestrator:
                 strategies=state.strategies,
                 current_round=current_round,
             )
+
+    async def _run_scheduled_route_updates(
+        self,
+        state: SolveState,
+        *,
+        problem: ProblemContract,
+        current_round: int,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+    ) -> bool:
+        control = state.proof_control
+        broker = state.message_broker
+        registry = state.route_registry
+        if control is None or not control.active or broker is None or registry is None:
+            return False
+
+        performed = False
+        for task in control.pending_route_update_tasks():
+            try:
+                route = registry.get(task.target_route_id)
+            except KeyError:
+                control.fail_route_update_task(
+                    task.task_id,
+                    reason="target route is no longer registered",
+                )
+                continue
+            agents: list[AgentRuntime] = []
+            for member in route.members:
+                if member.role != RouteRole.PROVER:
+                    continue
+                try:
+                    agent = runner.pool.get(member.agent_id)
+                except KeyError:
+                    continue
+                if not agent.in_cooldown:
+                    agents.append(agent)
+            if not agents:
+                control.fail_route_update_task(
+                    task.task_id,
+                    reason="target route has no available prover",
+                )
+                continue
+            agent = max(agents, key=lambda item: (item.trust_score, item.id))
+
+            receipt_ids: list[str] = []
+            task_failed = False
+            for message_id in task.message_ids:
+                delivery = broker.delivery_record(
+                    message_id,
+                    task.target_route_id,
+                )
+                if delivery is None:
+                    control.fail_route_update_task(
+                        task.task_id,
+                        reason=f"delivery {message_id} is missing",
+                    )
+                    task_failed = True
+                    break
+                existing_receipt = broker.receipt_record(
+                    message_id,
+                    task.target_route_id,
+                )
+                if existing_receipt is not None:
+                    receipt_ids.append(existing_receipt.receipt_id)
+                    continue
+                if runner.ledger.remaining_calls <= 0:
+                    control.fail_route_update_task(
+                        task.task_id,
+                        reason="no model call remains for the scheduled route update",
+                    )
+                    task_failed = True
+                    break
+                try:
+                    message = broker.present_scheduled_route_update(
+                        message_id,
+                        task.target_route_id,
+                        action_id=task.action_id,
+                        current_round=current_round,
+                    )
+                except ValueError as exc:
+                    control.fail_route_update_task(
+                        task.task_id,
+                        reason=str(exc),
+                    )
+                    task_failed = True
+                    break
+                control.mark_route_update_presented(task.task_id)
+                requirement = {
+                    "message_id": message.message_id,
+                    "target_route_id": task.target_route_id,
+                    "delivered_round": int(
+                        delivery.get("delivered_round", current_round)
+                    ),
+                    "receipt_token": str(delivery.get("receipt_token", "")),
+                    "required_fields": [
+                        "receipt_token",
+                        "status",
+                        "used",
+                        "referenced_in_step_ids",
+                        "claimed_closed_obligation_ids",
+                        "reason",
+                    ],
+                }
+                try:
+                    result = await self._safe_call(
+                        runner,
+                        "route_prover",
+                        prompts.acknowledge_message(
+                            problem=problem,
+                            route_id=task.target_route_id,
+                            message=message,
+                            receipt_requirement=requirement,
+                            task=(
+                                "Read this high-value cross-route message now. "
+                                "Return a semantic receipt and do not claim "
+                                "mathematical use without a verified downstream step."
+                            ),
+                        ),
+                        fixed_agent=agent,
+                        budget_bucket="depth",
+                    )
+                except (BudgetExhaustedError, ProviderCircuitOpenError) as exc:
+                    control.fail_route_update_task(
+                        task.task_id,
+                        reason=f"{type(exc).__name__}: {exc}",
+                    )
+                    task_failed = True
+                    break
+                if result is None:
+                    control.fail_route_update_task(
+                        task.task_id,
+                        reason="route prover did not return a valid semantic receipt",
+                    )
+                    task_failed = True
+                    break
+                acknowledged = acknowledge_route_messages(
+                    broker,
+                    [message],
+                    [result.value],
+                    route_id=task.target_route_id,
+                    current_round=current_round,
+                )
+                receipt_ids.extend(item.receipt_id for item in acknowledged)
+
+            if task_failed:
+                continue
+            used = any(
+                broker.utility_record(message_id, task.target_route_id) is not None
+                for message_id in task.message_ids
+            )
+            control.complete_route_update_task(
+                task.task_id,
+                receipt_ids=receipt_ids,
+                used=used,
+            )
+            performed = True
+        return performed
 
     def _materialize_post_failure_bottleneck(
         self,
@@ -4241,6 +4420,7 @@ class ProofMeshOrchestrator:
                 precomputed,
                 counterexamples,
                 hidden_assumptions,
+                deferred_proposal_ids,
             ) = await self._review_inspiration_proposals(
                 engine,
                 proposals,
@@ -4248,6 +4428,7 @@ class ProofMeshOrchestrator:
                 problem=problem,
                 runner=runner,
                 prompts=prompts,
+                proof_control=state.proof_control,
             )
         except Exception:
             self._finish_inspiration_reservations(engine, tasks, interrupted=True)
@@ -4262,14 +4443,19 @@ class ProofMeshOrchestrator:
                 phase="proposal_review_pipeline",
             )
         try:
+            reviewed_proposals = [
+                proposal
+                for proposal in proposals
+                if proposal.proposal_id not in deferred_proposal_ids
+            ]
             reviews = await engine.review(
-                proposals,
+                reviewed_proposals,
                 precomputed_reviews=precomputed,
                 immediate_counterexamples=counterexamples,
                 hidden_assumptions=hidden_assumptions,
             )
             compositions = engine.queue_compositions(
-                proposals,
+                reviewed_proposals,
                 reviews,
                 snapshot,
             )
@@ -4381,6 +4567,7 @@ class ProofMeshOrchestrator:
                 "triggers": triggers,
                 "tasks": tasks,
                 "proposals": proposals,
+                "deferred_proposal_ids": sorted(deferred_proposal_ids),
                 "reviews": reviews,
                 "compositions_queued": compositions,
                 "materializations": materializations,
@@ -4763,14 +4950,37 @@ class ProofMeshOrchestrator:
         problem: ProblemContract,
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
+        proof_control: ProofControlLayer | None,
     ) -> tuple[
         dict[str, InspirationReview],
         dict[str, list[str]],
         dict[str, list[str]],
+        set[str],
     ]:
         precomputed: dict[str, InspirationReview] = {}
         counterexamples: dict[str, list[str]] = {}
         hidden: dict[str, list[str]] = {}
+        deferred: set[str] = set()
+
+        def defer_review(proposal: InspirationProposal, reason: str) -> None:
+            if proof_control is None or not proof_control.active:
+                raise RuntimeError(
+                    "active inspiration review deferral requires active proof control"
+                )
+            action = proof_control.defer_inspiration_review(
+                proposal_id=proposal.proposal_id,
+                task_id=proposal.task_id,
+                reason=reason,
+                current_round=snapshot.round_index,
+            )
+            if action.status != ControlActionStatus.EXECUTED:
+                raise RuntimeError(
+                    "inspiration review deferral was not materialized: "
+                    f"{action.status.value}"
+                )
+            deferred.add(proposal.proposal_id)
+            engine.typed_memory.add_insight(proposal)
+
         for proposal in proposals:
             eligible = [
                 agent
@@ -4779,11 +4989,37 @@ class ProofMeshOrchestrator:
                 and agent.supports_role("inspiration_referee")
                 and not agent.in_cooldown
             ]
+            review_budget_available = (
+                runner.ledger.remaining_calls > snapshot.finalization_reserve_calls
+            )
+            if engine.inspiration_config.mode != "active":
+                local = engine.referee.review(
+                    proposal,
+                    reviewer_agent_id="local_deterministic_referee",
+                    open_obligation_ids=snapshot.open_obligation_ids,
+                    existing_signatures=snapshot.route_signatures,
+                )
+                precomputed[proposal.proposal_id] = (
+                    local.model_copy(update={"recommendation": "store_insight"})
+                    if engine.inspiration_config.require_inspiration_referee
+                    else local
+                )
+                continue
             if (
-                engine.inspiration_config.mode != "active"
-                or not eligible
-                or runner.ledger.remaining_calls <= snapshot.finalization_reserve_calls
+                proof_control is not None
+                and proof_control.active
+                and (not eligible or not review_budget_available)
             ):
+                defer_review(
+                    proposal,
+                    (
+                        "no independent inspiration referee is available"
+                        if not eligible
+                        else "inspiration referee budget is exhausted"
+                    ),
+                )
+                continue
+            if not eligible or not review_budget_available:
                 local = engine.referee.review(
                     proposal,
                     reviewer_agent_id="local_deterministic_referee",
@@ -4817,18 +5053,81 @@ class ProofMeshOrchestrator:
                 budget_reservation_id=engine.reservation_id_for_task(proposal.task_id),
             )
             if result is None:
-                local = engine.referee.review(
-                    proposal,
-                    reviewer_agent_id="local_deterministic_referee",
-                    open_obligation_ids=snapshot.open_obligation_ids,
-                    existing_signatures=snapshot.route_signatures,
-                )
-                precomputed[proposal.proposal_id] = (
-                    local.model_copy(update={"recommendation": "store_insight"})
-                    if engine.inspiration_config.require_inspiration_referee
-                    else local
-                )
-                continue
+                if proof_control is not None and proof_control.active:
+                    defer_review(
+                        proposal,
+                        "inspiration referee call failed or returned no review",
+                    )
+                    reassignment_candidates = [
+                        agent
+                        for agent in eligible
+                        if agent.id != reviewer.id and not agent.in_cooldown
+                    ]
+                    if (
+                        reassignment_candidates
+                        and runner.ledger.remaining_calls
+                        > snapshot.finalization_reserve_calls
+                    ):
+                        reassigned = max(
+                            reassignment_candidates,
+                            key=lambda item: (item.trust_score, item.id),
+                        )
+                        action = proof_control.reassign_inspiration_review(
+                            proposal_id=proposal.proposal_id,
+                            reviewer_agent_id=reassigned.id,
+                            current_round=snapshot.round_index,
+                        )
+                        if action.status != ControlActionStatus.EXECUTED:
+                            raise RuntimeError(
+                                "inspiration review reassignment was not "
+                                f"materialized: {action.status.value}"
+                            )
+                        result = await self._safe_call(
+                            runner,
+                            "inspiration_referee",
+                            prompts.inspiration_referee(
+                                problem=problem,
+                                proposal=proposal.model_dump(mode="json"),
+                                open_obligation_ids=snapshot.open_obligation_ids,
+                                existing_novelty_signatures=[
+                                    item.model_dump(mode="json")
+                                    for item in snapshot.route_signatures
+                                ],
+                            ),
+                            fixed_agent=reassigned,
+                            budget_bucket="verification",
+                            budget_reservation_id=engine.reservation_id_for_task(
+                                proposal.task_id
+                            ),
+                        )
+                        if result is not None:
+                            reviewer = reassigned
+                            deferred.discard(proposal.proposal_id)
+                            proof_control.complete_inspiration_review(
+                                proposal_id=proposal.proposal_id,
+                                reviewer_agent_id=reviewer.id,
+                            )
+                        else:
+                            defer_review(
+                                proposal,
+                                "reassigned inspiration referee call failed or "
+                                "returned no review",
+                            )
+                    if result is None:
+                        continue
+                else:
+                    local = engine.referee.review(
+                        proposal,
+                        reviewer_agent_id="local_deterministic_referee",
+                        open_obligation_ids=snapshot.open_obligation_ids,
+                        existing_signatures=snapshot.route_signatures,
+                    )
+                    precomputed[proposal.proposal_id] = (
+                        local.model_copy(update={"recommendation": "store_insight"})
+                        if engine.inspiration_config.require_inspiration_referee
+                        else local
+                    )
+                    continue
             review = result.value
             review.proposal_id = proposal.proposal_id
             review.reviewer_agent_id = reviewer.id
@@ -4900,7 +5199,7 @@ class ProofMeshOrchestrator:
                     passed=True,
                     reason="quick skeptic found no blocking counterexample",
                 )
-        return precomputed, counterexamples, hidden
+        return precomputed, counterexamples, hidden, deferred
 
     async def _execute_hierarchical_action(
         self,

@@ -25,6 +25,7 @@ from .models import (
     InductionBlueprintNode,
     InductionMeasureProposal,
     InferenceRiskRecord,
+    InspirationReviewDeferral,
     MinimalBridgeProposal,
     MessageUsageReceipt,
     MessageUtilityContract,
@@ -32,10 +33,12 @@ from .models import (
     NegativePatternRecord,
     ObligationDomainRecord,
     PremiseClosureRecord,
+    ProcessFailureDiagnostic,
     ProofRole,
     RealizerCandidate,
     RealizerRepairTask,
     RouteAdmissionRecord,
+    RouteUpdateTask,
     RouteTargetBinding,
     ScopeSignature,
     SynthesisReadinessRecord,
@@ -78,6 +81,9 @@ class ProofControlState:
         self.critical_assumptions: dict[str, CriticalAssumption] = {}
         self.assumption_families: dict[str, AssumptionFamily] = {}
         self.assumption_challenger_tasks: dict[str, AssumptionChallengerTask] = {}
+        self.route_update_tasks: dict[str, RouteUpdateTask] = {}
+        self.inspiration_review_deferrals: dict[str, InspirationReviewDeferral] = {}
+        self.process_diagnostics: dict[str, ProcessFailureDiagnostic] = {}
         self.utility_contracts: dict[str, MessageUtilityContract] = {}
         self.usage_receipts: dict[str, MessageUsageReceipt] = {}
         self.near_misses: dict[str, NearMissRecord] = {}
@@ -136,6 +142,11 @@ class ProofControlState:
             "assumption_challenger_tasks": self._dump_models(
                 self.assumption_challenger_tasks
             ),
+            "route_update_tasks": self._dump_models(self.route_update_tasks),
+            "inspiration_review_deferrals": self._dump_models(
+                self.inspiration_review_deferrals
+            ),
+            "process_diagnostics": self._dump_models(self.process_diagnostics),
             "utility_contracts": self._dump_models(self.utility_contracts),
             "usage_receipts": self._dump_models(self.usage_receipts),
             "near_misses": self._dump_models(self.near_misses),
@@ -196,6 +207,9 @@ class ProofControlState:
             ("critical_assumptions", CriticalAssumption),
             ("assumption_families", AssumptionFamily),
             ("assumption_challenger_tasks", AssumptionChallengerTask),
+            ("route_update_tasks", RouteUpdateTask),
+            ("inspiration_review_deferrals", InspirationReviewDeferral),
+            ("process_diagnostics", ProcessFailureDiagnostic),
             ("utility_contracts", MessageUtilityContract),
             ("usage_receipts", MessageUsageReceipt),
             ("near_misses", NearMissRecord),
