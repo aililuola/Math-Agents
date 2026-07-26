@@ -26,6 +26,7 @@ from .models import (
     InductionMeasureProposal,
     InferenceRiskRecord,
     InspirationReviewDeferral,
+    MetaPivotState,
     MinimalBridgeProposal,
     MessageUsageReceipt,
     MessageUtilityContract,
@@ -84,6 +85,7 @@ class ProofControlState:
         self.route_update_tasks: dict[str, RouteUpdateTask] = {}
         self.inspiration_review_deferrals: dict[str, InspirationReviewDeferral] = {}
         self.process_diagnostics: dict[str, ProcessFailureDiagnostic] = {}
+        self.meta_pivot_state: MetaPivotState | None = None
         self.utility_contracts: dict[str, MessageUtilityContract] = {}
         self.usage_receipts: dict[str, MessageUsageReceipt] = {}
         self.near_misses: dict[str, NearMissRecord] = {}
@@ -147,6 +149,11 @@ class ProofControlState:
                 self.inspiration_review_deferrals
             ),
             "process_diagnostics": self._dump_models(self.process_diagnostics),
+            "meta_pivot_state": (
+                self.meta_pivot_state.model_dump(mode="json")
+                if self.meta_pivot_state is not None
+                else None
+            ),
             "utility_contracts": self._dump_models(self.utility_contracts),
             "usage_receipts": self._dump_models(self.usage_receipts),
             "near_misses": self._dump_models(self.near_misses),
@@ -226,6 +233,15 @@ class ProofControlState:
                     target[str(key)] = model_type.model_validate(raw_values[key])
                 except (TypeError, ValueError) as exc:
                     restored._migration_event(field_name, type(exc).__name__, str(key))
+
+        raw_meta_pivot = state.get("meta_pivot_state")
+        if raw_meta_pivot is not None:
+            try:
+                restored.meta_pivot_state = MetaPivotState.model_validate(
+                    raw_meta_pivot
+                )
+            except (TypeError, ValueError) as exc:
+                restored._migration_event("meta_pivot_state", type(exc).__name__)
 
         raw_roles = state.get("proof_roles", {})
         if isinstance(raw_roles, Mapping):

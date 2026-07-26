@@ -82,7 +82,12 @@ from .proof_graph.contradictions import ContradictionBroker
 from .proof_graph.matching import DuplicateRouteDetector
 from .proof_graph.store import ProofGraphStore
 from .proof_control.controller import ProofControlLayer
-from .proof_control.models import ControlActionStatus, GateVerdict, ProofRole
+from .proof_control.models import (
+    ControlActionStatus,
+    GateVerdict,
+    MetaPivotStatus,
+    ProofRole,
+)
 from .proof_identity import (
     attempt_content_fingerprint,
     canonical_obligation_statement,
@@ -801,6 +806,20 @@ class ProofMeshOrchestrator:
                     runner=runner,
                     prompts=prompts,
                 )
+                (
+                    pivot_attempted,
+                    pivot_performed,
+                ) = await self._execute_pending_meta_pivot(
+                    state,
+                    problem=problem,
+                    store=store,
+                    runner=runner,
+                    prompts=prompts,
+                    allocator=allocator,
+                    router=router,
+                    memory=memory,
+                    tools=tools,
+                )
                 if self._has_synthesis_ready_candidate(state):
                     # A supported candidate exists; preserve calls for synthesis/final audit.
                     if allocator.should_protect_finish(
@@ -823,18 +842,19 @@ class ProofMeshOrchestrator:
                         break
 
                 graph_signals = self._hierarchical_graph_signals(state)
-                await self._run_inspiration_round(
-                    state,
-                    problem=problem,
-                    remaining_calls=runner.ledger.remaining_calls,
-                    store=store,
-                    runner=runner,
-                    prompts=prompts,
-                    allocator=allocator,
-                    router=router,
-                    memory=memory,
-                    tools=tools,
-                )
+                if not pivot_attempted:
+                    await self._run_inspiration_round(
+                        state,
+                        problem=problem,
+                        remaining_calls=runner.ledger.remaining_calls,
+                        store=store,
+                        runner=runner,
+                        prompts=prompts,
+                        allocator=allocator,
+                        router=router,
+                        memory=memory,
+                        tools=tools,
+                    )
                 graph_signals = self._hierarchical_graph_signals(state)
                 stats = budget_manager.build_path_stats(
                     state.strategies,
@@ -927,7 +947,7 @@ class ProofMeshOrchestrator:
                         },
                     )
 
-                performed = route_update_performed
+                performed = route_update_performed or pivot_performed
                 for action in decision.actions:
                     if action.action in {ActionKind.STOP, ActionKind.SYNTHESIZE}:
                         continue
@@ -1215,7 +1235,12 @@ class ProofMeshOrchestrator:
                     importance=ActivityImportance.MAJOR,
                     metrics={"round_index": round_index, "performed": performed},
                 )
-                if hard_stagnation_stop or not performed:
+                pivot_blocks_stop = (
+                    state.proof_control is not None
+                    and state.proof_control.active
+                    and state.proof_control.meta_pivot_blocks_stagnation_stop()
+                )
+                if hard_stagnation_stop or (not performed and not pivot_blocks_stop):
                     break
 
             if (
@@ -2028,6 +2053,27 @@ class ProofMeshOrchestrator:
                 state.last_progress_signature = self._global_progress_signature(state)
             for resume_round in range(max_resume_rounds):
                 state.current_round = resume_round
+                route_update_performed = await self._run_scheduled_route_updates(
+                    state,
+                    problem=problem,
+                    current_round=resume_round,
+                    runner=runner,
+                    prompts=prompts,
+                )
+                (
+                    pivot_attempted,
+                    pivot_performed,
+                ) = await self._execute_pending_meta_pivot(
+                    state,
+                    problem=problem,
+                    store=store,
+                    runner=runner,
+                    prompts=prompts,
+                    allocator=allocator,
+                    router=router,
+                    memory=memory,
+                    tools=tools,
+                )
                 updated_attempts: list[ProofAttempt] = []
                 for strategy in state.strategies:
                     path_attempts = [
@@ -2151,18 +2197,29 @@ class ProofMeshOrchestrator:
                     current_round=resume_round,
                     store=store,
                 )
-                await self._run_inspiration_round(
-                    state,
-                    problem=problem,
-                    remaining_calls=runner.ledger.remaining_calls,
-                    store=store,
-                    runner=runner,
-                    prompts=prompts,
-                    allocator=allocator,
-                    router=router,
-                    memory=memory,
-                    tools=tools,
+                route_update_performed = (
+                    await self._run_scheduled_route_updates(
+                        state,
+                        problem=problem,
+                        current_round=resume_round,
+                        runner=runner,
+                        prompts=prompts,
+                    )
+                    or route_update_performed
                 )
+                if not pivot_attempted:
+                    await self._run_inspiration_round(
+                        state,
+                        problem=problem,
+                        remaining_calls=runner.ledger.remaining_calls,
+                        store=store,
+                        runner=runner,
+                        prompts=prompts,
+                        allocator=allocator,
+                        router=router,
+                        memory=memory,
+                        tools=tools,
+                    )
                 if state.attempts and runner.ledger.remaining_calls > 0:
                     review = await self._meta_review(
                         problem,
@@ -2189,7 +2246,17 @@ class ProofMeshOrchestrator:
                 )
                 if self._has_synthesis_ready_candidate(state):
                     break
-                if hard_stagnation_stop or not updated_attempts:
+                pivot_blocks_stop = (
+                    state.proof_control is not None
+                    and state.proof_control.active
+                    and state.proof_control.meta_pivot_blocks_stagnation_stop()
+                )
+                if hard_stagnation_stop or (
+                    not updated_attempts
+                    and not route_update_performed
+                    and not pivot_performed
+                    and not pivot_blocks_stop
+                ):
                     break
 
             if (
@@ -3889,6 +3956,17 @@ class ProofMeshOrchestrator:
         current = self._global_progress_signature(state)
         prior = state.last_progress_signature
         changed = prior is not None and current != prior
+        control = state.proof_control
+        if (
+            control is not None
+            and control.active
+            and control.state.meta_pivot_state is not None
+            and control.state.meta_pivot_state.status == MetaPivotStatus.EXECUTED
+        ):
+            control.evaluate_meta_pivot(
+                progress_signature=current,
+                current_round=round_index,
+            )
         if prior is None or changed:
             state.global_no_progress_rounds = 0
             state.global_meta_pivot_used = False
@@ -3927,11 +4005,32 @@ class ProofMeshOrchestrator:
         if not scheduler.hard_stagnation_enabled:
             return False
         if (
+            control is not None
+            and control.active
+            and control.state.meta_pivot_state is None
+            and state.global_meta_pivot_used
+        ):
+            # A v0.8 checkpoint may have only the legacy Boolean request marker.
+            # Reify that request instead of treating it as an executed pivot.
+            state.global_meta_pivot_used = False
+        if (
             state.global_no_progress_rounds
             >= scheduler.global_no_progress_rounds_before_meta_pivot
             and not state.global_meta_pivot_used
         ):
             state.global_meta_pivot_used = True
+            if control is not None and control.active:
+                pivot = control.request_meta_pivot(
+                    source_stagnation_signature=current,
+                    trigger_round=round_index,
+                    requested_mechanisms=[
+                        "meta_replan",
+                        "representation_switch",
+                        "auxiliary_construction",
+                    ],
+                )
+            else:
+                pivot = None
             if state.route_registry is not None:
                 for route in state.route_registry.active_routes(round_index):
                     route.stagnation_rounds = max(
@@ -3945,6 +4044,10 @@ class ProofMeshOrchestrator:
                     "progress_signature": current,
                     "consecutive_no_progress_rounds": (state.global_no_progress_rounds),
                     "next_action": "one inspiration/meta-replan pivot",
+                    "pivot_id": pivot.pivot_id if pivot is not None else None,
+                    "pivot_status": (
+                        pivot.status.value if pivot is not None else "legacy_requested"
+                    ),
                 },
             )
             if activity is not None:
@@ -3970,6 +4073,25 @@ class ProofMeshOrchestrator:
             < scheduler.global_no_progress_rounds_before_stop
         ):
             return False
+        if control is not None and control.active:
+            pivot = control.state.meta_pivot_state
+            if control.meta_pivot_blocks_stagnation_stop():
+                store.append_event(
+                    "global_stagnation_stop_blocked_by_meta_pivot",
+                    {
+                        "round_index": round_index,
+                        "progress_signature": current,
+                        "pivot_id": pivot.pivot_id if pivot is not None else None,
+                        "pivot_status": (
+                            pivot.status.value if pivot is not None else None
+                        ),
+                    },
+                )
+                return False
+            if not control.meta_pivot_allows_stagnation_stop(
+                progress_signature=current
+            ):
+                return False
         if state.route_registry is not None:
             for route in state.route_registry.active_routes(round_index):
                 state.route_registry.mark_stalled(
@@ -3986,6 +4108,18 @@ class ProofMeshOrchestrator:
                 "reason": (
                     "No new verified checkpoint content, admitted fact, resolved "
                     "obligation, or independently checked counterexample."
+                ),
+                "meta_pivot_status": (
+                    control.state.meta_pivot_state.status.value
+                    if control is not None
+                    and control.state.meta_pivot_state is not None
+                    else None
+                ),
+                "meta_pivot_failure_reason": (
+                    control.state.meta_pivot_state.failure_reason
+                    if control is not None
+                    and control.state.meta_pivot_state is not None
+                    else ""
                 ),
             },
         )
@@ -4273,6 +4407,155 @@ class ProofMeshOrchestrator:
                 if item.status != "closed"
             },
         )
+
+    async def _execute_pending_meta_pivot(
+        self,
+        state: SolveState,
+        *,
+        problem: ProblemContract,
+        store: ArtifactStore,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        allocator: SoftBudgetAllocator,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        tools: ToolBroker,
+    ) -> tuple[bool, bool]:
+        control = state.proof_control
+        pivot = control.state.meta_pivot_state if control is not None else None
+        if (
+            control is None
+            or not control.active
+            or pivot is None
+            or pivot.status
+            not in {
+                MetaPivotStatus.REQUESTED,
+                MetaPivotStatus.ADMITTED,
+                MetaPivotStatus.EXECUTING,
+            }
+        ):
+            return False, False
+
+        async def execute(_pivot) -> dict[str, list[str]]:
+            engine = state.inspiration_engine
+            if engine is None or not engine.enabled:
+                raise RuntimeError("active Inspiration is unavailable for meta pivot")
+            snapshot = self._inspiration_snapshot(
+                state,
+                remaining_calls=runner.ledger.remaining_calls,
+            )
+            if snapshot is None:
+                raise RuntimeError("meta pivot could not build an Inspiration snapshot")
+            if runner.ledger.remaining_calls <= snapshot.finalization_reserve_calls:
+                raise BudgetExhaustedError(
+                    "meta pivot cannot spend the protected finalization reserve"
+                )
+            route_ids_before = {
+                route.route_id
+                for route in (
+                    state.route_registry.routes
+                    if state.route_registry is not None
+                    else []
+                )
+            }
+            fact_ids_before = {
+                item.message_id
+                for item in (
+                    state.typed_memory.facts if state.typed_memory is not None else []
+                )
+            }
+            obligation_ids_before = {
+                item.obligation_id
+                for item in (
+                    state.proof_graph.obligations
+                    if state.proof_graph is not None
+                    else []
+                )
+            }
+            evidence_before = {
+                "proposals": len(engine.proposals),
+                "directives": len(engine.meta_directives),
+                "materializations": len(engine.materializations),
+            }
+            await self._run_inspiration_round(
+                state,
+                problem=problem,
+                remaining_calls=runner.ledger.remaining_calls,
+                store=store,
+                runner=runner,
+                prompts=prompts,
+                allocator=allocator,
+                router=router,
+                memory=memory,
+                tools=tools,
+            )
+            evidence_after = {
+                "proposals": len(engine.proposals),
+                "directives": len(engine.meta_directives),
+                "materializations": len(engine.materializations),
+            }
+            if evidence_after == evidence_before:
+                raise RuntimeError(
+                    "meta pivot produced no executable artifact; budget or "
+                    "an eligible agent was unavailable"
+                )
+            created_route_ids = sorted(
+                {
+                    route.route_id
+                    for route in (
+                        state.route_registry.routes
+                        if state.route_registry is not None
+                        else []
+                    )
+                }
+                - route_ids_before
+            )
+            result_fact_ids = sorted(
+                {
+                    item.message_id
+                    for item in (
+                        state.typed_memory.facts
+                        if state.typed_memory is not None
+                        else []
+                    )
+                }
+                - fact_ids_before
+            )
+            result_obligation_ids = sorted(
+                {
+                    item.obligation_id
+                    for item in (
+                        state.proof_graph.obligations
+                        if state.proof_graph is not None
+                        else []
+                    )
+                }
+                - obligation_ids_before
+            )
+            return {
+                "created_route_ids": created_route_ids,
+                "result_fact_ids": result_fact_ids,
+                "result_obligation_ids": result_obligation_ids,
+            }
+
+        result = await control.execute_pending_meta_pivot(
+            current_round=state.current_round,
+            executor=execute,
+        )
+        if result.status == MetaPivotStatus.FAILED:
+            store.append_event(
+                "meta_pivot_unexecuted",
+                {
+                    "pivot_id": result.pivot_id,
+                    "round_index": state.current_round,
+                    "failure_reason": result.failure_reason,
+                },
+            )
+            return True, False
+        return True, result.status in {
+            MetaPivotStatus.EXECUTED,
+            MetaPivotStatus.EVALUATED,
+        }
 
     async def _run_inspiration_round(
         self,

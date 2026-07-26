@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any
 
 from ..activity import ActivityStream
@@ -75,6 +75,8 @@ from .models import (
     InferenceRiskRecord,
     InferenceRiskType,
     InspirationReviewDeferral,
+    MetaPivotState,
+    MetaPivotStatus,
     MessageExpectedEffect,
     MinimalBridgeProposal,
     NegativePatternRecord,
@@ -121,6 +123,10 @@ class ProofControlLayer:
         self.message_broker = message_broker
         self.route_registry = route_registry
         self.state = state or ProofControlState()
+        self._meta_pivot_executor: (
+            Callable[[MetaPivotState], Awaitable[Mapping[str, Any]]] | None
+        ) = None
+        self._meta_pivot_execution_round = 0
         self.action_dispatcher = ControlActionDispatcher(
             problem_hash=proof_graph.problem_hash,
             actions=self.state.control_actions,
@@ -250,6 +256,11 @@ class ProofControlLayer:
             ControlActionType.REASSIGN_INSPIRATION_REVIEW,
             self._handle_reassign_inspiration_review,
             postcondition=self._inspiration_review_reassigned_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.EXECUTE_META_PIVOT,
+            self._handle_execute_meta_pivot,
+            postcondition=self._meta_pivot_postcondition,
         )
 
         self.message_broker.set_proof_control_message_gate(self._message_gate)
@@ -1658,6 +1669,182 @@ class ProofControlLayer:
             ][:8],
         }
 
+    def request_meta_pivot(
+        self,
+        *,
+        source_stagnation_signature: str,
+        trigger_round: int,
+        requested_mechanisms: Sequence[str],
+    ) -> MetaPivotState:
+        signature = source_stagnation_signature.strip()
+        mechanisms = list(
+            dict.fromkeys(
+                mechanism.strip()
+                for mechanism in requested_mechanisms
+                if mechanism.strip()
+            )
+        )
+        if not signature:
+            raise ValueError("meta pivot requires a stagnation signature")
+        if not mechanisms:
+            raise ValueError("meta pivot requires at least one mechanism")
+        existing = self.state.meta_pivot_state
+        if existing is not None and existing.source_stagnation_signature == signature:
+            return existing
+        pivot = MetaPivotState(
+            pivot_id=(
+                "meta_pivot_"
+                + stable_hash(
+                    {
+                        "problem_hash": self.proof_graph.problem_hash,
+                        "source_stagnation_signature": signature,
+                    }
+                )[:16]
+            ),
+            status=MetaPivotStatus.REQUESTED,
+            trigger_round=trigger_round,
+            source_stagnation_signature=signature,
+            requested_mechanisms=mechanisms,
+        )
+        self.state.meta_pivot_state = pivot
+        action = self.action_dispatcher.propose(
+            ControlActionType.EXECUTE_META_PIVOT,
+            source_record_ids=[pivot.pivot_id],
+            payload={
+                "pivot_id": pivot.pivot_id,
+                "source_stagnation_signature": signature,
+                "requested_mechanisms": mechanisms,
+            },
+            current_round=trigger_round,
+        )
+        pivot.action_id = action.action_id
+        self._emit(
+            "meta_pivot_requested",
+            pivot.model_dump(mode="json"),
+        )
+        self.persist()
+        return pivot
+
+    async def execute_pending_meta_pivot(
+        self,
+        *,
+        current_round: int,
+        executor: Callable[
+            [MetaPivotState],
+            Awaitable[Mapping[str, Any]],
+        ],
+    ) -> MetaPivotState:
+        pivot = self.state.meta_pivot_state
+        if pivot is None:
+            raise ValueError("no meta pivot has been requested")
+        if pivot.status in {
+            MetaPivotStatus.EVALUATED,
+            MetaPivotStatus.FAILED,
+        }:
+            return pivot
+        if pivot.action_id is None:
+            raise ValueError("meta pivot has no dispatcher action")
+        if pivot.status == MetaPivotStatus.EXECUTED:
+            action = self.state.control_actions[pivot.action_id]
+            if action.status == ControlActionStatus.EXECUTING:
+                await self.action_dispatcher.execute(
+                    pivot.action_id,
+                    current_round=current_round,
+                )
+            return pivot
+        action = self.action_dispatcher.admit(
+            pivot.action_id,
+            current_round=current_round,
+        )
+        if action.status == ControlActionStatus.ADMITTED:
+            pivot.status = MetaPivotStatus.ADMITTED
+            self._emit(
+                "meta_pivot_admitted",
+                pivot.model_dump(mode="json"),
+            )
+            self.persist()
+        elif action.status in {
+            ControlActionStatus.REJECTED,
+            ControlActionStatus.DEFERRED,
+            ControlActionStatus.FAILED,
+        }:
+            pivot.status = MetaPivotStatus.FAILED
+            pivot.failure_reason = (
+                action.failure_reason
+                or action.admission_reason
+                or "meta pivot action was not admitted"
+            )
+            self._emit(
+                "meta_pivot_failed",
+                pivot.model_dump(mode="json"),
+            )
+            self.persist()
+            return pivot
+
+        self._meta_pivot_executor = executor
+        self._meta_pivot_execution_round = current_round
+        try:
+            await self.action_dispatcher.execute(
+                pivot.action_id,
+                current_round=current_round,
+            )
+        except Exception:
+            return pivot
+        finally:
+            self._meta_pivot_executor = None
+            self._meta_pivot_execution_round = 0
+        return pivot
+
+    def evaluate_meta_pivot(
+        self,
+        *,
+        progress_signature: str,
+        current_round: int,
+    ) -> MetaPivotState:
+        pivot = self.state.meta_pivot_state
+        if pivot is None:
+            raise ValueError("no meta pivot exists")
+        if pivot.status == MetaPivotStatus.EVALUATED:
+            return pivot
+        if pivot.status != MetaPivotStatus.EXECUTED:
+            raise ValueError("meta pivot must execute before evaluation")
+        pivot.no_progress_after_pivot = (
+            progress_signature == pivot.source_stagnation_signature
+        )
+        pivot.status = MetaPivotStatus.EVALUATED
+        pivot.evaluated_round = current_round
+        self._emit(
+            "meta_pivot_evaluated",
+            pivot.model_dump(mode="json"),
+        )
+        self.persist()
+        return pivot
+
+    def meta_pivot_blocks_stagnation_stop(self) -> bool:
+        pivot = self.state.meta_pivot_state
+        return pivot is not None and pivot.status in {
+            MetaPivotStatus.REQUESTED,
+            MetaPivotStatus.ADMITTED,
+            MetaPivotStatus.EXECUTING,
+            MetaPivotStatus.EXECUTED,
+        }
+
+    def meta_pivot_allows_stagnation_stop(
+        self,
+        *,
+        progress_signature: str,
+    ) -> bool:
+        pivot = self.state.meta_pivot_state
+        if pivot is None:
+            return False
+        if pivot.status == MetaPivotStatus.FAILED:
+            return True
+        return (
+            pivot.status == MetaPivotStatus.EVALUATED
+            and pivot.no_progress_after_pivot is True
+            and pivot.source_stagnation_signature == progress_signature
+        )
+
     def export_state(self) -> dict[str, Any]:
         return self.state.export_state()
 
@@ -1818,6 +2005,11 @@ class ProofControlLayer:
                 / len(synthesis_records)
                 if synthesis_records
                 else 0.0
+            ),
+            "meta_pivot": (
+                self.state.meta_pivot_state.model_dump(mode="json")
+                if self.state.meta_pivot_state is not None
+                else None
             ),
             "core_debt_history": self.state.core_debt_history,
             "core_proof_debt_auc": {
@@ -3226,6 +3418,102 @@ class ProofControlLayer:
             and record.deferral_id in result.result_refs
         )
 
+    async def _handle_execute_meta_pivot(
+        self,
+        action: ControlActionRecord,
+    ) -> ControlActionResult:
+        pivot = self.state.meta_pivot_state
+        if (
+            pivot is None
+            or pivot.pivot_id != str(action.payload.get("pivot_id", ""))
+            or pivot.action_id != action.action_id
+        ):
+            return ControlActionResult(
+                postcondition_met=False,
+                detail="meta pivot action does not match the active pivot state",
+            )
+        if self._meta_pivot_executor is None:
+            return ControlActionResult(
+                postcondition_met=False,
+                detail="meta pivot has no execution authority",
+            )
+        pivot.status = MetaPivotStatus.EXECUTING
+        pivot.failure_reason = ""
+        self._emit(
+            "meta_pivot_executing",
+            pivot.model_dump(mode="json"),
+        )
+        self.persist()
+        try:
+            raw_result = await self._meta_pivot_executor(pivot)
+            created_route_ids = list(
+                dict.fromkeys(
+                    str(value)
+                    for value in raw_result.get("created_route_ids", [])
+                    if str(value)
+                )
+            )
+            result_fact_ids = list(
+                dict.fromkeys(
+                    str(value)
+                    for value in raw_result.get("result_fact_ids", [])
+                    if str(value)
+                )
+            )
+            result_obligation_ids = list(
+                dict.fromkeys(
+                    str(value)
+                    for value in raw_result.get("result_obligation_ids", [])
+                    if str(value)
+                )
+            )
+        except Exception as exc:
+            pivot.status = MetaPivotStatus.FAILED
+            pivot.failure_reason = f"{type(exc).__name__}: {exc}"
+            self._emit(
+                "meta_pivot_failed",
+                pivot.model_dump(mode="json"),
+            )
+            self.persist()
+            raise
+        pivot.created_route_ids = created_route_ids
+        pivot.result_fact_ids = result_fact_ids
+        pivot.result_obligation_ids = result_obligation_ids
+        pivot.status = MetaPivotStatus.EXECUTED
+        pivot.executed_round = self._meta_pivot_execution_round
+        pivot.failure_reason = ""
+        self._emit(
+            "meta_pivot_executed",
+            pivot.model_dump(mode="json"),
+        )
+        action.result_refs = [
+            pivot.pivot_id,
+            *created_route_ids,
+            *result_fact_ids,
+            *result_obligation_ids,
+        ]
+        self.persist()
+        return ControlActionResult(
+            result_refs=list(action.result_refs),
+            postcondition_met=True,
+        )
+
+    def _meta_pivot_postcondition(
+        self,
+        action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        pivot = self.state.meta_pivot_state
+        return (
+            pivot is not None
+            and pivot.status == MetaPivotStatus.EXECUTED
+            and pivot.action_id == action.action_id
+            and pivot.pivot_id in result.result_refs
+            and set(pivot.created_route_ids).issubset(result.result_refs)
+            and set(pivot.result_fact_ids).issubset(result.result_refs)
+            and set(pivot.result_obligation_ids).issubset(result.result_refs)
+        )
+
     def _handle_activate_induction_measure(
         self, action: ControlActionRecord
     ) -> ControlActionResult:
@@ -3912,6 +4200,11 @@ class ProofControlLayer:
         }
 
     def _control_source_exists(self, source_id: str) -> bool:
+        if (
+            self.state.meta_pivot_state is not None
+            and self.state.meta_pivot_state.pivot_id == source_id
+        ):
+            return True
         state_mappings = (
             self.state.control_actions,
             self.state.goal_links,

@@ -89,6 +89,16 @@ class ControlActionStatus(StrEnum):
     FAILED = "failed"
 
 
+class MetaPivotStatus(StrEnum):
+    NONE = "none"
+    REQUESTED = "requested"
+    ADMITTED = "admitted"
+    EXECUTING = "executing"
+    EXECUTED = "executed"
+    EVALUATED = "evaluated"
+    FAILED = "failed"
+
+
 class ControlActionRecord(StrictModel):
     action_id: str = Field(default_factory=lambda: new_id("control_action"))
     action_type: ControlActionType
@@ -645,6 +655,22 @@ class ProcessFailureDiagnostic(StrictModel):
     domain: Literal["process", "execution"]
     reason: str
     evidence: list[str] = Field(default_factory=list)
+
+
+class MetaPivotState(StrictModel):
+    pivot_id: str = Field(default_factory=lambda: new_id("meta_pivot"))
+    status: MetaPivotStatus = MetaPivotStatus.NONE
+    trigger_round: int = Field(ge=0)
+    source_stagnation_signature: str
+    requested_mechanisms: list[str]
+    created_route_ids: list[str] = Field(default_factory=list)
+    result_fact_ids: list[str] = Field(default_factory=list)
+    result_obligation_ids: list[str] = Field(default_factory=list)
+    no_progress_after_pivot: bool | None = None
+    failure_reason: str = ""
+    action_id: str | None = None
+    executed_round: int | None = Field(default=None, ge=0)
+    evaluated_round: int | None = Field(default=None, ge=0)
 
 
 class MessageUtilityContract(StrictModel):
