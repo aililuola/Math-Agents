@@ -3,7 +3,9 @@ from __future__ import annotations
 from mathproofmesh.config import SynthesisReadinessControlConfig
 from mathproofmesh.proof_control.gates import SynthesisReadinessGate
 from mathproofmesh.proof_control.models import (
+    AssumptionDomain,
     ClaimGoalLink,
+    CriticalAssumption,
     GateVerdict,
     GoalRelation,
     InferenceRiskRecord,
@@ -12,7 +14,7 @@ from mathproofmesh.proof_control.models import (
 )
 from mathproofmesh.proof_graph.contradictions import ContradictionRecord
 from mathproofmesh.proof_graph.store import ProofGraphStore
-from mathproofmesh.schemas import ObligationKind, ProofObligation
+from mathproofmesh.schemas import ClaimStatus, ObligationKind, ProofObligation
 
 from v07_helpers import PROBLEM_HASH
 
@@ -115,3 +117,46 @@ def test_shadow_records_and_ready_graph_passes_active() -> None:
     assert shadow.verdict == GateVerdict.SHADOW_BLOCK
     assert SynthesisReadinessGate.blocks_synthesis(shadow) is False
     assert ready.verdict == GateVerdict.PASS
+
+
+def test_verified_complete_candidate_scopes_planning_debt_and_assumptions() -> None:
+    graph = _graph(open_dependency=True)
+    candidate_assumption = CriticalAssumption(
+        assumption_id="assumption-candidate",
+        normalized_statement="the parameter is positive",
+        source_subject_ids=["candidate-message"],
+        route_ids=["route-a"],
+        verification_status=ClaimStatus.PROPOSED,
+        necessity_by_route={"route-a": 1.0},
+        common_mode_risk=1.0,
+        domain=AssumptionDomain.MATHEMATICAL,
+    )
+
+    record = SynthesisReadinessGate(
+        SynthesisReadinessControlConfig(mode="active")
+    ).evaluate(
+        graph,
+        critical_assumptions=[candidate_assumption],
+        candidate_proof_verified=True,
+        candidate_verified_subject_ids=["candidate-message"],
+    )
+
+    assert record.verdict == GateVerdict.PASS
+    assert record.open_core_obligation_ids == []
+    assert record.unresolved_common_mode_assumption_ids == []
+    assert record.candidate_proof_verified
+
+
+def test_verified_candidate_still_blocks_an_explicit_open_dependency() -> None:
+    graph = _graph(open_dependency=True)
+
+    record = SynthesisReadinessGate(
+        SynthesisReadinessControlConfig(mode="active")
+    ).evaluate(
+        graph,
+        candidate_dependency_ids=["core-bridge"],
+        candidate_proof_verified=True,
+    )
+
+    assert record.verdict == GateVerdict.BLOCK
+    assert record.open_core_obligation_ids == ["core-bridge"]

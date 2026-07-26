@@ -985,6 +985,7 @@ class ProofMeshOrchestrator:
                     )
 
                 performed = route_update_performed or pivot_performed
+                action_calls_started = runner.ledger.calls_started
                 for action in decision.actions:
                     if action.action in {ActionKind.STOP, ActionKind.SYNTHESIZE}:
                         continue
@@ -1177,6 +1178,88 @@ class ProofMeshOrchestrator:
                             )
                             or performed
                         )
+
+                if (
+                    not performed
+                    and runner.ledger.calls_started == action_calls_started
+                ):
+                    fallback_deepen = next(
+                        (
+                            candidate
+                            for candidate in decision.candidates
+                            if candidate.action == ActionKind.DEEPEN
+                            and candidate.eligible
+                            and candidate.strategy_id is not None
+                            and not candidate.selected
+                        ),
+                        None,
+                    )
+                    if fallback_deepen is not None:
+                        estimated_cost = (
+                            fallback_deepen.estimated_calls
+                            or allocator.estimate_action_calls(
+                                ActionKind.DEEPEN,
+                                current_path_count=len(state.strategies),
+                            )
+                        )
+                        blocked_reason = allocator.spend_block_reason(
+                            allocator.bucket_for_action(ActionKind.DEEPEN),
+                            estimated_cost,
+                            protect_finish=True,
+                            has_candidate=bool(state.attempts),
+                        )
+                        control_route_id = self._route_for_strategy(
+                            state, fallback_deepen.strategy_id
+                        )
+                        control_allows_deepening = not (
+                            state.proof_control is not None
+                            and control_route_id is not None
+                            and not state.proof_control.deepening_currently_allowed(
+                                control_route_id
+                            )
+                        )
+                        if blocked_reason is None and control_allows_deepening:
+                            store.append_event(
+                                "adaptive_noop_action_backfilled",
+                                {
+                                    "round_index": round_index,
+                                    "action": ActionKind.DEEPEN.value,
+                                    "strategy_id": fallback_deepen.strategy_id,
+                                    "target_id": fallback_deepen.target_id,
+                                    "reason": (
+                                        "selected control actions produced no "
+                                        "material state change while an "
+                                        "evidence-backed route remained executable"
+                                    ),
+                                },
+                            )
+                            attempt = await self._deepen_path(
+                                problem,
+                                fallback_deepen.strategy_id,
+                                round_index,
+                                state,
+                                runner,
+                                prompts,
+                                router,
+                                memory,
+                                store,
+                                tools,
+                            )
+                            if attempt is not None:
+                                accepted_attempts = self._record_attempts(
+                                    state, [attempt], store
+                                )
+                                if accepted_attempts:
+                                    await self._extract_claims_many(
+                                        problem,
+                                        accepted_attempts,
+                                        runner,
+                                        prompts,
+                                        memory,
+                                        store,
+                                        budget_bucket="depth",
+                                    )
+                                    performed = True
 
                 # Verify the best newly generated candidate when its marginal value is high.
                 unverified = [
@@ -13512,14 +13595,25 @@ class ProofMeshOrchestrator:
 
     def _has_synthesis_ready_candidate(self, state: SolveState) -> bool:
         return any(
-            attempt.status == AttemptStatus.COMPLETE
-            and bool(attempt.proof_steps)
-            and state.aggregate_reports.get(attempt.attempt_id) is not None
-            and state.aggregate_reports[attempt.attempt_id].verdict
-            == VerificationVerdict.PASS
-            and state.aggregate_reports[attempt.attempt_id].confidence
-            >= self.config.budget.synthesis_threshold
+            self._is_verified_synthesis_candidate(state, attempt)
             for attempt in state.attempts
+        )
+
+    def _is_verified_synthesis_candidate(
+        self,
+        state: SolveState,
+        attempt: ProofAttempt,
+    ) -> bool:
+        report = state.aggregate_reports.get(attempt.attempt_id)
+        return bool(
+            attempt.status == AttemptStatus.COMPLETE
+            and attempt.proof_steps
+            and not attempt.unresolved_gaps
+            and report is not None
+            and report.verdict == VerificationVerdict.PASS
+            and report.problem_integrity_ok
+            and report.first_error_step is None
+            and report.confidence >= self.config.budget.synthesis_threshold
         )
 
     def _can_enter_synthesis(self, state: SolveState) -> bool:
@@ -13532,13 +13626,41 @@ class ProofMeshOrchestrator:
         if state.proof_control is None:
             return True
         selected = self._select_for_synthesis(state)
+        verified_selected = [
+            attempt
+            for attempt in selected
+            if self._is_verified_synthesis_candidate(state, attempt)
+        ]
+        candidate_attempts = verified_selected or selected
         subject_ids: set[str] = set()
+        local_subject_ids: set[str] = set()
+        candidate_artifact_refs: set[str] = set()
         unresolved_statements: set[str] = set()
         raw_dependencies: set[str] = set()
-        for attempt in selected:
+        for attempt in candidate_attempts:
             subject_ids.add(attempt.strategy_id)
-            subject_ids.update(item.step_id for item in attempt.proof_steps)
-            subject_ids.update(item.claim_id for item in attempt.proposed_lemmas)
+            step_ids = {item.step_id for item in attempt.proof_steps}
+            claim_ids = {item.claim_id for item in attempt.proposed_lemmas}
+            subject_ids.update(step_ids)
+            subject_ids.update(claim_ids)
+            local_subject_ids.update(step_ids)
+            local_subject_ids.update(claim_ids)
+            lineage_checkpoint_ids = set(attempt.checkpoint_ids)
+            candidate_artifact_refs.update(
+                lineage_attempt.raw_artifact_ref
+                for lineage_attempt in state.attempts
+                if lineage_attempt.raw_artifact_ref
+                and lineage_attempt.strategy_id == attempt.strategy_id
+                and lineage_attempt.path_id == attempt.path_id
+                and (
+                    lineage_attempt.attempt_id == attempt.attempt_id
+                    or (
+                        lineage_attempt.latest_checkpoint_id is not None
+                        and lineage_attempt.latest_checkpoint_id
+                        in lineage_checkpoint_ids
+                    )
+                )
+            )
             unresolved_statements.update(
                 self._normalize_statement(item) for item in attempt.unresolved_gaps
             )
@@ -13546,6 +13668,12 @@ class ProofMeshOrchestrator:
                 dependency
                 for step in attempt.proof_steps
                 for dependency in step.dependencies
+            )
+        if state.message_broker is not None and candidate_artifact_refs:
+            subject_ids.update(
+                message.message_id
+                for message in state.message_broker.messages
+                if candidate_artifact_refs.intersection(message.artifact_refs)
             )
         obligation_ids = [
             item.obligation_id
@@ -13567,6 +13695,22 @@ class ProofMeshOrchestrator:
             if message.message_id in raw_dependencies
             or message.content_hash in raw_dependencies
         ]
+        admitted_dependency_ids = {
+            value
+            for message in admitted
+            for value in (message.message_id, message.content_hash)
+        }
+        candidate_dependency_ids = sorted(
+            {
+                *obligation_ids,
+                *(
+                    dependency
+                    for dependency in raw_dependencies
+                    if dependency not in local_subject_ids
+                    and dependency not in admitted_dependency_ids
+                ),
+            }
+        )
         conflicts = (
             state.contradiction_broker.unresolved()
             if state.contradiction_broker is not None
@@ -13575,8 +13719,10 @@ class ProofMeshOrchestrator:
         record = state.proof_control.synthesis_readiness(
             conflicts=conflicts,
             candidate_subject_ids=subject_ids,
-            candidate_dependency_ids=obligation_ids,
+            candidate_dependency_ids=candidate_dependency_ids,
             candidate_fact_ids=candidate_fact_ids,
+            candidate_proof_verified=bool(verified_selected),
+            candidate_verified_subject_ids=subject_ids,
         )
         return record.verdict != GateVerdict.BLOCK
 

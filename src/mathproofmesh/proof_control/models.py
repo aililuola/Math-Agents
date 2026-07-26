@@ -1260,4 +1260,6 @@ class SynthesisReadinessRecord(StrictModel):
     unresolved_conflict_ids: list[str]
     invalid_goal_link_ids: list[str]
     unresolved_common_mode_assumption_ids: list[str]
+    candidate_proof_verified: bool = False
+    candidate_evidence_subject_ids: list[str] = Field(default_factory=list)
     reasons: list[str]

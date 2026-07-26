@@ -155,7 +155,7 @@ async def test_active_resume_migrates_a_v07_checkpoint_exactly_once(
     assert Path(first.run_directory, "structured", "proof_control.json").exists()
     latest = ArtifactStore(config.runtime.run_root, run_id).latest_stage_checkpoint()
     assert latest is not None
-    assert latest[1]["schema_version"] == "0.8.1"
+    assert latest[1]["schema_version"] == "0.8.2"
     assert latest[1]["proof_control_state"]["schema_version"] == "0.8.2"
 
     second = await ProofMeshOrchestrator(

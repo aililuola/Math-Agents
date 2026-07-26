@@ -422,6 +422,8 @@ class SynthesisReadinessGate:
         critical_assumptions: Sequence[CriticalAssumption] = (),
         candidate_dependency_ids: Sequence[str] = (),
         candidate_fact_ids: Sequence[str] = (),
+        candidate_proof_verified: bool = False,
+        candidate_verified_subject_ids: Collection[str] = (),
         broker_admitted_fact_ids: Collection[str] = (),
         obligation_domains: Mapping[str, ObligationDomainRecord] | None = None,
         obligation_semantic_quality: (
@@ -446,6 +448,14 @@ class SynthesisReadinessGate:
             if item.kind != ObligationKind.MAIN_GOAL
             and item.obligation_id in mathematical_ids
         ]
+        verified_subject_ids = set(candidate_verified_subject_ids)
+        if candidate_proof_verified:
+            candidate_dependencies = set(candidate_dependency_ids)
+            open_core = [
+                item
+                for item in open_core
+                if item.obligation_id in candidate_dependencies
+            ]
         if self.config.require_core_dependency_closure and open_core:
             reasons.append("core dependency closure contains open obligations")
         if self.config.require_core_dependency_closure and not main_goal_ids:
@@ -489,6 +499,10 @@ class SynthesisReadinessGate:
             for item in critical_assumptions
             if item.verification_status != ClaimStatus.VERIFIED
             and item.common_mode_risk >= self.config.high_centrality_threshold
+            and not (
+                candidate_proof_verified
+                and verified_subject_ids.intersection(item.source_subject_ids)
+            )
         ]
         if common_mode:
             reasons.append("unresolved common-mode assumptions remain")
@@ -550,6 +564,8 @@ class SynthesisReadinessGate:
             unresolved_common_mode_assumption_ids=sorted(
                 item.assumption_id for item in common_mode
             ),
+            candidate_proof_verified=candidate_proof_verified,
+            candidate_evidence_subject_ids=sorted(verified_subject_ids),
             reasons=record_reasons,
         )
 

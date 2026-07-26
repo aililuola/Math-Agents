@@ -1885,6 +1885,8 @@ class ProofControlLayer:
         candidate_subject_ids: Collection[str] = (),
         candidate_dependency_ids: Sequence[str] = (),
         candidate_fact_ids: Sequence[str] = (),
+        candidate_proof_verified: bool = False,
+        candidate_verified_subject_ids: Collection[str] = (),
     ) -> SynthesisReadinessRecord:
         subject_ids = set(candidate_subject_ids)
         links = [
@@ -1903,6 +1905,8 @@ class ProofControlLayer:
             critical_assumptions=list(self.state.critical_assumptions.values()),
             candidate_dependency_ids=candidate_dependency_ids,
             candidate_fact_ids=candidate_fact_ids,
+            candidate_proof_verified=candidate_proof_verified,
+            candidate_verified_subject_ids=candidate_verified_subject_ids,
             broker_admitted_fact_ids=admitted_fact_ids,
             obligation_domains=self.state.obligation_domains,
             obligation_semantic_quality=self.state.obligation_semantic_quality,

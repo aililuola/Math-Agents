@@ -14,6 +14,7 @@ _PROTOCOL_MARKERS = (
     "do not change",
     "retain the goal hash",
     "retain goal hash",
+    "goal hash",
     "distinguish proved",
     "output json",
     "output yaml",

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from ..proof_identity import normalize_text, obligation_identity_text
-from ..schemas import ObligationKind, ProofObligation
+from ..schemas import ObligationKind, ProofObligation, stable_hash
 from .domains import classify_obligation_domain
 from .models import ObligationDomain, ObligationSemanticQuality
 
@@ -79,6 +79,29 @@ class ObligationSemanticGate:
         "there",
         "to",
     }
+
+    def assess_statement(
+        self,
+        statement: str,
+        *,
+        source_kind: str | None = None,
+        executable_first_step: str | None = None,
+    ) -> ObligationSemanticQuality:
+        normalized = normalize_text(statement)
+        return self.assess(
+            ProofObligation(
+                obligation_id=(
+                    "semantic_probe_" + stable_hash(normalized.casefold())[:16]
+                ),
+                problem_hash="semantic-quality-probe",
+                route_ids=[],
+                kind=ObligationKind.LEMMA,
+                statement=statement,
+                normalized_statement=normalized,
+            ),
+            source_kind=source_kind,
+            executable_first_step=executable_first_step,
+        )
 
     def assess(
         self,

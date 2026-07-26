@@ -7,7 +7,12 @@ from mathproofmesh.proof_control.models import (
     ControlActionStatus,
     ControlActionType,
 )
-from mathproofmesh.schemas import ObligationKind, ProofObligation, RouteDescriptor
+from mathproofmesh.schemas import (
+    CriticalClaim,
+    ObligationKind,
+    ProofObligation,
+    RouteDescriptor,
+)
 
 from v07_helpers import (
     PROBLEM_HASH,
@@ -144,3 +149,34 @@ def test_multiple_agent_agreement_does_not_promote_assumption() -> None:
     assumption = next(iter(assumptions.values()))
     assert assumption.verification_status.value == "proposed"
     assert matrix.risks() == []
+
+
+def test_non_propositional_bottleneck_is_not_a_common_mode_assumption() -> None:
+    strategy = make_strategy(54, tag="diagram-route").model_copy(
+        update={
+            "prerequisites": [
+                "Every downstream artifact must retain the frozen goal hash."
+            ],
+            "critical_claims": [
+                CriticalClaim(
+                    claim_id="critical-diagram",
+                    statement="formalizing the diagram without a picture",
+                    necessity="required",
+                    status="needs_check",
+                    falsification_test="inspect the construction",
+                )
+            ],
+        }
+    )
+    route = RouteDescriptor(
+        route_id="route-diagram",
+        strategy_id=strategy.strategy_id,
+        mechanism_signature=["diagram"],
+    )
+    matrix = CriticalAssumptionMatrix()
+
+    assumptions = matrix.build([route], [strategy])
+
+    assert assumptions == {}
+    domains = {record.domain for record in matrix.domain_records.values()}
+    assert AssumptionDomain.PROTOCOL in domains

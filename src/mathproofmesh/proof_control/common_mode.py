@@ -25,6 +25,7 @@ from .models import (
     AssumptionFamily,
     CriticalAssumption,
 )
+from .semantic_quality import ObligationSemanticGate
 
 
 class CriticalAssumptionMatrix:
@@ -41,6 +42,7 @@ class CriticalAssumptionMatrix:
         self.assumptions: dict[str, CriticalAssumption] = {}
         self.families: dict[str, AssumptionFamily] = {}
         self.domain_records: dict[str, AssumptionDomainRecord] = {}
+        self.semantic_gate = ObligationSemanticGate()
 
     def build(
         self,
@@ -69,6 +71,7 @@ class CriticalAssumptionMatrix:
             source_subject_id: str,
             weight: float,
             verified: bool = False,
+            require_truth_apt: bool = False,
         ) -> None:
             normalized = self._normalize_assumption(statement)
             if not normalized or not route_id:
@@ -78,6 +81,14 @@ class CriticalAssumptionMatrix:
                 f"{source_subject_id}:{stable_hash(normalized)[:12]}"
             ] = domain_record
             if domain_record.domain != AssumptionDomain.MATHEMATICAL:
+                return
+            if (
+                require_truth_apt
+                and not self.semantic_gate.assess_statement(
+                    statement,
+                    source_kind="mathematical",
+                ).truth_apt
+            ):
                 return
             record = raw.setdefault(
                 normalized,
@@ -114,6 +125,7 @@ class CriticalAssumptionMatrix:
                         source_subject_id=claim.claim_id,
                         weight=1.0 if claim.necessity == "required" else 0.5,
                         verified=claim.status == "verified",
+                        require_truth_apt=True,
                     )
         for message in messages:
             for assumption in message.assumptions:

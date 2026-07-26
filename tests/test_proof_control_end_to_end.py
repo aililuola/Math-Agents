@@ -71,7 +71,7 @@ async def test_mock_proof_control_modes_are_auditable_and_offline(
     assert sidecar["route_admissions"]
     assert sidecar["synthesis_readiness_records"]
     assert checkpoint is not None
-    assert checkpoint[1]["schema_version"] == "0.8.1"
+    assert checkpoint[1]["schema_version"] == "0.8.2"
     assert checkpoint[1]["proof_control_state"] == sidecar
     assert all(
         item["verdict"]
