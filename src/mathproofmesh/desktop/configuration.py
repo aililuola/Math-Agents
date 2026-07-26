@@ -43,6 +43,15 @@ class DesktopConfigService:
         settings: DesktopSettings,
     ) -> SystemConfig:
         config = load_config(self.profile_path(profile))
+        return self.apply_runtime_context(config, settings)
+
+    def apply_runtime_context(
+        self,
+        config: SystemConfig,
+        settings: DesktopSettings,
+    ) -> SystemConfig:
+        """Attach Desktop paths, settings, and DPAPI credentials to a config."""
+
         config.runtime.project_root = str(self.paths.root)
         config.runtime.run_root = str(self.paths.runs)
         config.computation.sandboxed_python_enabled = (

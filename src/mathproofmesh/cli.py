@@ -196,6 +196,26 @@ def _run_resume_with_activity(
         )
 
 
+def _apply_desktop_resume_context(
+    config: SystemConfig,
+    desktop_home: Path,
+) -> SystemConfig:
+    """Reuse a Desktop run root and its DPAPI-protected credentials."""
+
+    from .desktop.configuration import DesktopConfigService
+    from .desktop.paths import DesktopPaths
+    from .desktop.security import CredentialVault
+    from .desktop.settings import SettingsStore
+
+    paths = DesktopPaths.discover(desktop_home)
+    settings = SettingsStore(paths.settings_file).load()
+    service = DesktopConfigService(
+        paths,
+        CredentialVault(paths.credentials_file),
+    )
+    return service.apply_runtime_context(config, settings)
+
+
 @app.command()
 def solve(
     problem: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
@@ -304,9 +324,28 @@ def resume(
             "reset_stagnation, or replay_stage."
         ),
     ),
+    desktop_home: Optional[Path] = typer.Option(
+        None,
+        "--desktop-home",
+        exists=True,
+        file_okay=False,
+        readable=True,
+        help=(
+            "Reuse a Desktop home directory for its run root, settings, "
+            "learning state, and DPAPI-protected API credentials."
+        ),
+    ),
 ) -> None:
     """Resume from the latest stage snapshot and verified proof checkpoint."""
     cfg = load_config(config)
+    if desktop_home is not None:
+        try:
+            cfg = _apply_desktop_resume_context(cfg, desktop_home)
+        except RuntimeError as exc:
+            raise typer.BadParameter(
+                str(exc),
+                param_hint="--desktop-home",
+            ) from exc
     cfg = _apply_topology_overrides(
         cfg,
         topology_mode=topology_mode,
