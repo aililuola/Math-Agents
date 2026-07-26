@@ -1,4 +1,4 @@
-# MathProofMesh 0.8.0 Windows 桌面版
+# MathProofMesh 0.8.1 Windows 桌面版
 
 桌面版使用 PyInstaller 打包 Python 运行时和 MathProofMesh 引擎，并通过
 pywebview + WebView2 提供本地窗口。应用只监听随机的 `127.0.0.1` 端口，
@@ -20,7 +20,7 @@ pywebview + WebView2 提供本地窗口。应用只监听随机的 `127.0.0.1` �
 
 - `dist\MathProofMesh\MathProofMesh.exe`：便携目录入口，需与同目录
   `_internal` 一起分发。
-- `packaging\windows\output\MathProofMesh-0.8.0-Setup-x64.exe`：推荐分发的
+- `packaging\windows\output\MathProofMesh-0.8.1-Setup-x64.exe`：推荐分发的
   安装程序。
 
 ## 用户数据

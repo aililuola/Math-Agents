@@ -1,6 +1,6 @@
 # 可复现验证记录
 
-**验证日期：2026 年 7 月 23 日。** 本记录严格区分源码静态质量、确定性 Mock/HTTP Mock 行为、Docker 沙箱探针和真实供应商联调。0.7 源码、Mock、拓扑 benchmark 与 Docker 固定镜像隔离探针已执行；整个 0.7 自动化过程没有读取 API key，也没有发起真实供应商请求。
+**验证日期：2026 年 7 月 25 日。** 本记录严格区分源码静态质量、确定性 Mock/HTTP Mock 行为、Docker 沙箱探针和真实供应商联调。0.8.1 源码、Mock、拓扑与 proof-control benchmark，以及兼容性恢复场景均已执行；整个自动化过程没有读取 API key，也没有发起真实供应商请求。
 
 ## 1. 一键复验
 
@@ -26,10 +26,14 @@ compileall(src + tests)
 
 | 检查 | 结果 |
 |---|---:|
-| `python -m compileall -q src tests` | PASS |
+| `python -m compileall -q src tests benchmarks` | PASS |
 | `ruff check .` | PASS |
 | `ruff format --check .` | PASS |
-| `python -m pytest -q` | **345 passed**（安装 `.[dev,server]`，包含 `z3-solver`） |
+| `python -m pytest -q` | **515 passed**（执行 editable `.[dev,server]` 安装，包含 `z3-solver`） |
+| 指定 E2E/resume 组合 | **17 passed** |
+| topology Mock benchmark | PASS，21/21 component contracts，0 provider calls |
+| proof-control Mock benchmark | PASS，14/14 component contracts，0 provider calls |
+| Windows desktop package | 17 passed，health check 与 hidden window smoke PASS |
 | deterministic demo | `verified`，23 calls，30,540 tokens |
 | continuation deterministic demo | `verified`，25 calls，32,920 tokens |
 | demo 证明检查点 | 3 条路径，共 6 个 checkpoint（3 个 genesis + 3 个已验证完成段） |
@@ -59,6 +63,12 @@ P0 Inspiration Engine 的每个要求均有确定性覆盖：触发策略、Repr
 结果保存在 `benchmarks/topology/mock_benchmark_results.json`。其中调用数、token 和费用明确是 Mock 估算，不是供应商遥测；该 benchmark 用于回归拓扑语义，不能单独证明真实 IMO 正确率提升。
 
 演示定理为前 `n` 个正奇数之和等于 `n^2`。选择简单定理是为了使状态机、故障恢复和审计链测试可重复，不能据此声称系统已经解决研究级开放问题。
+
+## 2B. 0.8.1 语义控制闭环验收
+
+13 个通用修复工作包均由确定性回归覆盖：Route Admission 与最近子义务绑定、Goal Alignment 硬约束、Claim 单调生命周期、性质强化风险、幂等动作物化、Induction 激活、Common-Mode、义务分域与 Bottleneck、Fast Lane、通信 Liveness、NearMiss、Inspiration Review 和 Meta Pivot。
+
+`off` 保留 v0.7 行为且不创建 proof-control sidecar；`shadow` 只记录；`active` 执行动作。旧 v0.7 checkpoint 和缺少 v0.8.1 字段的 v0.8.0 sidecar 均可迁移。中断测试覆盖 early checkpoint、mid-pivot，以及消息已排队但 Route Update 尚未调度三种边界，恢复后没有重复物化。
 
 ## 3. 断线、接力与进程恢复验证
 
@@ -149,7 +159,7 @@ primary key 正常调用级重试耗尽
 - 最终预算储备根据 `reserve_revision_cycles` 与 `max_revisions` 计算；
 - 调度产物记录每个候选动作的排名、分数、预计成本、未选原因和预算阻断原因。
 
-当前包含上述历史回归在内的完整自动化结果为 `345 passed`。分段确定性完整演示结果仍为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
+当前包含上述历史回归在内的完整自动化结果为 `515 passed`。分段确定性完整演示结果仍为 `verified`，25 calls，32,920 tokens。所有路线数、动作数、修补次数和调用预算均来自配置，不绑定某一道题。
 
 ## 6. 终审边界与修订回归验证
 
@@ -280,12 +290,14 @@ Python 3.11
 最终离线验收结果：
 
 ```text
-pytest: 345 passed
+pytest: 515 passed
 ruff check: PASS
-ruff format --check: PASS (203 files)
+ruff format --check: PASS (272 files)
 compileall: PASS
 topology mock benchmark: PASS
 component contracts: 21/21
+proof-control mock benchmark: PASS
+proof-control component contracts: 14/14
 provider calls: 0
 ```
 

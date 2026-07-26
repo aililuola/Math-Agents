@@ -1,5 +1,5 @@
 #define MyAppName "MathProofMesh"
-#define MyAppVersion "0.8.0"
+#define MyAppVersion "0.8.1"
 #define MyAppPublisher "MathProofMesh contributors"
 #define MyAppExeName "MathProofMesh.exe"
 #define ProjectRoot "..\.."

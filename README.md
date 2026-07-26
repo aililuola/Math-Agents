@@ -2,7 +2,7 @@
 
 MathProofMesh 是面向高难度数学证明、逻辑推演和研究型推理任务的多智能体系统。它强调四件事：**隔离探索、抽象推理优先、独立验证、可恢复执行**。
 
-当前源码版本为 **0.7.0**；实际包版本以 `pyproject.toml`、`BUILD_INFO.json` 和 `mathproofmesh.__version__` 为准。
+当前源码版本为 **0.8.1**；实际包版本以 `pyproject.toml`、`BUILD_INFO.json` 和 `mathproofmesh.__version__` 为准。
 
 > `verified` 表示结果通过了当前配置的独立审计链，并不等价于 Lean、Coq 或 Isabelle 内核证明。高风险结论仍应由领域专家或形式化证明助手复核。
 
@@ -277,7 +277,7 @@ hierarchical 报告把 `Broker-admitted global Fact` 与 `Legacy ClaimMemory his
 
 Blind packet 不再暴露 `artifact://` 原始路径，只携带实际文件内容的 SHA-256、证书类型和 replay 状态。这样不会通过文件名泄漏 Agent/Route，同时保留可审计证据身份。
 
-本轮离线验收基线为：安装 `.[dev,server]`（包含 `z3-solver`）后 `345 passed`、Ruff check 通过、Ruff format check 通过、`compileall` 通过、topology component-contract Mock benchmark 通过且真实 provider 调用数为 0。该 Mock benchmark 验证组件契约和消融开关，不代表真实 IMO 求解性能。
+本轮离线验收基线为：安装 `.[dev,server]`（包含 `z3-solver`）后 `515 passed`、Ruff check 通过、Ruff format check 通过、`compileall` 通过、topology 与 proof-control component-contract Mock benchmark 通过且真实 provider 调用数为 0。这些 Mock benchmark 验证组件契约和消融开关，不代表真实 IMO 求解性能。
 
 ## 推理优先计算流程
 
@@ -507,6 +507,7 @@ python -m benchmarks.topology.run_mock_benchmark
 - [部署与扩展](docs/DEPLOYMENT.md)
 - [可复现验证记录](docs/VALIDATION.md)
 - [0.7.0 发布说明](RELEASE_NOTES_0.7.0.md)
+- [0.8.1 发布说明](RELEASE_NOTES_0.8.1.md)
 - [0.6.0 发布说明](RELEASE_NOTES_0.6.0.md)
 
 ## 安全与正确性边界

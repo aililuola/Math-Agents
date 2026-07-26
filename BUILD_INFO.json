@@ -1,7 +1,7 @@
 {
   "project": "MathProofMesh",
-  "version": "0.8.0",
-  "validated_on": "2026-07-24",
+  "version": "0.8.1",
+  "validated_on": "2026-07-25",
   "python_requirement": ">=3.11",
   "base_branch": "feature/mathproofmesh-v0.7.0-hierarchical-sparse-topology",
   "base_commit": "866e7270a01babb93342d272b99865b449e3b934",
@@ -119,7 +119,11 @@
     "failure_blueprint_and_message_utility": true,
     "falsification_route_continue_synthesis_gates": true,
     "v07_checkpoint_migration": true,
-    "reasoning_token_and_tier_settings_unchanged": true
+    "reasoning_token_and_tier_settings_unchanged": true,
+    "semantic_bugfix_work_packages_complete": 13,
+    "idempotent_control_action_dispatcher": true,
+    "v080_sidecar_migration": true,
+    "meta_pivot_exactly_once": true
   },
   "reliability_control": {
     "stable_mathematical_identity": true,
@@ -161,7 +165,7 @@
     "compileall": "PASS",
     "ruff_check": "PASS",
     "ruff_format_check": "PASS",
-    "pytest": "440 passed with dev, server, and desktop extras including z3-solver",
+    "pytest": "515 passed after editable install with dev and server extras including z3-solver",
     "offline_topology_benchmark": {
       "status": "PASS",
       "provider_calls": 0,
@@ -182,21 +186,21 @@
     "real_provider_calls": "NOT RUN; credentials intentionally unused"
   },
   "counts": {
-    "source_python_files": 107,
-    "test_python_files": 92,
+    "source_python_files": 128,
+    "test_python_files": 134,
     "documentation_files": 18,
     "source_lines": 46927,
     "test_lines": 14806,
     "docs_directory_lines": 2315
   },
   "artifacts": {
-    "status": "WINDOWS DESKTOP 0.8.0 BUILD AND INSTALLER VALIDATED; INSTALL DEFERRED WHILE CURRENT APP IS RUNNING",
-    "windows_installer": "packaging/windows/output/MathProofMesh-0.8.0-Setup-x64.exe",
-    "windows_installer_sha256": "EE10141E4BEF08D6841ED283B15A129C7650EE3F02469AC14150CAA3370AE87A",
-    "portable_exe_sha256": "86C39181BCEBE50C00441348EA307AFA3F98DD7FADAF81CB097116756454D8D7",
-    "desktop_installer": "C:/Users/yanxinyu/Desktop/MathProofMesh-0.8.0-Setup-x64.exe",
-    "desktop_installer_sha256": "EE10141E4BEF08D6841ED283B15A129C7650EE3F02469AC14150CAA3370AE87A",
-    "installed_exe_sha256": "C29F7241618EFE53F595A1A039D0E0D5C27710CA48A466F0070B0D257F4EB455",
+    "status": "WINDOWS DESKTOP 0.8.1 BUILD AND INSTALLER VALIDATED; INSTALLER COPIED TO DESKTOP",
+    "windows_installer": "packaging/windows/output/MathProofMesh-0.8.1-Setup-x64.exe",
+    "windows_installer_sha256": "0088622C31BACC145428BEFEB6F48E4DF599A7AB202991A98DDAAE04F57AD1DD",
+    "portable_exe_sha256": "AF316B31869C2DE177D8C47E5D201AD9CB1DA91684ADF4A82C5BB15112C73079",
+    "desktop_installer": "C:/Users/yanxinyu/Desktop/MathProofMesh-0.8.1-Setup-x64.exe",
+    "desktop_installer_sha256": "0088622C31BACC145428BEFEB6F48E4DF599A7AB202991A98DDAAE04F57AD1DD",
+    "installed_exe_sha256": null,
     "wheel": "dist/mathproofmesh-0.7.0-py3-none-any.whl",
     "sdist": "dist/mathproofmesh-0.7.0.tar.gz",
     "runs_committed": false,

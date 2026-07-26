@@ -113,7 +113,7 @@ def test_desktop_app_requires_session_cookie_and_serves_workbench(
     bootstrap = client.get("/api/bootstrap")
     assert bootstrap.status_code == 200
     body = bootstrap.json()
-    assert body["version"] == "0.8.0"
+    assert body["version"] == "0.8.1"
     assert {profile["id"]: profile["filename"] for profile in body["profiles"]} == {
         "smoke": "config.deepseek-v4-pro.smoke.yaml",
         "formal": "config.deepseek-v4-pro.yaml",
