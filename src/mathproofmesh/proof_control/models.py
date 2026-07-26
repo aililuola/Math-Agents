@@ -266,6 +266,70 @@ class StrategyCandidateAssessment(StrictModel):
     semantic_rejection_reason: str | None = None
 
 
+class DependencyKind(StrEnum):
+    LOCAL_STEP = "local_step"
+    LOCAL_CLAIM = "local_claim"
+    GLOBAL_FACT = "global_fact"
+    MESSAGE = "message"
+    OBLIGATION = "obligation"
+    TOOL_CERTIFICATE = "tool_certificate"
+    FORMAL_CERTIFICATE = "formal_certificate"
+    EXTERNAL_RESULT = "external_result"
+
+
+class DependencyRef(StrictModel):
+    kind: DependencyKind
+    target_id: str
+    source_attempt_id: str | None = None
+    source_delta_id: str | None = None
+    source_route_id: str | None = None
+    content_hash: str | None = None
+
+
+class DependencyNormalizationTask(StrictModel):
+    task_id: str
+    source_attempt_id: str | None = None
+    source_delta_id: str | None = None
+    ambiguous_ids: list[str]
+    status: Literal["open", "resolved", "cancelled"] = "open"
+
+
+class DependencyMigrationResult(StrictModel):
+    dependency_refs: list[DependencyRef]
+    migration_status: Literal["complete", "ambiguous"]
+    normalization_task: DependencyNormalizationTask | None = None
+    invalidates_claim: Literal[False] = False
+
+
+class DependencyResolutionResult(StrictModel):
+    resolved: bool
+    resolved_refs: list[DependencyRef] = Field(default_factory=list)
+    missing_refs: list[DependencyRef] = Field(default_factory=list)
+    invalid_refs: list[DependencyRef] = Field(default_factory=list)
+    ambiguous_refs: list[DependencyRef] = Field(default_factory=list)
+
+
+class ClaimRefereeDisposition(StrEnum):
+    ACCEPT = "accept"
+    REJECT = "reject"
+    DEFER = "defer"
+    NEEDS_ADDITIONAL_REVIEW = "needs_additional_review"
+
+
+class ClaimRefereeRecord(StrictModel):
+    review_id: str
+    referee_agent_id: str
+    source_attempt_id: str
+    source_delta_id: str | None
+    claim_id: str
+    disposition: ClaimRefereeDisposition
+    dependencies_valid: bool
+    scope_valid: bool
+    quantifiers_valid: bool
+    evidence_type_valid: bool
+    reason: str
+
+
 class ControlActionRecord(StrictModel):
     action_id: str = Field(default_factory=lambda: new_id("control_action"))
     action_type: ControlActionType
@@ -322,11 +386,14 @@ class ClaimVerificationState(StrEnum):
 class ClaimVerificationLedgerEntry(StrictModel):
     claim_id: str
     source_attempt_id: str
+    source_delta_id: str | None = None
     state: ClaimVerificationState = ClaimVerificationState.PROPOSED
     dependency_ids: list[str] = Field(default_factory=list)
+    dependency_refs: list[DependencyRef] = Field(default_factory=list)
     local_report_ids: list[str] = Field(default_factory=list)
     independent_report_ids: list[str] = Field(default_factory=list)
     referee_review_ids: list[str] = Field(default_factory=list)
+    referee_agent_ids: list[str] = Field(default_factory=list)
     source_attempt_incomplete: bool = False
     invalidation_reason: str | None = None
     invalidating_evidence_ids: list[str] = Field(default_factory=list)

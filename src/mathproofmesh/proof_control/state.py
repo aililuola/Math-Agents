@@ -15,12 +15,14 @@ from .models import (
     BlueprintNode,
     BottleneckBridgeTask,
     BottleneckCluster,
+    ClaimRefereeRecord,
     ClaimVerificationLedgerEntry,
     ClaimGoalLink,
     ControlActionRecord,
     CountermodelTaskRecord,
     ContinueGateRecord,
     CriticalAssumption,
+    DependencyNormalizationTask,
     FailureClassificationRecord,
     FalsificationTaskRecord,
     GoalAlignmentContractResult,
@@ -66,6 +68,8 @@ class ProofControlState:
         self.route_target_bindings: dict[str, RouteTargetBinding] = {}
         self.goal_alignment_contracts: dict[str, GoalAlignmentContractResult] = {}
         self.claim_verification_ledger: dict[str, ClaimVerificationLedgerEntry] = {}
+        self.claim_referee_records: dict[str, ClaimRefereeRecord] = {}
+        self.dependency_normalization_tasks: dict[str, DependencyNormalizationTask] = {}
         self.premise_closure_records: dict[str, PremiseClosureRecord] = {}
         self.countermodel_tasks: dict[str, CountermodelTaskRecord] = {}
         self.falsification_tasks: dict[str, FalsificationTaskRecord] = {}
@@ -125,6 +129,10 @@ class ProofControlState:
             ),
             "claim_verification_ledger": self._dump_models(
                 self.claim_verification_ledger
+            ),
+            "claim_referee_records": self._dump_models(self.claim_referee_records),
+            "dependency_normalization_tasks": self._dump_models(
+                self.dependency_normalization_tasks
             ),
             "premise_closure_records": self._dump_models(self.premise_closure_records),
             "countermodel_tasks": self._dump_models(self.countermodel_tasks),
@@ -228,6 +236,8 @@ class ProofControlState:
             ("route_target_bindings", RouteTargetBinding),
             ("goal_alignment_contracts", GoalAlignmentContractResult),
             ("claim_verification_ledger", ClaimVerificationLedgerEntry),
+            ("claim_referee_records", ClaimRefereeRecord),
+            ("dependency_normalization_tasks", DependencyNormalizationTask),
             ("premise_closure_records", PremiseClosureRecord),
             ("countermodel_tasks", CountermodelTaskRecord),
             ("falsification_tasks", FalsificationTaskRecord),

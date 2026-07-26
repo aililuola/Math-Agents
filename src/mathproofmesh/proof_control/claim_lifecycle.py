@@ -9,7 +9,13 @@ from ..schemas import (
     VerificationReport,
     VerificationVerdict,
 )
-from .models import ClaimVerificationLedgerEntry, ClaimVerificationState
+from .models import (
+    ClaimRefereeDisposition,
+    ClaimRefereeRecord,
+    ClaimVerificationLedgerEntry,
+    ClaimVerificationState,
+    DependencyRef,
+)
 
 
 class ClaimLifecycleController:
@@ -35,8 +41,13 @@ class ClaimLifecycleController:
             self.register_claim(claim)
 
     def register_claim(self, claim: ClaimCard) -> ClaimVerificationLedgerEntry:
+        self.claims.setdefault(claim.claim_id, claim)
         existing = self.ledger.get(claim.claim_id)
         if existing is not None:
+            if existing.source_delta_id is None and claim.source_delta_id is not None:
+                existing.source_delta_id = claim.source_delta_id
+            existing.dependency_ids = list(claim.dependencies)
+            existing.dependency_refs = self._dependency_refs(claim.dependency_refs)
             return existing
         initial_state = (
             ClaimVerificationState.REJECTED
@@ -48,8 +59,10 @@ class ClaimLifecycleController:
         entry = ClaimVerificationLedgerEntry(
             claim_id=claim.claim_id,
             source_attempt_id=claim.source_attempt_id or "",
+            source_delta_id=claim.source_delta_id,
             state=initial_state,
             dependency_ids=list(claim.dependencies),
+            dependency_refs=self._dependency_refs(claim.dependency_refs),
             transition_history=[
                 {
                     "from": None,
@@ -59,6 +72,77 @@ class ClaimLifecycleController:
             ],
         )
         self.ledger[claim.claim_id] = entry
+        return entry
+
+    def apply_referee_record(
+        self,
+        record: ClaimRefereeRecord,
+    ) -> ClaimVerificationLedgerEntry:
+        entry = self._entry(record.claim_id)
+        already_recorded = record.review_id in entry.referee_review_ids
+        if not already_recorded:
+            entry.referee_review_ids.append(record.review_id)
+        if record.referee_agent_id not in entry.referee_agent_ids:
+            entry.referee_agent_ids.append(record.referee_agent_id)
+        if entry.source_delta_id is None:
+            entry.source_delta_id = record.source_delta_id
+        if not entry.source_attempt_id:
+            entry.source_attempt_id = record.source_attempt_id
+
+        if record.disposition == ClaimRefereeDisposition.REJECT:
+            if entry.state not in {
+                ClaimVerificationState.REJECTED,
+                ClaimVerificationState.INVALIDATED,
+            }:
+                return self.invalidate_claim(
+                    record.claim_id,
+                    reason="claim_level_fail",
+                    evidence_ids=[record.review_id],
+                )
+            return entry
+
+        validity_flags = (
+            record.dependencies_valid,
+            record.scope_valid,
+            record.quantifiers_valid,
+            record.evidence_type_valid,
+        )
+        if record.disposition == ClaimRefereeDisposition.ACCEPT and all(validity_flags):
+            if entry.state in {
+                ClaimVerificationState.INDEPENDENTLY_VERIFIED,
+                ClaimVerificationState.REFEREE_ACCEPTED,
+                ClaimVerificationState.FACT_CANDIDATE,
+                ClaimVerificationState.FACT,
+            }:
+                if not already_recorded or entry.state == (
+                    ClaimVerificationState.INDEPENDENTLY_VERIFIED
+                ):
+                    self._advance(
+                        entry,
+                        ClaimVerificationState.REFEREE_ACCEPTED,
+                        reason="claim_referee_accepted",
+                        report_id=record.review_id,
+                    )
+                return entry
+            if not already_recorded:
+                self._record_same_state(
+                    entry,
+                    reason="claim_referee_acceptance_waiting_for_independent_review",
+                    report_id=record.review_id,
+                )
+            return entry
+
+        if not already_recorded:
+            reason = (
+                "claim_referee_validity_gate_failed"
+                if record.disposition == ClaimRefereeDisposition.ACCEPT
+                else f"claim_referee_{record.disposition.value}"
+            )
+            self._record_same_state(
+                entry,
+                reason=reason,
+                report_id=record.review_id,
+            )
         return entry
 
     def apply_claim_report(
@@ -167,6 +251,11 @@ class ClaimLifecycleController:
         referee_review_id: str | None = None,
     ) -> ClaimVerificationLedgerEntry:
         entry = self._entry(claim_id)
+        if entry.state in {
+            ClaimVerificationState.INVALIDATED,
+            ClaimVerificationState.REJECTED,
+        }:
+            raise ValueError("claim was rejected by a referee or invalidated")
         if entry.state not in {
             ClaimVerificationState.INDEPENDENTLY_VERIFIED,
             ClaimVerificationState.REFEREE_ACCEPTED,
@@ -183,6 +272,10 @@ class ClaimLifecycleController:
                 reason="referee_accepted",
                 report_id=referee_review_id,
             )
+        if not entry.referee_review_ids:
+            raise ValueError("claim lacks a recorded referee review")
+        if entry.state == ClaimVerificationState.INDEPENDENTLY_VERIFIED:
+            raise ValueError("claim lacks referee acceptance")
         self._advance(
             entry,
             ClaimVerificationState.FACT_CANDIDATE,
@@ -318,6 +411,17 @@ class ClaimLifecycleController:
             self.ledger[claim_id] = entry
         for claim in self.claims.values():
             self.register_claim(claim)
+
+    @staticmethod
+    def _dependency_refs(values: list[Any]) -> list[DependencyRef]:
+        refs: list[DependencyRef] = []
+        for value in values:
+            refs.append(
+                value
+                if isinstance(value, DependencyRef)
+                else DependencyRef.model_validate(value)
+            )
+        return refs
 
     def _entry(self, claim_id: str) -> ClaimVerificationLedgerEntry:
         try:

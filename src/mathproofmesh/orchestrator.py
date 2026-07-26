@@ -83,7 +83,9 @@ from .proof_graph.matching import DuplicateRouteDetector
 from .proof_graph.store import ProofGraphStore
 from .proof_control.controller import ProofControlLayer
 from .proof_control.models import (
+    ClaimVerificationState,
     ControlActionStatus,
+    DependencyKind,
     GateVerdict,
     MetaPivotStatus,
     ProofRole,
@@ -204,6 +206,32 @@ from .route_pipeline import acknowledge_route_messages, build_route_prompt_conte
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
+
+
+def _reusable_claim_dependency_ids(claim: ClaimCard) -> list[str]:
+    local_targets: set[str] = set()
+    for value in claim.dependency_refs:
+        kind = getattr(value, "kind", None)
+        target_id = getattr(value, "target_id", None)
+        if isinstance(value, dict):
+            kind = value.get("kind")
+            target_id = value.get("target_id")
+        kind_value = getattr(kind, "value", kind)
+        if (
+            kind_value
+            in {
+                DependencyKind.LOCAL_STEP.value,
+                DependencyKind.LOCAL_CLAIM.value,
+            }
+            and target_id
+        ):
+            local_targets.add(str(target_id))
+    return [
+        dependency
+        for dependency in claim.dependencies
+        if dependency not in local_targets
+        and not dependency.startswith(("step:", "claim:"))
+    ]
 
 
 @dataclass(slots=True)
@@ -3076,10 +3104,32 @@ class ProofMeshOrchestrator:
             message_type = MessageType.CLAIM_PROPOSAL
             verification_status = claim.status
             confidence = claim.verification_confidence or 0.0
+            ledger_entry = (
+                state.proof_control.state.claim_verification_ledger.get(claim.claim_id)
+                if state.proof_control is not None
+                else None
+            )
+            referee_ledger_allows_fact = bool(
+                ledger_entry is not None
+                and ledger_entry.referee_review_ids
+                and ledger_entry.state
+                in {
+                    ClaimVerificationState.REFEREE_ACCEPTED,
+                    ClaimVerificationState.FACT_CANDIDATE,
+                    ClaimVerificationState.FACT,
+                }
+            )
+            proof_control_requires_referee_ledger = bool(
+                state.proof_control is not None and state.proof_control.active
+            )
             if (
                 claim.status == ClaimStatus.VERIFIED
                 and referee_id is not None
                 and team_global_allowed
+                and (
+                    not proof_control_requires_referee_ledger
+                    or referee_ledger_allows_fact
+                )
             ):
                 tier = MemoryTier.FACT
                 evidence = EvidenceType.NATURAL_PROOF_AUDITED
@@ -3108,7 +3158,12 @@ class ProofMeshOrchestrator:
                 normalized_statement=normalized,
                 assumptions=claim.assumptions,
                 conclusion=claim.conclusion,
-                dependencies=claim.dependencies,
+                dependencies=(
+                    _reusable_claim_dependency_ids(claim)
+                    if proof_control_requires_referee_ledger
+                    else claim.dependencies
+                ),
+                dependency_refs=claim.dependency_refs,
                 scope_limitations=claim.scope_limitations,
                 evidence_type=evidence,
                 memory_tier=tier,
@@ -3121,11 +3176,34 @@ class ProofMeshOrchestrator:
             )
             if broker.contains(message, current_round=current_round):
                 continue
+            if (
+                tier == MemoryTier.FACT
+                and proof_control_requires_referee_ledger
+                and state.proof_control is not None
+                and ledger_entry is not None
+                and ledger_entry.state == ClaimVerificationState.REFEREE_ACCEPTED
+            ):
+                ledger_entry = (
+                    state.proof_control.claim_lifecycle.promote_fact_candidate(
+                        claim.claim_id
+                    )
+                )
             publication = broker.publish(
                 message,
                 referee_agent_id=referee_id,
                 current_round=current_round,
             )
+            if (
+                publication.accepted
+                and tier == MemoryTier.FACT
+                and state.proof_control is not None
+                and ledger_entry is not None
+                and ledger_entry.state == ClaimVerificationState.FACT_CANDIDATE
+            ):
+                state.proof_control.claim_lifecycle.mark_fact(
+                    claim.claim_id,
+                    evidence_ids=[publication.duplicate_of or message.message_id],
+                )
             if (
                 publication.accepted
                 and tier == MemoryTier.FACT
@@ -8204,6 +8282,28 @@ class ProofMeshOrchestrator:
         result.global_share_allowed = (
             result.global_share_allowed and execution.fact_promotion_allowed
         )
+        if state.proof_control is not None and result.claim_dispositions:
+            independent_reports = [
+                item
+                for item in [result.skeptic_result]
+                if isinstance(item, VerificationReport)
+                and item.verdict == VerificationVerdict.PASS
+                and item.agent_id != author.id
+            ]
+            state.proof_control.apply_route_referee_records(
+                result.claim_dispositions,
+                claims=delta.new_claims,
+                local_steps=delta.new_steps,
+                structurally_verified_step_ids={
+                    item.step_id for item in delta.new_steps
+                },
+                independent_report_ids=[item.report_id for item in independent_reports],
+                confidence=(
+                    min(item.confidence for item in independent_reports)
+                    if independent_reports
+                    else 1.0
+                ),
+            )
         store.append_event(
             "validation_escalation_executed",
             {
@@ -8253,6 +8353,9 @@ class ProofMeshOrchestrator:
             "global_share_allowed": result.global_share_allowed,
             "validation_passed": execution.passed,
             "validation_execution": execution.model_dump(mode="json"),
+            "claim_dispositions": [
+                item.model_dump(mode="json") for item in result.claim_dispositions
+            ],
             "diagnostics": list(result.diagnostics),
         }
         if state.route_team_reviews is None:
@@ -9231,7 +9334,10 @@ class ProofMeshOrchestrator:
             store.save_working_checkpoint(working_checkpoint)
 
             if state is not None and state.proof_control is not None:
-                state.proof_control.register_delta(delta)
+                state.proof_control.register_delta(
+                    delta,
+                    source_attempt_id=attempt_id,
+                )
             local_report = local_delta_verification(problem, checkpoint, delta)
             policy_issues: list[VerificationIssue] = []
             for gate_failure in calculation_gate_result.failures:

@@ -37,6 +37,7 @@ from .action_dispatcher import ControlActionDispatcher
 from .bottleneck import BottleneckCompressor
 from .claim_lifecycle import ClaimLifecycleController
 from .common_mode import CriticalAssumptionMatrix
+from .dependencies import DependencyResolver, migrate_legacy_dependencies
 from .domains import classify_obligation_domain
 from .failure_control import BlueprintRewriter, FailureClassifier
 from .falsification import (
@@ -61,12 +62,18 @@ from .models import (
     BlueprintRewriteRequest,
     BottleneckBridgeTask,
     BottleneckCluster,
+    ClaimRefereeDisposition,
+    ClaimRefereeRecord,
     ClaimGoalLink,
+    ClaimVerificationLedgerEntry,
+    ClaimVerificationState,
     ControlActionRecord,
     ControlActionResult,
     ControlActionStatus,
     ControlActionType,
     CountermodelTaskRecord,
+    DependencyRef,
+    DependencyResolutionResult,
     FalsificationTaskRecord,
     GateVerdict,
     GoalAlignmentContractResult,
@@ -695,6 +702,8 @@ class ProofControlLayer:
         *,
         route_id: str | None = None,
     ) -> ClaimGoalLink | None:
+        if claim.claim_id in self.claim_lifecycle.claims:
+            self.claim_lifecycle.register_claim(claim)
         existing = self._goal_link_for_subject(claim.claim_id)
         if existing is not None:
             return existing
@@ -770,8 +779,40 @@ class ProofControlLayer:
         return self._register_goal_link(obligation, link)
 
     def register_attempt(self, attempt: ProofAttempt) -> None:
+        if not self.control_config.enabled or self.control_config.mode == "off":
+            return
         route_id = self._route_id_for_strategy(attempt.strategy_id)
+        local_steps = {
+            item.step_id: item
+            for item in [
+                *attempt.proof_steps,
+                *(
+                    step
+                    for claim in attempt.proposed_lemmas
+                    for step in claim.proof_steps
+                ),
+            ]
+        }
+        local_claims = {item.claim_id: item for item in attempt.proposed_lemmas}
+        self._normalize_step_dependencies(
+            attempt.proof_steps,
+            source_attempt_id=attempt.attempt_id,
+            source_delta_id=None,
+            route_id=route_id,
+            local_step_ids=local_steps,
+            local_claim_ids=local_claims,
+        )
         for claim in attempt.proposed_lemmas:
+            if claim.source_attempt_id is None:
+                claim.source_attempt_id = attempt.attempt_id
+            self._normalize_claim_dependencies(
+                claim,
+                source_attempt_id=attempt.attempt_id,
+                source_delta_id=claim.source_delta_id,
+                route_id=route_id,
+                local_steps=local_steps,
+                local_claims=local_claims,
+            )
             self.register_claim(claim, route_id=route_id)
         self._register_steps(
             attempt.proof_steps,
@@ -793,9 +834,44 @@ class ProofControlLayer:
             ],
         )
 
-    def register_delta(self, delta: ProofDelta) -> None:
+    def register_delta(
+        self,
+        delta: ProofDelta,
+        *,
+        source_attempt_id: str | None = None,
+    ) -> None:
+        if not self.control_config.enabled or self.control_config.mode == "off":
+            return
         route_id = self._route_id_for_strategy(delta.strategy_id)
+        local_steps = {
+            item.step_id: item
+            for item in [
+                *delta.new_steps,
+                *(step for claim in delta.new_claims for step in claim.proof_steps),
+            ]
+        }
+        local_claims = {item.claim_id: item for item in delta.new_claims}
+        self._normalize_step_dependencies(
+            delta.new_steps,
+            source_attempt_id=source_attempt_id,
+            source_delta_id=delta.delta_id,
+            route_id=route_id,
+            local_step_ids=local_steps,
+            local_claim_ids=local_claims,
+        )
         for claim in delta.new_claims:
+            if claim.source_attempt_id is None and source_attempt_id is not None:
+                claim.source_attempt_id = source_attempt_id
+            if claim.source_delta_id is None:
+                claim.source_delta_id = delta.delta_id
+            self._normalize_claim_dependencies(
+                claim,
+                source_attempt_id=claim.source_attempt_id,
+                source_delta_id=delta.delta_id,
+                route_id=route_id,
+                local_steps=local_steps,
+                local_claims=local_claims,
+            )
             self.register_claim(claim, route_id=route_id)
         self._register_steps(
             delta.new_steps,
@@ -821,6 +897,271 @@ class ProofControlLayer:
             ],
         )
         self._register_abstract_realizer_if_explicit(delta, route_id=route_id)
+
+    def apply_route_referee_records(
+        self,
+        records: Sequence[ClaimRefereeRecord],
+        *,
+        claims: Sequence[ClaimCard],
+        local_steps: Sequence[ProofStep] = (),
+        structurally_verified_step_ids: Collection[str] = (),
+        independent_report_ids: Sequence[str] = (),
+        confidence: float = 1.0,
+    ) -> list[ClaimVerificationLedgerEntry]:
+        if not self.control_config.enabled or self.control_config.mode == "off":
+            return []
+        claims_by_id = {item.claim_id: item for item in claims}
+        transient_claim_ids = [
+            claim.claim_id
+            for claim in claims
+            if claim.claim_id not in self.claim_lifecycle.claims
+        ]
+        for claim_id, claim in claims_by_id.items():
+            self.claim_lifecycle.claims.setdefault(claim_id, claim)
+        try:
+            for claim in claims:
+                self.claim_lifecycle.register_claim(claim)
+                self.register_claim(claim)
+            applied: list[ClaimVerificationLedgerEntry] = []
+            for supplied_record in records:
+                claim = claims_by_id.get(supplied_record.claim_id)
+                if claim is None:
+                    self._emit(
+                        "claim_referee_record_deferred",
+                        {
+                            "review_id": supplied_record.review_id,
+                            "claim_id": supplied_record.claim_id,
+                            "reason": "claim_not_present_in_reviewed_artifact",
+                        },
+                    )
+                    continue
+                record = supplied_record
+                resolution = self.resolve_claim_dependencies(
+                    claim,
+                    local_steps=local_steps,
+                    structurally_verified_step_ids=structurally_verified_step_ids,
+                    local_claims=claims,
+                    structurally_verified_claim_ids=(
+                        claims_by_id if independent_report_ids else ()
+                    ),
+                )
+                if (
+                    record.disposition == ClaimRefereeDisposition.ACCEPT
+                    and not resolution.resolved
+                ):
+                    record = record.model_copy(
+                        update={
+                            "disposition": (
+                                ClaimRefereeDisposition.NEEDS_ADDITIONAL_REVIEW
+                            ),
+                            "dependencies_valid": False,
+                            "reason": (
+                                f"{record.reason} Dependency resolution remains open."
+                            ).strip(),
+                        }
+                    )
+                existing = self.state.claim_referee_records.get(record.review_id)
+                if existing is not None and existing != record:
+                    raise ValueError(
+                        f"conflicting claim referee review ID: {record.review_id}"
+                    )
+                self.state.claim_referee_records[record.review_id] = record
+                if independent_report_ids and self.claim_lifecycle.ledger[
+                    claim.claim_id
+                ].state not in {
+                    ClaimVerificationState.INVALIDATED,
+                    ClaimVerificationState.REJECTED,
+                }:
+                    self.claim_lifecycle.record_checkpoint_verification(
+                        claim.claim_id,
+                        report_ids=list(independent_report_ids),
+                        confidence=confidence,
+                        independent=True,
+                    )
+                entry = self.claim_lifecycle.apply_referee_record(record)
+                applied.append(entry)
+                self._emit(
+                    "claim_referee_record_applied",
+                    {
+                        **record.model_dump(mode="json"),
+                        "ledger_state": entry.state.value,
+                    },
+                )
+            self.persist()
+            return applied
+        finally:
+            for claim_id in transient_claim_ids:
+                self.claim_lifecycle.claims.pop(claim_id, None)
+
+    def resolve_claim_dependencies(
+        self,
+        claim: ClaimCard,
+        *,
+        local_steps: Sequence[ProofStep] = (),
+        structurally_verified_step_ids: Collection[str] = (),
+        invalidated_local_step_ids: Collection[str] = (),
+        local_claims: Sequence[ClaimCard] = (),
+        structurally_verified_claim_ids: Collection[str] = (),
+    ) -> DependencyResolutionResult:
+        refs = [
+            item
+            if isinstance(item, DependencyRef)
+            else DependencyRef.model_validate(item)
+            for item in claim.dependency_refs
+        ]
+        broker_facts = self.message_broker.admitted_facts()
+        all_local_claims = {
+            **self.claim_lifecycle.claims,
+            **{item.claim_id: item for item in local_claims},
+        }
+        verified_states = {
+            ClaimVerificationState.LOCALLY_VERIFIED,
+            ClaimVerificationState.INDEPENDENTLY_VERIFIED,
+            ClaimVerificationState.REFEREE_ACCEPTED,
+            ClaimVerificationState.FACT_CANDIDATE,
+            ClaimVerificationState.FACT,
+        }
+        verified_claim_ids = {
+            claim_id
+            for claim_id, entry in self.claim_lifecycle.ledger.items()
+            if entry.state in verified_states
+        } | set(structurally_verified_claim_ids)
+        return DependencyResolver(
+            local_steps={item.step_id: item for item in local_steps},
+            structurally_verified_step_ids=structurally_verified_step_ids,
+            invalidated_local_step_ids=invalidated_local_step_ids,
+            local_claims=all_local_claims,
+            verified_local_claim_ids=verified_claim_ids,
+            broker_fact_ids={item.message_id for item in broker_facts},
+            broker_fact_hashes={item.content_hash for item in broker_facts},
+            message_ids={item.message_id for item in self.message_broker.messages},
+            obligation_ids={
+                item.obligation_id for item in self.proof_graph.obligations
+            },
+            external_result_ids={item.artifact_ref for item in claim.evidence_refs},
+            source_attempt_id=claim.source_attempt_id,
+            source_delta_id=claim.source_delta_id,
+        ).resolve_all(refs)
+
+    def _normalize_claim_dependencies(
+        self,
+        claim: ClaimCard,
+        *,
+        source_attempt_id: str | None,
+        source_delta_id: str | None,
+        route_id: str | None,
+        local_steps: Mapping[str, ProofStep],
+        local_claims: Mapping[str, ClaimCard],
+    ) -> None:
+        refs = self._normalize_dependencies(
+            claim.dependencies,
+            claim.dependency_refs,
+            source_attempt_id=source_attempt_id,
+            source_delta_id=source_delta_id,
+            route_id=route_id,
+            local_step_ids=local_steps,
+            local_claim_ids=local_claims,
+            subject_id=claim.claim_id,
+        )
+        claim.dependency_refs = refs
+        for step in claim.proof_steps:
+            step.dependency_refs = self._normalize_dependencies(
+                step.dependencies,
+                step.dependency_refs,
+                source_attempt_id=source_attempt_id,
+                source_delta_id=source_delta_id,
+                route_id=route_id,
+                local_step_ids=local_steps,
+                local_claim_ids=local_claims,
+                subject_id=step.step_id,
+            )
+
+    def _normalize_step_dependencies(
+        self,
+        steps: Sequence[ProofStep],
+        *,
+        source_attempt_id: str | None,
+        source_delta_id: str | None,
+        route_id: str | None,
+        local_step_ids: Mapping[str, ProofStep],
+        local_claim_ids: Mapping[str, ClaimCard],
+    ) -> None:
+        for step in steps:
+            step.dependency_refs = self._normalize_dependencies(
+                step.dependencies,
+                step.dependency_refs,
+                source_attempt_id=source_attempt_id,
+                source_delta_id=source_delta_id,
+                route_id=route_id,
+                local_step_ids=local_step_ids,
+                local_claim_ids=local_claim_ids,
+                subject_id=step.step_id,
+            )
+
+    def _normalize_dependencies(
+        self,
+        legacy_ids: Sequence[str],
+        supplied_refs: Sequence[Any],
+        *,
+        source_attempt_id: str | None,
+        source_delta_id: str | None,
+        route_id: str | None,
+        local_step_ids: Collection[str],
+        local_claim_ids: Collection[str],
+        subject_id: str,
+    ) -> list[DependencyRef]:
+        refs = [
+            item
+            if isinstance(item, DependencyRef)
+            else DependencyRef.model_validate(item)
+            for item in supplied_refs
+        ]
+        migration = migrate_legacy_dependencies(
+            legacy_ids,
+            source_attempt_id=source_attempt_id,
+            source_delta_id=source_delta_id,
+            source_route_id=route_id,
+            local_step_ids=local_step_ids,
+            local_claim_ids=local_claim_ids,
+            broker_fact_ids={
+                item.message_id for item in self.message_broker.admitted_facts()
+            },
+        )
+        refs.extend(migration.dependency_refs)
+        deduplicated = {
+            (
+                item.kind.value,
+                item.target_id,
+                item.source_attempt_id,
+                item.source_delta_id,
+                item.source_route_id,
+                item.content_hash,
+            ): item
+            for item in refs
+        }
+        if migration.normalization_task is not None:
+            task = migration.normalization_task.model_copy(
+                update={
+                    "task_id": (
+                        "dependency_normalization_"
+                        + stable_hash(
+                            {
+                                "base_task_id": migration.normalization_task.task_id,
+                                "subject_id": subject_id,
+                            }
+                        )[:20]
+                    )
+                }
+            )
+            self.state.dependency_normalization_tasks[task.task_id] = task
+            self._emit(
+                "ambiguous_dependency",
+                {
+                    "subject_id": subject_id,
+                    **task.model_dump(mode="json"),
+                },
+            )
+        return list(deduplicated.values())
 
     def process_verification_report(
         self,
@@ -4689,6 +5030,8 @@ class ProofControlLayer:
             self.state.route_target_bindings,
             self.state.goal_alignment_contracts,
             self.state.claim_verification_ledger,
+            self.state.claim_referee_records,
+            self.state.dependency_normalization_tasks,
             self.state.premise_closure_records,
             self.state.countermodel_tasks,
             self.state.falsification_tasks,

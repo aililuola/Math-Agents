@@ -5,6 +5,10 @@ from typing import Any, Awaitable, Callable
 
 from ..config import SystemConfig
 from ..cross_route_phase import distinct_agent_exclusions
+from ..proof_control.models import (
+    ClaimRefereeDisposition,
+    ClaimRefereeRecord,
+)
 from ..schemas import (
     BrokerDecision,
     ClaimStatus,
@@ -15,6 +19,7 @@ from ..schemas import (
     ToolAuditReport,
     VerificationReport,
     VerificationVerdict,
+    stable_hash,
 )
 from .role_runner import RoleAssignment, RoleRunner
 
@@ -47,6 +52,7 @@ class RouteTeamResult:
     skeptic_result: Any = None
     tool_result: Any = None
     referee_result: Any = None
+    claim_dispositions: list[ClaimRefereeRecord] = field(default_factory=list)
     global_share_allowed: bool = False
     diagnostics: list[str] = field(default_factory=list)
 
@@ -314,4 +320,90 @@ class RouteTeam:
             result.diagnostics.append(
                 "referee returned no recognized admissibility result"
             )
+        result.claim_dispositions = self._map_claim_dispositions(
+            plan,
+            artifact,
+            result.referee_result,
+        )
         return result
+
+    @staticmethod
+    def _map_claim_dispositions(
+        plan: RouteTeamPlan,
+        artifact: Any,
+        referee_result: Any,
+    ) -> list[ClaimRefereeRecord]:
+        claims = [
+            *getattr(artifact, "new_claims", []),
+            *getattr(artifact, "proposed_lemmas", []),
+        ]
+        if not claims or plan.referee.agent_id is None:
+            return []
+        decision = (
+            referee_result if isinstance(referee_result, BrokerDecision) else None
+        )
+        accepted_ids = set(decision.accepted_claim_ids if decision else [])
+        rejected_ids = set(decision.rejected_claim_ids if decision else [])
+        deferred_ids = set(decision.deferred_claim_ids if decision else [])
+        records: list[ClaimRefereeRecord] = []
+        for claim in claims:
+            if claim.claim_id in rejected_ids:
+                disposition = ClaimRefereeDisposition.REJECT
+                reason = (
+                    decision.rejection_reason
+                    if decision is not None and decision.rejection_reason
+                    else "The Route Referee rejected this Claim explicitly."
+                )
+            elif (
+                decision is not None
+                and decision.accepted
+                and claim.claim_id in accepted_ids
+            ):
+                disposition = ClaimRefereeDisposition.ACCEPT
+                reason = "The Route Referee accepted this Claim explicitly."
+            elif claim.claim_id in deferred_ids:
+                disposition = ClaimRefereeDisposition.DEFER
+                reason = "The Route Referee deferred this Claim explicitly."
+            else:
+                disposition = ClaimRefereeDisposition.DEFER
+                reason = (
+                    "The artifact-level Referee result did not contain an "
+                    "explicit disposition for this Claim."
+                )
+            accepted = disposition == ClaimRefereeDisposition.ACCEPT
+            records.append(
+                ClaimRefereeRecord(
+                    review_id=(
+                        "claim_referee_"
+                        + stable_hash(
+                            {
+                                "route_id": plan.route_id,
+                                "referee_agent_id": plan.referee.agent_id,
+                                "message_id": (
+                                    decision.message_id
+                                    if decision is not None
+                                    else getattr(artifact, "delta_id", None)
+                                    or getattr(artifact, "attempt_id", None)
+                                ),
+                                "claim_id": claim.claim_id,
+                                "disposition": disposition.value,
+                            }
+                        )[:20]
+                    ),
+                    referee_agent_id=plan.referee.agent_id,
+                    source_attempt_id=(
+                        claim.source_attempt_id or getattr(artifact, "attempt_id", "")
+                    ),
+                    source_delta_id=(
+                        claim.source_delta_id or getattr(artifact, "delta_id", None)
+                    ),
+                    claim_id=claim.claim_id,
+                    disposition=disposition,
+                    dependencies_valid=accepted,
+                    scope_valid=accepted,
+                    quantifiers_valid=accepted,
+                    evidence_type_valid=accepted,
+                    reason=reason,
+                )
+            )
+        return records

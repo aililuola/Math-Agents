@@ -1508,7 +1508,14 @@ JSON SCHEMA:
     def route_referee(self, **context: Any) -> PromptBundle:
         return self._typed_stage(
             "route_referee",
-            "Judge only global admissibility, memory tier, scope, dependencies, quantifiers, and need for escalation. Do not invent new proof steps.",
+            (
+                "Judge only global admissibility, memory tier, scope, dependencies, "
+                "quantifiers, and need for escalation. For every Claim in the "
+                "artifact, place its exact claim_id in exactly one of "
+                "accepted_claim_ids, rejected_claim_ids, or deferred_claim_ids. "
+                "Artifact-level accepted=true does not accept an unmapped Claim. "
+                "Do not invent new proof steps."
+            ),
             BrokerDecision,
             context,
         )

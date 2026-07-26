@@ -438,6 +438,7 @@ class MessageEnvelope(StrictModel):
     quantifiers: list[QuantifierSpec] = Field(default_factory=list)
     variable_bindings: list[VariableBinding] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
+    dependency_refs: list[Any] = Field(default_factory=list)
     scope_limitations: list[str] = Field(default_factory=list)
 
     evidence_type: EvidenceType
@@ -605,6 +606,7 @@ class ProofObligation(StrictModel):
     assumptions: list[str] = Field(default_factory=list)
     quantifiers: list[QuantifierSpec] = Field(default_factory=list)
     dependency_ids: list[str] = Field(default_factory=list)
+    dependency_refs: list[Any] = Field(default_factory=list)
     status: Literal["open", "tentative", "closed", "refuted", "blocked"] = "open"
     priority: float = Field(default=0.5, ge=0.0, le=1.0)
     centrality: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -649,6 +651,9 @@ class BrokerDecision(StrictModel):
     bridge_task_id: str | None = None
     contradiction_id: str | None = None
     score_breakdown: dict[str, float] = Field(default_factory=dict)
+    accepted_claim_ids: list[str] = Field(default_factory=list)
+    rejected_claim_ids: list[str] = Field(default_factory=list)
+    deferred_claim_ids: list[str] = Field(default_factory=list)
 
 
 class BridgeTask(StrictModel):
@@ -1983,6 +1988,7 @@ class ProofStep(StrictModel):
     statement: str
     justification: str
     dependencies: list[str] = Field(default_factory=list)
+    dependency_refs: list[Any] = Field(default_factory=list)
     calculations: list[str] = Field(default_factory=list)
     calculation_checks: list[ToolRequest] = Field(default_factory=list)
     calculation_evidence_refs: list[EvidenceRef] = Field(default_factory=list)
@@ -1991,9 +1997,10 @@ class ProofStep(StrictModel):
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
 
     def checkpoint_payload(self) -> dict[str, Any]:
-        """Keep old checkpoint hashes valid when the new fields are empty."""
+        """Keep sidecar metadata out of the mathematical checkpoint hash."""
 
         payload = self.model_dump(mode="json")
+        payload.pop("dependency_refs", None)
         if not self.calculation_checks:
             payload.pop("calculation_checks", None)
         if not self.calculation_evidence_refs:
@@ -2008,6 +2015,7 @@ class ClaimCard(StrictModel):
     conclusion: str
     proof_steps: list[ProofStep] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
+    dependency_refs: list[Any] = Field(default_factory=list)
     status: ClaimStatus = ClaimStatus.PROPOSED
     source_delta_id: str | None = None
     source_attempt_id: str | None = None
@@ -2139,6 +2147,7 @@ class ProofDelta(StrictModel):
     new_claims: list[ClaimCard] = Field(default_factory=list)
     candidate_conjectures: list[CandidateConjecture] = Field(default_factory=list)
     active_assumptions: list[str] = Field(default_factory=list)
+    dependency_refs: list[Any] = Field(default_factory=list)
     remaining_subgoals: list[str] = Field(default_factory=list)
     current_goal: str | None = None
     known_risks: list[str] = Field(default_factory=list)

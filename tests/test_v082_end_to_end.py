@@ -98,3 +98,54 @@ def test_proof_control_off_keeps_legacy_path(tmp_path) -> None:
     assert admitted == [strategy]
     assert control.state.strategy_blueprints == {}
     assert control.state.original_strategy_archive == {}
+
+
+def test_route_referee_pipeline_does_not_publish_uncommitted_claim(tmp_path) -> None:
+    *_runtime, control, _main_goal = make_control_runtime(tmp_path, mode="active")
+    step = ProofStep(
+        step_id="step-transient",
+        statement="The local construction satisfies the audited relation.",
+        justification="By direct inspection of the construction.",
+    )
+    claim = ClaimCard(
+        claim_id="claim-transient",
+        statement="The audited local relation implies the target relation.",
+        conclusion="The audited local relation implies the target relation.",
+        dependencies=[step.step_id],
+        dependency_refs=[
+            DependencyRef(
+                kind=DependencyKind.LOCAL_STEP,
+                target_id=step.step_id,
+                source_delta_id="delta-transient",
+            )
+        ],
+        source_attempt_id="attempt-transient",
+        source_delta_id="delta-transient",
+        source_agent_id="author-a",
+    )
+    record = ClaimRefereeRecord(
+        review_id="review-transient",
+        referee_agent_id="referee-b",
+        source_attempt_id="attempt-transient",
+        source_delta_id="delta-transient",
+        claim_id=claim.claim_id,
+        disposition=ClaimRefereeDisposition.ACCEPT,
+        dependencies_valid=True,
+        scope_valid=True,
+        quantifiers_valid=True,
+        evidence_type_valid=True,
+        reason="The Claim and its local Step passed independent review.",
+    )
+
+    entries = control.apply_route_referee_records(
+        [record],
+        claims=[claim],
+        local_steps=[step],
+        structurally_verified_step_ids={step.step_id},
+        independent_report_ids=["independent-review"],
+        confidence=0.95,
+    )
+
+    assert entries[0].state == ClaimVerificationState.REFEREE_ACCEPTED
+    assert control.typed_memory.lemma_memory.claims == []
+    assert control.state.claim_referee_records == {record.review_id: record}

@@ -177,10 +177,14 @@ class LemmaMemory:
             for claim_id, claim in verified.items():
                 if claim_id in valid:
                     continue
-                claim_dependencies = [
-                    d for d in claim.dependencies if not d.startswith("external:")
-                ]
-                if all(dep in valid for dep in claim_dependencies):
+                local_claim_ids, local_steps_valid, ambiguous = (
+                    self._claim_local_dependencies(claim)
+                )
+                if (
+                    local_steps_valid
+                    and not ambiguous
+                    and all(dep in valid for dep in local_claim_ids)
+                ):
                     valid.add(claim_id)
                     changed = True
         return valid
@@ -197,14 +201,33 @@ class LemmaMemory:
             indegree.setdefault(claim_id, 0)
         for claim_id in verified_ids:
             claim = self._claims[claim_id]
-            for dep in claim.dependencies:
+            local_claim_ids, local_steps_valid, ambiguous = (
+                self._claim_local_dependencies(claim)
+            )
+            if ambiguous:
+                claim.status = ClaimStatus.UNCERTAIN
+                limitation = "ambiguous dependency requires normalization review"
+                if limitation not in claim.scope_limitations:
+                    claim.scope_limitations.append(limitation)
+                for dependency_id in self._ambiguous_legacy_dependency_ids(claim):
+                    missing = f"missing dependency: {dependency_id}"
+                    if missing not in claim.scope_limitations:
+                        claim.scope_limitations.append(missing)
+            if not local_steps_valid:
+                missing_steps = self._missing_local_step_ids(claim)
+                self._claim_lifecycle.invalidate_claim(
+                    claim.claim_id,
+                    reason="dependency_invalidated",
+                    evidence_ids=missing_steps,
+                )
+                for step_id in missing_steps:
+                    limitation = f"missing local proof step: {step_id}"
+                    if limitation not in claim.scope_limitations:
+                        claim.scope_limitations.append(limitation)
+            for dep in local_claim_ids:
                 if dep in verified_ids:
                     graph[dep].append(claim_id)
                     indegree[claim_id] = indegree.get(claim_id, 0) + 1
-                elif dep.startswith("external:"):
-                    # External dependencies are allowed only when their exact statement and applicability
-                    # are carried in the claim's proof/citation packet; the verifier remains responsible.
-                    continue
                 elif dep in self._claims:
                     # A verified claim depending on a non-verified stored claim is not reusable as verified.
                     self._claim_lifecycle.invalidate_claim(
@@ -216,8 +239,6 @@ class LemmaMemory:
                     if limitation not in claim.scope_limitations:
                         claim.scope_limitations.append(limitation)
                 else:
-                    # Missing IDs are never silently ignored. This also catches accidental use of a
-                    # local proof-step ID in ClaimCard.dependencies.
                     self._claim_lifecycle.invalidate_claim(
                         claim.claim_id,
                         reason="dependency_invalidated",
@@ -245,6 +266,82 @@ class LemmaMemory:
             limitations = self._claims[claim_id].scope_limitations
             if "dependency cycle detected" not in limitations:
                 limitations.append("dependency cycle detected")
+
+    @staticmethod
+    def _typed_dependency_parts(value: Any) -> tuple[str | None, str | None]:
+        if isinstance(value, dict):
+            kind = value.get("kind")
+            target_id = value.get("target_id")
+        else:
+            kind = getattr(value, "kind", None)
+            target_id = getattr(value, "target_id", None)
+        kind_value = getattr(kind, "value", kind)
+        return (
+            str(kind_value) if kind_value is not None else None,
+            str(target_id) if target_id is not None else None,
+        )
+
+    def _claim_local_dependencies(
+        self,
+        claim: ClaimCard,
+    ) -> tuple[set[str], bool, bool]:
+        step_ids = {step.step_id for step in claim.proof_steps}
+        local_claim_ids: set[str] = set()
+        referenced_step_ids: set[str] = set()
+        ambiguous = False
+
+        for value in claim.dependency_refs:
+            kind, target_id = self._typed_dependency_parts(value)
+            if not target_id:
+                ambiguous = True
+            elif kind == "local_step":
+                referenced_step_ids.add(target_id)
+            elif kind == "local_claim":
+                local_claim_ids.add(target_id)
+
+        for raw in claim.dependencies:
+            prefix, separator, target_id = raw.partition(":")
+            if separator:
+                if prefix == "step":
+                    referenced_step_ids.add(target_id)
+                elif prefix == "claim":
+                    local_claim_ids.add(target_id)
+                continue
+            if raw in step_ids:
+                referenced_step_ids.add(raw)
+            elif raw in self._claims:
+                local_claim_ids.add(raw)
+            elif not claim.dependency_refs:
+                # Untyped legacy IDs are reviewed by the dependency normalizer,
+                # not treated as missing global facts by LemmaMemory.
+                ambiguous = True
+
+        return (
+            local_claim_ids,
+            referenced_step_ids.issubset(step_ids),
+            ambiguous,
+        )
+
+    def _missing_local_step_ids(self, claim: ClaimCard) -> list[str]:
+        step_ids = {step.step_id for step in claim.proof_steps}
+        referenced: set[str] = set()
+        for value in claim.dependency_refs:
+            kind, target_id = self._typed_dependency_parts(value)
+            if kind == "local_step" and target_id:
+                referenced.add(target_id)
+        for raw in claim.dependencies:
+            prefix, separator, target_id = raw.partition(":")
+            if separator and prefix == "step":
+                referenced.add(target_id)
+        return sorted(referenced - step_ids)
+
+    def _ambiguous_legacy_dependency_ids(self, claim: ClaimCard) -> list[str]:
+        step_ids = {step.step_id for step in claim.proof_steps}
+        return sorted(
+            raw
+            for raw in claim.dependencies
+            if ":" not in raw and raw not in step_ids and raw not in self._claims
+        )
 
     def _persist(self) -> None:
         self.store.write_json(

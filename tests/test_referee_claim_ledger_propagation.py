@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from mathproofmesh.proof_control.claim_lifecycle import ClaimLifecycleController
@@ -8,7 +10,8 @@ from mathproofmesh.proof_control.models import (
     ClaimRefereeRecord,
     ClaimVerificationState,
 )
-from mathproofmesh.schemas import ClaimCard, ClaimStatus
+from mathproofmesh.schemas import BrokerDecision, ClaimCard, ClaimStatus
+from mathproofmesh.teams.route_team import RouteTeam
 
 
 def _claim() -> ClaimCard:
@@ -108,3 +111,42 @@ def test_referee_record_is_exactly_once() -> None:
     entry = controller.apply_referee_record(record)
 
     assert entry.referee_review_ids == [record.review_id]
+
+
+def test_delta_level_acceptance_requires_claim_mapping() -> None:
+    claim = _claim()
+    plan = SimpleNamespace(
+        route_id="route-a",
+        referee=SimpleNamespace(agent_id="referee-b"),
+    )
+    decision = BrokerDecision(message_id="artifact-a", accepted=True)
+
+    records = RouteTeam._map_claim_dispositions(
+        plan,
+        SimpleNamespace(new_claims=[claim], proposed_lemmas=[]),
+        decision,
+    )
+
+    assert records[0].disposition == ClaimRefereeDisposition.DEFER
+
+
+def test_explicit_claim_acceptance_maps_to_referee_record() -> None:
+    claim = _claim()
+    plan = SimpleNamespace(
+        route_id="route-a",
+        referee=SimpleNamespace(agent_id="referee-b"),
+    )
+    decision = BrokerDecision(
+        message_id="artifact-a",
+        accepted=True,
+        accepted_claim_ids=[claim.claim_id],
+    )
+
+    records = RouteTeam._map_claim_dispositions(
+        plan,
+        SimpleNamespace(new_claims=[claim], proposed_lemmas=[]),
+        decision,
+    )
+
+    assert records[0].disposition == ClaimRefereeDisposition.ACCEPT
+    assert records[0].dependencies_valid
