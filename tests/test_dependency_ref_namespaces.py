@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from mathproofmesh.memory import LemmaMemory
 from mathproofmesh.proof_control.dependencies import (
     DependencyResolver,
     migrate_legacy_dependencies,
@@ -39,6 +40,56 @@ def test_unknown_dependency_kind_still_fails_strict_validation() -> None:
                 "target_id": "artifact://result/certificate.json",
             }
         )
+
+
+def test_legacy_alias_with_non_string_target_still_reports_validation_error() -> None:
+    with pytest.raises(ValidationError):
+        DependencyRef.model_validate(
+            {
+                "kind": "external",
+                "target_id": [],
+            },
+            context={"local_claim_ids": {"claim-base"}},
+        )
+
+
+def test_legacy_external_kind_uses_explicit_local_namespace_context() -> None:
+    ref = DependencyRef.model_validate(
+        {
+            "kind": "external",
+            "target_id": "claim-base",
+        },
+        context={"local_claim_ids": {"claim-base"}},
+    )
+
+    assert ref.kind == DependencyKind.LOCAL_CLAIM
+    assert ref.kind_migration == "legacy_external_to_local_claim"
+
+
+def test_lemma_memory_contextually_migrates_legacy_claim_ref(
+    artifact_store,
+) -> None:
+    base = ClaimCard(
+        claim_id="claim-base",
+        statement="The base relation holds.",
+        conclusion="The base relation holds.",
+        source_attempt_id="attempt-a",
+    )
+    derived = ClaimCard(
+        claim_id="claim-derived",
+        statement="The derived relation holds.",
+        conclusion="The derived relation holds.",
+        dependencies=["claim-base"],
+        dependency_refs=[{"kind": "external", "target_id": "claim-base"}],
+        source_attempt_id="attempt-a",
+    )
+
+    LemmaMemory(artifact_store).add_many([base, derived])
+
+    ref = derived.dependency_refs[0]
+    assert isinstance(ref, DependencyRef)
+    assert ref.kind == DependencyKind.LOCAL_CLAIM
+    assert ref.kind_migration == "legacy_external_to_local_claim"
 
 
 def test_local_step_dependency_resolves_inside_delta() -> None:
@@ -203,6 +254,35 @@ def test_dependency_namespace_resume_roundtrip() -> None:
     restored = ProofControlState.from_state(state.export_state())
 
     assert restored.dependency_normalization_tasks == {task.task_id: task}
+
+
+def test_legacy_external_kind_is_canonical_after_checkpoint_resume() -> None:
+    restored = ProofControlState.from_state(
+        {
+            "schema_version": ProofControlState.schema_version,
+            "claim_verification_ledger": {
+                "claim-a": {
+                    "claim_id": "claim-a",
+                    "source_attempt_id": "attempt-a",
+                    "dependency_refs": [
+                        {
+                            "kind": "external",
+                            "target_id": "artifact://result/certificate.json",
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    ref = restored.claim_verification_ledger["claim-a"].dependency_refs[0]
+    exported_ref = restored.export_state()["claim_verification_ledger"]["claim-a"][
+        "dependency_refs"
+    ][0]
+
+    assert ref.kind == DependencyKind.EXTERNAL_RESULT
+    assert exported_ref["kind"] == "external_result"
+    assert exported_ref["kind_migration"] == ("legacy_external_to_external_result")
 
 
 def test_dependency_sidecar_does_not_change_claim_hash() -> None:

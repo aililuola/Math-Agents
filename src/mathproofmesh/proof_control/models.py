@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, ValidationInfo, model_validator
 
 from ..schemas import (
     ActionKind,
@@ -425,6 +426,52 @@ class DependencyRef(StrictModel):
     source_delta_id: str | None = None
     source_route_id: str | None = None
     content_hash: str | None = None
+    kind_migration: (
+        Literal[
+            "legacy_external_to_local_step",
+            "legacy_external_to_local_claim",
+            "legacy_external_to_external_result",
+        ]
+        | None
+    ) = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_external_kind(cls, value: Any, info: ValidationInfo) -> Any:
+        """Restore the sole documented pre-v0.8 typed dependency alias."""
+
+        if not isinstance(value, Mapping) or value.get("kind") != "external":
+            return value
+        context = info.context if isinstance(info.context, Mapping) else {}
+        local_step_ids = set(context.get("local_step_ids", ()))
+        local_claim_ids = set(context.get("local_claim_ids", ()))
+        target_id = value.get("target_id")
+        is_local_step = isinstance(target_id, str) and target_id in local_step_ids
+        is_local_claim = isinstance(target_id, str) and target_id in local_claim_ids
+        if is_local_step and not is_local_claim:
+            canonical = DependencyKind.LOCAL_STEP
+        elif is_local_claim and not is_local_step:
+            canonical = DependencyKind.LOCAL_CLAIM
+        else:
+            canonical = DependencyKind.EXTERNAL_RESULT
+        migrated = dict(value)
+        migrated["kind"] = canonical.value
+        migrated["kind_migration"] = f"legacy_external_to_{canonical.value}"
+        return migrated
+
+    @model_validator(mode="after")
+    def validate_kind_migration(self) -> "DependencyRef":
+        expected = {
+            "legacy_external_to_local_step": DependencyKind.LOCAL_STEP,
+            "legacy_external_to_local_claim": DependencyKind.LOCAL_CLAIM,
+            "legacy_external_to_external_result": DependencyKind.EXTERNAL_RESULT,
+        }
+        if (
+            self.kind_migration is not None
+            and self.kind != expected[self.kind_migration]
+        ):
+            raise ValueError("dependency kind migration does not match canonical kind")
+        return self
 
 
 class DependencyNormalizationTask(StrictModel):

@@ -167,3 +167,19 @@ def test_dependency_ref_aliases_use_payload_namespaces_and_are_audited() -> None
     ]
     assert len(actions) == 3
     assert all("external to " in action for action in actions)
+
+
+def test_model_cannot_supply_server_owned_dependency_migration_audit() -> None:
+    payload = {
+        "dependency_refs": [
+            {
+                "kind": "local_claim",
+                "target_id": "claim-base",
+                "kind_migration": "legacy_external_to_local_claim",
+            }
+        ]
+    }
+
+    StructuredAgentRunner._strip_server_owned_hashes(payload)
+
+    assert "kind_migration" not in payload["dependency_refs"][0]

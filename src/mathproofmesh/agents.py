@@ -1312,9 +1312,10 @@ class StructuredAgentRunner:
 
     @classmethod
     def _strip_server_owned_hashes(cls, value: Any) -> None:
-        """Ignore hashes invented by a model; validators recompute canonical values."""
+        """Discard model-authored fields that only the server may attest."""
 
         if isinstance(value, dict):
+            value.pop("kind_migration", None)
             for key in (
                 "content_hash",
                 "normalized_hash",
@@ -1340,7 +1341,7 @@ class StructuredAgentRunner:
         """Apply only lossless or conservative repairs before schema validation."""
 
         model_name = response_model.__name__
-        actions: list[str] = []
+        actions = StructuredAgentRunner._normalize_dependency_ref_kinds(payload)
         if model_name == "MetaStrategyDecision":
             aliases = {
                 "invent_auxiliary_construction": "auxiliary_construction",
@@ -1461,6 +1462,72 @@ class StructuredAgentRunner:
                 notes.append(note)
             actions.append(note)
 
+        return actions
+
+    @staticmethod
+    def _normalize_dependency_ref_kinds(payload: dict[str, Any]) -> list[str]:
+        """Canonicalize the exact legacy dependency alias using payload scope."""
+
+        local_step_ids: set[str] = set()
+        local_claim_ids: set[str] = set()
+
+        def collect_ids(value: Any) -> None:
+            if isinstance(value, dict):
+                step_id = value.get("step_id")
+                claim_id = value.get("claim_id")
+                if isinstance(step_id, str) and step_id:
+                    local_step_ids.add(step_id)
+                if isinstance(claim_id, str) and claim_id:
+                    local_claim_ids.add(claim_id)
+                for nested in value.values():
+                    collect_ids(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    collect_ids(nested)
+
+        collect_ids(payload)
+        actions: list[str] = []
+
+        def normalize(value: Any, path: str) -> None:
+            if isinstance(value, dict):
+                refs = value.get("dependency_refs")
+                if isinstance(refs, list):
+                    for index, raw_ref in enumerate(refs):
+                        if not (
+                            isinstance(raw_ref, dict)
+                            and raw_ref.get("kind") == "external"
+                        ):
+                            continue
+                        target_id = raw_ref.get("target_id")
+                        is_local_step = (
+                            isinstance(target_id, str) and target_id in local_step_ids
+                        )
+                        is_local_claim = (
+                            isinstance(target_id, str) and target_id in local_claim_ids
+                        )
+                        if is_local_step and not is_local_claim:
+                            canonical = "local_step"
+                        elif is_local_claim and not is_local_step:
+                            canonical = "local_claim"
+                        else:
+                            # No unique local namespace is safe to bind. The
+                            # external-result resolver will keep it unresolved
+                            # unless an exact artifact is actually registered.
+                            canonical = "external_result"
+                        migration = f"legacy_external_to_{canonical}"
+                        raw_ref["kind"] = canonical
+                        raw_ref["kind_migration"] = migration
+                        ref_path = f"{path}.dependency_refs[{index}].kind"
+                        actions.append(
+                            f"canonicalized {ref_path} external to {canonical}"
+                        )
+                for key, nested in value.items():
+                    normalize(nested, f"{path}.{key}")
+            elif isinstance(value, list):
+                for index, nested in enumerate(value):
+                    normalize(nested, f"{path}[{index}]")
+
+        normalize(payload, "$")
         return actions
 
     async def _call_with_activity_heartbeat(

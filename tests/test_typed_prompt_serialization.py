@@ -7,6 +7,7 @@ from pathlib import Path
 from mathproofmesh.prompts import PromptBundle, PromptFactory, _json, _schema
 from mathproofmesh.schemas import (
     AnalogyMapping,
+    AttemptStatus,
     BlindVerificationReport,
     BrokerDecision,
     ClaimBatch,
@@ -140,3 +141,25 @@ def test_cross_field_prompt_examples_are_actually_schema_valid() -> None:
     for model in models:
         example = json.loads(_schema(model).split(marker, 1)[1])
         model.model_validate(example)
+
+
+def test_claim_extraction_prompt_names_canonical_dependency_namespaces() -> None:
+    problem = _problem()
+    attempt = ProofAttempt(
+        problem_hash=problem.goal_hash,
+        strategy_id="strategy-a",
+        agent_id="explorer-a",
+        round_index=0,
+        status=AttemptStatus.PARTIAL,
+    )
+
+    bundle = PromptFactory(computation_enabled=True).summarize_claims(
+        problem,
+        attempt,
+        [],
+    )
+
+    assert '"local_claim"' in bundle.user
+    assert '"local_step"' in bundle.user
+    assert '"external_result"' in bundle.user
+    assert 'Never emit the legacy kind "external"' in bundle.user

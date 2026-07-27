@@ -1239,6 +1239,7 @@ Convert the attempt into a compact, loss-aware lemma packet for future agents.
 Extract only mathematically substantive new claims whose proof is actually present. Do not promote guesses, goals, or desired conclusions into lemmas.
 Each extracted claim must include assumptions, conclusion, dependencies, proof steps, source attempt/agent IDs, scope limitations, and evidence references to the attempt.
 ClaimCard.dependencies may contain only other ClaimCard IDs from the library or explicit external IDs prefixed with "external:"; dependencies among steps inside the same claim belong in ProofStep.dependencies.
+For typed dependency_refs, use kind "local_claim" for a ClaimCard ID in this packet, "local_step" for a ProofStep ID in this packet, and "external_result" only for an external artifact or theorem result. Never emit the legacy kind "external".
 Deduplicate against the existing library. Preserve uncertainty and failed conditions. The summary must not erase counterexamples or unresolved gaps.
 If no reusable claim is proved, return an empty claims list and explain why in discarded_material.
 

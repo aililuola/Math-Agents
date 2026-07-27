@@ -107,8 +107,10 @@ class LemmaMemory:
         self._persist()
 
     def add_many(self, claims: Iterable[ClaimCard]) -> list[ClaimCard]:
+        pending = list(claims)
+        self._normalize_dependency_ref_sidecars(pending)
         added: list[ClaimCard] = []
-        for claim in claims:
+        for claim in pending:
             existing_id = self._hash_to_id.get(claim.content_hash)
             if existing_id:
                 existing = self._claims[existing_id]
@@ -158,6 +160,66 @@ class LemmaMemory:
             self.store.append_event("claim_added", claim)
         self._persist()
         return added
+
+    def _normalize_dependency_ref_sidecars(self, claims: list[ClaimCard]) -> None:
+        """Canonicalize typed dependency metadata before mutating memory."""
+
+        from .proof_control.models import DependencyRef
+
+        known_claims = [*self._claims.values(), *claims]
+        context = {
+            "local_claim_ids": {claim.claim_id for claim in known_claims},
+            "local_step_ids": {
+                *self._committed_step_ids,
+                *(step.step_id for claim in known_claims for step in claim.proof_steps),
+            },
+        }
+        migrations: list[dict[str, str]] = []
+
+        def normalize(
+            values: list[Any],
+            *,
+            owner_kind: str,
+            owner_id: str,
+        ) -> list[DependencyRef]:
+            normalized: list[DependencyRef] = []
+            for value in values:
+                was_legacy = isinstance(value, dict) and value.get("kind") == "external"
+                ref = (
+                    value
+                    if isinstance(value, DependencyRef)
+                    else DependencyRef.model_validate(value, context=context)
+                )
+                normalized.append(ref)
+                if was_legacy:
+                    migrations.append(
+                        {
+                            "owner_kind": owner_kind,
+                            "owner_id": owner_id,
+                            "target_id": ref.target_id,
+                            "canonical_kind": ref.kind.value,
+                            "kind_migration": ref.kind_migration or "",
+                        }
+                    )
+            return normalized
+
+        for claim in claims:
+            claim.dependency_refs = normalize(
+                claim.dependency_refs,
+                owner_kind="claim",
+                owner_id=claim.claim_id,
+            )
+            for step in claim.proof_steps:
+                step.dependency_refs = normalize(
+                    step.dependency_refs,
+                    owner_kind="step",
+                    owner_id=step.step_id,
+                )
+        if migrations:
+            self.store.append_event(
+                "dependency_ref_checkpoint_migrated",
+                {"migrations": migrations},
+            )
 
     def mark_attempt_verified(
         self, attempt_id: str, report: VerificationReport
