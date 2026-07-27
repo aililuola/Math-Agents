@@ -34,6 +34,10 @@ from .models import (
     DependencyRef,
     ScopeSignature,
 )
+from .semantic_profile import (
+    conservatively_matches_across_languages,
+    extract_semantic_profile,
+)
 from .semantic_quality import ObligationSemanticGate
 
 
@@ -919,12 +923,19 @@ class CriticalAssumptionMatrix:
     ) -> bool:
         left_normalized = cls._normalize_assumption(left)
         right_normalized = cls._normalize_assumption(right)
-        return left_normalized == right_normalized or (
-            cls._tag_similarity(
-                cls._semantic_tags(left_normalized),
-                cls._semantic_tags(right_normalized),
+        return (
+            left_normalized == right_normalized
+            or conservatively_matches_across_languages(
+                left_normalized,
+                right_normalized,
             )
-            >= threshold
+            or (
+                cls._tag_similarity(
+                    cls._semantic_tags(left_normalized),
+                    cls._semantic_tags(right_normalized),
+                )
+                >= threshold
+            )
         )
 
     def _statement_matches_assumption(
@@ -954,6 +965,11 @@ class CriticalAssumptionMatrix:
         if left_scopes and right_scopes and not left_scopes.intersection(right_scopes):
             return False
         if left.normalized_statement == right.normalized_statement:
+            return True
+        if conservatively_matches_across_languages(
+            left.normalized_statement,
+            right.normalized_statement,
+        ):
             return True
         neighborhood_overlap = bool(
             set(left.proof_graph_neighborhood) & set(right.proof_graph_neighborhood)
@@ -1022,6 +1038,9 @@ class CriticalAssumptionMatrix:
                 )
         tags.update(
             f"math:{symbol}" for symbol in re.findall(r"[∀∃=≤≥≠∈∉⊂⊆→↔∣+\-*/^]", text)
+        )
+        tags.update(
+            f"concept:{concept}" for concept in extract_semantic_profile(text).concepts
         )
         return tags
 

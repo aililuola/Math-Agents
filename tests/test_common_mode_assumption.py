@@ -62,6 +62,62 @@ def test_chinese_particle_variants_share_the_same_assumption_family() -> None:
     )
 
 
+def test_chinese_and_english_assumptions_share_a_conservative_family() -> None:
+    routes = [
+        RouteDescriptor(
+            route_id="route-zh",
+            strategy_id="strategy-zh",
+            mechanism_signature=["direct"],
+        ),
+        RouteDescriptor(
+            route_id="route-en",
+            strategy_id="strategy-en",
+            mechanism_signature=["induction"],
+        ),
+    ]
+    chinese = make_strategy(101).model_copy(
+        update={
+            "strategy_id": "strategy-zh",
+            "prerequisites": ["相邻对象的距离有界"],
+        }
+    )
+    english = make_strategy(102).model_copy(
+        update={
+            "strategy_id": "strategy-en",
+            "prerequisites": ["Adjacent objects have bounded distance"],
+        }
+    )
+
+    matrix = CriticalAssumptionMatrix()
+    matrix.build(routes, [chinese, english])
+    shared = [
+        family
+        for family in matrix.risk_families()
+        if family.route_ids == ["route-en", "route-zh"]
+    ]
+
+    assert len(shared) == 1
+    assert CriticalAssumptionMatrix.statements_semantically_match(
+        "相邻对象的距离有界",
+        "Adjacent objects have bounded distance",
+    )
+
+
+def test_cross_language_matching_fails_closed_on_semantic_conflicts() -> None:
+    assert not CriticalAssumptionMatrix.statements_semantically_match(
+        "相邻对象的距离有界",
+        "Adjacent objects have unbounded distance",
+    )
+    assert not CriticalAssumptionMatrix.statements_semantically_match(
+        "每个对象都有一个表示",
+        "There exists an object with a representation",
+    )
+    assert not CriticalAssumptionMatrix.statements_semantically_match(
+        "映射在定义域上保持次序",
+        "Every closed interval is compact",
+    )
+
+
 def test_transport_wrappers_do_not_make_unrelated_chinese_gaps_equivalent() -> None:
     assert not CriticalAssumptionMatrix.statements_semantically_match(
         "[LEMMA][STATUS:OPEN][SOURCE:route-a][PREMISE_ELIGIBLE:false] "
