@@ -34,10 +34,7 @@ from .models import (
     DependencyRef,
     ScopeSignature,
 )
-from .semantic_profile import (
-    conservatively_matches_across_languages,
-    extract_semantic_profile,
-)
+from .semantic_profile import conservatively_matches_across_languages
 from .semantic_quality import ObligationSemanticGate
 
 
@@ -1038,9 +1035,6 @@ class CriticalAssumptionMatrix:
                 )
         tags.update(
             f"math:{symbol}" for symbol in re.findall(r"[∀∃=≤≥≠∈∉⊂⊆→↔∣+\-*/^]", text)
-        )
-        tags.update(
-            f"concept:{concept}" for concept in extract_semantic_profile(text).concepts
         )
         return tags
 
