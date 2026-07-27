@@ -1839,6 +1839,32 @@ class GoalClarificationDecision(StrictModel):
     selected_candidate_index: int | None = Field(default=None, ge=0)
 
 
+class ProblemSemanticViewCandidate(StrictModel):
+    """Model-proposed English reading; never an authoritative problem statement."""
+
+    english_statement: str = Field(min_length=1)
+    preserves_hypotheses: bool
+    preserves_quantifiers: bool
+    preserves_domains: bool
+    preserves_conclusion: bool
+    confidence: float = Field(ge=0.0, le=1.0)
+    notes: list[str] = Field(default_factory=list)
+
+
+class ProblemSemanticView(StrictModel):
+    """Audited prompt sidecar excluded from the frozen goal identity."""
+
+    source_statement_hash: str
+    source_language: str
+    english_statement: str
+    candidate_confidence: float = Field(ge=0.0, le=1.0)
+    protected_fragments: list[str] = Field(default_factory=list)
+    missing_protected_fragments: list[str] = Field(default_factory=list)
+    status: Literal["usable", "rejected"]
+    authoritative: Literal[False] = False
+    notes: list[str] = Field(default_factory=list)
+
+
 class ProblemContract(StrictModel):
     problem_id: str = Field(default_factory=lambda: new_id("problem"))
     exact_statement: str
@@ -1862,6 +1888,7 @@ class ProblemContract(StrictModel):
     hard_constraints: list[str] = Field(default_factory=list)
     allowed_tools: list[str] = Field(default_factory=list)
     output_language: str = "zh-CN"
+    semantic_view: ProblemSemanticView | None = None
     integrity_hash: str = ""
     created_at: str = Field(default_factory=utc_now_iso)
 
@@ -1919,6 +1946,7 @@ class TriageResult(StrictModel):
     proof_mode: Literal["direct", "decomposition", "hybrid"] = "hybrid"
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
+    semantic_view_candidate: ProblemSemanticViewCandidate | None = None
 
 
 class CriticalClaim(StrictModel):

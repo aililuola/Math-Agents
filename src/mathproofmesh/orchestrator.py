@@ -98,6 +98,7 @@ from .proof_control.models import (
     TaskStatus as ProofControlTaskStatus,
     WakeConditionKind,
 )
+from .proof_control.semantic_view import build_problem_semantic_view, contains_cjk
 from .proof_identity import (
     attempt_content_fingerprint,
     canonical_obligation_statement,
@@ -467,6 +468,7 @@ class ProofMeshOrchestrator:
             state.triage = await self._triage(problem, runner, prompts, store)
             problem.problem_kind = state.triage.problem_kind
             apply_task_contract(problem, state.triage)
+            self._attach_problem_semantic_view(problem, state.triage, store)
             store.write_json("structured", "problem_contract", problem)
             self._apply_difficulty_budget_scaling(state.triage, store)
             allocator = SoftBudgetAllocator(self.config, runner.ledger)
@@ -7464,6 +7466,7 @@ class ProofMeshOrchestrator:
                 "Do not change hypotheses, quantifiers, domains, or requested conclusions.",
                 "Distinguish proved claims from conjectures and unresolved gaps.",
                 "Every downstream artifact must retain the frozen goal hash.",
+                "Any semantic_view is non-authoritative; exact_statement wins on conflict.",
             ],
             allowed_tools=self._allowed_tools(),
             output_language=self.config.runtime.output_language,
@@ -7510,6 +7513,30 @@ class ProofMeshOrchestrator:
             },
         )
         return problem
+
+    @staticmethod
+    def _attach_problem_semantic_view(
+        problem: ProblemContract,
+        triage: TriageResult,
+        store: ArtifactStore,
+    ) -> None:
+        candidate = triage.semantic_view_candidate
+        if candidate is None or not contains_cjk(problem.exact_statement):
+            return
+        view = build_problem_semantic_view(problem.exact_statement, candidate)
+        store.write_json("structured", "problem_semantic_view", view)
+        store.append_event(
+            "problem_semantic_view_audited",
+            {
+                "source_statement_hash": view.source_statement_hash,
+                "status": view.status,
+                "candidate_confidence": view.candidate_confidence,
+                "missing_protected_fragments": view.missing_protected_fragments,
+                "authoritative": False,
+            },
+        )
+        if view.status == "usable":
+            problem.semantic_view = view
 
     async def _triage(
         self,
