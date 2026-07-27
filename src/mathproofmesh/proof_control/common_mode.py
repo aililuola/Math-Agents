@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ..config import CommonModeControlConfig
-from ..proof_identity import normalize_text
+from ..proof_identity import canonical_obligation_statement, normalize_text
 from ..schemas import (
     ClaimStatus,
     MemoryTier,
@@ -39,10 +40,19 @@ from .semantic_quality import ObligationSemanticGate
 class CriticalAssumptionMatrix:
     """Measure route dependence without treating agreement as verification."""
 
+    _SCHEDULABLE_ROUTE_STATUSES = {
+        RouteStatus.ACTIVE,
+        RouteStatus.WAITING,
+        RouteStatus.REPAIR_ONCE,
+        RouteStatus.COOLING,
+    }
     _STRIP_PREFIX = re.compile(
         r"^(?:we\s+)?(?:assume|suppose|using|use|hypothesis)\s*(?:that)?\s*[:,-]?\s*",
         re.IGNORECASE,
     )
+    _STRIP_PREFIX_CJK = re.compile(r"^(?:假设|假定|设)\s*[:：，,]?\s*")
+    _CJK_RUN = re.compile(r"[\u3400-\u9fff]+")
+    _CJK_PARTICLES = str.maketrans("", "", "的地得之是为均都")
     _JUSTIFICATION_ASSUMPTION = re.compile(
         r"(?:^|[.;]\s*)(?:assume|suppose|requires?|provided\s+that|using)\s+"
         r"(?:that\s+)?(?P<statement>[^.;]+)",
@@ -73,12 +83,7 @@ class CriticalAssumptionMatrix:
         active_route_ids = {
             route.route_id
             for route in routes
-            if route.status
-            not in {
-                RouteStatus.REFUTED,
-                RouteStatus.MERGED,
-                RouteStatus.ABANDONED,
-            }
+            if route.status in self._SCHEDULABLE_ROUTE_STATUSES
         }
         strategy_routes = {route.strategy_id: route.route_id for route in routes}
         route_by_id = {route.route_id: route for route in routes}
@@ -702,7 +707,10 @@ class CriticalAssumptionMatrix:
             (
                 family
                 for family in self.families.values()
-                if len(family.route_ids) >= self.config.min_routes
+                if (
+                    len(family.route_ids) >= self.config.min_routes
+                    or (family.is_dependency_cutset and len(family.route_ids) >= 2)
+                )
                 and family.common_mode_risk >= self.config.risk_threshold
                 and any(
                     self.assumptions[assumption_id].verification_status
@@ -990,11 +998,32 @@ class CriticalAssumptionMatrix:
             "the",
             "under",
         }
-        return {
+        text = unicodedata.normalize("NFKC", statement).casefold()
+        tags = {
             aliases.get(token, token)
-            for token in re.findall(r"[a-z][a-z0-9_]*", statement.casefold())
+            for token in re.findall(r"[a-z][a-z0-9_]*", text)
             if token not in stop
         }
+        for run in CriticalAssumptionMatrix._CJK_RUN.findall(text):
+            compact = run.translate(CriticalAssumptionMatrix._CJK_PARTICLES)
+            if not compact:
+                continue
+            if len(compact) == 1:
+                tags.add(f"cjk:{compact}")
+                continue
+            tags.update(
+                f"cjk2:{compact[index : index + 2]}"
+                for index in range(len(compact) - 1)
+            )
+            if len(compact) >= 3:
+                tags.update(
+                    f"cjk3:{compact[index : index + 3]}"
+                    for index in range(len(compact) - 2)
+                )
+        tags.update(
+            f"math:{symbol}" for symbol in re.findall(r"[∀∃=≤≥≠∈∉⊂⊆→↔∣+\-*/^]", text)
+        )
+        return tags
 
     @classmethod
     def _assumption_from_justification(cls, text: str) -> str:
@@ -1003,9 +1032,14 @@ class CriticalAssumptionMatrix:
 
     @classmethod
     def _normalize_assumption(cls, statement: str) -> str:
-        value = normalize_text(statement).casefold().strip(" .;:")
+        value = unicodedata.normalize(
+            "NFKC",
+            canonical_obligation_statement(statement),
+        )
+        value = normalize_text(value).casefold().strip(" .;:：。；")
         previous = ""
         while value != previous:
             previous = value
             value = cls._STRIP_PREFIX.sub("", value).strip(" .;:")
+            value = cls._STRIP_PREFIX_CJK.sub("", value).strip(" .;:：。；")
         return value

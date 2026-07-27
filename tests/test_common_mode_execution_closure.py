@@ -24,6 +24,7 @@ from mathproofmesh.schemas import (
     ProofObligation,
     ProofStep,
     RouteDescriptor,
+    RouteStatus,
     Severity,
     VerificationIssue,
     VerificationReport,
@@ -193,6 +194,75 @@ def test_shared_typed_dependency_clusters_different_route_mechanisms(tmp_path) -
     assert all(
         not control.deepening_currently_allowed(route.route_id) for route in routes
     )
+
+
+def test_live_route_cutset_is_not_diluted_by_frozen_routes(tmp_path) -> None:
+    (
+        config,
+        _store,
+        registry,
+        _memory,
+        graph,
+        control,
+        routes,
+        strategies,
+    ) = _runtime(tmp_path)
+    config.topology.proof_control.common_mode.min_routes = 3
+    control.control_config.common_mode.min_routes = 3
+    control.common_mode.config.min_routes = 3
+    for index, status in enumerate(
+        (RouteStatus.FROZEN, RouteStatus.FROZEN_STALLED),
+        start=401,
+    ):
+        frozen_strategy = make_strategy(index, tag=f"historical-{index}")
+        frozen = registry.register_route(
+            frozen_strategy,
+            route_id=f"route-historical-{index}",
+        )
+        frozen.status = status
+        strategies.append(frozen_strategy)
+    graph.add_obligation(
+        ProofObligation(
+            obligation_id="remaining-route-cutset",
+            problem_hash=PROBLEM_HASH,
+            route_ids=[route.route_id for route in routes],
+            kind=ObligationKind.LEMMA,
+            statement="Every admissible update preserves the declared relation.",
+            normalized_statement=(
+                "every admissible update preserves the declared relation"
+            ),
+            status="open",
+            centrality=1.0,
+        )
+    )
+    attempts = [
+        _attempt(
+            attempt_id=f"attempt-live-{index}",
+            strategy_id=strategy.strategy_id,
+            agent_id=f"agent-live-{index}",
+            route_id=route.route_id,
+            dependency_id="remaining-route-cutset",
+        )
+        for index, (route, strategy) in enumerate(zip(routes, strategies[:2]))
+    ]
+
+    control.update_after_round(
+        strategies=strategies,
+        attempts=attempts,
+        current_round=1,
+    )
+
+    family = next(
+        item
+        for item in control.common_mode.risk_families()
+        if item.typed_dependency_ids == ["obligation:remaining-route-cutset"]
+    )
+    assert family.route_ids == ["route-left", "route-right"]
+    assert family.is_dependency_cutset is True
+    task = control.state.assumption_challenger_tasks[family.challenger_task_id]
+    executable = control.state.executable_tasks[task.executable_task_id]
+    assert executable.status == TaskStatus.READY
+    assert executable.registered_handler == "assumption_challenger_dispatcher"
 
 
 def test_similar_theme_with_distinct_dependency_closures_is_not_merged(

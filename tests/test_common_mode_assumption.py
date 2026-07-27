@@ -55,6 +55,22 @@ def test_wording_variants_share_one_unverified_common_mode_assumption() -> None:
     assert shared.challenger_task_id == task["task_id"]
 
 
+def test_chinese_particle_variants_share_the_same_assumption_family() -> None:
+    assert CriticalAssumptionMatrix.statements_semantically_match(
+        "相邻对象的距离有界",
+        "相邻对象距离有界",
+    )
+
+
+def test_transport_wrappers_do_not_make_unrelated_chinese_gaps_equivalent() -> None:
+    assert not CriticalAssumptionMatrix.statements_semantically_match(
+        "[LEMMA][STATUS:OPEN][SOURCE:route-a][PREMISE_ELIGIBLE:false] "
+        "Unresolved gap: 映射在定义域上保持次序",
+        "[LEMMA][STATUS:OPEN][SOURCE:route-b][PREMISE_ELIGIBLE:false] "
+        "Unresolved gap: 每个闭区间都是紧致的",
+    )
+
+
 def test_route_votes_never_upgrade_evidence_status() -> None:
     routes, strategies = _routes_and_strategies()
     assumptions = CriticalAssumptionMatrix().build(routes, strategies)
