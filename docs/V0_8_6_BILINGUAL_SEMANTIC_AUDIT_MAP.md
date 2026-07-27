@@ -50,3 +50,14 @@ than textual similarity.
    topology/proof-control benchmarks, E2E, and checkpoint/resume tests.
 4. Keep real Provider calls at zero and do not commit runtime output, caches,
    distributions, credentials, or `.env` files.
+
+Final validation:
+
+- Full Pytest: 748 passed.
+- Focused E2E and checkpoint/resume: 41 passed.
+- Ruff check, Ruff format check, and compileall: passed.
+- Topology Mock benchmark: 21/21 contracts, 0 Provider calls.
+- Proof-control Mock benchmark: 14/14 contracts, 0 Provider calls.
+- Reasoning-first computation proxy: correctness rate 1.0.
+- Windows desktop tests: 19 passed; packaged health check, hidden-window smoke,
+  and Inno Setup compilation passed.

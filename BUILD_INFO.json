@@ -1,12 +1,12 @@
 {
   "project": "MathProofMesh",
   "version": "0.8.2",
-  "validated_on": "2026-07-26",
+  "validated_on": "2026-07-27",
   "python_requirement": ">=3.11",
   "base_branch": "feature/mathproofmesh-v0.7.0-hierarchical-sparse-topology",
   "base_commit": "866e7270a01babb93342d272b99865b449e3b934",
   "release_branch": "feature/mathproofmesh-v0.8.0-goal-plan-failure-utility-control",
-  "runtime_build_commit": "78545e8ce9d5daaeff62134ed5ddcc681c18b9eb",
+  "runtime_build_commit": "f914e9086e6a8c2f422a54b0c9b6e6ea5c0807d1",
   "deepseek_profile": {
     "provider": "deepseek",
     "model": "deepseek-v4-pro",
@@ -150,7 +150,12 @@
     "live_route_common_mode_cutset": true,
     "nonexecutable_falsification_deferred": true,
     "audited_bilingual_problem_sidecar": true,
-    "original_problem_authority_preserved": true
+    "original_problem_authority_preserved": true,
+    "cross_language_common_mode_text_matching": true,
+    "bilingual_semantic_conflicts_fail_closed": true,
+    "deterministic_problem_translation_audit": true,
+    "legacy_unaudited_semantic_view_quarantine": true,
+    "common_mode_family_key_identity_preserved": true
   },
   "reliability_control": {
     "stable_mathematical_identity": true,
@@ -194,8 +199,8 @@
     "compileall": "PASS",
     "ruff_check": "PASS",
     "ruff_format_check": "PASS",
-    "pytest": "742 passed after editable install with dev, server, and desktop extras including z3-solver",
-    "required_e2e_resume": "39 focused E2E and checkpoint/resume tests passed within the 742-test full suite",
+    "pytest": "748 passed after editable install with dev, server, and desktop extras including z3-solver",
+    "required_e2e_resume": "41 focused E2E and checkpoint/resume tests passed within the 748-test full suite",
     "offline_topology_benchmark": {
       "status": "PASS",
       "provider_calls": 0,
@@ -218,22 +223,22 @@
     "real_provider_calls": "NOT RUN; credentials intentionally unused"
   },
   "counts": {
-    "source_python_files": 135,
-    "test_python_files": 164,
-    "documentation_files": 28,
-    "source_lines": 76455,
-    "test_lines": 28780,
-    "docs_directory_lines": 5520
+    "source_python_files": 137,
+    "test_python_files": 166,
+    "documentation_files": 31,
+    "source_lines": 73032,
+    "test_lines": 25900,
+    "docs_directory_lines": 4389
   },
   "artifacts": {
-    "status": "WINDOWS DESKTOP 0.8.2 BUILD AND INSTALLER VALIDATED FOR 78545E8; INSTALLATION NOT RUN FOR THIS BUILD",
+    "status": "WINDOWS DESKTOP 0.8.2 BUILD AND INSTALLER VALIDATED FOR F914E90; INSTALLATION NOT RUN FOR THIS BUILD",
     "windows_installer": "packaging/windows/output/MathProofMesh-0.8.2-Setup-x64.exe",
-    "windows_installer_sha256": "7457814DBD57F0934E9F8548177CFB8C5786860C9772D036D7740F0252A4302A",
-    "portable_exe_sha256": "D160355CA51F0CFC011F53FC4F18399EBC0CECDF44957780483D83601CEF3DB9",
-    "desktop_installer": "MathProofMesh-0.8.2-78545e8-Setup-x64.exe",
-    "desktop_installer_sha256": "7457814DBD57F0934E9F8548177CFB8C5786860C9772D036D7740F0252A4302A",
+    "windows_installer_sha256": "D3FFCBD9D1446DCBB3D1C07DC2D1C89E9052CA1FEB5C5AB17C709832551E9498",
+    "portable_exe_sha256": "EC3F8A7B0A84A15C88F8FA82DD107E64BE4ED485585CE8A7AA3058A7C710DA2F",
+    "desktop_installer": "MathProofMesh-0.8.2-f914e90-Setup-x64.exe",
+    "desktop_installer_sha256": "D3FFCBD9D1446DCBB3D1C07DC2D1C89E9052CA1FEB5C5AB17C709832551E9498",
     "installed_exe_sha256": null,
-    "installed_health_check": "NOT RUN for runtime build 78545e8",
+    "installed_health_check": "NOT RUN for runtime build f914e90",
     "wheel": null,
     "sdist": null,
     "runs_committed": false,
