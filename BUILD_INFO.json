@@ -6,7 +6,7 @@
   "base_branch": "feature/mathproofmesh-v0.7.0-hierarchical-sparse-topology",
   "base_commit": "866e7270a01babb93342d272b99865b449e3b934",
   "release_branch": "feature/mathproofmesh-v0.8.0-goal-plan-failure-utility-control",
-  "runtime_build_commit": "0728d7410ee16f0c2482c5cd79889979339b389d",
+  "runtime_build_commit": "78545e8ce9d5daaeff62134ed5ddcc681c18b9eb",
   "deepseek_profile": {
     "provider": "deepseek",
     "model": "deepseek-v4-pro",
@@ -145,7 +145,12 @@
     "common_mode_transitive_dependency_closure": true,
     "executable_assumption_challenger": true,
     "independent_assumption_challenge_review": true,
-    "common_mode_checkpoint_exactly_once": true
+    "common_mode_checkpoint_exactly_once": true,
+    "multilingual_common_mode_dependency_families": true,
+    "live_route_common_mode_cutset": true,
+    "nonexecutable_falsification_deferred": true,
+    "audited_bilingual_problem_sidecar": true,
+    "original_problem_authority_preserved": true
   },
   "reliability_control": {
     "stable_mathematical_identity": true,
@@ -181,14 +186,16 @@
     "deferred_computation_retry_before_route_call": true,
     "first_stream_chunk_timeout_seconds": 90,
     "queued_agent_calls_reported_separately": true,
-    "optional_batch_provider_circuit_short_circuit": true
+    "optional_batch_provider_circuit_short_circuit": true,
+    "bounded_post_failure_recovery_lineage": true,
+    "conservative_structured_control_normalization": true
   },
   "validation": {
     "compileall": "PASS",
     "ruff_check": "PASS",
     "ruff_format_check": "PASS",
-    "pytest": "730 passed after editable install with dev, server, and desktop extras including z3-solver",
-    "required_e2e_resume": "PASS within the 730-test full suite",
+    "pytest": "742 passed after editable install with dev, server, and desktop extras including z3-solver",
+    "required_e2e_resume": "39 focused E2E and checkpoint/resume tests passed within the 742-test full suite",
     "offline_topology_benchmark": {
       "status": "PASS",
       "provider_calls": 0,
@@ -219,14 +226,14 @@
     "docs_directory_lines": 5520
   },
   "artifacts": {
-    "status": "WINDOWS DESKTOP 0.8.2 BUILD AND INSTALLER VALIDATED FOR 0728D74; INSTALLATION NOT RUN FOR THIS BUILD",
+    "status": "WINDOWS DESKTOP 0.8.2 BUILD AND INSTALLER VALIDATED FOR 78545E8; INSTALLATION NOT RUN FOR THIS BUILD",
     "windows_installer": "packaging/windows/output/MathProofMesh-0.8.2-Setup-x64.exe",
-    "windows_installer_sha256": "D68EB5C1C32B00A6F79E6EC6000F3D62FED9C260126E81D157D23B7B210CA392",
-    "portable_exe_sha256": "80F7F5B56BEE4639D430C0AE04FA154B45793CE5ED5C15767FDCFFA540579E04",
-    "desktop_installer": "MathProofMesh-0.8.2-0728d74-Setup-x64.exe",
-    "desktop_installer_sha256": "D68EB5C1C32B00A6F79E6EC6000F3D62FED9C260126E81D157D23B7B210CA392",
+    "windows_installer_sha256": "7457814DBD57F0934E9F8548177CFB8C5786860C9772D036D7740F0252A4302A",
+    "portable_exe_sha256": "D160355CA51F0CFC011F53FC4F18399EBC0CECDF44957780483D83601CEF3DB9",
+    "desktop_installer": "MathProofMesh-0.8.2-78545e8-Setup-x64.exe",
+    "desktop_installer_sha256": "7457814DBD57F0934E9F8548177CFB8C5786860C9772D036D7740F0252A4302A",
     "installed_exe_sha256": null,
-    "installed_health_check": "NOT RUN for runtime build 0728d74",
+    "installed_health_check": "NOT RUN for runtime build 78545e8",
     "wheel": null,
     "sdist": null,
     "runs_committed": false,
