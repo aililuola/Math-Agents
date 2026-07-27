@@ -1339,15 +1339,50 @@ class StructuredAgentRunner:
     ) -> list[str]:
         """Apply only lossless or conservative repairs before schema validation."""
 
-        if response_model.__name__ not in {"ContinuationTurn", "ProofDelta"}:
-            return []
+        model_name = response_model.__name__
+        actions: list[str] = []
+        if model_name == "MetaStrategyDecision":
+            aliases = {
+                "invent_auxiliary_construction": "auxiliary_construction",
+                "search_analogy": "structural_analogy",
+                "switch_representation": "representation_switch",
+                "rewrite_plan": "meta_replan",
+            }
+            selected = payload.get("selected_mechanism")
+            action = payload.get("action")
+            canonical = aliases.get(str(selected))
+            if canonical is not None and selected == action:
+                payload["selected_mechanism"] = canonical
+                actions.append(
+                    f"canonicalized selected_mechanism {selected} to {canonical}"
+                )
+            return actions
 
-        is_turn = response_model.__name__ == "ContinuationTurn"
+        if model_name in {"ContinuationTurn", "InitialExplorationTurn"} and (
+            payload.get("action") == "request_computation"
+        ):
+            if payload.get("experiment_impact") is not None:
+                payload["experiment_impact"] = None
+                actions.append(
+                    "cleared premature experiment_impact for request_computation"
+                )
+            experiment_spec = payload.get("experiment_spec")
+            if (
+                isinstance(experiment_spec, dict)
+                and experiment_spec.get("purpose") == "discover_pattern"
+                and experiment_spec.get("broad_search") is not True
+            ):
+                experiment_spec["broad_search"] = True
+                actions.append("marked discover_pattern computation as broad_search")
+
+        if model_name not in {"ContinuationTurn", "ProofDelta"}:
+            return actions
+
+        is_turn = model_name == "ContinuationTurn"
         raw_delta = payload.get("delta") if is_turn else payload
         if not isinstance(raw_delta, dict):
-            return []
+            return actions
 
-        actions: list[str] = []
         step_by_id: dict[str, dict[str, Any]] = {}
         raw_steps = raw_delta.get("new_steps")
         if isinstance(raw_steps, list):
