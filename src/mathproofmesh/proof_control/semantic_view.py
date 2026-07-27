@@ -69,7 +69,7 @@ def build_problem_semantic_view(
         source_statement,
         candidate.english_statement,
     )
-    deterministic_audit_passed = all(
+    deterministic_audit_passed = not missing and all(
         comparison.status != "fail" for comparison in comparisons
     )
     usable = (

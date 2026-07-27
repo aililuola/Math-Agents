@@ -61,6 +61,7 @@ def test_translation_that_changes_formula_or_domain_is_rejected() -> None:
 
     assert view.status == "rejected"
     assert view.missing_protected_fragments
+    assert view.deterministic_audit_passed is False
     assert view.authoritative is False
 
 
@@ -137,6 +138,7 @@ def test_triage_prompt_requests_a_non_authoritative_english_view() -> None:
     assert "semantic_view_candidate" in bundle.user
     assert "non-authoritative" in bundle.user
     assert "preserve every formula" in bundle.user
+    assert "task intent, polarity, implication direction" in bundle.user
 
 
 def test_orchestrator_attaches_only_an_audited_view(tmp_path) -> None:

@@ -7532,6 +7532,12 @@ class ProofMeshOrchestrator:
                 "status": view.status,
                 "candidate_confidence": view.candidate_confidence,
                 "missing_protected_fragments": view.missing_protected_fragments,
+                "deterministic_audit_passed": view.deterministic_audit_passed,
+                "failed_invariants": [
+                    finding.invariant
+                    for finding in view.audit_findings
+                    if finding.status == "fail"
+                ],
                 "authoritative": False,
             },
         )

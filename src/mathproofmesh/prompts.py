@@ -644,7 +644,7 @@ JSON SCHEMA:
 Classify the problem and recommend a cost-aware reasoning mode. Do not attempt the full solution yet.
 Assess whether the task needs direct solving, a claim-dependency DAG, or a hybrid. Identify likely failure modes and useful deterministic tools.
 Populate task_requirements from what the user actually requested. Do not add proof merely because the input is mathematical: computation, conjecture, counterexample, classification, optimization, construction, solution, and proof are distinct deliverables. A conjecture explicitly marked for separate later proof does not request that proof in this run.
-If exact_statement is not English, populate semantic_view_candidate with a faithful English rendering for downstream semantic comparison. This rendering is non-authoritative: preserve every formula, variable, number, hypothesis, quantifier, domain, and requested conclusion exactly. Set each preservation flag independently and leave the candidate null when the statement is already English.
+If exact_statement is not English, populate semantic_view_candidate with a faithful English rendering for downstream semantic comparison. This rendering is non-authoritative: preserve every formula, variable, number, hypothesis, quantifier, domain, requested conclusion, task intent, polarity, implication direction, and the order of directional mathematical clauses exactly. Set each preservation flag independently and leave the candidate null when the statement is already English.
 The final system output language is {self.output_language}.
 
 IMMUTABLE PROBLEM CONTRACT:
