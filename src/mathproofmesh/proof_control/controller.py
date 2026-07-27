@@ -5132,10 +5132,18 @@ class ProofControlLayer:
             else None
         )
         if task.experiment_spec is None or task.computation_plan is None:
-            if executable is not None and (
-                executable.assigned_agent_id is not None
-                or executable.wake_conditions
-                or executable.terminal_reason is not None
+            routed_statuses = {
+                TaskStatus.NEEDS_REWRITE,
+                TaskStatus.DEFERRED,
+                TaskStatus.BLOCKED,
+                *ExecutableTaskController.TERMINAL_STATUSES,
+            }
+            if (
+                executable is not None
+                and executable.status in routed_statuses
+                and (
+                    executable.wake_conditions or executable.terminal_reason is not None
+                )
             ):
                 task.status = "deferred"
                 task.action_id = action.action_id
@@ -5199,9 +5207,15 @@ class ProofControlLayer:
                 and task.action_id == action.action_id
                 and task.task_id in result.result_refs
                 and executable.task_id in result.result_refs
+                and executable.status
+                in {
+                    TaskStatus.NEEDS_REWRITE,
+                    TaskStatus.DEFERRED,
+                    TaskStatus.BLOCKED,
+                    *ExecutableTaskController.TERMINAL_STATUSES,
+                }
                 and (
-                    executable.assigned_agent_id is not None
-                    or bool(executable.wake_conditions)
+                    bool(executable.wake_conditions)
                     or executable.terminal_reason is not None
                 )
             )

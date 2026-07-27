@@ -206,7 +206,9 @@ def test_unsupported_falsification_has_agent_or_wakeable_task(tmp_path) -> None:
     assert task.deferred_reason
     assert task.experiment_spec is None
     executable = control.state.executable_tasks[task.executable_task_id]
-    assert executable.assigned_agent_id is not None or executable.wake_conditions
+    assert executable.status.value == "deferred"
+    assert executable.registered_handler is None
+    assert executable.wake_conditions
 
 
 @pytest.mark.asyncio

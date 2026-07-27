@@ -22,7 +22,7 @@ def test_falsification_text_compiles_to_typed_contract() -> None:
     assert contract.exact_relation["relation"] == "ge"
 
 
-def test_non_automatable_task_routes_to_counterexample_hunter() -> None:
+def test_non_automatable_task_is_not_assigned_without_an_executable_handler() -> None:
     contract = FalsificationContractCompiler().compile(
         "Look for a configuration that violates the proposed relation.",
         target_subject_id="claim-a",
@@ -38,9 +38,13 @@ def test_non_automatable_task_routes_to_counterexample_hunter() -> None:
     )
 
     assert contract.status == FalsificationCompilationStatus.NON_AUTOMATABLE
-    assert task.status == TaskStatus.ASSIGNED
+    assert task.status == TaskStatus.DEFERRED
     assert task.assigned_agent_id == "agent-hunter"
     assert task.typed_contract_ref == contract.contract_id
+    assert task.registered_handler is None
+    assert [item.kind for item in task.wake_conditions] == [
+        WakeConditionKind.TASK_RECOMPILED
+    ]
 
 
 def test_deferred_task_has_wake_condition() -> None:

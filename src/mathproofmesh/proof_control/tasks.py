@@ -154,12 +154,13 @@ class ExecutableTaskController:
                 current_round=created_round,
                 reason="typed_contract_requires_rewrite",
             )
-        if counterexample_hunter_agent_id:
-            return self._transition(
-                task,
-                TaskStatus.ASSIGNED,
+        if contract.status == FalsificationCompilationStatus.NON_AUTOMATABLE:
+            return self.defer(
+                task.task_id,
                 current_round=created_round,
-                reason="counterexample_hunter_assigned",
+                reason="typed_falsification_contract_requires_recompilation",
+                wake_kind=WakeConditionKind.TASK_RECOMPILED,
+                target_id=contract.contract_id,
             )
         return self.defer(
             task.task_id,
