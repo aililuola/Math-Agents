@@ -234,14 +234,14 @@
     "docs_directory_lines": 4389
   },
   "artifacts": {
-    "status": "WINDOWS DESKTOP 0.8.2 BUILD AND INSTALLER VALIDATED FOR 529488A; INSTALLATION NOT RUN FOR THIS BUILD",
+    "status": "WINDOWS DESKTOP 0.8.2 BUILD, INSTALLER, AND LOCAL INSTALLATION VALIDATED FOR 529488A",
     "windows_installer": "packaging/windows/output/MathProofMesh-0.8.2-Setup-x64.exe",
     "windows_installer_sha256": "E69A23C2ADFC7BB73950E924C8A9F3D38553CDBD4B5559FE6E9CE0238C18AE54",
     "portable_exe_sha256": "B1DF4D4E80CF5368B6CC514488C3DCF9A6B799DCB916DE041E50EB9F056503F2",
     "desktop_installer": "MathProofMesh-0.8.2-529488a-Setup-x64.exe",
     "desktop_installer_sha256": "E69A23C2ADFC7BB73950E924C8A9F3D38553CDBD4B5559FE6E9CE0238C18AE54",
-    "installed_exe_sha256": null,
-    "installed_health_check": "NOT RUN for runtime build 529488a",
+    "installed_exe_sha256": "B1DF4D4E80CF5368B6CC514488C3DCF9A6B799DCB916DE041E50EB9F056503F2",
+    "installed_health_check": "PASS for runtime build 529488a",
     "wheel": null,
     "sdist": null,
     "runs_committed": false,
