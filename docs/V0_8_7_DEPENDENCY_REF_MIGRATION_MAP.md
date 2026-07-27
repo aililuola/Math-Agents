@@ -44,3 +44,20 @@ It makes no real Provider calls.
 4. Build and smoke-test the Windows installer from the validated commit.
 5. Do not commit runtime output, caches, distributions, credentials, `.env`,
    or real Provider responses.
+
+Final validation:
+
+- The preserved failed `lemma_memory.json` replayed offline: 3 claims and 15
+  typed references restored; all 4 legacy values became `local_claim` from
+  exact in-payload identity and none became an unbound external result.
+- Full Pytest: 757 passed.
+- Focused E2E and checkpoint/resume: 39 passed.
+- Ruff check, Ruff format check, and compileall: passed.
+- Topology Mock benchmark: 21/21 contracts, 0 Provider calls.
+- Proof-control Mock benchmark: 14/14 contracts, 0 Provider calls.
+- Reasoning-first computation proxy: correctness rate 1.0.
+- Windows desktop tests: 19 passed; packaged health check, hidden-window smoke,
+  and Inno Setup 6.7.3 compilation passed.
+- Runtime build commit: `529488a7093e736ea113dcdd041a27661429d447`.
+- Installer SHA-256:
+  `E69A23C2ADFC7BB73950E924C8A9F3D38553CDBD4B5559FE6E9CE0238C18AE54`.
