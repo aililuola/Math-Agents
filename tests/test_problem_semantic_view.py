@@ -8,6 +8,7 @@ from mathproofmesh.proof_control.semantic_view import build_problem_semantic_vie
 from mathproofmesh.prompts import PromptFactory
 from mathproofmesh.schemas import (
     ProblemContract,
+    ProblemSemanticView,
     ProblemSemanticViewCandidate,
 )
 from mathproofmesh.store import ArtifactStore
@@ -41,6 +42,8 @@ def test_usable_english_view_is_sidecar_and_does_not_change_goal_hash() -> None:
 
     assert view.status == "usable"
     assert view.authoritative is False
+    assert view.deterministic_audit_passed is True
+    assert all(item.status != "fail" for item in view.audit_findings)
     assert view.missing_protected_fragments == []
     assert problem.exact_statement == source
     assert problem.goal_hash == original_hash
@@ -59,6 +62,67 @@ def test_translation_that_changes_formula_or_domain_is_rejected() -> None:
     assert view.status == "rejected"
     assert view.missing_protected_fragments
     assert view.authoritative is False
+
+
+def test_translation_cannot_reverse_the_requested_task() -> None:
+    source = r"证明每个正整数 $n$ 都满足 $n \ge 1$。"
+
+    view = build_problem_semantic_view(
+        source,
+        _candidate(r"Disprove that every positive integer $n$ satisfies $n \ge 1$."),
+    )
+
+    assert view.status == "rejected"
+    assert any("task_intent" in note for note in view.notes)
+
+
+def test_translation_cannot_reverse_quantifier_or_unmarked_domain() -> None:
+    existential = r"证明存在正整数 $n$ 使得 $P(n)$ 成立。"
+    changed_quantifier = build_problem_semantic_view(
+        existential,
+        _candidate(r"Prove that every positive integer $n$ satisfies $P(n)$."),
+    )
+    natural_domain = r"证明每个正整数 $n$ 都满足 $P(n)$。"
+    changed_domain = build_problem_semantic_view(
+        natural_domain,
+        _candidate(r"Prove that every real number $n$ satisfies $P(n)$."),
+    )
+
+    assert changed_quantifier.status == "rejected"
+    assert any("quantifier" in note for note in changed_quantifier.notes)
+    assert changed_domain.status == "rejected"
+    assert any("domain" in note for note in changed_domain.notes)
+
+
+def test_translation_cannot_reverse_implication_order() -> None:
+    source = r"若 $P$ 成立，则 $Q$ 成立。"
+
+    view = build_problem_semantic_view(
+        source,
+        _candidate(r"If $Q$ holds, then $P$ holds."),
+    )
+
+    assert view.status == "rejected"
+    assert any("logical_relation" in note for note in view.notes)
+
+
+def test_legacy_usable_view_without_deterministic_audit_is_quarantined() -> None:
+    legacy = ProblemSemanticView.model_validate(
+        {
+            "source_statement_hash": "legacy-source",
+            "source_language": "zh",
+            "english_statement": "Prove the translated assertion.",
+            "candidate_confidence": 0.99,
+            "protected_fragments": [],
+            "missing_protected_fragments": [],
+            "status": "usable",
+            "notes": [],
+        }
+    )
+
+    assert legacy.status == "rejected"
+    assert legacy.deterministic_audit_passed is False
+    assert any("legacy" in note for note in legacy.notes)
 
 
 def test_triage_prompt_requests_a_non_authoritative_english_view() -> None:

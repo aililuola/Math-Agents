@@ -6,8 +6,10 @@ import unicodedata
 from ..schemas import (
     ProblemSemanticView,
     ProblemSemanticViewCandidate,
+    SemanticInvariantAudit,
     stable_hash,
 )
+from .semantic_profile import audit_bilingual_translation
 
 _CJK = re.compile(r"[\u3400-\u9fff]")
 _LATIN_WORD = re.compile(r"\b[A-Za-z]{2,}\b")
@@ -63,12 +65,20 @@ def build_problem_semantic_view(
         candidate.preserves_domains,
         candidate.preserves_conclusion,
     )
+    comparisons = audit_bilingual_translation(
+        source_statement,
+        candidate.english_statement,
+    )
+    deterministic_audit_passed = all(
+        comparison.status != "fail" for comparison in comparisons
+    )
     usable = (
         contains_cjk(source_statement)
         and bool(_LATIN_WORD.search(candidate.english_statement))
         and all(preservation_flags)
         and candidate.confidence >= 0.75
         and not missing
+        and deterministic_audit_passed
     )
     notes = list(candidate.notes)
     if missing:
@@ -79,6 +89,12 @@ def build_problem_semantic_view(
         notes.append(
             "translation rejected because a semantic preservation check failed"
         )
+    notes.extend(
+        "deterministic semantic audit failed: "
+        f"{comparison.invariant}: {comparison.detail}"
+        for comparison in comparisons
+        if comparison.status == "fail"
+    )
     return ProblemSemanticView(
         source_statement_hash=stable_hash(source_statement),
         source_language="zh" if contains_cjk(source_statement) else "unknown",
@@ -86,6 +102,17 @@ def build_problem_semantic_view(
         candidate_confidence=candidate.confidence,
         protected_fragments=protected,
         missing_protected_fragments=missing,
+        deterministic_audit_passed=deterministic_audit_passed,
+        audit_findings=[
+            SemanticInvariantAudit(
+                invariant=comparison.invariant,
+                status=comparison.status,
+                source_values=list(comparison.source_values),
+                target_values=list(comparison.target_values),
+                detail=comparison.detail,
+            )
+            for comparison in comparisons
+        ],
         status="usable" if usable else "rejected",
         notes=list(dict.fromkeys(notes)),
     )

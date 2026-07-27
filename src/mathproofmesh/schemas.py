@@ -1851,6 +1851,14 @@ class ProblemSemanticViewCandidate(StrictModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class SemanticInvariantAudit(StrictModel):
+    invariant: str = Field(min_length=1)
+    status: Literal["pass", "fail", "not_applicable"]
+    source_values: list[str] = Field(default_factory=list)
+    target_values: list[str] = Field(default_factory=list)
+    detail: str = Field(min_length=1)
+
+
 class ProblemSemanticView(StrictModel):
     """Audited prompt sidecar excluded from the frozen goal identity."""
 
@@ -1860,9 +1868,30 @@ class ProblemSemanticView(StrictModel):
     candidate_confidence: float = Field(ge=0.0, le=1.0)
     protected_fragments: list[str] = Field(default_factory=list)
     missing_protected_fragments: list[str] = Field(default_factory=list)
+    deterministic_audit_passed: bool = False
+    audit_findings: list[SemanticInvariantAudit] = Field(default_factory=list)
     status: Literal["usable", "rejected"]
     authoritative: Literal[False] = False
     notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def quarantine_legacy_unaudited_view(self) -> "ProblemSemanticView":
+        if self.status == "usable" and not self.deterministic_audit_passed:
+            object.__setattr__(self, "status", "rejected")
+            object.__setattr__(
+                self,
+                "notes",
+                list(
+                    dict.fromkeys(
+                        [
+                            *self.notes,
+                            "legacy semantic view rejected because it has no "
+                            "deterministic bilingual audit",
+                        ]
+                    )
+                ),
+            )
+        return self
 
 
 class ProblemContract(StrictModel):
