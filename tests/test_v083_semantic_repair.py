@@ -10,6 +10,7 @@ from mathproofmesh.proof_control.models import (
     WakeConditionKind,
 )
 from mathproofmesh.proof_control.tasks import ExecutableTaskController, WakeScheduler
+from mathproofmesh.schemas import ObligationKind, ProofObligation
 
 from v082_helpers import make_control_runtime, make_domain_strategy
 
@@ -184,3 +185,125 @@ def test_claim_weaker_materializes_open_bridge_obligation(tmp_path) -> None:
     assert bridge.status == "open"
     assert "then" in bridge.statement.casefold()
     assert bridge.obligation_id in registered.remaining_obligation_ids_if_proved
+
+
+def test_materialized_weaker_bridge_is_not_wrapped_recursively(tmp_path) -> None:
+    *_runtime, control, main_goal = make_control_runtime(tmp_path)
+    weaker = control.proof_graph.add_obligation(
+        ProofObligation(
+            obligation_id="lemma-weaker",
+            problem_hash=main_goal.problem_hash,
+            route_ids=[],
+            kind=ObligationKind.LEMMA,
+            statement="Every admissible object has a canonical decomposition.",
+            normalized_statement=(
+                "every admissible object has a canonical decomposition"
+            ),
+            priority=0.8,
+            centrality=0.8,
+        )
+    )
+    first = control._register_goal_link(
+        weaker,
+        ClaimGoalLink(
+            link_id="link-weaker-obligation",
+            subject_id=weaker.obligation_id,
+            subject_kind="obligation",
+            target_obligation_id=main_goal.obligation_id,
+            relation=GoalRelation.SUFFICIENT,
+            scope_relation=ScopeRelation.CLAIM_WEAKER,
+            alignment_confidence=0.9,
+            assessment_source="deterministic",
+        ),
+    )
+    bridge = control.proof_graph.get_obligation(first.required_bridge_obligation_ids[0])
+    bridge_ids_before = {
+        item.obligation_id
+        for item in control.proof_graph.obligations
+        if item.obligation_id.startswith("obl_weaker_bridge_")
+    }
+
+    recursive = control._register_goal_link(
+        bridge,
+        ClaimGoalLink(
+            link_id="link-materialized-bridge",
+            subject_id=bridge.obligation_id,
+            subject_kind="obligation",
+            target_obligation_id=main_goal.obligation_id,
+            relation=GoalRelation.SUFFICIENT,
+            scope_relation=ScopeRelation.CLAIM_WEAKER,
+            alignment_confidence=0.9,
+            assessment_source="deterministic",
+        ),
+    )
+    bridge_ids_after = {
+        item.obligation_id
+        for item in control.proof_graph.obligations
+        if item.obligation_id.startswith("obl_weaker_bridge_")
+    }
+
+    assert bridge_ids_after == bridge_ids_before
+    assert recursive.required_bridge_obligation_ids == []
+    blocked = [
+        event
+        for event in control.state.events
+        if event["event_type"] == "weaker_claim_bridge_recursion_blocked"
+    ]
+    assert blocked[-1]["payload"]["origin_link_id"] == first.link_id
+
+
+def test_restored_weaker_bridge_id_is_not_wrapped_without_origin_link(
+    tmp_path,
+) -> None:
+    *_runtime, control, main_goal = make_control_runtime(tmp_path)
+    restored = control.proof_graph.add_obligation(
+        ProofObligation(
+            obligation_id="obl_weaker_bridge_restored",
+            problem_hash=main_goal.problem_hash,
+            route_ids=[],
+            kind=ObligationKind.LEMMA,
+            statement=(
+                "If every object has a canonical decomposition, "
+                "then every admissible object satisfies the target relation."
+            ),
+            normalized_statement=(
+                "if every object has a canonical decomposition, "
+                "then every admissible object satisfies the target relation"
+            ),
+            priority=1.0,
+            centrality=1.0,
+        )
+    )
+    bridge_ids_before = {
+        item.obligation_id
+        for item in control.proof_graph.obligations
+        if item.obligation_id.startswith("obl_weaker_bridge_")
+    }
+
+    registered = control._register_goal_link(
+        restored,
+        ClaimGoalLink(
+            link_id="link-restored-bridge",
+            subject_id=restored.obligation_id,
+            subject_kind="obligation",
+            target_obligation_id=main_goal.obligation_id,
+            relation=GoalRelation.SUFFICIENT,
+            scope_relation=ScopeRelation.CLAIM_WEAKER,
+            alignment_confidence=0.9,
+            assessment_source="deterministic",
+        ),
+    )
+    bridge_ids_after = {
+        item.obligation_id
+        for item in control.proof_graph.obligations
+        if item.obligation_id.startswith("obl_weaker_bridge_")
+    }
+
+    assert bridge_ids_after == bridge_ids_before
+    assert registered.required_bridge_obligation_ids == []
+    blocked = [
+        event
+        for event in control.state.events
+        if event["event_type"] == "weaker_claim_bridge_recursion_blocked"
+    ]
+    assert blocked[-1]["payload"]["origin_link_id"] == "legacy_or_restored_bridge"

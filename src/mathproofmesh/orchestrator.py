@@ -15069,6 +15069,11 @@ class ProofMeshOrchestrator:
             if state.typed_memory is not None
             else []
         )
+        verified_local_claim_ids = (
+            [item.message_id for item in state.typed_memory.facts]
+            if state.typed_memory is not None
+            else []
+        )
         remaining_gaps = self._deduplicate_strings(
             [gap for attempt in reviewed for gap in attempt.unresolved_gaps]
             + [str(item["statement"]) for item in open_obligations]
@@ -15095,7 +15100,9 @@ class ProofMeshOrchestrator:
         else:
             summary = (
                 f"尚未建立完整证明。保留 {len(verified_attempts)} 条通过局部审查的路线、"
-                f"{len(verified_step_ids)} 个已审查步骤、{len(refuted_routes)} 条失败路线，"
+                f"{len(verified_step_ids)} 个已审查步骤、"
+                f"{len(verified_local_claim_ids)} 个已验证局部结论、"
+                f"{len(refuted_routes)} 条失败路线，"
                 f"{len(open_obligations)} 个开放证明义务"
                 + (
                     f"（另有 {draft_obligation_count} 个未准入草稿义务，不计入开放数学）。"
@@ -15106,8 +15113,10 @@ class ProofMeshOrchestrator:
                 else (
                     "No complete proof was established. Preserved "
                     f"{len(verified_attempts)} locally passed routes, "
-                    f"{len(verified_step_ids)} reviewed steps, {len(refuted_routes)} failed "
-                    f"routes, and {len(open_obligations)} open proof obligations"
+                    f"{len(verified_step_ids)} reviewed steps, "
+                    f"{len(verified_local_claim_ids)} verified local claims, "
+                    f"{len(refuted_routes)} failed routes, and "
+                    f"{len(open_obligations)} open proof obligations"
                     + (
                         f" (plus {draft_obligation_count} unadmitted draft "
                         "obligations, not counted as open mathematics)."
@@ -15122,11 +15131,7 @@ class ProofMeshOrchestrator:
             valid_partial_attempt_ids=[item.attempt_id for item in reviewed],
             strongest_partial_attempt_id=(reviewed[0].attempt_id if reviewed else None),
             verified_step_ids=self._deduplicate_strings(verified_step_ids),
-            verified_local_claim_ids=(
-                [item.message_id for item in state.typed_memory.facts]
-                if state.typed_memory is not None
-                else []
-            ),
+            verified_local_claim_ids=verified_local_claim_ids,
             refuted_routes=refuted_routes,
             negative_evidence=self._deduplicate_strings(negative_evidence),
             open_obligations=open_obligations,

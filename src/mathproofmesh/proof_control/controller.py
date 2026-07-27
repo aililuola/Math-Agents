@@ -133,6 +133,9 @@ from .strategy_blueprint import (
 from .tasks import ExecutableTaskController, RouteWakeController, WakeScheduler
 
 
+_WEAKER_BRIDGE_ID_PREFIX = "obl_weaker_bridge_"
+
+
 class ProofControlLayer:
     """Sidecar-only proof control over existing v0.7 authorities."""
 
@@ -3276,7 +3279,19 @@ class ProofControlLayer:
         link: ClaimGoalLink,
     ) -> ClaimGoalLink:
         if link.scope_relation == ScopeRelation.CLAIM_WEAKER:
-            link = self._materialize_weaker_claim_bridge(subject, link)
+            bridge_origin = self._weaker_bridge_origin(subject)
+            if bridge_origin is None:
+                link = self._materialize_weaker_claim_bridge(subject, link)
+            else:
+                self._emit(
+                    "weaker_claim_bridge_recursion_blocked",
+                    {
+                        "subject_id": link.subject_id,
+                        "target_obligation_id": link.target_obligation_id,
+                        "origin_link_id": bridge_origin,
+                        "reason": "subject_is_materialized_weaker_bridge",
+                    },
+                )
         self.state.goal_links[link.link_id] = link
         self._emit("goal_link_created", link.model_dump(mode="json"))
         if link.scope_relation == ScopeRelation.CLAIM_STRONGER:
@@ -3313,6 +3328,20 @@ class ProofControlLayer:
         self._register_risks(self.risk_scanner.scan_goal_link(link))
         return link
 
+    def _weaker_bridge_origin(
+        self,
+        subject: StrategyCard | ClaimCard | MessageEnvelope | ProofObligation,
+    ) -> str | None:
+        if not isinstance(subject, ProofObligation):
+            return None
+        obligation_id = subject.obligation_id
+        for existing in self.state.goal_links.values():
+            if obligation_id in existing.required_bridge_obligation_ids:
+                return existing.link_id
+        if obligation_id.startswith(_WEAKER_BRIDGE_ID_PREFIX):
+            return "legacy_or_restored_bridge"
+        return None
+
     def _materialize_weaker_claim_bridge(
         self,
         subject: StrategyCard | ClaimCard | MessageEnvelope | ProofObligation,
@@ -3345,7 +3374,7 @@ class ProofControlLayer:
         ):
             return link
         bridge_id = (
-            "obl_weaker_bridge_"
+            _WEAKER_BRIDGE_ID_PREFIX
             + stable_hash(
                 {
                     "subject_id": link.subject_id,
