@@ -62,6 +62,9 @@ from .inference_risk import InferenceRiskScanner
 from .message_utility import MessageUtilityController
 from .models import (
     AlignmentExceptionCode,
+    AssumptionChallengeOutcome,
+    AssumptionChallengeResult,
+    AssumptionChallengerTask,
     BlueprintRewriteRequest,
     BottleneckBridgeTask,
     BottleneckCluster,
@@ -76,6 +79,7 @@ from .models import (
     ControlActionStatus,
     ControlActionType,
     CountermodelTaskRecord,
+    DependencyKind,
     DependencyRef,
     DependencyResolutionResult,
     ExecutableTaskRecord,
@@ -160,6 +164,8 @@ class ProofControlLayer:
         self.message_broker = message_broker
         self.route_registry = route_registry
         self.state = state or ProofControlState()
+        self._assumption_challenger_executor: Callable[..., Any] | None = None
+        self._assumption_challenger_execution_round = 0
         self._meta_pivot_executor: Callable[..., Any] | None = None
         self._meta_pivot_execution_round = 0
         self.action_dispatcher = ControlActionDispatcher(
@@ -209,6 +215,9 @@ class ProofControlLayer:
         )
         self.bottlenecks = BottleneckCompressor(self.control_config.bottleneck)
         self.common_mode = CriticalAssumptionMatrix(self.control_config.common_mode)
+        self.common_mode.assumptions = dict(self.state.critical_assumptions)
+        self.common_mode.families = dict(self.state.assumption_families)
+        self.common_mode.atoms = dict(self.state.dependency_atoms)
         self.falsification_tasks = FalsificationTaskMaterializer(config)
         self.falsification_contracts = FalsificationContractCompiler()
         self.executable_task_controller = ExecutableTaskController(
@@ -287,6 +296,11 @@ class ProofControlLayer:
             ControlActionType.CREATE_ASSUMPTION_CHALLENGER,
             self._handle_create_assumption_challenger,
             postcondition=self._assumption_challenger_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.EXECUTE_ASSUMPTION_CHALLENGER,
+            self._handle_execute_assumption_challenger,
+            postcondition=self._assumption_challenger_execution_postcondition,
         )
         self.action_dispatcher.register_handler(
             ControlActionType.MATERIALIZE_BOTTLENECK_CLUSTER,
@@ -1575,6 +1589,8 @@ class ProofControlLayer:
         *,
         strategies: Sequence[StrategyCard],
         current_round: int,
+        attempts: Sequence[ProofAttempt] = (),
+        reports: Sequence[VerificationReport] = (),
     ) -> None:
         route_ids = [item.route_id for item in self.route_registry.routes]
         for obligation in self.proof_graph.obligations:
@@ -1636,11 +1652,38 @@ class ProofControlLayer:
                 for item in self.proof_graph.obligations
                 if self._eligible_mathematical_obligation(item)
             ],
+            attempts=attempts,
+            reports=reports,
+            scope_signatures=self.state.scope_signatures,
+            prior_atoms=list(self.state.dependency_atoms.values()),
         )
         self.state.assumption_domains = dict(self.common_mode.domain_records)
+        self.state.dependency_atoms = dict(self.common_mode.atoms)
         self.state.critical_assumptions.clear()
         self.state.critical_assumptions.update(assumptions)
         self.state.assumption_families = dict(self.common_mode.families)
+        challenger_by_family = {
+            task.family_id: task
+            for task in self.state.assumption_challenger_tasks.values()
+        }
+        for family in self.state.assumption_families.values():
+            existing_task = challenger_by_family.get(family.family_id)
+            if existing_task is None:
+                continue
+            family.challenger_task_id = existing_task.task_id
+            for assumption_id in family.member_assumption_ids:
+                assumption = self.state.critical_assumptions.get(assumption_id)
+                if assumption is not None:
+                    assumption.challenger_task_id = existing_task.task_id
+            if existing_task.result_id is not None:
+                result = self.state.assumption_challenge_results.get(
+                    existing_task.result_id
+                )
+                if result is not None:
+                    self._apply_assumption_challenge_resolution(
+                        existing_task,
+                        result,
+                    )
         for family in self.common_mode.risk_families()[
             : self.control_config.common_mode.max_challengers_per_round
         ]:
@@ -1669,6 +1712,98 @@ class ProofControlLayer:
             )
         self.schedule_pending_route_updates(current_round=current_round)
         self.persist()
+
+    async def execute_pending_assumption_challengers(
+        self,
+        *,
+        current_round: int,
+        executor: Callable[[AssumptionChallengerTask], Any],
+    ) -> list[AssumptionChallengerTask]:
+        """Execute each ready common-mode challenge once through the dispatcher."""
+
+        runnable_statuses = {
+            "open",
+            "materialized",
+            "ready",
+            "running",
+            "blocked",
+        }
+        candidates = sorted(
+            (
+                task
+                for task in self.state.assumption_challenger_tasks.values()
+                if task.status in runnable_statuses
+                and task.execution_action_id is not None
+                and task.executable_task_id is not None
+                and self.state.executable_tasks[task.executable_task_id].status
+                not in ExecutableTaskController.TERMINAL_STATUSES
+                and self.state.control_actions[task.execution_action_id].status
+                not in {
+                    ControlActionStatus.EXECUTED,
+                    ControlActionStatus.FAILED,
+                    ControlActionStatus.REJECTED,
+                }
+            ),
+            key=lambda item: (item.family_id, item.task_id),
+        )[: self.control_config.common_mode.max_challengers_per_round]
+        completed: list[AssumptionChallengerTask] = []
+        self._assumption_challenger_executor = executor
+        self._assumption_challenger_execution_round = current_round
+        try:
+            for task in candidates:
+                try:
+                    await self.action_dispatcher.execute(
+                        task.execution_action_id,
+                        current_round=current_round,
+                    )
+                except Exception:
+                    completed.append(task)
+                    continue
+                if task.status in {
+                    "verified",
+                    "refuted",
+                    "avoided",
+                    "inconclusive",
+                }:
+                    completed.append(task)
+        finally:
+            self._assumption_challenger_executor = None
+            self._assumption_challenger_execution_round = 0
+        self.persist()
+        return completed
+
+    def common_mode_blocks_stagnation_stop(self) -> bool:
+        if not self.active:
+            return False
+        live = {
+            TaskStatus.CREATED,
+            TaskStatus.ASSIGNED,
+            TaskStatus.READY,
+            TaskStatus.RUNNING,
+        }
+        return any(
+            task.executable_task_id is not None
+            and (executable := self.state.executable_tasks.get(task.executable_task_id))
+            is not None
+            and executable.status in live
+            for task in self.state.assumption_challenger_tasks.values()
+        )
+
+    def strategy_is_independent_from_common_mode(
+        self,
+        strategy: StrategyCard,
+    ) -> bool:
+        return all(
+            self.common_mode.strategy_is_independent(strategy, family)
+            for family in self.common_mode.risk_families()
+        )
+
+    def _route_has_unresolved_common_mode_dependency(self, route_id: str) -> bool:
+        if not self.active:
+            return False
+        return any(
+            route_id in family.route_ids for family in self.common_mode.risk_families()
+        )
 
     def route_signals(self, route_id: str) -> dict[str, object]:
         history = self.state.core_debt_history.get(route_id, [])
@@ -1891,6 +2026,16 @@ class ProofControlLayer:
                         contract=contract,
                         record=record,
                     )
+            if not self.strategy_is_independent_from_common_mode(strategy):
+                reason = (
+                    "strategy depends on an unresolved common-mode assumption "
+                    "family and is not an independent route"
+                )
+                record.reasons = list(dict.fromkeys([*record.reasons, reason]))
+                record.verdict = (
+                    GateVerdict.BLOCK if self.active else GateVerdict.SHADOW_BLOCK
+                )
+                record.rewrite_request_id = None
             self.state.route_admissions[strategy.strategy_id] = record
             records.append(record)
             self._emit(
@@ -2006,6 +2151,20 @@ class ProofControlLayer:
         core_debt_reduced: bool,
         verified_bridge_gain: bool,
     ) -> bool:
+        if self._route_has_unresolved_common_mode_dependency(route_id):
+            self._emit(
+                "common_mode_route_deepening_blocked",
+                {
+                    "route_id": route_id,
+                    "family_ids": [
+                        family.family_id
+                        for family in self.common_mode.risk_families()
+                        if route_id in family.route_ids
+                    ],
+                },
+            )
+            self.persist()
+            return False
         record = self.continue_gate.evaluate(
             route_id=route_id,
             segment_index=segment_index,
@@ -2032,6 +2191,8 @@ class ProofControlLayer:
         return record.verdict != GateVerdict.BLOCK
 
     def deepening_currently_allowed(self, route_id: str) -> bool:
+        if self._route_has_unresolved_common_mode_dependency(route_id):
+            return False
         latest = next(
             (
                 item
@@ -4577,9 +4738,39 @@ class ProofControlLayer:
     ) -> ControlActionResult:
         family_id = str(action.payload["family_id"])
         family = self.state.assumption_families[family_id]
-        task = self.common_mode.challenger_for_family(family)
-        task.action_id = action.action_id
-        self.state.assumption_challenger_tasks[task.task_id] = task
+        candidate = self.common_mode.challenger_for_family(family)
+        task = self.state.assumption_challenger_tasks.get(candidate.task_id)
+        if task is None:
+            task = candidate
+            task.action_id = action.action_id
+            self.state.assumption_challenger_tasks[task.task_id] = task
+        target_obligation_ids = sorted(
+            {
+                ref.target_id
+                for atom_id in family.dependency_atom_ids
+                if (atom := self.state.dependency_atoms.get(atom_id)) is not None
+                for ref in atom.dependency_refs
+                if ref.kind == DependencyKind.OBLIGATION
+            }
+        )
+        executable = self.executable_task_controller.create_assumption_challenger_task(
+            challenger_task_id=task.task_id,
+            family_id=family.family_id,
+            route_ids=family.route_ids,
+            target_obligation_ids=target_obligation_ids,
+            created_round=action.created_round,
+        )
+        task.executable_task_id = executable.task_id
+        task.status = "ready"
+        execution_action = self.action_dispatcher.propose(
+            ControlActionType.EXECUTE_ASSUMPTION_CHALLENGER,
+            source_record_ids=[task.task_id],
+            route_ids=family.route_ids,
+            target_obligation_ids=target_obligation_ids,
+            payload={"task_id": task.task_id, "family_id": family.family_id},
+            current_round=action.created_round,
+        )
+        task.execution_action_id = execution_action.action_id
         family.challenger_task_id = task.task_id
         for assumption_id in family.member_assumption_ids:
             assumption = self.state.critical_assumptions[assumption_id]
@@ -4589,7 +4780,12 @@ class ProofControlLayer:
             task.model_dump(mode="json"),
         )
         return ControlActionResult(
-            result_refs=[family.family_id, task.task_id],
+            result_refs=[
+                family.family_id,
+                task.task_id,
+                executable.task_id,
+                execution_action.action_id,
+            ],
             postcondition_met=True,
         )
 
@@ -4609,8 +4805,232 @@ class ProofControlLayer:
             and task.action_id == action.action_id
             and not task.premise_eligible
             and task.task_id in result.result_refs
+            and task.executable_task_id in result.result_refs
+            and task.execution_action_id in result.result_refs
             and set(task.assumption_ids) == set(family.member_assumption_ids)
+            and task.executable_task_id in self.state.executable_tasks
+            and task.execution_action_id in self.state.control_actions
         )
+
+    async def _handle_execute_assumption_challenger(
+        self,
+        action: ControlActionRecord,
+    ) -> ControlActionResult:
+        task_id = str(action.payload["task_id"])
+        task = self.state.assumption_challenger_tasks[task_id]
+        if task.result_id is not None:
+            result = self.state.assumption_challenge_results.get(task.result_id)
+            if (
+                result is not None
+                and result.outcome != AssumptionChallengeOutcome.BLOCKED
+            ):
+                return ControlActionResult(
+                    result_refs=[
+                        task.task_id,
+                        task.executable_task_id or "",
+                        result.result_id,
+                    ],
+                    postcondition_met=True,
+                    detail="existing terminal challenge result reused",
+                )
+        executor = self._assumption_challenger_executor
+        if executor is None:
+            self.action_dispatcher.defer(
+                action.action_id,
+                reason="assumption challenger executor is not attached",
+            )
+            return ControlActionResult(
+                detail="assumption challenger executor is not attached"
+            )
+        if task.executable_task_id is None:
+            return ControlActionResult(
+                detail="assumption challenger has no executable task"
+            )
+        executable = self.state.executable_tasks[task.executable_task_id]
+        if executable.status in {TaskStatus.READY, TaskStatus.ASSIGNED}:
+            self.executable_task_controller.mark_running(
+                executable.task_id,
+                current_round=self._assumption_challenger_execution_round,
+            )
+        task.status = "running"
+        self._emit(
+            "assumption_challenger_running",
+            task.model_dump(mode="json"),
+        )
+        self.persist()
+        try:
+            raw_result = executor(task)
+            if inspect.isawaitable(raw_result):
+                raw_result = await raw_result
+            result = (
+                raw_result
+                if isinstance(raw_result, AssumptionChallengeResult)
+                else AssumptionChallengeResult.model_validate(raw_result)
+            )
+            if result.task_id != task.task_id or result.family_id != task.family_id:
+                raise ValueError(
+                    "assumption challenge result does not match its task and family"
+                )
+            if result.outcome in {
+                AssumptionChallengeOutcome.VERIFIED,
+                AssumptionChallengeOutcome.REFUTED,
+                AssumptionChallengeOutcome.AVOIDED,
+            } and (
+                result.challenger_agent_id is None
+                or result.reviewer_agent_id is None
+                or not result.evidence_refs
+                or not result.independent_review_refs
+            ):
+                raise ValueError(
+                    "resolved assumption challenge requires challenger evidence "
+                    "and independent review evidence"
+                )
+            if result.outcome == AssumptionChallengeOutcome.AVOIDED and (
+                not result.created_route_ids or not result.alternative_strategy_ids
+            ):
+                raise ValueError(
+                    "avoided assumption challenge requires a materialized "
+                    "independent route"
+                )
+        except Exception as exc:
+            task.status = "blocked"
+            if executable.status == TaskStatus.RUNNING:
+                self.executable_task_controller.fail(
+                    executable.task_id,
+                    current_round=self._assumption_challenger_execution_round,
+                    reason=f"{type(exc).__name__}: {exc}",
+                )
+            self._emit(
+                "assumption_challenger_failed",
+                {
+                    "task_id": task.task_id,
+                    "family_id": task.family_id,
+                    "reason": f"{type(exc).__name__}: {exc}",
+                },
+            )
+            self.persist()
+            raise
+
+        self.state.assumption_challenge_results[result.result_id] = result
+        task.result_id = result.result_id
+        task.assigned_agent_id = result.challenger_agent_id
+        terminal_status = {
+            AssumptionChallengeOutcome.VERIFIED: "verified",
+            AssumptionChallengeOutcome.REFUTED: "refuted",
+            AssumptionChallengeOutcome.AVOIDED: "avoided",
+            AssumptionChallengeOutcome.INCONCLUSIVE: "inconclusive",
+        }
+        if result.outcome == AssumptionChallengeOutcome.BLOCKED:
+            task.status = "blocked"
+            self.executable_task_controller.defer(
+                executable.task_id,
+                current_round=self._assumption_challenger_execution_round,
+                reason=result.detail or "assumption challenger is blocked",
+                wake_kind=WakeConditionKind.REVIEWER_AVAILABLE,
+            )
+            self.action_dispatcher.defer(
+                action.action_id,
+                reason=result.detail or "assumption challenger is blocked",
+            )
+            self._emit(
+                "assumption_challenger_blocked",
+                result.model_dump(mode="json"),
+            )
+            self.persist()
+            return ControlActionResult(
+                result_refs=[task.task_id, executable.task_id, result.result_id],
+                detail=result.detail,
+            )
+
+        task.status = terminal_status[result.outcome]
+        result_refs = [
+            result.result_id,
+            *result.evidence_refs,
+            *result.independent_review_refs,
+            *result.created_route_ids,
+        ]
+        if result.outcome == AssumptionChallengeOutcome.INCONCLUSIVE:
+            self.executable_task_controller.complete_inconclusive(
+                executable.task_id,
+                current_round=self._assumption_challenger_execution_round,
+                result_refs=result_refs,
+                reason=result.detail or "assumption challenge was inconclusive",
+            )
+        else:
+            self.executable_task_controller.complete_work(
+                executable.task_id,
+                current_round=self._assumption_challenger_execution_round,
+                result_refs=result_refs,
+                reason=f"assumption_challenge_{result.outcome.value}",
+            )
+        if result.outcome == AssumptionChallengeOutcome.REFUTED:
+            for route_id in task.route_ids:
+                try:
+                    self.route_registry.mark_refuted(
+                        route_id,
+                        (
+                            "independently reviewed refutation of common-mode "
+                            f"assumption family {task.family_id}"
+                        ),
+                    )
+                except KeyError:
+                    continue
+        self._apply_assumption_challenge_resolution(task, result)
+        self._emit(
+            "assumption_challenger_completed",
+            result.model_dump(mode="json"),
+        )
+        self.persist()
+        return ControlActionResult(
+            result_refs=[task.task_id, executable.task_id, result.result_id],
+            postcondition_met=True,
+        )
+
+    def _assumption_challenger_execution_postcondition(
+        self,
+        action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        task = self.state.assumption_challenger_tasks.get(
+            str(action.payload.get("task_id", ""))
+        )
+        if task is None or task.result_id is None or task.executable_task_id is None:
+            return False
+        executable = self.state.executable_tasks.get(task.executable_task_id)
+        challenge_result = self.state.assumption_challenge_results.get(task.result_id)
+        return bool(
+            executable is not None
+            and executable.status in ExecutableTaskController.TERMINAL_STATUSES
+            and challenge_result is not None
+            and challenge_result.outcome != AssumptionChallengeOutcome.BLOCKED
+            and task.task_id in result.result_refs
+            and executable.task_id in result.result_refs
+            and challenge_result.result_id in result.result_refs
+        )
+
+    def _apply_assumption_challenge_resolution(
+        self,
+        task: AssumptionChallengerTask,
+        result: AssumptionChallengeResult,
+    ) -> None:
+        family = self.state.assumption_families.get(task.family_id)
+        if family is None:
+            return
+        family.resolution_result_id = result.result_id
+        family.resolution_outcome = result.outcome
+        common_family = self.common_mode.families.get(task.family_id)
+        if common_family is not None and common_family is not family:
+            common_family.resolution_result_id = result.result_id
+            common_family.resolution_outcome = result.outcome
+        if result.outcome != AssumptionChallengeOutcome.VERIFIED:
+            return
+        for assumption_id in family.member_assumption_ids:
+            assumption = self.state.critical_assumptions.get(assumption_id)
+            if assumption is not None:
+                assumption.verification_status = ClaimStatus.VERIFIED
+            common_assumption = self.common_mode.assumptions.get(assumption_id)
+            if common_assumption is not None:
+                common_assumption.verification_status = ClaimStatus.VERIFIED
 
     def _handle_materialize_bottleneck_cluster(
         self, action: ControlActionRecord

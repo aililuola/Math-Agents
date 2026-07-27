@@ -13,10 +13,11 @@ from pydantic import BaseModel
 from .computation.contracts import experiment_tool_catalog
 from .proof_control.models import (
     AbstractRealizerExtraction,
+    AssumptionChallengeProposal,
+    AssumptionChallengeReview,
     BlueprintRewriteRequest,
     BottleneckCluster,
     ClaimGoalLink,
-    CriticalAssumption,
     FailureClassificationRecord,
     InferenceRiskRecord,
     InductionMeasureProposal,
@@ -1873,13 +1874,36 @@ JSON SCHEMA:
             (
                 "Challenge one shared, unverified load-bearing assumption. Seek an "
                 "exact counterexample, a route that avoids it, a weaker sufficient "
-                "condition, or a proof that it is genuinely necessary. Multiple "
-                "routes agreeing is not evidence and must not change verification "
-                "status."
+                "condition, or a direct proof. Select exactly one action. Return "
+                "only a concise, auditable mathematical artifact with explicit "
+                "dependencies and remaining gaps; do not expose private reasoning. "
+                "An avoid or weaken action must include a complete alternative "
+                "StrategyCard whose dependency closure omits the challenged family. "
+                "Multiple routes agreeing is not evidence and must not change "
+                "verification status."
             ),
-            CriticalAssumption,
+            AssumptionChallengeProposal,
             context,
             temperature=0.1,
+        )
+
+    def review_critical_assumption_challenge(
+        self,
+        **context: Any,
+    ) -> PromptBundle:
+        return self._typed_stage(
+            "proof_control_assumption_challenge_review",
+            (
+                "Independently audit one assumption-challenge proposal. Check exact "
+                "scope, every proof dependency, any claimed counterexample, and "
+                "whether an alternative route truly omits the challenged dependency "
+                "family rather than merely rewording it. A finite non-refutation is "
+                "inconclusive. Do not promote a Fact or close an obligation. Return "
+                "a pass only for the specific action actually established."
+            ),
+            AssumptionChallengeReview,
+            context,
+            temperature=0.0,
         )
 
     def extract_abstract_structure_and_realizer(self, **context: Any) -> PromptBundle:

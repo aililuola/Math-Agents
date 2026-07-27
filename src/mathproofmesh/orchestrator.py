@@ -83,6 +83,9 @@ from .proof_graph.matching import DuplicateRouteDetector
 from .proof_graph.store import ProofGraphStore
 from .proof_control.controller import ProofControlLayer
 from .proof_control.models import (
+    AssumptionChallengeAction,
+    AssumptionChallengeOutcome,
+    AssumptionChallengeResult,
     ClaimVerificationState,
     ControlActionStatus,
     DependencyKind,
@@ -92,6 +95,7 @@ from .proof_control.models import (
     ProofRole,
     ResumeDecisionKind,
     RouteAdmissionRecord,
+    TaskStatus as ProofControlTaskStatus,
     WakeConditionKind,
 )
 from .proof_identity import (
@@ -873,17 +877,10 @@ class ProofMeshOrchestrator:
                     current_round=round_index,
                     store=store,
                 )
-                route_update_performed = await self._run_scheduled_route_updates(
-                    state,
-                    problem=problem,
-                    current_round=round_index,
-                    runner=runner,
-                    prompts=prompts,
-                )
                 (
-                    pivot_attempted,
-                    pivot_performed,
-                ) = await self._execute_pending_meta_pivot(
+                    challenger_attempted,
+                    challenger_performed,
+                ) = await self._execute_pending_assumption_challengers(
                     state,
                     problem=problem,
                     store=store,
@@ -894,6 +891,30 @@ class ProofMeshOrchestrator:
                     memory=memory,
                     tools=tools,
                 )
+                route_update_performed = await self._run_scheduled_route_updates(
+                    state,
+                    problem=problem,
+                    current_round=round_index,
+                    runner=runner,
+                    prompts=prompts,
+                )
+                if challenger_attempted:
+                    pivot_attempted, pivot_performed = False, False
+                else:
+                    (
+                        pivot_attempted,
+                        pivot_performed,
+                    ) = await self._execute_pending_meta_pivot(
+                        state,
+                        problem=problem,
+                        store=store,
+                        runner=runner,
+                        prompts=prompts,
+                        allocator=allocator,
+                        router=router,
+                        memory=memory,
+                        tools=tools,
+                    )
                 if self._has_synthesis_ready_candidate(state):
                     # A supported candidate exists; preserve calls for synthesis/final audit.
                     if allocator.should_protect_finish(
@@ -916,7 +937,7 @@ class ProofMeshOrchestrator:
                         break
 
                 graph_signals = self._hierarchical_graph_signals(state)
-                if not pivot_attempted:
+                if not pivot_attempted and not challenger_attempted:
                     await self._run_inspiration_round(
                         state,
                         problem=problem,
@@ -1021,7 +1042,9 @@ class ProofMeshOrchestrator:
                         },
                     )
 
-                performed = route_update_performed or pivot_performed
+                performed = (
+                    challenger_performed or route_update_performed or pivot_performed
+                )
                 action_calls_started = runner.ledger.calls_started
                 for action in decision.actions:
                     if action.action in {ActionKind.STOP, ActionKind.SYNTHESIZE}:
@@ -1395,7 +1418,10 @@ class ProofMeshOrchestrator:
                 pivot_blocks_stop = (
                     state.proof_control is not None
                     and state.proof_control.active
-                    and state.proof_control.meta_pivot_blocks_stagnation_stop()
+                    and (
+                        state.proof_control.meta_pivot_blocks_stagnation_stop()
+                        or state.proof_control.common_mode_blocks_stagnation_stop()
+                    )
                 )
                 if performed:
                     consecutive_no_action_rounds = 0
@@ -3742,6 +3768,8 @@ class ProofMeshOrchestrator:
         if state.proof_control is not None:
             state.proof_control.update_after_round(
                 strategies=state.strategies,
+                attempts=state.attempts,
+                reports=state.reports,
                 current_round=current_round,
             )
 
@@ -4576,6 +4604,33 @@ class ProofMeshOrchestrator:
         if (
             control is not None
             and control.active
+            and control.common_mode_blocks_stagnation_stop()
+        ):
+            store.append_event(
+                "global_stagnation_stop_blocked_by_common_mode_challenger",
+                {
+                    "round_index": round_index,
+                    "progress_signature": current,
+                    "task_ids": sorted(
+                        task.task_id
+                        for task in control.state.assumption_challenger_tasks.values()
+                        if task.executable_task_id is not None
+                        and control.state.executable_tasks[
+                            task.executable_task_id
+                        ].status
+                        in {
+                            ProofControlTaskStatus.CREATED,
+                            ProofControlTaskStatus.ASSIGNED,
+                            ProofControlTaskStatus.READY,
+                            ProofControlTaskStatus.RUNNING,
+                        }
+                    ),
+                },
+            )
+            return False
+        if (
+            control is not None
+            and control.active
             and control.state.meta_pivot_state is None
             and state.global_meta_pivot_used
         ):
@@ -4994,6 +5049,429 @@ class ProofMeshOrchestrator:
                 if item.status != "closed"
             },
         )
+
+    async def _execute_pending_assumption_challengers(
+        self,
+        state: SolveState,
+        *,
+        problem: ProblemContract,
+        store: ArtifactStore,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        allocator: SoftBudgetAllocator,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        tools: ToolBroker,
+    ) -> tuple[bool, bool]:
+        control = state.proof_control
+        registry = state.route_registry
+        if control is None or not control.active or registry is None:
+            return False, False
+        live_statuses = {
+            ProofControlTaskStatus.CREATED,
+            ProofControlTaskStatus.ASSIGNED,
+            ProofControlTaskStatus.READY,
+            ProofControlTaskStatus.RUNNING,
+            ProofControlTaskStatus.DEFERRED,
+            ProofControlTaskStatus.BLOCKED,
+        }
+        pending = [
+            task
+            for task in control.state.assumption_challenger_tasks.values()
+            if task.executable_task_id is not None
+            and control.state.executable_tasks[task.executable_task_id].status
+            in live_statuses
+            and task.execution_action_id is not None
+            and control.state.control_actions[task.execution_action_id].status
+            not in {
+                ControlActionStatus.EXECUTED,
+                ControlActionStatus.FAILED,
+                ControlActionStatus.REJECTED,
+            }
+        ]
+        if not pending:
+            return False, False
+
+        async def execute(task) -> AssumptionChallengeResult:
+            family = control.state.assumption_families[task.family_id]
+            default_action = AssumptionChallengeAction.REFUTE
+            if runner.ledger.remaining_calls <= allocator.minimum_finish_reserve + 1:
+                return AssumptionChallengeResult(
+                    result_id=(
+                        "assumption_challenge_result_"
+                        + stable_hash(
+                            {
+                                "task_id": task.task_id,
+                                "round": state.current_round,
+                                "reason": "protected_finish_reserve",
+                            }
+                        )[:20]
+                    ),
+                    task_id=task.task_id,
+                    family_id=task.family_id,
+                    action=default_action,
+                    outcome=AssumptionChallengeOutcome.BLOCKED,
+                    detail=(
+                        "The protected finalization reserve leaves no independent "
+                        "challenge-and-review pair."
+                    ),
+                    completed_round=state.current_round,
+                )
+
+            excluded_authors = self._route_authors(registry, task.route_ids)
+            try:
+                challenger = runner.pool.select(
+                    "counterexample_hunter",
+                    exclude=excluded_authors,
+                    specialty_hints=family.semantic_tags,
+                    strict_exclude=True,
+                )
+            except RuntimeError:
+                return AssumptionChallengeResult(
+                    result_id=(
+                        "assumption_challenge_result_"
+                        + stable_hash(
+                            {
+                                "task_id": task.task_id,
+                                "round": state.current_round,
+                                "reason": "independent_challenger_unavailable",
+                            }
+                        )[:20]
+                    ),
+                    task_id=task.task_id,
+                    family_id=task.family_id,
+                    action=default_action,
+                    outcome=AssumptionChallengeOutcome.BLOCKED,
+                    detail="No agent independent of the affected route authors is available.",
+                    completed_round=state.current_round,
+                )
+            task.assigned_agent_id = challenger.id
+            executable = control.state.executable_tasks[task.executable_task_id]
+            executable.assigned_agent_id = challenger.id
+            proposal_call = await self._safe_call(
+                runner,
+                "counterexample_hunter",
+                prompts.challenge_critical_assumption(
+                    problem=problem,
+                    challenger_task=task,
+                    assumption_family=family,
+                    member_assumptions=[
+                        control.state.critical_assumptions[assumption_id]
+                        for assumption_id in family.member_assumption_ids
+                        if assumption_id in control.state.critical_assumptions
+                    ],
+                    dependency_atoms=[
+                        control.state.dependency_atoms[atom_id]
+                        for atom_id in family.dependency_atom_ids
+                        if atom_id in control.state.dependency_atoms
+                    ],
+                    affected_routes=[
+                        registry.get(route_id)
+                        for route_id in task.route_ids
+                        if any(route.route_id == route_id for route in registry.routes)
+                    ],
+                    verified_facts=(
+                        state.typed_memory.facts
+                        if state.typed_memory is not None
+                        else []
+                    ),
+                    premise_eligible=False,
+                ),
+                fixed_agent=challenger,
+                budget_bucket="depth",
+            )
+            if proposal_call is None:
+                return AssumptionChallengeResult(
+                    result_id=(
+                        "assumption_challenge_result_"
+                        + stable_hash(
+                            {
+                                "task_id": task.task_id,
+                                "round": state.current_round,
+                                "reason": "challenger_returned_no_artifact",
+                            }
+                        )[:20]
+                    ),
+                    task_id=task.task_id,
+                    family_id=task.family_id,
+                    action=default_action,
+                    outcome=AssumptionChallengeOutcome.INCONCLUSIVE,
+                    challenger_agent_id=challenger.id,
+                    detail="The challenger returned no usable structured artifact.",
+                    completed_round=state.current_round,
+                )
+            proposal = proposal_call.value
+            proposal_name = f"assumption_challenge_proposal_{task.task_id}"
+            store.write_json("structured", proposal_name, proposal)
+            proposal_ref = proposal_call.raw_ref or f"structured:{proposal_name}"
+
+            try:
+                reviewer = runner.pool.select(
+                    "detailed_verifier",
+                    exclude={challenger.id},
+                    specialty_hints=family.semantic_tags,
+                    prefer_provider_not=challenger.provider,
+                    strict_exclude=True,
+                )
+            except RuntimeError:
+                return AssumptionChallengeResult(
+                    result_id=(
+                        "assumption_challenge_result_"
+                        + stable_hash(
+                            {
+                                "task_id": task.task_id,
+                                "proposal_id": proposal.proposal_id,
+                                "reason": "independent_reviewer_unavailable",
+                            }
+                        )[:20]
+                    ),
+                    task_id=task.task_id,
+                    family_id=task.family_id,
+                    action=proposal.action,
+                    outcome=AssumptionChallengeOutcome.BLOCKED,
+                    challenger_agent_id=challenger.id,
+                    evidence_refs=[proposal_ref],
+                    detail="No independent reviewer is available for the challenge.",
+                    completed_round=state.current_round,
+                )
+            review_call = await self._safe_call(
+                runner,
+                "detailed_verifier",
+                prompts.review_critical_assumption_challenge(
+                    problem=problem,
+                    challenger_task=task,
+                    assumption_family=family,
+                    proposal=proposal,
+                    dependency_atoms=[
+                        control.state.dependency_atoms[atom_id]
+                        for atom_id in family.dependency_atom_ids
+                        if atom_id in control.state.dependency_atoms
+                    ],
+                    verified_facts=(
+                        state.typed_memory.facts
+                        if state.typed_memory is not None
+                        else []
+                    ),
+                    proof_control_constraints={
+                        "may_promote_fact": False,
+                        "may_close_obligation": False,
+                        "requires_dependency_independence_for_avoidance": True,
+                    },
+                ),
+                fixed_agent=reviewer,
+                exclude={challenger.id},
+                prefer_provider_not=challenger.provider,
+                budget_bucket="verification",
+            )
+            if review_call is None:
+                return AssumptionChallengeResult(
+                    result_id=(
+                        "assumption_challenge_result_"
+                        + stable_hash(
+                            {
+                                "task_id": task.task_id,
+                                "proposal_id": proposal.proposal_id,
+                                "reason": "review_returned_no_artifact",
+                            }
+                        )[:20]
+                    ),
+                    task_id=task.task_id,
+                    family_id=task.family_id,
+                    action=proposal.action,
+                    outcome=AssumptionChallengeOutcome.INCONCLUSIVE,
+                    challenger_agent_id=challenger.id,
+                    reviewer_agent_id=reviewer.id,
+                    evidence_refs=[proposal_ref],
+                    detail="Independent review returned no usable structured artifact.",
+                    completed_round=state.current_round,
+                )
+            review = review_call.value
+            review_name = f"assumption_challenge_review_{task.task_id}"
+            store.write_json("structured", review_name, review)
+            review_ref = review_call.raw_ref or f"structured:{review_name}"
+            outcome = AssumptionChallengeOutcome.INCONCLUSIVE
+            created_route_ids: list[str] = []
+            alternative_strategy_ids: list[str] = []
+            target_matches = control.common_mode.statements_semantically_match(
+                proposal.target_statement,
+                family.canonical_statement,
+            )
+            review_passed = (
+                target_matches and review.verdict == "pass" and review.action_supported
+            )
+
+            if (
+                proposal.action == AssumptionChallengeAction.PROVE
+                and bool(proposal.proof_steps)
+                and review_passed
+                and review.proof_complete
+            ):
+                outcome = AssumptionChallengeOutcome.VERIFIED
+            elif (
+                proposal.action == AssumptionChallengeAction.REFUTE
+                and proposal.counterexample
+                and review_passed
+                and review.exact_counterexample_confirmed
+            ):
+                outcome = AssumptionChallengeOutcome.REFUTED
+            elif proposal.action in {
+                AssumptionChallengeAction.AVOID,
+                AssumptionChallengeAction.WEAKEN,
+            }:
+                alternative = proposal.alternative_strategy
+                weaker_ok = proposal.action == AssumptionChallengeAction.AVOID or bool(
+                    proposal.weaker_condition and review.weaker_sufficient_confirmed
+                )
+                independent = bool(
+                    alternative is not None
+                    and review_passed
+                    and review.independence_confirmed
+                    and weaker_ok
+                    and control.strategy_is_independent_from_common_mode(alternative)
+                    and self._common_mode_alternative_has_new_mechanism(
+                        alternative,
+                        state.strategies,
+                        task.route_ids,
+                        registry,
+                    )
+                )
+                if (
+                    independent
+                    and alternative is not None
+                    and len(state.strategies) < self.config.budget.max_paths
+                    and all(
+                        item.strategy_id != alternative.strategy_id
+                        for item in state.strategies
+                    )
+                ):
+                    selected, _records = control.admit_routes([alternative])
+                    if selected:
+                        state.strategies.extend(selected)
+                        assignments = router.assign_explorers(selected)
+                        for strategy, agent in assignments:
+                            route = registry.register_route(strategy)
+                            registry.assign_member(
+                                route.route_id,
+                                agent.id,
+                                RouteRole.PROVER,
+                                state.current_round,
+                            )
+                            created_route_ids.append(route.route_id)
+                            alternative_strategy_ids.append(strategy.strategy_id)
+                            store.append_event(
+                                "common_mode_independent_route_registered",
+                                {
+                                    "task_id": task.task_id,
+                                    "family_id": task.family_id,
+                                    "route_id": route.route_id,
+                                    "strategy_id": strategy.strategy_id,
+                                },
+                            )
+                        registry.recompute_neighbors()
+                        attempts = await self._parallel_round_exploration(
+                            problem,
+                            state,
+                            assignments,
+                            state.current_round,
+                            runner,
+                            prompts,
+                            router,
+                            memory,
+                            store,
+                            tools,
+                            max_segments_this_call=1,
+                        )
+                        accepted_attempts = self._record_attempts(
+                            state,
+                            attempts,
+                            store,
+                        )
+                        if accepted_attempts:
+                            await self._extract_claims_many(
+                                problem,
+                                accepted_attempts,
+                                runner,
+                                prompts,
+                                memory,
+                                store,
+                                budget_bucket="breadth",
+                            )
+                        if created_route_ids:
+                            outcome = AssumptionChallengeOutcome.AVOIDED
+
+            result_id = (
+                "assumption_challenge_result_"
+                + stable_hash(
+                    {
+                        "task_id": task.task_id,
+                        "proposal_id": proposal.proposal_id,
+                        "outcome": outcome.value,
+                        "created_route_ids": created_route_ids,
+                    }
+                )[:20]
+            )
+            return AssumptionChallengeResult(
+                result_id=result_id,
+                task_id=task.task_id,
+                family_id=task.family_id,
+                action=proposal.action,
+                outcome=outcome,
+                challenger_agent_id=challenger.id,
+                reviewer_agent_id=reviewer.id,
+                evidence_refs=[proposal_ref],
+                independent_review_refs=[review_ref],
+                created_route_ids=created_route_ids,
+                alternative_strategy_ids=alternative_strategy_ids,
+                detail=review.concise_feedback,
+                completed_round=state.current_round,
+            )
+
+        completed = await control.execute_pending_assumption_challengers(
+            current_round=state.current_round,
+            executor=execute,
+        )
+        store.append_event(
+            "assumption_challenger_dispatch_cycle",
+            {
+                "round_index": state.current_round,
+                "pending_task_ids": sorted(task.task_id for task in pending),
+                "completed_task_ids": sorted(task.task_id for task in completed),
+            },
+        )
+        return True, bool(completed)
+
+    @staticmethod
+    def _common_mode_alternative_has_new_mechanism(
+        candidate: StrategyCard,
+        strategies: Sequence[StrategyCard],
+        affected_route_ids: Sequence[str],
+        registry: RouteRegistry,
+    ) -> bool:
+        affected_strategy_ids = {
+            registry.get(route_id).strategy_id
+            for route_id in affected_route_ids
+            if any(route.route_id == route_id for route in registry.routes)
+        }
+        candidate_mechanism = " ".join(
+            [
+                *candidate.tags,
+                candidate.key_original_step or "",
+                candidate.core_idea,
+            ]
+        )
+        for existing in strategies:
+            if existing.strategy_id not in affected_strategy_ids:
+                continue
+            existing_mechanism = " ".join(
+                [
+                    *existing.tags,
+                    existing.key_original_step or "",
+                    existing.core_idea,
+                ]
+            )
+            if jaccard_similarity(candidate_mechanism, existing_mechanism) >= 0.80:
+                return False
+        return True
 
     async def _execute_pending_meta_pivot(
         self,

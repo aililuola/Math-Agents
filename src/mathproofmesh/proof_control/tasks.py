@@ -341,6 +341,55 @@ class ExecutableTaskController:
             wake_kind=WakeConditionKind.REVIEWER_AVAILABLE,
         )
 
+    def create_assumption_challenger_task(
+        self,
+        *,
+        challenger_task_id: str,
+        family_id: str,
+        route_ids: Sequence[str],
+        created_round: int,
+        target_obligation_ids: Sequence[str] = (),
+        assigned_agent_id: str | None = None,
+        expires_round: int | None = None,
+    ) -> ExecutableTaskRecord:
+        identity = {
+            "task_kind": "assumption_challenger",
+            "challenger_task_id": challenger_task_id,
+            "family_id": family_id,
+            "route_ids": sorted(set(route_ids)),
+            "target_obligation_ids": sorted(set(target_obligation_ids)),
+        }
+        task_id = f"executable_task_{stable_hash(identity)[:20]}"
+        existing = self.tasks.get(task_id)
+        if existing is not None:
+            return existing
+        task = ExecutableTaskRecord(
+            task_id=task_id,
+            task_kind="assumption_challenger",
+            status=TaskStatus.READY,
+            target_obligation_ids=identity["target_obligation_ids"],
+            route_ids=identity["route_ids"],
+            assigned_agent_id=assigned_agent_id,
+            registered_handler="assumption_challenger_dispatcher",
+            explicit_prompt_ref=challenger_task_id,
+            typed_contract_ref=family_id,
+            created_round=created_round,
+            last_transition_round=created_round,
+            expires_round=(
+                expires_round if expires_round is not None else created_round + 4
+            ),
+            transition_history=[
+                {
+                    "from": None,
+                    "to": TaskStatus.READY.value,
+                    "round": created_round,
+                    "reason": "common_mode_challenger_materialized",
+                }
+            ],
+        )
+        self.tasks[task.task_id] = task
+        return task
+
     def create_route_update_task(
         self,
         *,
@@ -527,6 +576,30 @@ class ExecutableTaskController:
         return self._transition(
             task,
             TaskStatus.COMPLETED,
+            current_round=current_round,
+            reason=task.terminal_reason,
+        )
+
+    def complete_inconclusive(
+        self,
+        task_id: str,
+        *,
+        current_round: int,
+        result_refs: Sequence[str],
+        reason: str,
+    ) -> ExecutableTaskRecord:
+        task = self.tasks[task_id]
+        if task.status in {TaskStatus.ASSIGNED, TaskStatus.READY}:
+            self.mark_running(task_id, current_round=current_round)
+        if task.status != TaskStatus.RUNNING:
+            raise ValueError("only an executable or running task may be inconclusive")
+        task.result_refs = list(dict.fromkeys(result_refs))
+        if not task.result_refs:
+            raise ValueError("inconclusive task requires a result reference")
+        task.terminal_reason = reason.strip() or "task_inconclusive"
+        return self._transition(
+            task,
+            TaskStatus.INCONCLUSIVE,
             current_round=current_round,
             reason=task.terminal_reason,
         )

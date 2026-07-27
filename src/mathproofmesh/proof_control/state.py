@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from ..proof_identity import normalize_text
 from .models import (
     AbstractStructureProposal,
+    AssumptionChallengeResult,
     AssumptionChallengerTask,
     AssumptionDomainRecord,
     AssumptionFamily,
@@ -24,6 +25,7 @@ from .models import (
     CountermodelTaskRecord,
     ContinueGateRecord,
     CriticalAssumption,
+    DependencyAtom,
     DependencyNormalizationTask,
     ExecutableTaskRecord,
     FailureClassificationRecord,
@@ -113,8 +115,10 @@ class ProofControlState:
         self.bottleneck_aliases: dict[str, str] = {}
         self.bottleneck_bridge_tasks: dict[str, BottleneckBridgeTask] = {}
         self.critical_assumptions: dict[str, CriticalAssumption] = {}
+        self.dependency_atoms: dict[str, DependencyAtom] = {}
         self.assumption_families: dict[str, AssumptionFamily] = {}
         self.assumption_challenger_tasks: dict[str, AssumptionChallengerTask] = {}
+        self.assumption_challenge_results: dict[str, AssumptionChallengeResult] = {}
         self.route_update_tasks: dict[str, RouteUpdateTask] = {}
         self.inspiration_review_deferrals: dict[str, InspirationReviewDeferral] = {}
         self.process_diagnostics: dict[str, ProcessFailureDiagnostic] = {}
@@ -202,9 +206,13 @@ class ProofControlState:
             },
             "bottleneck_bridge_tasks": self._dump_models(self.bottleneck_bridge_tasks),
             "critical_assumptions": self._dump_models(self.critical_assumptions),
+            "dependency_atoms": self._dump_models(self.dependency_atoms),
             "assumption_families": self._dump_models(self.assumption_families),
             "assumption_challenger_tasks": self._dump_models(
                 self.assumption_challenger_tasks
+            ),
+            "assumption_challenge_results": self._dump_models(
+                self.assumption_challenge_results
             ),
             "route_update_tasks": self._dump_models(self.route_update_tasks),
             "inspiration_review_deferrals": self._dump_models(
@@ -299,8 +307,10 @@ class ProofControlState:
             ("bottleneck_clusters", BottleneckCluster),
             ("bottleneck_bridge_tasks", BottleneckBridgeTask),
             ("critical_assumptions", CriticalAssumption),
+            ("dependency_atoms", DependencyAtom),
             ("assumption_families", AssumptionFamily),
             ("assumption_challenger_tasks", AssumptionChallengerTask),
+            ("assumption_challenge_results", AssumptionChallengeResult),
             ("route_update_tasks", RouteUpdateTask),
             ("inspiration_review_deferrals", InspirationReviewDeferral),
             ("process_diagnostics", ProcessFailureDiagnostic),

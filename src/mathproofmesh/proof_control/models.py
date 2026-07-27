@@ -12,6 +12,7 @@ from ..schemas import (
     ExperimentSpec,
     FailureLevel,
     NoveltySignature,
+    ProofStep,
     QuantifierSpec,
     RouteStatus as RouteStatus,
     StrategyCard,
@@ -78,6 +79,7 @@ class ControlActionType(StrEnum):
     CREATE_COUNTERMODEL_TASK = "create_countermodel_task"
     ACTIVATE_INDUCTION_MEASURE = "activate_induction_measure"
     CREATE_ASSUMPTION_CHALLENGER = "create_assumption_challenger"
+    EXECUTE_ASSUMPTION_CHALLENGER = "execute_assumption_challenger"
     MATERIALIZE_BOTTLENECK_CLUSTER = "materialize_bottleneck_cluster"
     MATERIALIZE_FALSIFICATION_TASK = "materialize_falsification_task"
     SCHEDULE_ROUTE_UPDATE = "schedule_route_update"
@@ -119,6 +121,21 @@ class TaskStatus(StrEnum):
     BLOCKED = "blocked"
     FAILED = "failed"
     EXPIRED = "expired"
+
+
+class AssumptionChallengeAction(StrEnum):
+    PROVE = "prove"
+    REFUTE = "refute"
+    WEAKEN = "weaken"
+    AVOID = "avoid"
+
+
+class AssumptionChallengeOutcome(StrEnum):
+    VERIFIED = "verified"
+    REFUTED = "refuted"
+    AVOIDED = "avoided"
+    INCONCLUSIVE = "inconclusive"
+    BLOCKED = "blocked"
 
 
 class WakeConditionKind(StrEnum):
@@ -192,6 +209,7 @@ class ExecutableTaskRecord(StrictModel):
         "edge_review",
         "generate_plan",
         "batch_repair",
+        "assumption_challenger",
     ]
     status: TaskStatus
     target_claim_ids: list[str] = Field(default_factory=list)
@@ -1008,7 +1026,42 @@ class CriticalAssumption(StrictModel):
     domain: AssumptionDomain = AssumptionDomain.MATHEMATICAL
     family_id: str | None = None
     semantic_tags: list[str] = Field(default_factory=list)
+    dependency_atom_ids: list[str] = Field(default_factory=list)
+    typed_dependency_ids: list[str] = Field(default_factory=list)
+    scope_signature_ids: list[str] = Field(default_factory=list)
+    proof_graph_neighborhood: list[str] = Field(default_factory=list)
+    load_bearing_score: float = Field(default=0.5, ge=0.0, le=1.0)
     challenger_task_id: str | None = None
+
+
+class DependencyAtom(StrictModel):
+    """Route-scoped, sidecar-only record of a load-bearing dependency."""
+
+    atom_id: str
+    statement: str
+    normalized_statement: str
+    statement_hash: str
+    source_kind: Literal[
+        "strategy_prerequisite",
+        "critical_claim",
+        "message_assumption",
+        "verified_fact",
+        "obligation_assumption",
+        "typed_dependency",
+        "key_step_justification",
+        "unresolved_gap",
+        "verifier_critical_issue",
+    ]
+    source_id: str
+    route_id: str
+    verification_status: ClaimStatus = ClaimStatus.PROPOSED
+    dependency_refs: list[DependencyRef] = Field(default_factory=list)
+    typed_dependency_ids: list[str] = Field(default_factory=list)
+    scope_signature_id: str | None = None
+    proof_graph_neighborhood: list[str] = Field(default_factory=list)
+    mechanism_signature: list[str] = Field(default_factory=list)
+    load_bearing_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    domain: AssumptionDomain = AssumptionDomain.MATHEMATICAL
 
 
 class AssumptionFamily(StrictModel):
@@ -1019,7 +1072,16 @@ class AssumptionFamily(StrictModel):
     semantic_tags: list[str]
     common_mode_risk: float = Field(ge=0.0, le=1.0)
     normalization_confidence: float = Field(ge=0.0, le=1.0)
+    dependency_atom_ids: list[str] = Field(default_factory=list)
+    typed_dependency_ids: list[str] = Field(default_factory=list)
+    scope_signature_ids: list[str] = Field(default_factory=list)
+    proof_graph_neighborhood: list[str] = Field(default_factory=list)
+    route_dependency_closures: dict[str, list[str]] = Field(default_factory=dict)
+    load_bearing_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    is_dependency_cutset: bool = False
     challenger_task_id: str | None = None
+    resolution_result_id: str | None = None
+    resolution_outcome: AssumptionChallengeOutcome | None = None
 
 
 class AssumptionChallengerTask(StrictModel):
@@ -1030,8 +1092,65 @@ class AssumptionChallengerTask(StrictModel):
     route_ids: list[str]
     required_actions: list[str]
     premise_eligible: bool = False
-    status: Literal["open", "resolved", "cancelled"] = "open"
+    status: Literal[
+        "open",
+        "materialized",
+        "ready",
+        "running",
+        "verified",
+        "refuted",
+        "avoided",
+        "inconclusive",
+        "blocked",
+        "cancelled",
+    ] = "open"
     action_id: str | None = None
+    execution_action_id: str | None = None
+    executable_task_id: str | None = None
+    assigned_agent_id: str | None = None
+    result_id: str | None = None
+
+
+class AssumptionChallengeProposal(StrictModel):
+    proposal_id: str = Field(default_factory=lambda: new_id("assumption_challenge"))
+    action: AssumptionChallengeAction
+    target_statement: str
+    concise_argument: str
+    proof_steps: list[ProofStep] = Field(default_factory=list)
+    counterexample: str | None = None
+    weaker_condition: str | None = None
+    alternative_strategy: StrategyCard | None = None
+    dependency_refs: list[DependencyRef] = Field(default_factory=list)
+    unresolved_gaps: list[str] = Field(default_factory=list)
+
+
+class AssumptionChallengeReview(StrictModel):
+    proposal_id: str
+    verdict: Literal["pass", "fail", "inconclusive"]
+    action_supported: bool = False
+    proof_complete: bool = False
+    exact_counterexample_confirmed: bool = False
+    independence_confirmed: bool = False
+    weaker_sufficient_confirmed: bool = False
+    checked_step_ids: list[str] = Field(default_factory=list)
+    issues: list[str] = Field(default_factory=list)
+    concise_feedback: str
+
+
+class AssumptionChallengeResult(StrictModel):
+    result_id: str
+    task_id: str
+    family_id: str
+    action: AssumptionChallengeAction
+    outcome: AssumptionChallengeOutcome
+    challenger_agent_id: str | None = None
+    reviewer_agent_id: str | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    independent_review_refs: list[str] = Field(default_factory=list)
+    created_route_ids: list[str] = Field(default_factory=list)
+    alternative_strategy_ids: list[str] = Field(default_factory=list)
+    detail: str
+    completed_round: int = Field(ge=0)
 
 
 class BottleneckBridgeTask(StrictModel):

@@ -17,6 +17,7 @@ from ..schemas import (
     StrategyCard,
     stable_hash,
 )
+from .common_mode import CriticalAssumptionMatrix
 from .models import (
     ClaimGoalLink,
     ContinueGateRecord,
@@ -272,15 +273,22 @@ class RouteAdmissionGate:
         strategy: StrategyCard,
         assumptions: Sequence[CriticalAssumption],
     ) -> list[str]:
-        prerequisites = {
-            normalize_text(item).casefold() for item in strategy.prerequisites
-        }
+        dependencies = [
+            *strategy.prerequisites,
+            *(claim.statement for claim in strategy.critical_claims),
+        ]
         return sorted(
             item.assumption_id
             for item in assumptions
             if item.verification_status != ClaimStatus.VERIFIED
             and item.common_mode_risk >= 0.70
-            and normalize_text(item.normalized_statement).casefold() in prerequisites
+            and any(
+                CriticalAssumptionMatrix.statements_semantically_match(
+                    dependency,
+                    item.normalized_statement,
+                )
+                for dependency in dependencies
+            )
         )
 
 
