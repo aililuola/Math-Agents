@@ -13,6 +13,7 @@ from mathproofmesh.agents import (
     StructuredAgentRunner,
 )
 from mathproofmesh.communication.route_registry import RouteRegistry
+from mathproofmesh.deep_exploration import DeepExplorationRegistry
 from mathproofmesh.inspiration.engine import InspirationEngine
 from mathproofmesh.llm.base import LLMClient, LLMResponse, Message
 from mathproofmesh.llm.pool import AgentPool
@@ -324,6 +325,10 @@ def test_diagnostic_becomes_route_local_obligation_and_manual_inspiration_trigge
         proof_graph=graph,
         typed_memory=typed_memory,
         inspiration_engine=engine,
+        deep_exploration_registry=DeepExplorationRegistry(
+            config.deep_exploration_policy,
+            problem_hash=problem.integrity_hash,
+        ),
         current_round=2,
     )
     payload = json.loads(
@@ -367,3 +372,25 @@ def test_diagnostic_becomes_route_local_obligation_and_manual_inspiration_trigge
     assert len(manual) == 1
     assert manual[0].affected_route_ids == [route.route_id]
     assert manual[0].evidence_refs == [obligation.obligation_id]
+
+    admission, signature = orchestrator._admit_deep_exploration(
+        state,
+        problem=problem,
+        strategy=strategy,
+        checkpoint=checkpoint,
+        route_id=route.route_id,
+        round_index=2,
+        meta_approved=False,
+        remaining_calls=20,
+        remaining_tokens=None,
+        store=store,
+    )
+
+    assert signature is not None
+    assert signature.recovery_lineage_id is not None
+    assert admission is not None and admission.allowed
+    assert admission.recovery_only is True
+    assert (
+        admission.max_output_tokens
+        == config.deep_exploration_policy.partial_repair_max_output_tokens
+    )

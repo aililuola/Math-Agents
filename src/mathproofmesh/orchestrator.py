@@ -4115,6 +4115,25 @@ class ProofMeshOrchestrator:
                     proposal.reverse_goal.sufficient_intermediate_claims
                 )
 
+        recovery_lineage_id = None
+        if bottleneck_obligation is not None:
+            failure_fingerprint = str(
+                bottleneck_obligation.first_error_fingerprint or ""
+            )
+            if failure_fingerprint.startswith("post_failure:"):
+                recovery_lineage_id = (
+                    "post_failure_recovery_"
+                    + stable_hash(
+                        {
+                            "route_id": route_id,
+                            "verified_checkpoint_hash": checkpoint_math_fingerprint(
+                                checkpoint
+                            ),
+                            "failure_fingerprint": failure_fingerprint,
+                        }
+                    )[:24]
+                )
+
         signature = ExplorationSignature(
             problem_hash=problem.integrity_hash,
             verified_checkpoint_id=checkpoint.checkpoint_id,
@@ -4131,6 +4150,7 @@ class ProofMeshOrchestrator:
                 *strategy.prerequisites,
             ],
             route_id=route_id,
+            recovery_lineage_id=recovery_lineage_id,
         )
         referee_confirmed = bool(
             review is not None

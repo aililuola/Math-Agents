@@ -69,6 +69,7 @@ class ExplorationSignature(ExplorationModel):
     transformation_tags: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     route_id: str | None = None
+    recovery_lineage_id: str | None = None
     signature_hash: str = ""
 
     def canonical_payload(self) -> dict[str, Any]:
@@ -201,6 +202,7 @@ class DeepExplorationRegistry:
         self.strikes: dict[str, int] = {}
         self.locked_signatures: dict[str, str] = {}
         self.partial_repairs: dict[str, int] = {}
+        self.recovery_repairs: dict[str, int] = {}
         self.pivots: dict[str, BottleneckPivotRecord] = {}
         self.route_usage: dict[str, UsageRecord] = {}
         self._lock = threading.RLock()
@@ -257,13 +259,49 @@ class DeepExplorationRegistry:
                     requested_tier=requested,
                     reason="the same mathematical state and mechanism already has a running lease",
                 )
+            recovery_lineage_id = signature.recovery_lineage_id
+            if recovery_lineage_id is not None:
+                running_recovery = [
+                    record
+                    for record in self.attempts.values()
+                    if record.outcome == ExplorationOutcome.RUNNING
+                    and record.signature.recovery_lineage_id == recovery_lineage_id
+                ]
+                if len(running_recovery) >= self.config.max_running_per_signature:
+                    return ExplorationAdmission(
+                        allowed=False,
+                        signature_hash=signature_hash,
+                        requested_tier=requested,
+                        reason=(
+                            "the same post-failure recovery lineage already has "
+                            "a running lease"
+                        ),
+                    )
 
             granted = requested
             reason = "evidence-gated tier admitted"
             recovery_only = False
             novelty_required = False
 
-            if signature_hash in self.locked_signatures:
+            if recovery_lineage_id is not None:
+                repairs = self.recovery_repairs.get(recovery_lineage_id, 0)
+                if repairs >= self.config.max_partial_repairs_per_signature:
+                    return ExplorationAdmission(
+                        allowed=False,
+                        signature_hash=signature_hash,
+                        requested_tier=requested,
+                        reason=(
+                            "this post-failure recovery lineage already exhausted "
+                            "its one bounded repair"
+                        ),
+                    )
+                repair_tier = self.config.tier_index_for_limit(
+                    self.config.partial_repair_max_output_tokens
+                )
+                granted = min(granted, repair_tier)
+                recovery_only = True
+                reason = "one bounded repair is allowed for a post-failure lineage"
+            elif signature_hash in self.locked_signatures:
                 repairs = self.partial_repairs.get(signature_hash, 0)
                 if repairs >= self.config.max_partial_repairs_per_signature:
                     return ExplorationAdmission(
@@ -282,7 +320,11 @@ class DeepExplorationRegistry:
                 recovery_only = True
                 reason = "one bounded repair is allowed for a locked signature"
 
-            near_duplicate = self._near_duplicate(signature)
+            near_duplicate = (
+                None
+                if recovery_lineage_id is not None
+                else self._near_duplicate(signature)
+            )
             if near_duplicate is not None and not evidence.novelty_review_passed:
                 repair_tier = self.config.tier_index_for_limit(
                     self.config.partial_repair_max_output_tokens
@@ -331,9 +373,14 @@ class DeepExplorationRegistry:
             self.attempts[lease_id] = record
             self.running_by_signature.setdefault(signature_hash, []).append(lease_id)
             if recovery_only:
-                self.partial_repairs[signature_hash] = (
-                    self.partial_repairs.get(signature_hash, 0) + 1
-                )
+                if recovery_lineage_id is not None:
+                    self.recovery_repairs[recovery_lineage_id] = (
+                        self.recovery_repairs.get(recovery_lineage_id, 0) + 1
+                    )
+                else:
+                    self.partial_repairs[signature_hash] = (
+                        self.partial_repairs.get(signature_hash, 0) + 1
+                    )
             return ExplorationAdmission(
                 allowed=True,
                 signature_hash=signature_hash,
@@ -448,6 +495,7 @@ class DeepExplorationRegistry:
                 "strikes": dict(self.strikes),
                 "locked_signatures": dict(self.locked_signatures),
                 "partial_repairs": dict(self.partial_repairs),
+                "recovery_repairs": dict(self.recovery_repairs),
                 "pivots": {
                     key: value.model_dump(mode="json")
                     for key, value in self.pivots.items()
@@ -492,6 +540,17 @@ class DeepExplorationRegistry:
 
         registry.strikes = remap_counts(state.get("strikes", {}))
         registry.partial_repairs = remap_counts(state.get("partial_repairs", {}))
+        registry.recovery_repairs = {
+            str(key): int(value)
+            for key, value in dict(state.get("recovery_repairs", {})).items()
+        }
+        if "recovery_repairs" not in state:
+            for record in registry.attempts.values():
+                lineage = record.signature.recovery_lineage_id
+                if lineage is not None and record.recovery_only:
+                    registry.recovery_repairs[lineage] = (
+                        registry.recovery_repairs.get(lineage, 0) + 1
+                    )
         registry.locked_signatures = {}
         for key, value in dict(state.get("locked_signatures", {})).items():
             registry.locked_signatures[hash_remap.get(str(key), str(key))] = str(value)
@@ -528,6 +587,7 @@ class DeepExplorationRegistry:
             "attempt_count": len(self.attempts),
             "running_signature_count": len(self.running_by_signature),
             "locked_signature_count": len(self.locked_signatures),
+            "recovery_lineage_count": len(self.recovery_repairs),
             "pivot_count": len(self.pivots),
             "route_usage": {
                 key: value.model_dump(mode="json")
