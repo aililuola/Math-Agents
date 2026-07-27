@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from mathproofmesh.proof_control.dependencies import (
     DependencyResolver,
     migrate_legacy_dependencies,
@@ -11,6 +14,31 @@ from mathproofmesh.proof_control.models import (
 )
 from mathproofmesh.proof_control.state import ProofControlState
 from mathproofmesh.schemas import ClaimCard, ClaimStatus, ProofStep
+
+
+def test_legacy_external_dependency_kind_restores_with_audit_metadata() -> None:
+    ref = DependencyRef.model_validate(
+        {
+            "kind": "external",
+            "target_id": "artifact://result/certificate.json",
+        }
+    )
+
+    assert ref.kind == DependencyKind.EXTERNAL_RESULT
+    assert ref.kind_migration == "legacy_external_to_external_result"
+    assert ref.model_dump(mode="json")["kind_migration"] == (
+        "legacy_external_to_external_result"
+    )
+
+
+def test_unknown_dependency_kind_still_fails_strict_validation() -> None:
+    with pytest.raises(ValidationError):
+        DependencyRef.model_validate(
+            {
+                "kind": "outside",
+                "target_id": "artifact://result/certificate.json",
+            }
+        )
 
 
 def test_local_step_dependency_resolves_inside_delta() -> None:

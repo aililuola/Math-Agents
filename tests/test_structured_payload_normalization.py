@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from mathproofmesh.agents import StructuredAgentRunner
 from mathproofmesh.schemas import (
+    ClaimBatch,
     ComputationMethod,
     ContinuationTurn,
     InitialExplorationTurn,
@@ -111,3 +112,58 @@ def test_unknown_meta_mechanism_is_not_replaced_by_a_generic_fallback() -> None:
     assert actions == []
     with pytest.raises(ValidationError):
         MetaStrategyDecision.model_validate(payload)
+
+
+def test_dependency_ref_aliases_use_payload_namespaces_and_are_audited() -> None:
+    payload: dict[str, object] = {
+        "attempt_id": "attempt-a",
+        "claims": [
+            {
+                "claim_id": "claim-base",
+                "statement": "The base relation holds.",
+                "conclusion": "The base relation holds.",
+                "proof_steps": [
+                    {
+                        "step_id": "step-base",
+                        "statement": "Establish the base relation.",
+                        "justification": "By the stated assumptions.",
+                    }
+                ],
+            },
+            {
+                "claim_id": "claim-derived",
+                "statement": "The derived relation holds.",
+                "conclusion": "The derived relation holds.",
+                "dependencies": ["claim-base"],
+                "dependency_refs": [
+                    {"kind": "external", "target_id": "claim-base"},
+                    {"kind": "external", "target_id": "step-base"},
+                    {
+                        "kind": "external",
+                        "target_id": "artifact://result/certificate.json",
+                    },
+                ],
+            },
+        ],
+        "summary": "Two reusable relations were extracted.",
+    }
+
+    actions = StructuredAgentRunner._normalize_continuation_payload(
+        payload,
+        response_model=ClaimBatch,
+    )
+    batch = ClaimBatch.model_validate(payload)
+    refs = batch.claims[1].dependency_refs
+
+    assert [ref["kind"] for ref in refs] == [
+        "local_claim",
+        "local_step",
+        "external_result",
+    ]
+    assert [ref["kind_migration"] for ref in refs] == [
+        "legacy_external_to_local_claim",
+        "legacy_external_to_local_step",
+        "legacy_external_to_external_result",
+    ]
+    assert len(actions) == 3
+    assert all("external to " in action for action in actions)
