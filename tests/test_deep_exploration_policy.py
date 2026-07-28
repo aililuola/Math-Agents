@@ -26,21 +26,25 @@ def _signature(
     checkpoint_hash: str = "checkpoint-hash",
     target: str = "prove the local divisibility lemma",
     route_id: str = "route-a",
+    recovery_lineage_id: str | None = None,
 ) -> ExplorationSignature:
-    return ExplorationSignature(
-        problem_hash="problem-hash",
-        verified_checkpoint_id="checkpoint-1",
-        verified_checkpoint_hash=checkpoint_hash,
-        target_obligation_id="obligation-1",
-        target_statement=target,
-        mechanism_tags=[mechanism],
-        representation_tags=["residue classes"],
-        construction_tags=[],
-        invariant_tags=[],
-        transformation_tags=["factorization"],
-        assumptions=["n is a positive integer"],
-        route_id=route_id,
-    )
+    payload = {
+        "problem_hash": "problem-hash",
+        "verified_checkpoint_id": "checkpoint-1",
+        "verified_checkpoint_hash": checkpoint_hash,
+        "target_obligation_id": "obligation-1",
+        "target_statement": target,
+        "mechanism_tags": [mechanism],
+        "representation_tags": ["residue classes"],
+        "construction_tags": [],
+        "invariant_tags": [],
+        "transformation_tags": ["factorization"],
+        "assumptions": ["n is a positive integer"],
+        "route_id": route_id,
+    }
+    if recovery_lineage_id is not None:
+        payload["recovery_lineage_id"] = recovery_lineage_id
+    return ExplorationSignature.model_validate(payload)
 
 
 def _evidence(**updates: bool) -> ExplorationEvidence:
@@ -250,6 +254,52 @@ def test_high_tier_no_progress_locks_only_that_mathematical_signature() -> None:
     assert not exhausted.allowed
     assert distinct.allowed
     assert distinct.max_output_tokens == 96000
+
+
+def test_post_failure_lineage_gets_one_bounded_repair_across_reworded_targets() -> None:
+    config = DeepExplorationPolicyConfig()
+    registry = DeepExplorationRegistry(config, problem_hash="problem-hash")
+    lineage = "post-failure:checkpoint-1:failure-a"
+    first = _signature(
+        "same stalled mechanism",
+        target="Diagnose the missing local bridge.",
+        recovery_lineage_id=lineage,
+    )
+
+    repair = registry.admit(
+        first,
+        route_id="route-a",
+        round_index=4,
+        evidence=_evidence(),
+        requested_tier=1,
+    )
+
+    assert repair.allowed
+    assert repair.recovery_only is True
+    assert repair.max_output_tokens == config.partial_repair_max_output_tokens
+    assert repair.lease_id is not None
+    registry.finish(repair.lease_id, ExplorationOutcome.NO_ARTIFACT)
+    registry = DeepExplorationRegistry.from_state(
+        registry.export_state(),
+        config,
+        problem_hash="problem-hash",
+    )
+
+    reworded = _signature(
+        "same stalled mechanism",
+        target="Repair the unresolved local bridge using the public checkpoint.",
+        recovery_lineage_id=lineage,
+    )
+    exhausted = registry.admit(
+        reworded,
+        route_id="route-a",
+        round_index=5,
+        evidence=_evidence(),
+        requested_tier=1,
+    )
+
+    assert exhausted.allowed is False
+    assert "recovery lineage" in exhausted.reason
 
 
 def test_same_domain_subdirections_and_local_pivot_are_allowed() -> None:

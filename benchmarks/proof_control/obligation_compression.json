@@ -1,0 +1,9 @@
+{
+  "case_id": "obligation_compression",
+  "obligation_count": 10,
+  "statement": "Establish the shared bridge B.",
+  "assumptions": ["H"],
+  "first_error_fingerprint": "same-first-error",
+  "expected_cluster_count": 1,
+  "preserve_original_nodes": true
+}

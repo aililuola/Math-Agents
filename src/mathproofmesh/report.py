@@ -437,6 +437,7 @@ def write_run_report(store: ArtifactStore, result: RunResult) -> str:
                     "",
                     f"- 有效局部路线：{len(progress.valid_partial_attempt_ids)}",
                     f"- 已审查步骤：{len(progress.verified_step_ids)}",
+                    f"- 已验证局部结论：{len(progress.verified_local_claim_ids)}",
                     f"- 已反驳路线：{len(progress.refuted_routes)}",
                     f"- 开放义务：{len(progress.open_obligations)}",
                     f"- 剩余缺口：{len(progress.remaining_gaps)}",

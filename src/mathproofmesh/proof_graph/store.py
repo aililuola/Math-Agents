@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from collections.abc import Callable
 from typing import Any, Iterable
 
 from ..config import SchedulerConfig, SystemConfig
@@ -44,6 +45,9 @@ class ProofGraphStore:
         self._edges: dict[str, ProofGraphEdge] = {}
         self._frozen = False
         self._events: list[dict[str, Any]] = []
+        self._proof_control_pre_close_policy: (
+            Callable[[MessageEnvelope, ProofObligation], tuple[bool, str | None]] | None
+        ) = None
 
     @property
     def frozen(self) -> bool:
@@ -339,12 +343,114 @@ class ProofGraphStore:
         self._record("obligation_reopened", obligation)
         return obligation
 
+    def invalidate_evidence_messages(
+        self,
+        message_ids: Iterable[str],
+        *,
+        reason: str,
+    ) -> list[str]:
+        """Remove rolled-back evidence from the live graph and reopen its closures."""
+
+        self._ensure_mutable()
+        invalidated = set(message_ids)
+        if not invalidated:
+            return []
+        for message_id in invalidated:
+            self._claim_nodes.pop(message_id, None)
+        self._edges = {
+            edge_id: edge
+            for edge_id, edge in self._edges.items()
+            if edge.source_id not in invalidated
+            and edge.target_id not in invalidated
+            and edge.evidence_message_id not in invalidated
+        }
+        reopened: list[str] = []
+        for obligation in self._obligations.values():
+            obligation.evidence_message_ids = [
+                message_id
+                for message_id in obligation.evidence_message_ids
+                if message_id not in invalidated
+            ]
+            obligation.dependency_ids = [
+                dependency_id
+                for dependency_id in obligation.dependency_ids
+                if dependency_id not in invalidated
+            ]
+            if (
+                obligation.status in {"closed", "refuted"}
+                and not obligation.evidence_message_ids
+            ):
+                obligation.status = "open"
+                reopened.append(obligation.obligation_id)
+        self._record(
+            "proof_evidence_invalidated",
+            {
+                "message_ids": sorted(invalidated),
+                "reopened_obligation_ids": sorted(reopened),
+                "reason": reason,
+            },
+        )
+        return sorted(reopened)
+
     def get_obligation(self, obligation_id: str) -> ProofObligation:
         obligation_id = self._obligation_aliases.get(obligation_id, obligation_id)
         return self._obligations[obligation_id]
 
+    def retract_tentative_obligation(
+        self,
+        obligation_id: str,
+        *,
+        route_id: str | None = None,
+        reason: str = "",
+    ) -> ProofObligation | None:
+        """Remove a draft obligation whose route admission was blocked.
+
+        Only tentative, evidence-free, edge-free obligations may be
+        retracted, and only when they belong exclusively to the blocked
+        route. Anything another route references stays in the graph.
+        """
+        self._ensure_mutable()
+        obligation_id = self._obligation_aliases.get(obligation_id, obligation_id)
+        obligation = self._obligations.get(obligation_id)
+        if obligation is None or obligation.status != "tentative":
+            return None
+        if obligation.evidence_message_ids:
+            return None
+        if route_id is not None and set(obligation.route_ids) - {route_id}:
+            return None
+        if any(
+            edge.source_id == obligation_id or edge.target_id == obligation_id
+            for edge in self._edges.values()
+        ):
+            return None
+        del self._obligations[obligation_id]
+        index = self._obligation_content_index.get(obligation.content_hash, [])
+        if obligation_id in index:
+            index.remove(obligation_id)
+            if not index:
+                self._obligation_content_index.pop(obligation.content_hash, None)
+        self._record(
+            "obligation_retracted",
+            {
+                "obligation_id": obligation_id,
+                "reason": reason,
+                "statement": obligation.statement,
+            },
+        )
+        return obligation
+
     def record_event(self, event_type: str, payload: Any) -> None:
         self._record(event_type, payload)
+
+    def set_proof_control_pre_close_policy(
+        self,
+        policy: (
+            Callable[[MessageEnvelope, ProofObligation], tuple[bool, str | None]] | None
+        ),
+    ) -> None:
+        """Attach an additive pre-close check without replacing the Fact gate."""
+
+        self._proof_control_pre_close_policy = policy
 
     def find_equivalent_obligations(
         self,
@@ -421,6 +527,124 @@ class ProofGraphStore:
                 groups.append(ordered)
                 consumed.update(unique)
         return groups
+
+    def main_goal_obligation_ids(self) -> list[str]:
+        return sorted(
+            item.obligation_id
+            for item in self._obligations.values()
+            if item.kind == ObligationKind.MAIN_GOAL
+        )
+
+    def core_dependency_closure(self) -> set[str]:
+        """Return main goals and every obligation they transitively depend on."""
+
+        closure: set[str] = set()
+        queue = deque(self.main_goal_obligation_ids())
+        dependency_edges: dict[str, set[str]] = defaultdict(set)
+        for edge in self._edges.values():
+            if edge.edge_type == GraphEdgeType.DEPENDS_ON:
+                dependency_edges[edge.source_id].add(edge.target_id)
+        for obligation in self._obligations.values():
+            dependency_edges[obligation.obligation_id].update(
+                self._obligation_aliases.get(item, item)
+                for item in obligation.dependency_ids
+            )
+        while queue:
+            raw_id = queue.popleft()
+            current = self._obligation_aliases.get(raw_id, raw_id)
+            if not current or current in closure:
+                continue
+            if current not in self._obligations:
+                continue
+            closure.add(current)
+            queue.extend(sorted(dependency_edges.get(current, set())))
+        return closure
+
+    def core_open_obligations(self) -> list[ProofObligation]:
+        closure = self.core_dependency_closure()
+        return sorted(
+            (
+                item
+                for item_id, item in self._obligations.items()
+                if item_id in closure
+                and item.status in {"open", "tentative", "blocked"}
+            ),
+            key=lambda item: (
+                item.kind != ObligationKind.MAIN_GOAL,
+                -item.centrality,
+                -item.priority,
+                item.obligation_id,
+            ),
+        )
+
+    def obligations_in_core_closure(
+        self,
+        *,
+        route_id: str | None = None,
+        open_only: bool = False,
+    ) -> list[ProofObligation]:
+        closure = self.core_dependency_closure()
+        return sorted(
+            (
+                item
+                for item_id, item in self._obligations.items()
+                if item_id in closure
+                and (route_id is None or route_id in item.route_ids)
+                and (not open_only or item.status in {"open", "tentative", "blocked"})
+            ),
+            key=lambda item: item.obligation_id,
+        )
+
+    def cluster_neighborhood(self, obligation_id: str) -> set[str]:
+        obligation_id = self._obligation_aliases.get(obligation_id, obligation_id)
+        if obligation_id not in self._obligations:
+            raise KeyError(obligation_id)
+        neighbors = {
+            self._obligation_aliases.get(item, item)
+            for item in self._obligations[obligation_id].dependency_ids
+        }
+        for edge in self._edges.values():
+            if edge.source_id == obligation_id:
+                neighbors.add(
+                    self._obligation_aliases.get(edge.target_id, edge.target_id)
+                )
+            if edge.target_id == obligation_id:
+                neighbors.add(
+                    self._obligation_aliases.get(edge.source_id, edge.source_id)
+                )
+        neighbors.update(
+            item.obligation_id for item in self.find_dependents(obligation_id)
+        )
+        neighbors.discard(obligation_id)
+        return {item for item in neighbors if item in self._obligations}
+
+    def obligation_dominates(
+        self, candidate_id: str, other_id: str, *, threshold: float = 0.90
+    ) -> bool:
+        candidate = self.get_obligation(candidate_id)
+        other = self.get_obligation(other_id)
+        if candidate.problem_hash != other.problem_hash:
+            return False
+        if candidate.assumptions != other.assumptions:
+            return False
+        if [item.model_dump(mode="json") for item in candidate.quantifiers] != [
+            item.model_dump(mode="json") for item in other.quantifiers
+        ]:
+            return False
+        if (
+            statement_similarity(
+                candidate.normalized_statement, other.normalized_statement
+            )
+            < threshold
+        ):
+            return False
+        candidate_neighbors = self.cluster_neighborhood(candidate.obligation_id)
+        other_neighbors = self.cluster_neighborhood(other.obligation_id)
+        return (
+            other_neighbors.issubset(candidate_neighbors)
+            and candidate.centrality >= other.centrality
+            and candidate.priority >= other.priority
+        )
 
     def proof_debt(self, route_id: str) -> float:
         scheduler = (
@@ -501,6 +725,21 @@ class ProofGraphStore:
                     obligation.assumptions == message.assumptions
                     and obligation.normalized_statement == message.normalized_statement
                 ):
+                    if self._proof_control_pre_close_policy is not None:
+                        allowed, reason = self._proof_control_pre_close_policy(
+                            message, obligation
+                        )
+                        if not allowed:
+                            self._record(
+                                "proof_control_obligation_close_blocked",
+                                {
+                                    "message_id": message.message_id,
+                                    "obligation_id": obligation.obligation_id,
+                                    "reason": reason
+                                    or "proof-control pre-close policy rejected closure",
+                                },
+                            )
+                            continue
                     self.close_obligation(
                         obligation.obligation_id,
                         message.message_id,

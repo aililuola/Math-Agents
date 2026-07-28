@@ -113,8 +113,14 @@ def test_desktop_app_requires_session_cookie_and_serves_workbench(
     bootstrap = client.get("/api/bootstrap")
     assert bootstrap.status_code == 200
     body = bootstrap.json()
-    assert body["version"] == "0.7.0"
-    assert len(body["profiles"]) == 3
+    assert body["version"] == "0.8.2"
+    assert {profile["id"]: profile["filename"] for profile in body["profiles"]} == {
+        "smoke": "config.deepseek-v4-pro.smoke.yaml",
+        "formal": "config.deepseek-v4-pro.yaml",
+        "active": "config.deepseek-v4-pro.topology-active.yaml",
+        "proof_control_shadow": ("config.deepseek-v4-pro.proof-control-shadow.yaml"),
+        "proof_control_active": ("config.deepseek-v4-pro.proof-control-active.yaml"),
+    }
     assert body["credential_status"]["DEEPSEEK_AGENT_1_KEY"] == "missing"
 
     settings = client.put(
@@ -545,6 +551,124 @@ def test_desktop_run_manager_publishes_terminal_state(
         assert session.metadata.lifecycle == "completed"
         assert any(item["event"] == "result" for item in session.events)
         assert session.events[-1]["event"] == "terminal"
+
+    asyncio.run(exercise())
+
+
+def test_desktop_resume_endpoint_defaults_to_normal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = DesktopPaths.discover(tmp_path / "desktop")
+    app = create_desktop_app(paths=paths, token="test-token")
+    client = TestClient(app)
+    assert client.get("/?token=test-token").status_code == 200
+
+    received: list[tuple[str, str, str]] = []
+
+    async def fake_resume(
+        *,
+        run_id: str,
+        profile: str,
+        resume_mode: str,
+    ) -> dict[str, object]:
+        received.append((run_id, profile, resume_mode))
+        return {"run_id": run_id, "lifecycle": "queued"}
+
+    monkeypatch.setattr(app.state.desktop_manager, "resume", fake_resume)
+
+    default = client.post("/api/runs/stalled-run/resume", json={"profile": "smoke"})
+    assert default.status_code == 200
+    assert received == [("stalled-run", "smoke", "normal")]
+
+    explicit = client.post(
+        "/api/runs/stalled-run/resume",
+        json={"profile": "smoke", "resume_mode": "replay_stage"},
+    )
+    assert explicit.status_code == 200
+    assert received[-1] == ("stalled-run", "smoke", "replay_stage")
+
+    invalid = client.post(
+        "/api/runs/stalled-run/resume",
+        json={"profile": "smoke", "resume_mode": "bogus"},
+    )
+    assert invalid.status_code == 400
+    assert "resume_mode" in invalid.json()["detail"]
+    assert len(received) == 2
+
+
+def test_desktop_run_manager_resume_threads_intervention_to_orchestrator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = DesktopPaths.discover(tmp_path / "desktop")
+    settings_store = SettingsStore(paths.settings_file)
+    credentials = CredentialVault(
+        paths.credentials_file,
+        protector=ReversingProtector(),
+    )
+    repository = RunRepository(paths)
+    interventions: list[tuple[str, str | None]] = []
+
+    class FakeConfigService:
+        def build(self, profile, settings):
+            return object()
+
+    class FakeOrchestrator:
+        def __init__(
+            self,
+            config,
+            *,
+            activity_listener=None,
+            clarification_resolver=None,
+        ):
+            pass
+
+        async def resume(self, run_id, *, intervention=None):
+            interventions.append((run_id, intervention))
+            return SimpleNamespace(
+                run_id=run_id,
+                status=SimpleNamespace(value="verified"),
+                math_status=SimpleNamespace(value="verified"),
+                execution_status=SimpleNamespace(value="completed"),
+                total_calls=1,
+                total_usage=SimpleNamespace(
+                    total_tokens=100,
+                    estimated_cost_usd=0.01,
+                ),
+            )
+
+    monkeypatch.setattr(
+        "mathproofmesh.desktop.manager.ProofMeshOrchestrator",
+        FakeOrchestrator,
+    )
+    manager = DesktopRunManager(
+        paths,
+        settings_store,
+        credentials,
+        FakeConfigService(),  # type: ignore[arg-type]
+        repository,
+    )
+    (paths.runs / "resume-test").mkdir(parents=True, exist_ok=True)
+
+    async def exercise() -> None:
+        first = await manager.resume(run_id="resume-test", profile="smoke")
+        session = manager.session(str(first["run_id"]))
+        assert session is not None and session.task is not None
+        await session.task
+        assert interventions == [("resume-test", None)]
+        assert session.metadata.lifecycle == "completed"
+
+        interventions.clear()
+        second = await manager.resume(
+            run_id="resume-test",
+            profile="smoke",
+            resume_mode="reset_stagnation",
+        )
+        session = manager.session(str(second["run_id"]))
+        assert session is not None and session.task is not None
+        await session.task
+        assert interventions == [("resume-test", "reset_stagnation")]
 
     asyncio.run(exercise())
 

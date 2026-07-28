@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import ssl
+from pathlib import Path
 
 import httpx
 import pytest
@@ -9,6 +11,13 @@ from pydantic import ValidationError
 from mathproofmesh.config import AgentConfig, SystemConfig
 from mathproofmesh.llm.deepseek import DeepSeekClient
 from mathproofmesh.llm.pool import AgentPool
+from mathproofmesh.reasoning_trace import (
+    ReasoningTraceBinding,
+    ReasoningTraceStore,
+    bind_reasoning_trace,
+    build_reasoning_snapshot,
+    read_reasoning_records,
+)
 
 
 def test_deepseek_agent_config_requires_thinking_for_effort() -> None:
@@ -388,6 +397,75 @@ async def test_deepseek_model_list_probe() -> None:
     finally:
         await client.aclose()
     assert models == ["deepseek-v4-flash", "deepseek-v4-pro"]
+
+
+@pytest.mark.asyncio
+async def test_deepseek_streaming_disconnect_salvages_partial_reasoning(
+    tmp_path: Path,
+) -> None:
+    deltas = ["partial reasoning A; ", "partial reasoning B"]
+    expected_text = "".join(deltas)
+
+    class _DisconnectingStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for index, delta in enumerate(deltas):
+                event = {
+                    "id": "chat-cut",
+                    "model": "deepseek-v4-pro",
+                    "choices": [
+                        {
+                            "delta": {
+                                "reasoning_content": delta,
+                                "content": '{"partial":' if index == 0 else "",
+                            }
+                        }
+                    ],
+                }
+                yield f"data: {json.dumps(event)}\n\n".encode("utf-8")
+            raise ssl.SSLError("EOF occurred in violation of protocol")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=_DisconnectingStream(),
+        )
+
+    client = DeepSeekClient(api_key="test-secret", streaming=True)
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = ReasoningTraceStore(tmp_path, "run-disconnect")
+    binding = ReasoningTraceBinding(
+        store=store,
+        task_id="salvage-node",
+        agent_id="ds-explorer-a",
+        stage="route_prove",
+    )
+    try:
+        with bind_reasoning_trace(binding):
+            with pytest.raises(ssl.SSLError) as excinfo:
+                await client.complete(
+                    [{"role": "user", "content": "Return JSON."}],
+                    temperature=0.0,
+                    max_output_tokens=1024,
+                    json_mode=True,
+                )
+    finally:
+        await client.aclose()
+
+    # The retryable exception type is preserved and its message reports the
+    # amount of reasoning salvaged before the disconnect.
+    assert type(excinfo.value) is ssl.SSLError
+    assert f"{len(expected_text)} reasoning characters" in str(excinfo.value)
+    assert getattr(excinfo.value, "mathproofmesh_partial_content") == '{"partial":'
+
+    records, _ = read_reasoning_records(store.path)
+    snapshot = build_reasoning_snapshot(records)
+    assert snapshot["calls"], "the interrupted call must still be archived"
+    call = snapshot["calls"][0]
+    assert call["text"] == expected_text
+    assert call["status"] == "failed"
+    assert call["error_type"] == "SSLError"
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import ssl
 import time
 from collections.abc import AsyncIterator
 from typing import Any, Literal
@@ -279,89 +280,110 @@ class DeepSeekClient(LLMClient):
         done_received = False
         first_chunk_latency_ms: float | None = None
 
-        async with self._client.stream(
-            "POST",
-            f"{self.base_url}/chat/completions",
-            json=payload,
-            headers={"Accept": "text/event-stream"},
-        ) as response:
-            response.raise_for_status()
-            request_id = response.headers.get("x-request-id")
-            async for event in self._iter_sse_data(response):
-                if event == "[DONE]":
-                    done_received = True
-                    break
-                try:
-                    chunk = json.loads(event)
-                except json.JSONDecodeError as exc:
-                    preview = event[:240].replace("\n", "\\n")
-                    raise RuntimeError(
-                        f"invalid DeepSeek SSE JSON chunk: {preview}"
-                    ) from exc
-                if not isinstance(chunk, dict):
-                    raise RuntimeError("DeepSeek returned a non-object SSE payload")
-                if chunk.get("error"):
-                    error = chunk["error"]
-                    if isinstance(error, dict):
-                        detail = (
-                            error.get("message") or error.get("type") or "unknown error"
-                        )
-                    else:
-                        detail = str(error)
-                    raise RuntimeError(f"DeepSeek streaming error: {detail}")
+        try:
+            async with self._client.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                json=payload,
+                headers={"Accept": "text/event-stream"},
+            ) as response:
+                response.raise_for_status()
+                request_id = response.headers.get("x-request-id")
+                async for event in self._iter_sse_data(response):
+                    if event == "[DONE]":
+                        done_received = True
+                        break
+                    try:
+                        chunk = json.loads(event)
+                    except json.JSONDecodeError as exc:
+                        preview = event[:240].replace("\n", "\\n")
+                        raise RuntimeError(
+                            f"invalid DeepSeek SSE JSON chunk: {preview}"
+                        ) from exc
+                    if not isinstance(chunk, dict):
+                        raise RuntimeError("DeepSeek returned a non-object SSE payload")
+                    if chunk.get("error"):
+                        error = chunk["error"]
+                        if isinstance(error, dict):
+                            detail = (
+                                error.get("message")
+                                or error.get("type")
+                                or "unknown error"
+                            )
+                        else:
+                            detail = str(error)
+                        raise RuntimeError(f"DeepSeek streaming error: {detail}")
 
-                chunk_count += 1
-                progress["chunks"] = chunk_count
-                progress["last_data_at_monotonic"] = time.monotonic()
-                if first_chunk_latency_ms is None:
-                    first_chunk_latency_ms = (time.perf_counter() - started) * 1000.0
+                    chunk_count += 1
+                    progress["chunks"] = chunk_count
+                    progress["last_data_at_monotonic"] = time.monotonic()
+                    if first_chunk_latency_ms is None:
+                        first_chunk_latency_ms = (
+                            time.perf_counter() - started
+                        ) * 1000.0
 
-                if chunk.get("id") is not None:
-                    response_id = str(chunk["id"])
-                if chunk.get("object") is not None:
-                    response_object = str(chunk["object"])
-                if chunk.get("created") is not None:
-                    created = int(chunk["created"])
-                if chunk.get("model") is not None:
-                    response_model = str(chunk["model"])
-                if isinstance(chunk.get("usage"), dict):
-                    usage = dict(chunk["usage"])
-                    usage_received = bool(usage)
+                    if chunk.get("id") is not None:
+                        response_id = str(chunk["id"])
+                    if chunk.get("object") is not None:
+                        response_object = str(chunk["object"])
+                    if chunk.get("created") is not None:
+                        created = int(chunk["created"])
+                    if chunk.get("model") is not None:
+                        response_model = str(chunk["model"])
+                    if isinstance(chunk.get("usage"), dict):
+                        usage = dict(chunk["usage"])
+                        usage_received = bool(usage)
 
-                choices = chunk.get("choices") or []
-                if not isinstance(choices, list) or not choices:
-                    # With include_usage=true, the final usage-only chunk has choices=[].
-                    continue
-                choice = choices[0] if isinstance(choices[0], dict) else {}
-                if choice.get("finish_reason") is not None:
-                    finish_reason = str(choice["finish_reason"])
-                delta = choice.get("delta") or {}
-                if not isinstance(delta, dict):
-                    continue
+                    choices = chunk.get("choices") or []
+                    if not isinstance(choices, list) or not choices:
+                        # With include_usage=true, the final usage-only chunk has choices=[].
+                        continue
+                    choice = choices[0] if isinstance(choices[0], dict) else {}
+                    if choice.get("finish_reason") is not None:
+                        finish_reason = str(choice["finish_reason"])
+                    delta = choice.get("delta") or {}
+                    if not isinstance(delta, dict):
+                        continue
 
-                content = self._text_value(delta.get("content"))
-                if content:
-                    content_parts.append(content)
-                    progress["content_characters"] = int(
-                        progress.get("content_characters", 0)
-                    ) + len(content)
+                    content = self._text_value(delta.get("content"))
+                    if content:
+                        content_parts.append(content)
+                        progress["content_characters"] = int(
+                            progress.get("content_characters", 0)
+                        ) + len(content)
 
-                reasoning = self._text_value(delta.get("reasoning_content"))
-                if reasoning:
-                    reasoning_present = True
-                    reasoning_characters += len(reasoning)
-                    reasoning_hash.update(reasoning.encode("utf-8"))
-                    progress["reasoning_characters"] = reasoning_characters
+                    reasoning = self._text_value(delta.get("reasoning_content"))
+                    if reasoning:
+                        reasoning_present = True
+                        reasoning_characters += len(reasoning)
+                        reasoning_hash.update(reasoning.encode("utf-8"))
+                        progress["reasoning_characters"] = reasoning_characters
+                        if trace_call is not None:
+                            trace_call.append(reasoning)
                     if trace_call is not None:
-                        trace_call.append(reasoning)
-                if trace_call is not None:
-                    trace_call.flush_due()
-                total_characters = int(progress.get("reasoning_characters", 0)) + int(
-                    progress.get("content_characters", 0)
-                )
-                # This is deliberately observational only. DeepSeek's final usage
-                # chunk is the sole authoritative output-token count.
-                progress["approx_output_tokens"] = (total_characters + 3) // 4
+                        trace_call.flush_due()
+                    total_characters = int(
+                        progress.get("reasoning_characters", 0)
+                    ) + int(progress.get("content_characters", 0))
+                    # This is deliberately observational only. DeepSeek's final usage
+                    # chunk is the sole authoritative output-token count.
+                    progress["approx_output_tokens"] = (total_characters + 3) // 4
+        except (
+            httpx.TransportError,
+            ssl.SSLError,
+            ConnectionError,
+            TimeoutError,
+        ) as exc:
+            # Salvage the partial chain of thought: force-flush whatever streamed
+            # before the disconnect into the trace archive, marked as failed.
+            if trace_call is not None:
+                trace_call.finish("failed", error_type=type(exc).__name__)
+            self._annotate_stream_disconnect(
+                exc,
+                reasoning_characters,
+                "".join(content_parts),
+            )
+            raise
 
         if not done_received:
             raise RuntimeError("DeepSeek SSE stream ended before data: [DONE]")
@@ -409,6 +431,41 @@ class DeepSeekClient(LLMClient):
             request_id=request_id or response_id,
             raw=safe_raw,
         )
+
+    @staticmethod
+    def _annotate_stream_disconnect(
+        exc: BaseException,
+        reasoning_characters: int,
+        partial_content: str,
+    ) -> None:
+        """Record the salvaged reasoning size inside the propagated error message.
+
+        Retry and circuit-breaker layers dispatch on the exception class, so the
+        original instance is annotated in place instead of being wrapped.
+        """
+
+        # Only public answer content is exposed to the retry layer. Provider
+        # reasoning remains confined to the local trace archive.
+        setattr(exc, "mathproofmesh_partial_content", partial_content)
+        setattr(
+            exc,
+            "mathproofmesh_partial_content_sha256",
+            hashlib.sha256(partial_content.encode("utf-8")).hexdigest()
+            if partial_content
+            else None,
+        )
+        note = (
+            f"{reasoning_characters} reasoning characters were received and "
+            "preserved in the reasoning trace before the stream disconnected; "
+            f"{len(partial_content)} public content characters are available "
+            "for bounded retry recovery"
+        )
+        annotated = f"{str(exc) or type(exc).__name__} [{note}]"
+        strerror = getattr(exc, "strerror", None)
+        if isinstance(strerror, str) and strerror:
+            # OSError.__str__ prefers errno/strerror over args.
+            exc.strerror = f"{strerror} [{note}]"
+        exc.args = (annotated,)
 
     @staticmethod
     async def _iter_sse_data(response: httpx.Response) -> AsyncIterator[str]:

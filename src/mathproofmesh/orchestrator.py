@@ -6,7 +6,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Iterable, Sequence, TypeVar
+from typing import Any, Iterable, Literal, Mapping, Sequence, TypeVar
 
 from pydantic import BaseModel
 
@@ -81,6 +81,27 @@ from .proof_graph.bridges import BridgeBroker
 from .proof_graph.contradictions import ContradictionBroker
 from .proof_graph.matching import DuplicateRouteDetector
 from .proof_graph.store import ProofGraphStore
+from .proof_control.controller import ProofControlLayer
+from .proof_control.models import (
+    AssumptionChallengeAction,
+    AssumptionChallengeOutcome,
+    AssumptionChallengeResult,
+    ClaimVerificationState,
+    ControlActionStatus,
+    CountermodelOutcome,
+    CountermodelResult,
+    CountermodelTaskRecord,
+    DependencyKind,
+    GateVerdict,
+    MetaPivotEffect,
+    MetaPivotStatus,
+    ProofRole,
+    ResumeDecisionKind,
+    RouteAdmissionRecord,
+    TaskStatus as ProofControlTaskStatus,
+    WakeConditionKind,
+)
+from .proof_control.semantic_view import build_problem_semantic_view, contains_cjk
 from .proof_identity import (
     attempt_content_fingerprint,
     canonical_obligation_statement,
@@ -185,6 +206,7 @@ from .verification import (
     infer_capability_domain,
 )
 from .verification.escalation import ValidationLevel, ValidationStepResult
+from .verification.formal_microcert import formalization_coverage
 from .synthesis_phase import (
     apply_blind_context_integrity_guard,
     build_blind_review_packet,
@@ -197,6 +219,32 @@ from .route_pipeline import acknowledge_route_messages, build_route_prompt_conte
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
+
+
+def _reusable_claim_dependency_ids(claim: ClaimCard) -> list[str]:
+    local_targets: set[str] = set()
+    for value in claim.dependency_refs:
+        kind = getattr(value, "kind", None)
+        target_id = getattr(value, "target_id", None)
+        if isinstance(value, dict):
+            kind = value.get("kind")
+            target_id = value.get("target_id")
+        kind_value = getattr(kind, "value", kind)
+        if (
+            kind_value
+            in {
+                DependencyKind.LOCAL_STEP.value,
+                DependencyKind.LOCAL_CLAIM.value,
+            }
+            and target_id
+        ):
+            local_targets.add(str(target_id))
+    return [
+        dependency
+        for dependency in claim.dependencies
+        if dependency not in local_targets
+        and not dependency.startswith(("step:", "claim:"))
+    ]
 
 
 @dataclass(slots=True)
@@ -239,10 +287,20 @@ class SolveState:
     execution_status: ExecutionStatus = ExecutionStatus.COMPLETED
     research_progress_report: ResearchProgressReport | None = None
     deep_exploration_registry: DeepExplorationRegistry | None = None
+    proof_control: ProofControlLayer | None = None
     global_no_progress_rounds: int = 0
     global_meta_pivot_used: bool = False
+    pivot_grace_used: bool = False
+    hard_stopped: bool = False
     last_progress_signature: str | None = None
     certified_counterexample_hashes: list[str] = field(default_factory=list)
+    termination_reason: str | None = None
+    # Set when route admission rejected every candidate strategy. Carries
+    # {"category": ..., "detail": ...}; a repairable systemic category stops
+    # the adaptive loop from burning budget on widen/regeneration retries of
+    # the same doomed pipeline and makes the final report say what actually
+    # happened instead of disguising a gate failure as open mathematics.
+    admission_starvation: dict[str, Any] | None = None
 
 
 class ProofMeshOrchestrator:
@@ -269,11 +327,17 @@ class ProofMeshOrchestrator:
         self.mock_responders = mock_responders or {}
         self.activity_listener = activity_listener
         self.clarification_resolver = clarification_resolver
+        self._budget_scaling_baseline = {
+            "max_total_calls": config.budget.max_total_calls,
+            "max_rounds": config.budget.max_rounds,
+            "max_segments_per_path": config.continuation.max_segments_per_path,
+        }
 
     async def solve(self, problem_text: str, *, run_id: str | None = None) -> RunResult:
         if not problem_text or not problem_text.strip():
             raise ValueError("problem_text must be non-empty")
 
+        self._restore_baseline_budget_limits()
         run_id = run_id or self._make_run_id(problem_text)
         store = ArtifactStore(self.config.runtime.run_root, run_id)
         activity = ActivityStream(
@@ -290,10 +354,14 @@ class ProofMeshOrchestrator:
         )
         router = SparseTopologyRouter(self.config, pool, store)
         budget_manager = AdaptiveBudgetManager(self.config)
-        allocator = SoftBudgetAllocator(self.config, runner.ledger)
         memory = LemmaMemory(store)
         tools = ToolBroker(self.config, store, activity)
 
+        store.write_json(
+            "structured",
+            "config_requested_redacted",
+            self.config.redacted_dict(),
+        )
         store.write_json("structured", "config_redacted", self.config.redacted_dict())
         run_activity_task = activity.start_task(
             "run",
@@ -403,7 +471,10 @@ class ProofMeshOrchestrator:
             state.triage = await self._triage(problem, runner, prompts, store)
             problem.problem_kind = state.triage.problem_kind
             apply_task_contract(problem, state.triage)
+            self._attach_problem_semantic_view(problem, state.triage, store)
             store.write_json("structured", "problem_contract", problem)
+            self._apply_difficulty_budget_scaling(state.triage, store)
+            allocator = SoftBudgetAllocator(self.config, runner.ledger)
             state.capability_domain = infer_capability_domain(
                 problem.exact_statement,
                 state.triage.rationale,
@@ -455,6 +526,7 @@ class ProofMeshOrchestrator:
                 prompts,
                 router,
                 store,
+                state=state,
             )
             assignments = router.assign_explorers(state.strategies)
             self._ensure_hierarchical_routes(
@@ -766,8 +838,28 @@ class ProofMeshOrchestrator:
 
             # Adaptive breadth/depth loop. Actions are selected from verified progress,
             # novelty, uncertainty, gaps, stagnation, and protected future call reserves.
+            consecutive_no_action_rounds = 0
             for round_index in range(1, self.config.budget.max_rounds):
+                if (
+                    state.admission_starvation is not None
+                    and state.admission_starvation.get("category")
+                    == "systemic_semantic_failure"
+                ):
+                    # Every route died on the same repairable control-plane
+                    # failure. Widening re-runs the identical doomed pipeline,
+                    # so stop here with an explicit reason instead.
+                    store.append_event(
+                        "adaptive_rounds_skipped_admission_starvation",
+                        dict(state.admission_starvation),
+                    )
+                    break
                 state.current_round = round_index
+                self._reevaluate_route_wakes(
+                    state,
+                    current_round=round_index,
+                    pool=pool,
+                    runner=runner,
+                )
                 round_task = activity.start_task(
                     "adaptive_round",
                     title=activity.text(
@@ -783,11 +875,67 @@ class ProofMeshOrchestrator:
                     importance=ActivityImportance.MAJOR,
                     metrics={"round_index": round_index},
                 )
+                self._sync_hierarchical_artifacts(
+                    state,
+                    problem=problem,
+                    memory=memory,
+                    current_round=round_index,
+                    store=store,
+                )
+                (
+                    countermodel_attempted,
+                    countermodel_performed,
+                ) = await self._execute_pending_countermodels(
+                    state,
+                    problem=problem,
+                    store=store,
+                    runner=runner,
+                    prompts=prompts,
+                    allocator=allocator,
+                )
+                (
+                    challenger_attempted,
+                    challenger_performed,
+                ) = await self._execute_pending_assumption_challengers(
+                    state,
+                    problem=problem,
+                    store=store,
+                    runner=runner,
+                    prompts=prompts,
+                    allocator=allocator,
+                    router=router,
+                    memory=memory,
+                    tools=tools,
+                )
+                route_update_performed = await self._run_scheduled_route_updates(
+                    state,
+                    problem=problem,
+                    current_round=round_index,
+                    runner=runner,
+                    prompts=prompts,
+                )
+                if challenger_attempted or countermodel_attempted:
+                    pivot_attempted, pivot_performed = False, False
+                else:
+                    (
+                        pivot_attempted,
+                        pivot_performed,
+                    ) = await self._execute_pending_meta_pivot(
+                        state,
+                        problem=problem,
+                        store=store,
+                        runner=runner,
+                        prompts=prompts,
+                        allocator=allocator,
+                        router=router,
+                        memory=memory,
+                        tools=tools,
+                    )
                 if self._has_synthesis_ready_candidate(state):
                     # A supported candidate exists; preserve calls for synthesis/final audit.
                     if allocator.should_protect_finish(
                         state.aggregate_reports.values()
-                    ):
+                    ) and self._proof_control_allows_synthesis(state):
                         activity.complete_task(
                             round_task,
                             title=activity.text(
@@ -804,26 +952,20 @@ class ProofMeshOrchestrator:
                         )
                         break
 
-                self._sync_hierarchical_artifacts(
-                    state,
-                    problem=problem,
-                    memory=memory,
-                    current_round=round_index,
-                    store=store,
-                )
                 graph_signals = self._hierarchical_graph_signals(state)
-                await self._run_inspiration_round(
-                    state,
-                    problem=problem,
-                    remaining_calls=runner.ledger.remaining_calls,
-                    store=store,
-                    runner=runner,
-                    prompts=prompts,
-                    allocator=allocator,
-                    router=router,
-                    memory=memory,
-                    tools=tools,
-                )
+                if not pivot_attempted and not challenger_attempted:
+                    await self._run_inspiration_round(
+                        state,
+                        problem=problem,
+                        remaining_calls=runner.ledger.remaining_calls,
+                        store=store,
+                        runner=runner,
+                        prompts=prompts,
+                        allocator=allocator,
+                        router=router,
+                        memory=memory,
+                        tools=tools,
+                    )
                 graph_signals = self._hierarchical_graph_signals(state)
                 stats = budget_manager.build_path_stats(
                     state.strategies,
@@ -916,7 +1058,13 @@ class ProofMeshOrchestrator:
                         },
                     )
 
-                performed = False
+                performed = (
+                    countermodel_performed
+                    or challenger_performed
+                    or route_update_performed
+                    or pivot_performed
+                )
+                action_calls_started = runner.ledger.calls_started
                 for action in decision.actions:
                     if action.action in {ActionKind.STOP, ActionKind.SYNTHESIZE}:
                         continue
@@ -974,6 +1122,31 @@ class ProofMeshOrchestrator:
                     )
 
                     if action.action == ActionKind.DEEPEN and action.strategy_id:
+                        control_route_id = self._route_for_strategy(
+                            state, action.strategy_id
+                        )
+                        if (
+                            state.proof_control is not None
+                            and control_route_id is not None
+                            and not state.proof_control.deepening_currently_allowed(
+                                control_route_id
+                            )
+                        ):
+                            action.selected = False
+                            action.blocked_reason = (
+                                "proof-control Continue Gate requires a route "
+                                "rewrite before further deepening"
+                            )
+                            store.append_event(
+                                "adaptive_action_blocked",
+                                {
+                                    "round_index": round_index,
+                                    "action": action.action.value,
+                                    "strategy_id": action.strategy_id,
+                                    "reason": action.blocked_reason,
+                                },
+                            )
+                            continue
                         attempt = await self._deepen_path(
                             problem,
                             action.strategy_id,
@@ -1085,6 +1258,88 @@ class ProofMeshOrchestrator:
                             or performed
                         )
 
+                if (
+                    not performed
+                    and runner.ledger.calls_started == action_calls_started
+                ):
+                    fallback_deepen = next(
+                        (
+                            candidate
+                            for candidate in decision.candidates
+                            if candidate.action == ActionKind.DEEPEN
+                            and candidate.eligible
+                            and candidate.strategy_id is not None
+                            and not candidate.selected
+                        ),
+                        None,
+                    )
+                    if fallback_deepen is not None:
+                        estimated_cost = (
+                            fallback_deepen.estimated_calls
+                            or allocator.estimate_action_calls(
+                                ActionKind.DEEPEN,
+                                current_path_count=len(state.strategies),
+                            )
+                        )
+                        blocked_reason = allocator.spend_block_reason(
+                            allocator.bucket_for_action(ActionKind.DEEPEN),
+                            estimated_cost,
+                            protect_finish=True,
+                            has_candidate=bool(state.attempts),
+                        )
+                        control_route_id = self._route_for_strategy(
+                            state, fallback_deepen.strategy_id
+                        )
+                        control_allows_deepening = not (
+                            state.proof_control is not None
+                            and control_route_id is not None
+                            and not state.proof_control.deepening_currently_allowed(
+                                control_route_id
+                            )
+                        )
+                        if blocked_reason is None and control_allows_deepening:
+                            store.append_event(
+                                "adaptive_noop_action_backfilled",
+                                {
+                                    "round_index": round_index,
+                                    "action": ActionKind.DEEPEN.value,
+                                    "strategy_id": fallback_deepen.strategy_id,
+                                    "target_id": fallback_deepen.target_id,
+                                    "reason": (
+                                        "selected control actions produced no "
+                                        "material state change while an "
+                                        "evidence-backed route remained executable"
+                                    ),
+                                },
+                            )
+                            attempt = await self._deepen_path(
+                                problem,
+                                fallback_deepen.strategy_id,
+                                round_index,
+                                state,
+                                runner,
+                                prompts,
+                                router,
+                                memory,
+                                store,
+                                tools,
+                            )
+                            if attempt is not None:
+                                accepted_attempts = self._record_attempts(
+                                    state, [attempt], store
+                                )
+                                if accepted_attempts:
+                                    await self._extract_claims_many(
+                                        problem,
+                                        accepted_attempts,
+                                        runner,
+                                        prompts,
+                                        memory,
+                                        store,
+                                        budget_bucket="depth",
+                                    )
+                                    performed = True
+
                 # Verify the best newly generated candidate when its marginal value is high.
                 unverified = [
                     attempt
@@ -1140,6 +1395,16 @@ class ProofMeshOrchestrator:
                     current_round=round_index,
                     store=store,
                 )
+                performed = (
+                    await self._run_scheduled_route_updates(
+                        state,
+                        problem=problem,
+                        current_round=round_index,
+                        runner=runner,
+                        prompts=prompts,
+                    )
+                    or performed
+                )
                 hard_stagnation_stop = self._apply_global_progress_gate(
                     state,
                     round_index=round_index,
@@ -1169,7 +1434,27 @@ class ProofMeshOrchestrator:
                     importance=ActivityImportance.MAJOR,
                     metrics={"round_index": round_index, "performed": performed},
                 )
-                if hard_stagnation_stop or not performed:
+                pivot_blocks_stop = (
+                    state.proof_control is not None
+                    and state.proof_control.active
+                    and (
+                        state.proof_control.meta_pivot_blocks_stagnation_stop()
+                        or state.proof_control.common_mode_blocks_stagnation_stop()
+                        or self._proof_control_work_blocks_no_action_stop(state)
+                    )
+                )
+                if performed:
+                    consecutive_no_action_rounds = 0
+                elif not pivot_blocks_stop:
+                    consecutive_no_action_rounds += 1
+                # A single empty round (for example a widen whose candidates
+                # were all similarity-filtered) must not abandon the whole
+                # remaining budget; require two consecutive empty rounds.
+                if self._should_stop_after_adaptive_round(
+                    hard_stagnation_stop=hard_stagnation_stop,
+                    no_action_rounds=consecutive_no_action_rounds,
+                    control_work_blocks_stop=pivot_blocks_stop,
+                ):
                     break
 
             if (
@@ -1183,7 +1468,9 @@ class ProofMeshOrchestrator:
             # Final synthesis is a proof-producing stage, not a generic summarizer.
             # When no candidate meets the evidence gate, preserve the mathematics in
             # a separate research-progress report instead of fabricating closure.
-            if self._can_enter_synthesis(state):
+            if self._can_enter_synthesis(
+                state
+            ) and self._proof_control_allows_synthesis(state):
                 synthesis_task = activity.start_task(
                     "stage",
                     title=activity.text(
@@ -1714,12 +2001,18 @@ class ProofMeshOrchestrator:
         finally:
             await pool.aclose()
 
-    async def resume(self, run_id: str) -> RunResult:
+    async def resume(
+        self,
+        run_id: str,
+        *,
+        intervention: str | None = None,
+    ) -> RunResult:
         """Resume a stopped run from persisted stage state and verified proof checkpoints."""
         if not self.config.continuation.process_resume_enabled:
             raise RuntimeError(
                 "process resume is disabled by continuation.process_resume_enabled"
             )
+        self._restore_baseline_budget_limits()
         store = ArtifactStore(self.config.runtime.run_root, run_id)
         if not store.has_named_json("structured", "problem_contract"):
             raise FileNotFoundError(
@@ -1750,6 +2043,23 @@ class ProofMeshOrchestrator:
         problem = ProblemContract.model_validate(
             store.read_named_json("structured", "problem_contract")
         )
+        store.write_json(
+            "structured",
+            "config_resume_requested_redacted",
+            self.config.redacted_dict(),
+        )
+        resume_triage_payload = payload.get("triage")
+        if isinstance(resume_triage_payload, dict):
+            self._apply_difficulty_budget_scaling(
+                TriageResult.model_validate(resume_triage_payload),
+                store,
+            )
+        else:
+            store.write_json(
+                "structured",
+                "config_redacted",
+                self.config.redacted_dict(),
+            )
 
         activity = ActivityStream(
             store,
@@ -1788,12 +2098,32 @@ class ProofMeshOrchestrator:
         state.resumed_from_checkpoint_id = (
             latest_proof_checkpoint.checkpoint_id if latest_proof_checkpoint else None
         )
-        persisted_claims: list[Any] = list(payload.get("claims", []))
+        # lemma_memory is persisted on every mutation and is therefore the
+        # freshest source; the stage-checkpoint snapshot only fills gaps.
+        # Loading the stale snapshot first let REJECTED claims resurrect as
+        # VERIFIED, because content-hash dedup keeps the first status seen.
+        persisted_claims: list[Any] = []
+        lemma_runtime_payload = (
+            store.read_named_json("structured", "lemma_memory_runtime")
+            if store.has_named_json("structured", "lemma_memory_runtime")
+            else {}
+        )
         if store.has_named_json("structured", "lemma_memory"):
             lemma_payload = store.read_named_json("structured", "lemma_memory")
             if isinstance(lemma_payload, list):
                 persisted_claims.extend(lemma_payload)
+        persisted_claims.extend(payload.get("claims", []))
         memory.add_many([ClaimCard.model_validate(item) for item in persisted_claims])
+        memory.restore_runtime_state(
+            lemma_runtime_payload if isinstance(lemma_runtime_payload, dict) else {}
+        )
+        active_checkpoints = store.list_proof_checkpoints()
+        if active_checkpoints:
+            memory.replace_committed_step_ids(
+                step.step_id
+                for active_checkpoint in active_checkpoints
+                for step in active_checkpoint.verified_steps
+            )
         if self.config.topology.mode == "hierarchical_sparse" and not all(
             isinstance(payload.get(key), dict)
             for key in ("typed_memory", "message_broker")
@@ -1935,6 +2265,212 @@ class ProofMeshOrchestrator:
                 write_run_report(store, result)
                 return result
 
+            if state.proof_control is not None and state.proof_control.active:
+                current_config_hash = stable_hash(self.config.model_dump(mode="json"))
+                prior_decisions = list(
+                    state.proof_control.state.resume_decisions.values()
+                )
+                prior_decision = (
+                    sorted(
+                        prior_decisions,
+                        key=lambda item: item.decision_id,
+                    )[-1]
+                    if prior_decisions
+                    else None
+                )
+                prior_config_hash = str(
+                    payload.get("proof_control_config_hash")
+                    or (
+                        prior_decision.config_hash
+                        if prior_decision is not None
+                        else current_config_hash
+                    )
+                )
+                prior_goal_hash = str(
+                    payload.get("proof_control_goal_hash")
+                    or (
+                        prior_decision.goal_hash
+                        if prior_decision is not None
+                        else problem.goal_hash
+                    )
+                )
+                self._reevaluate_route_wakes(
+                    state,
+                    current_round=state.current_round + 1,
+                    pool=pool,
+                    runner=runner,
+                    user_intervention=intervention is not None,
+                    config_changed=prior_config_hash != current_config_hash,
+                )
+                routes = (
+                    state.route_registry.routes
+                    if state.route_registry is not None
+                    else []
+                )
+                inferred_legacy_hard_stop = bool(
+                    routes
+                    and all(
+                        route.status
+                        in {
+                            RouteStatus.WAITING,
+                            RouteStatus.FROZEN,
+                            RouteStatus.FROZEN_STALLED,
+                            RouteStatus.TERMINAL,
+                            RouteStatus.REFUTED,
+                            RouteStatus.MERGED,
+                            RouteStatus.ABANDONED,
+                            RouteStatus.COMPLETED,
+                        }
+                        for route in routes
+                    )
+                    and state.global_no_progress_rounds
+                    >= self.config.scheduler.global_no_progress_rounds_before_stop
+                )
+                hard_stopped = state.hard_stopped or inferred_legacy_hard_stop
+                pending_action_ids = [
+                    action.action_id
+                    for action in state.proof_control.state.control_actions.values()
+                    if action.status
+                    in {
+                        ControlActionStatus.PROPOSED,
+                        ControlActionStatus.ADMITTED,
+                        ControlActionStatus.EXECUTING,
+                    }
+                ]
+                checkpoint_state = {
+                    "current_round": state.current_round,
+                    "hard_stopped": hard_stopped,
+                    "global_no_progress_rounds": state.global_no_progress_rounds,
+                    "mathematical_progress_signature": (state.last_progress_signature),
+                    "route_statuses": {
+                        route.route_id: route.status.value for route in routes
+                    },
+                }
+                decision = state.proof_control.plan_resume(
+                    checkpoint_state=checkpoint_state,
+                    config_hash=current_config_hash,
+                    goal_hash=problem.goal_hash,
+                    hard_stopped=hard_stopped,
+                    pending_action_ids=pending_action_ids,
+                    terminal_stagnation_signature=state.last_progress_signature,
+                    prior_state_hash=(
+                        prior_decision.state_hash
+                        if prior_decision is not None
+                        else None
+                    ),
+                    prior_config_hash=prior_config_hash,
+                    prior_goal_hash=prior_goal_hash,
+                    prior_terminal_stagnation_signature=(
+                        prior_decision.terminal_stagnation_signature
+                        if prior_decision is not None
+                        else state.last_progress_signature
+                    ),
+                    intervention=intervention,
+                )
+                store.append_event(
+                    "run_resume_policy_decided",
+                    decision.model_dump(mode="json"),
+                )
+                if decision.decision == ResumeDecisionKind.NO_RESUMABLE_WORK:
+                    state.hard_stopped = True
+                    state.research_progress_report = self._build_research_progress_report(
+                        problem,
+                        state,
+                        execution_note=(
+                            "硬停止检查点没有待执行动作、可唤醒任务或显式干预；"
+                            "本次恢复未调用模型。"
+                            if self.config.runtime.output_language.lower().startswith(
+                                "zh"
+                            )
+                            else (
+                                "The hard-stopped checkpoint has no pending "
+                                "action, wakeable task, or explicit intervention; "
+                                "resume made no model calls."
+                            )
+                        ),
+                    )
+                    store.write_json(
+                        "reports",
+                        "research_progress_report",
+                        state.research_progress_report,
+                    )
+                    self._checkpoint(
+                        store,
+                        "resume_no_resumable_work",
+                        state,
+                        memory,
+                        runner,
+                    )
+                    state.checkpoints = store.list_proof_checkpoints()
+                    result = self._build_result(
+                        run_id,
+                        self._run_status(problem, state, store),
+                        problem,
+                        state,
+                        pool.metrics(),
+                        runner,
+                        pool,
+                        store,
+                        memory,
+                        summary_override=(
+                            "硬停止状态没有新增可执行工作；已原样返回研究进展，"
+                            "模型调用数未增加。"
+                            if self.config.runtime.output_language.lower().startswith(
+                                "zh"
+                            )
+                            else (
+                                "No new executable work was available after the "
+                                "hard stop; research progress was returned without "
+                                "additional model calls."
+                            )
+                        ),
+                    )
+                    store.write_json("structured", "run_result", result)
+                    activity.complete_task(
+                        run_task,
+                        title=activity.text(
+                            "无可恢复工作，未调用模型",
+                            "No resumable work; no model calls made",
+                        ),
+                        detail=decision.reason,
+                        stage="run_resume",
+                        importance=ActivityImportance.MAJOR,
+                        metrics={
+                            "resume_decision_id": decision.decision_id,
+                            "no_new_model_calls": True,
+                            "total_calls": result.total_calls,
+                        },
+                    )
+                    activity.finalize()
+                    write_run_report(store, result)
+                    return result
+                state.hard_stopped = False
+                if intervention is not None:
+                    state.proof_control.reopen_frozen_routes(
+                        intervention=intervention,
+                        current_round=state.current_round + 1,
+                    )
+                    if intervention.strip().casefold().replace("-", "_") == (
+                        "reset_stagnation"
+                    ):
+                        state.global_no_progress_rounds = 0
+                        state.global_meta_pivot_used = False
+                    elif intervention.strip().casefold().replace("-", "_") == (
+                        "reopen_with_pivot"
+                    ):
+                        state.proof_control.request_meta_pivot(
+                            source_stagnation_signature=(
+                                state.last_progress_signature
+                                or stable_hash(checkpoint_state)
+                            ),
+                            trigger_round=state.current_round + 1,
+                            requested_mechanisms=[
+                                "meta_replan",
+                                "representation_switch",
+                                "auxiliary_construction",
+                            ],
+                        )
+
             if state.triage is None:
                 state.triage = await self._triage(problem, runner, prompts, store)
             state.capability_domain = infer_capability_domain(
@@ -1955,6 +2491,7 @@ class ProofMeshOrchestrator:
                     prompts,
                     router,
                     store,
+                    state=state,
                 )
             self._ensure_hierarchical_routes(
                 state,
@@ -1977,8 +2514,66 @@ class ProofMeshOrchestrator:
             max_resume_rounds = max(1, self.config.budget.max_rounds)
             if state.last_progress_signature is None:
                 state.last_progress_signature = self._global_progress_signature(state)
-            for resume_round in range(max_resume_rounds):
+            resume_start_round = state.current_round + 1
+            resume_no_action_rounds = 0
+            for resume_offset in range(max_resume_rounds):
+                resume_round = resume_start_round + resume_offset
                 state.current_round = resume_round
+                self._reevaluate_route_wakes(
+                    state,
+                    current_round=resume_round,
+                    pool=pool,
+                    runner=runner,
+                )
+                (
+                    countermodel_attempted,
+                    countermodel_performed,
+                ) = await self._execute_pending_countermodels(
+                    state,
+                    problem=problem,
+                    store=store,
+                    runner=runner,
+                    prompts=prompts,
+                    allocator=allocator,
+                )
+                (
+                    challenger_attempted,
+                    challenger_performed,
+                ) = await self._execute_pending_assumption_challengers(
+                    state,
+                    problem=problem,
+                    store=store,
+                    runner=runner,
+                    prompts=prompts,
+                    allocator=allocator,
+                    router=router,
+                    memory=memory,
+                    tools=tools,
+                )
+                route_update_performed = await self._run_scheduled_route_updates(
+                    state,
+                    problem=problem,
+                    current_round=resume_round,
+                    runner=runner,
+                    prompts=prompts,
+                )
+                if countermodel_attempted or challenger_attempted:
+                    pivot_attempted, pivot_performed = False, False
+                else:
+                    (
+                        pivot_attempted,
+                        pivot_performed,
+                    ) = await self._execute_pending_meta_pivot(
+                        state,
+                        problem=problem,
+                        store=store,
+                        runner=runner,
+                        prompts=prompts,
+                        allocator=allocator,
+                        router=router,
+                        memory=memory,
+                        tools=tools,
+                    )
                 updated_attempts: list[ProofAttempt] = []
                 for strategy in state.strategies:
                     path_attempts = [
@@ -2005,6 +2600,25 @@ class ProofMeshOrchestrator:
                         RouteStatus.ACTIVE,
                         RouteStatus.REPAIR_ONCE,
                     }:
+                        continue
+                    if (
+                        route is not None
+                        and state.proof_control is not None
+                        and not state.proof_control.deepening_currently_allowed(
+                            route.route_id
+                        )
+                    ):
+                        store.append_event(
+                            "resume_deepening_blocked",
+                            {
+                                "route_id": route.route_id,
+                                "strategy_id": strategy.strategy_id,
+                                "reason": (
+                                    "proof-control Continue Gate requires "
+                                    "blueprint revision"
+                                ),
+                            },
+                        )
                         continue
                     if runner.ledger.remaining_calls <= 0:
                         break
@@ -2083,18 +2697,29 @@ class ProofMeshOrchestrator:
                     current_round=resume_round,
                     store=store,
                 )
-                await self._run_inspiration_round(
-                    state,
-                    problem=problem,
-                    remaining_calls=runner.ledger.remaining_calls,
-                    store=store,
-                    runner=runner,
-                    prompts=prompts,
-                    allocator=allocator,
-                    router=router,
-                    memory=memory,
-                    tools=tools,
+                route_update_performed = (
+                    await self._run_scheduled_route_updates(
+                        state,
+                        problem=problem,
+                        current_round=resume_round,
+                        runner=runner,
+                        prompts=prompts,
+                    )
+                    or route_update_performed
                 )
+                if not pivot_attempted:
+                    await self._run_inspiration_round(
+                        state,
+                        problem=problem,
+                        remaining_calls=runner.ledger.remaining_calls,
+                        store=store,
+                        runner=runner,
+                        prompts=prompts,
+                        allocator=allocator,
+                        router=router,
+                        memory=memory,
+                        tools=tools,
+                    )
                 if state.attempts and runner.ledger.remaining_calls > 0:
                     review = await self._meta_review(
                         problem,
@@ -2121,7 +2746,31 @@ class ProofMeshOrchestrator:
                 )
                 if self._has_synthesis_ready_candidate(state):
                     break
-                if hard_stagnation_stop or not updated_attempts:
+                pivot_blocks_stop = (
+                    state.proof_control is not None
+                    and state.proof_control.active
+                    and (
+                        state.proof_control.meta_pivot_blocks_stagnation_stop()
+                        or state.proof_control.common_mode_blocks_stagnation_stop()
+                        or self._proof_control_work_blocks_no_action_stop(state)
+                    )
+                )
+                round_performed = bool(
+                    updated_attempts
+                    or countermodel_performed
+                    or challenger_performed
+                    or route_update_performed
+                    or pivot_performed
+                )
+                if round_performed:
+                    resume_no_action_rounds = 0
+                elif not pivot_blocks_stop:
+                    resume_no_action_rounds += 1
+                if self._should_stop_after_adaptive_round(
+                    hard_stagnation_stop=hard_stagnation_stop,
+                    no_action_rounds=resume_no_action_rounds,
+                    control_work_blocks_stop=pivot_blocks_stop,
+                ):
                     break
 
             if (
@@ -2131,7 +2780,9 @@ class ProofMeshOrchestrator:
             ):
                 state.proof_graph.freeze()
                 state.graph_frozen = True
-            if self._can_enter_synthesis(state):
+            if self._can_enter_synthesis(
+                state
+            ) and self._proof_control_allows_synthesis(state):
                 state.final_proof, synthesizer = await self._synthesize(
                     problem,
                     state,
@@ -2457,6 +3108,63 @@ class ProofMeshOrchestrator:
                 state.typed_memory,
             )
         )
+        proof_control_config = self.config.topology.proof_control
+        if proof_control_config.enabled and proof_control_config.mode != "off":
+            if (
+                not state.proof_graph.main_goal_obligation_ids()
+                and not state.proof_graph.frozen
+            ):
+                state.proof_graph.add_obligation(
+                    ProofObligation(
+                        obligation_id=f"obl_main_{problem.goal_hash[:12]}",
+                        problem_hash=problem.integrity_hash,
+                        route_ids=[],
+                        kind=ObligationKind.MAIN_GOAL,
+                        statement=problem.exact_statement,
+                        normalized_statement=self._normalize_statement(
+                            problem.exact_statement
+                        ),
+                        assumptions=list(problem.hard_constraints),
+                        status="open",
+                        priority=1.0,
+                        centrality=1.0,
+                    )
+                )
+            control_state = payload.get("proof_control_state")
+            state.proof_control = ProofControlLayer.from_state(
+                control_state if isinstance(control_state, dict) else None,
+                config=self.config,
+                store=store,
+                activity=activity,
+                proof_graph=state.proof_graph,
+                typed_memory=state.typed_memory,
+                message_broker=state.message_broker,
+                route_registry=state.route_registry,
+            )
+            for obligation in state.proof_graph.obligations:
+                state.proof_control.register_obligation(obligation)
+            if checkpoint_payload is not None and not isinstance(control_state, dict):
+                migration = {
+                    "event_type": "checkpoint_migrated_to_v0_8",
+                    "payload": {
+                        "initialized_empty_component": "proof_control_state",
+                        "source_schema_version": str(
+                            payload.get("schema_version", "0.7")
+                        ),
+                    },
+                }
+                state.proof_control.state.events.append(migration)
+                store.append_event("checkpoint_migrated_to_v0_8", migration["payload"])
+                activity.info(
+                    "checkpoint_migrated_to_v0_8",
+                    title="Checkpoint migrated to v0.8",
+                    detail=(
+                        "Missing proof-control sidecar state was initialized "
+                        "without changing mathematical artifacts."
+                    ),
+                    stage="run_resume",
+                )
+            state.proof_control.persist()
         bridge_state = payload.get("bridge_broker")
         state.bridge_broker = (
             BridgeBroker.from_state(
@@ -2529,6 +3237,11 @@ class ProofMeshOrchestrator:
         inspiration_state = payload.get("inspiration_engine")
         if isinstance(inspiration_state, dict):
             state.inspiration_engine.restore_state(inspiration_state)
+        state.inspiration_engine.proof_control_context_provider = (
+            state.proof_control.inspiration_context
+            if state.proof_control is not None
+            else None
+        )
 
         if checkpoint_payload is not None and not all(
             isinstance(payload.get(key), dict)
@@ -2606,6 +3319,14 @@ class ProofMeshOrchestrator:
                             "recovered": state.resumed,
                         },
                     )
+
+        if state.proof_control is not None and state.proof_graph is not None:
+            route_ids = [item.route_id for item in registry.routes]
+            for main_goal_id in state.proof_graph.main_goal_obligation_ids():
+                main_goal = state.proof_graph.get_obligation(main_goal_id)
+                main_goal.route_ids = list(
+                    dict.fromkeys([*main_goal.route_ids, *route_ids])
+                )
 
         needs_assignment: list[StrategyCard] = []
         for strategy in state.strategies:
@@ -2747,6 +3468,7 @@ class ProofMeshOrchestrator:
             "message_broker": state.message_broker,
             "typed_memory": state.typed_memory,
             "proof_graph": state.proof_graph,
+            "proof_control": state.proof_control,
         }
         for name, component in components.items():
             if component is not None:
@@ -2780,6 +3502,8 @@ class ProofMeshOrchestrator:
             route_id = self._route_for_strategy(state, attempt.strategy_id)
             if route_id is None:
                 continue
+            if state.proof_control is not None:
+                state.proof_control.register_claim(claim, route_id=route_id)
             if not registry.owns_agent(route_id, attempt.agent_id, RouteRole.PROVER):
                 try:
                     registry.assign_member(
@@ -2866,10 +3590,44 @@ class ProofMeshOrchestrator:
             message_type = MessageType.CLAIM_PROPOSAL
             verification_status = claim.status
             confidence = claim.verification_confidence or 0.0
+            ledger_entry = (
+                state.proof_control.state.claim_verification_ledger.get(claim.claim_id)
+                if state.proof_control is not None
+                else None
+            )
+            referee_ledger_allows_fact = bool(
+                ledger_entry is not None
+                and ledger_entry.referee_review_ids
+                and ledger_entry.state
+                in {
+                    ClaimVerificationState.REFEREE_ACCEPTED,
+                    ClaimVerificationState.FACT_CANDIDATE,
+                    ClaimVerificationState.FACT,
+                }
+            )
+            proof_control_requires_referee_ledger = bool(
+                state.proof_control is not None and state.proof_control.active
+            )
+            claim_fact_risk_free = bool(
+                not proof_control_requires_referee_ledger
+                or claim.status != ClaimStatus.VERIFIED
+                or (
+                    state.proof_control is not None
+                    and state.proof_control.claim_fact_promotion_allowed(
+                        claim,
+                        route_id=route_id,
+                    )
+                )
+            )
             if (
                 claim.status == ClaimStatus.VERIFIED
                 and referee_id is not None
                 and team_global_allowed
+                and claim_fact_risk_free
+                and (
+                    not proof_control_requires_referee_ledger
+                    or referee_ledger_allows_fact
+                )
             ):
                 tier = MemoryTier.FACT
                 evidence = EvidenceType.NATURAL_PROOF_AUDITED
@@ -2898,7 +3656,12 @@ class ProofMeshOrchestrator:
                 normalized_statement=normalized,
                 assumptions=claim.assumptions,
                 conclusion=claim.conclusion,
-                dependencies=claim.dependencies,
+                dependencies=(
+                    _reusable_claim_dependency_ids(claim)
+                    if proof_control_requires_referee_ledger
+                    else claim.dependencies
+                ),
+                dependency_refs=claim.dependency_refs,
                 scope_limitations=claim.scope_limitations,
                 evidence_type=evidence,
                 memory_tier=tier,
@@ -2911,11 +3674,34 @@ class ProofMeshOrchestrator:
             )
             if broker.contains(message, current_round=current_round):
                 continue
+            if (
+                tier == MemoryTier.FACT
+                and proof_control_requires_referee_ledger
+                and state.proof_control is not None
+                and ledger_entry is not None
+                and ledger_entry.state == ClaimVerificationState.REFEREE_ACCEPTED
+            ):
+                ledger_entry = (
+                    state.proof_control.claim_lifecycle.promote_fact_candidate(
+                        claim.claim_id
+                    )
+                )
             publication = broker.publish(
                 message,
                 referee_agent_id=referee_id,
                 current_round=current_round,
             )
+            if (
+                publication.accepted
+                and tier == MemoryTier.FACT
+                and state.proof_control is not None
+                and ledger_entry is not None
+                and ledger_entry.state == ClaimVerificationState.FACT_CANDIDATE
+            ):
+                state.proof_control.claim_lifecycle.mark_fact(
+                    claim.claim_id,
+                    evidence_ids=[publication.duplicate_of or message.message_id],
+                )
             if (
                 publication.accepted
                 and tier == MemoryTier.FACT
@@ -3043,6 +3829,188 @@ class ProofMeshOrchestrator:
             )
         if state.contradiction_broker is not None:
             state.contradiction_broker.detect(current_round=current_round)
+        if state.proof_control is not None:
+            state.proof_control.update_after_round(
+                strategies=state.strategies,
+                attempts=state.attempts,
+                reports=state.reports,
+                current_round=current_round,
+            )
+
+    async def _run_scheduled_route_updates(
+        self,
+        state: SolveState,
+        *,
+        problem: ProblemContract,
+        current_round: int,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+    ) -> bool:
+        control = state.proof_control
+        broker = state.message_broker
+        registry = state.route_registry
+        if control is None or not control.active or broker is None or registry is None:
+            return False
+
+        performed = False
+        for task in control.pending_route_update_tasks():
+            try:
+                route = registry.get(task.target_route_id)
+            except KeyError:
+                control.fail_route_update_task(
+                    task.task_id,
+                    reason="target route is no longer registered",
+                    current_round=current_round,
+                )
+                continue
+            agents: list[AgentRuntime] = []
+            for member in route.members:
+                if member.role != RouteRole.PROVER:
+                    continue
+                try:
+                    agent = runner.pool.get(member.agent_id)
+                except KeyError:
+                    continue
+                if not agent.in_cooldown:
+                    agents.append(agent)
+            if not agents:
+                control.defer_route_update_task(
+                    task.task_id,
+                    reason="target route has no available prover",
+                    current_round=current_round,
+                    wake_kind=WakeConditionKind.REVIEWER_AVAILABLE,
+                )
+                continue
+            agent = max(agents, key=lambda item: (item.trust_score, item.id))
+
+            receipt_ids: list[str] = []
+            task_failed = False
+            for message_id in task.message_ids:
+                delivery = broker.delivery_record(
+                    message_id,
+                    task.target_route_id,
+                )
+                if delivery is None:
+                    control.fail_route_update_task(
+                        task.task_id,
+                        reason=f"delivery {message_id} is missing",
+                        current_round=current_round,
+                    )
+                    task_failed = True
+                    break
+                existing_receipt = broker.receipt_record(
+                    message_id,
+                    task.target_route_id,
+                )
+                if existing_receipt is not None:
+                    receipt_ids.append(existing_receipt.receipt_id)
+                    continue
+                if runner.ledger.remaining_calls <= 0:
+                    control.defer_route_update_task(
+                        task.task_id,
+                        reason="no model call remains for the scheduled route update",
+                        current_round=current_round,
+                        wake_kind=WakeConditionKind.BUDGET_AVAILABLE,
+                    )
+                    task_failed = True
+                    break
+                try:
+                    message = broker.present_scheduled_route_update(
+                        message_id,
+                        task.target_route_id,
+                        action_id=task.action_id,
+                        current_round=current_round,
+                    )
+                except ValueError as exc:
+                    control.fail_route_update_task(
+                        task.task_id,
+                        reason=str(exc),
+                        current_round=current_round,
+                    )
+                    task_failed = True
+                    break
+                control.mark_route_update_presented(
+                    task.task_id,
+                    current_round=current_round,
+                )
+                requirement = {
+                    "message_id": message.message_id,
+                    "target_route_id": task.target_route_id,
+                    "delivered_round": int(
+                        delivery.get("delivered_round", current_round)
+                    ),
+                    "receipt_token": str(delivery.get("receipt_token", "")),
+                    "required_fields": [
+                        "receipt_token",
+                        "status",
+                        "used",
+                        "referenced_in_step_ids",
+                        "claimed_closed_obligation_ids",
+                        "reason",
+                    ],
+                }
+                try:
+                    result = await self._safe_call(
+                        runner,
+                        "route_prover",
+                        prompts.acknowledge_message(
+                            problem=problem,
+                            route_id=task.target_route_id,
+                            message=message,
+                            receipt_requirement=requirement,
+                            task=(
+                                "Read this high-value cross-route message now. "
+                                "Return a semantic receipt and do not claim "
+                                "mathematical use without a verified downstream step."
+                            ),
+                        ),
+                        fixed_agent=agent,
+                        budget_bucket="depth",
+                    )
+                except (BudgetExhaustedError, ProviderCircuitOpenError) as exc:
+                    control.defer_route_update_task(
+                        task.task_id,
+                        reason=f"{type(exc).__name__}: {exc}",
+                        current_round=current_round,
+                        wake_kind=(
+                            WakeConditionKind.BUDGET_AVAILABLE
+                            if isinstance(exc, BudgetExhaustedError)
+                            else WakeConditionKind.PROVIDER_AVAILABLE
+                        ),
+                    )
+                    task_failed = True
+                    break
+                if result is None:
+                    control.fail_route_update_task(
+                        task.task_id,
+                        reason="route prover did not return a valid semantic receipt",
+                        current_round=current_round,
+                    )
+                    task_failed = True
+                    break
+                acknowledged = acknowledge_route_messages(
+                    broker,
+                    [message],
+                    [result.value],
+                    route_id=task.target_route_id,
+                    current_round=current_round,
+                )
+                receipt_ids.extend(item.receipt_id for item in acknowledged)
+
+            if task_failed:
+                continue
+            used = any(
+                broker.utility_record(message_id, task.target_route_id) is not None
+                for message_id in task.message_ids
+            )
+            control.complete_route_update_task(
+                task.task_id,
+                receipt_ids=receipt_ids,
+                used=used,
+                current_round=current_round,
+            )
+            performed = True
+        return performed
 
     def _materialize_post_failure_bottleneck(
         self,
@@ -3211,6 +4179,25 @@ class ProofMeshOrchestrator:
                     proposal.reverse_goal.sufficient_intermediate_claims
                 )
 
+        recovery_lineage_id = None
+        if bottleneck_obligation is not None:
+            failure_fingerprint = str(
+                bottleneck_obligation.first_error_fingerprint or ""
+            )
+            if failure_fingerprint.startswith("post_failure:"):
+                recovery_lineage_id = (
+                    "post_failure_recovery_"
+                    + stable_hash(
+                        {
+                            "route_id": route_id,
+                            "verified_checkpoint_hash": checkpoint_math_fingerprint(
+                                checkpoint
+                            ),
+                            "failure_fingerprint": failure_fingerprint,
+                        }
+                    )[:24]
+                )
+
         signature = ExplorationSignature(
             problem_hash=problem.integrity_hash,
             verified_checkpoint_id=checkpoint.checkpoint_id,
@@ -3227,6 +4214,7 @@ class ProofMeshOrchestrator:
                 *strategy.prerequisites,
             ],
             route_id=route_id,
+            recovery_lineage_id=recovery_lineage_id,
         )
         referee_confirmed = bool(
             review is not None
@@ -3530,6 +4518,8 @@ class ProofMeshOrchestrator:
             state.attempts.append(attempt)
             existing[key] = attempt
             accepted.append(attempt)
+            if state.proof_control is not None:
+                state.proof_control.register_attempt(attempt)
             if route is not None:
                 route.latest_attempt_id = attempt.attempt_id
                 route.latest_checkpoint_id = attempt.latest_checkpoint_id
@@ -3569,6 +4559,48 @@ class ProofMeshOrchestrator:
             }
         )
 
+    def _reevaluate_route_wakes(
+        self,
+        state: SolveState,
+        *,
+        current_round: int,
+        pool: AgentPool,
+        runner: StructuredAgentRunner,
+        user_intervention: bool = False,
+        config_changed: bool = False,
+    ) -> list[str]:
+        control = state.proof_control
+        if control is None or not control.active:
+            return []
+        available_agents: list[AgentRuntime] = []
+        if runner.ledger.remaining_calls > 0:
+            for agent in pool.agents:
+                if agent.in_cooldown:
+                    continue
+                try:
+                    pool.provider_circuit.assert_available(agent.provider_scope)
+                except ProviderCircuitOpenError:
+                    continue
+                available_agents.append(agent)
+        return control.evaluate_route_wakes(
+            current_round=current_round,
+            provider_available=bool(available_agents),
+            budget_available=runner.ledger.remaining_calls > 0,
+            available_fact_ids=(
+                [fact.message_id for fact in state.typed_memory.facts]
+                if state.typed_memory is not None
+                else []
+            ),
+            reviewer_available=any(
+                agent.supports_role("counterexample_hunter")
+                or agent.supports_role("referee")
+                or agent.supports_role("verifier")
+                for agent in available_agents
+            ),
+            user_intervention=user_intervention,
+            config_changed=config_changed,
+        )
+
     def _apply_global_progress_gate(
         self,
         state: SolveState,
@@ -3582,11 +4614,45 @@ class ProofMeshOrchestrator:
         current = self._global_progress_signature(state)
         prior = state.last_progress_signature
         changed = prior is not None and current != prior
+        control = state.proof_control
+        if (
+            control is not None
+            and control.active
+            and control.state.meta_pivot_state is not None
+            and control.state.meta_pivot_state.status == MetaPivotStatus.EXECUTED
+        ):
+            control.evaluate_meta_pivot(
+                progress_signature=current,
+                current_round=round_index,
+            )
         if prior is None or changed:
             state.global_no_progress_rounds = 0
             state.global_meta_pivot_used = False
+            state.hard_stopped = False
         else:
             state.global_no_progress_rounds += 1
+            pivot = (
+                control.state.meta_pivot_state
+                if control is not None and control.active
+                else None
+            )
+            pivot_outcome = (
+                control.state.meta_pivot_outcomes.get(pivot.pivot_id)
+                if control is not None and pivot is not None
+                else None
+            )
+            if (
+                not state.pivot_grace_used
+                and pivot is not None
+                and pivot.status == MetaPivotStatus.FAILED
+                and pivot_outcome is not None
+                and pivot_outcome.effect == MetaPivotEffect.EMPTY
+            ):
+                # An admitted pivot that never materialized consumed this
+                # round; hold the counter once per run so the hard stop does
+                # not fire on the very round the pivot burned.
+                state.pivot_grace_used = True
+                state.global_no_progress_rounds -= 1
         state.last_progress_signature = current
 
         certificate = {
@@ -3620,11 +4686,59 @@ class ProofMeshOrchestrator:
         if not scheduler.hard_stagnation_enabled:
             return False
         if (
+            control is not None
+            and control.active
+            and control.common_mode_blocks_stagnation_stop()
+        ):
+            store.append_event(
+                "global_stagnation_stop_blocked_by_common_mode_challenger",
+                {
+                    "round_index": round_index,
+                    "progress_signature": current,
+                    "task_ids": sorted(
+                        task.task_id
+                        for task in control.state.assumption_challenger_tasks.values()
+                        if task.executable_task_id is not None
+                        and control.state.executable_tasks[
+                            task.executable_task_id
+                        ].status
+                        in {
+                            ProofControlTaskStatus.CREATED,
+                            ProofControlTaskStatus.ASSIGNED,
+                            ProofControlTaskStatus.READY,
+                            ProofControlTaskStatus.RUNNING,
+                        }
+                    ),
+                },
+            )
+            return False
+        if (
+            control is not None
+            and control.active
+            and control.state.meta_pivot_state is None
+            and state.global_meta_pivot_used
+        ):
+            # A v0.8 checkpoint may have only the legacy Boolean request marker.
+            # Reify that request instead of treating it as an executed pivot.
+            state.global_meta_pivot_used = False
+        if (
             state.global_no_progress_rounds
             >= scheduler.global_no_progress_rounds_before_meta_pivot
             and not state.global_meta_pivot_used
         ):
             state.global_meta_pivot_used = True
+            if control is not None and control.active:
+                pivot = control.request_meta_pivot(
+                    source_stagnation_signature=current,
+                    trigger_round=round_index,
+                    requested_mechanisms=[
+                        "meta_replan",
+                        "representation_switch",
+                        "auxiliary_construction",
+                    ],
+                )
+            else:
+                pivot = None
             if state.route_registry is not None:
                 for route in state.route_registry.active_routes(round_index):
                     route.stagnation_rounds = max(
@@ -3638,6 +4752,10 @@ class ProofMeshOrchestrator:
                     "progress_signature": current,
                     "consecutive_no_progress_rounds": (state.global_no_progress_rounds),
                     "next_action": "one inspiration/meta-replan pivot",
+                    "pivot_id": pivot.pivot_id if pivot is not None else None,
+                    "pivot_status": (
+                        pivot.status.value if pivot is not None else "legacy_requested"
+                    ),
                 },
             )
             if activity is not None:
@@ -3663,13 +4781,49 @@ class ProofMeshOrchestrator:
             < scheduler.global_no_progress_rounds_before_stop
         ):
             return False
-        if state.route_registry is not None:
+        if control is not None and control.active:
+            pivot = control.state.meta_pivot_state
+            if control.meta_pivot_blocks_stagnation_stop():
+                store.append_event(
+                    "global_stagnation_stop_blocked_by_meta_pivot",
+                    {
+                        "round_index": round_index,
+                        "progress_signature": current,
+                        "pivot_id": pivot.pivot_id if pivot is not None else None,
+                        "pivot_status": (
+                            pivot.status.value if pivot is not None else None
+                        ),
+                    },
+                )
+                return False
+            if not control.meta_pivot_allows_stagnation_stop(
+                progress_signature=current
+            ):
+                return False
+        route_terminal_policy: dict[str, list[str]] | None = None
+        if control is not None and control.active:
+            route_terminal_policy = control.prepare_routes_for_hard_stop(
+                progress_signature=current,
+                current_round=round_index,
+            )
+            if route_terminal_policy["ready_task_ids"]:
+                store.append_event(
+                    "global_stagnation_stop_blocked_by_executable_task",
+                    {
+                        "round_index": round_index,
+                        "progress_signature": current,
+                        "ready_task_ids": route_terminal_policy["ready_task_ids"],
+                    },
+                )
+                return False
+        elif state.route_registry is not None:
             for route in state.route_registry.active_routes(round_index):
                 state.route_registry.mark_stalled(
                     route.route_id,
                     signature=current,
                     reason="global certified-progress plateau",
                 )
+        state.hard_stopped = True
         store.append_event(
             "global_stagnation_hard_stop",
             {
@@ -3680,6 +4834,19 @@ class ProofMeshOrchestrator:
                     "No new verified checkpoint content, admitted fact, resolved "
                     "obligation, or independently checked counterexample."
                 ),
+                "meta_pivot_status": (
+                    control.state.meta_pivot_state.status.value
+                    if control is not None
+                    and control.state.meta_pivot_state is not None
+                    else None
+                ),
+                "meta_pivot_failure_reason": (
+                    control.state.meta_pivot_state.failure_reason
+                    if control is not None
+                    and control.state.meta_pivot_state is not None
+                    else ""
+                ),
+                "route_terminal_policy": route_terminal_policy,
             },
         )
         if activity is not None:
@@ -3804,6 +4971,10 @@ class ProofMeshOrchestrator:
                     else 0
                 ),
             }
+            if state.proof_control is not None:
+                result[route.strategy_id].update(
+                    state.proof_control.route_signals(route.route_id)
+                )
         return result
 
     def _inspiration_snapshot(
@@ -3963,6 +5134,868 @@ class ProofMeshOrchestrator:
             },
         )
 
+    @staticmethod
+    def _proof_control_work_blocks_no_action_stop(state: SolveState) -> bool:
+        control = state.proof_control
+        return bool(
+            control is not None
+            and control.active
+            and control.executable_work_blocks_stagnation_stop()
+        )
+
+    @staticmethod
+    def _should_stop_after_adaptive_round(
+        *,
+        hard_stagnation_stop: bool,
+        no_action_rounds: int,
+        control_work_blocks_stop: bool,
+    ) -> bool:
+        return hard_stagnation_stop or (
+            no_action_rounds >= 2 and not control_work_blocks_stop
+        )
+
+    async def _execute_pending_countermodels(
+        self,
+        state: SolveState,
+        *,
+        problem: ProblemContract,
+        store: ArtifactStore,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        allocator: SoftBudgetAllocator,
+    ) -> tuple[bool, bool]:
+        control = state.proof_control
+        registry = state.route_registry
+        if control is None or not control.active or registry is None:
+            return False, False
+        live_statuses = {
+            ProofControlTaskStatus.CREATED,
+            ProofControlTaskStatus.ASSIGNED,
+            ProofControlTaskStatus.READY,
+            ProofControlTaskStatus.RUNNING,
+        }
+        pending = [
+            task
+            for task in control.state.countermodel_tasks.values()
+            if task.status
+            in {
+                "pending",
+                "assigned",
+                "ready",
+                "running",
+                "deferred",
+                "blocked",
+            }
+            and task.executable_task_id is not None
+            and control.state.executable_tasks[task.executable_task_id].status
+            in live_statuses
+        ]
+        if not pending:
+            return False, False
+
+        async def execute(task: CountermodelTaskRecord) -> CountermodelResult:
+            default_outcome = CountermodelOutcome.INCONCLUSIVE
+
+            def result(
+                *,
+                outcome: CountermodelOutcome,
+                detail: str,
+                challenger_agent_id: str | None = None,
+                reviewer_agent_id: str | None = None,
+                evidence_refs: Sequence[str] = (),
+                independent_review_refs: Sequence[str] = (),
+                wake_condition: WakeConditionKind | None = None,
+            ) -> CountermodelResult:
+                return CountermodelResult(
+                    result_id=(
+                        "countermodel_result_"
+                        + stable_hash(
+                            {
+                                "task_id": task.task_id,
+                                "round": state.current_round,
+                                "outcome": outcome.value,
+                                "evidence_refs": list(evidence_refs),
+                                "review_refs": list(independent_review_refs),
+                            }
+                        )[:20]
+                    ),
+                    task_id=task.task_id,
+                    outcome=outcome,
+                    challenger_agent_id=challenger_agent_id,
+                    reviewer_agent_id=reviewer_agent_id,
+                    evidence_refs=list(evidence_refs),
+                    independent_review_refs=list(independent_review_refs),
+                    wake_condition=wake_condition,
+                    detail=detail,
+                    completed_round=state.current_round,
+                )
+
+            if runner.ledger.remaining_calls <= allocator.minimum_finish_reserve + 1:
+                return result(
+                    outcome=CountermodelOutcome.BLOCKED,
+                    detail=(
+                        "The protected finalization reserve leaves no independent "
+                        "countermodel search-and-review pair."
+                    ),
+                    wake_condition=WakeConditionKind.BUDGET_AVAILABLE,
+                )
+
+            source_risk = control.state.inference_risks.get(task.source_record_id)
+            source_link = (
+                control.state.goal_links.get(task.source_goal_link_id)
+                if task.source_goal_link_id is not None
+                else None
+            )
+            try:
+                target_obligation = control.proof_graph.get_obligation(
+                    task.target_obligation_id
+                )
+            except KeyError:
+                target_obligation = None
+            if source_risk is not None and source_risk.explanation.strip():
+                exact_target_statement = source_risk.explanation.strip()
+            elif source_link is not None and target_obligation is not None:
+                exact_target_statement = (
+                    f"The recorded subject {source_link.subject_id} implies "
+                    f"{target_obligation.statement}"
+                )
+            elif target_obligation is not None:
+                exact_target_statement = target_obligation.statement
+            else:
+                return result(
+                    outcome=default_outcome,
+                    detail="The countermodel task has no recoverable exact scoped target.",
+                )
+
+            excluded_authors = self._route_authors(registry, task.route_ids)
+            specialty_hints = (
+                [source_risk.risk_type.value] if source_risk is not None else []
+            )
+            try:
+                challenger = runner.pool.select(
+                    "counterexample_hunter",
+                    exclude=excluded_authors,
+                    specialty_hints=specialty_hints,
+                    strict_exclude=True,
+                )
+            except RuntimeError:
+                return result(
+                    outcome=default_outcome,
+                    detail=(
+                        "No counterexample hunter independent of the affected route "
+                        "authors is available."
+                    ),
+                )
+            task.assigned_agent_id = challenger.id
+            executable = control.state.executable_tasks[task.executable_task_id]
+            executable.assigned_agent_id = challenger.id
+            proposal_call = await self._safe_call(
+                runner,
+                "counterexample_hunter",
+                prompts.challenge_countermodel_task(
+                    problem=problem,
+                    countermodel_task=task,
+                    exact_target_statement=exact_target_statement,
+                    inference_risk=source_risk,
+                    goal_link=source_link,
+                    target_obligation=target_obligation,
+                    verified_facts=(
+                        state.typed_memory.facts
+                        if state.typed_memory is not None
+                        else []
+                    ),
+                    proof_control_constraints={
+                        "may_promote_fact": False,
+                        "may_close_obligation": False,
+                        "requires_exact_counterexample": True,
+                    },
+                ),
+                fixed_agent=challenger,
+                budget_bucket="depth",
+            )
+            if proposal_call is None:
+                return result(
+                    outcome=default_outcome,
+                    challenger_agent_id=challenger.id,
+                    detail="The countermodel search returned no structured artifact.",
+                )
+            proposal = proposal_call.value
+            proposal_ref = store.write_json(
+                "structured",
+                f"countermodel_proposal_{task.task_id}",
+                proposal,
+            )
+
+            try:
+                reviewer = runner.pool.select(
+                    "detailed_verifier",
+                    exclude={challenger.id},
+                    specialty_hints=specialty_hints,
+                    prefer_provider_not=challenger.provider,
+                    strict_exclude=True,
+                )
+            except RuntimeError:
+                return result(
+                    outcome=default_outcome,
+                    challenger_agent_id=challenger.id,
+                    evidence_refs=[proposal_ref],
+                    detail="No independent reviewer is available for the countermodel.",
+                )
+            review_call = await self._safe_call(
+                runner,
+                "detailed_verifier",
+                prompts.review_countermodel_task(
+                    problem=problem,
+                    countermodel_task=task,
+                    exact_target_statement=exact_target_statement,
+                    proposal=proposal,
+                    inference_risk=source_risk,
+                    goal_link=source_link,
+                    target_obligation=target_obligation,
+                    verified_facts=(
+                        state.typed_memory.facts
+                        if state.typed_memory is not None
+                        else []
+                    ),
+                    proof_control_constraints={
+                        "may_promote_fact": False,
+                        "may_close_obligation": False,
+                        "bounded_non_refutation_is_inconclusive": True,
+                    },
+                ),
+                fixed_agent=reviewer,
+                exclude={challenger.id},
+                prefer_provider_not=challenger.provider,
+                budget_bucket="verification",
+            )
+            if review_call is None:
+                return result(
+                    outcome=default_outcome,
+                    challenger_agent_id=challenger.id,
+                    reviewer_agent_id=reviewer.id,
+                    evidence_refs=[proposal_ref],
+                    detail="Independent review returned no structured artifact.",
+                )
+            review = review_call.value
+            review_ref = store.write_json(
+                "structured",
+                f"countermodel_review_{task.task_id}",
+                review,
+            )
+            target_matches = self._normalize_statement(
+                proposal.target_statement
+            ) == self._normalize_statement(exact_target_statement)
+            confirmed = bool(
+                proposal.action == AssumptionChallengeAction.REFUTE
+                and proposal.counterexample
+                and target_matches
+                and review.proposal_id == proposal.proposal_id
+                and review.verdict == "pass"
+                and review.action_supported
+                and review.exact_counterexample_confirmed
+                and review.independence_confirmed
+            )
+            if confirmed:
+                outcome = CountermodelOutcome.COUNTEREXAMPLE_FOUND
+            elif proposal.counterexample is None:
+                outcome = CountermodelOutcome.NOT_REFUTED_BOUNDED
+            else:
+                outcome = CountermodelOutcome.INCONCLUSIVE
+            return result(
+                outcome=outcome,
+                challenger_agent_id=challenger.id,
+                reviewer_agent_id=reviewer.id,
+                evidence_refs=[proposal_ref],
+                independent_review_refs=[review_ref],
+                detail=review.concise_feedback,
+            )
+
+        completed = await control.execute_pending_countermodels(
+            current_round=state.current_round,
+            executor=execute,
+        )
+        store.append_event(
+            "countermodel_dispatch_cycle",
+            {
+                "round_index": state.current_round,
+                "pending_task_ids": sorted(task.task_id for task in pending),
+                "completed_task_ids": sorted(task.task_id for task in completed),
+            },
+        )
+        return True, bool(completed)
+
+    async def _execute_pending_assumption_challengers(
+        self,
+        state: SolveState,
+        *,
+        problem: ProblemContract,
+        store: ArtifactStore,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        allocator: SoftBudgetAllocator,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        tools: ToolBroker,
+    ) -> tuple[bool, bool]:
+        control = state.proof_control
+        registry = state.route_registry
+        if control is None or not control.active or registry is None:
+            return False, False
+        live_statuses = {
+            ProofControlTaskStatus.CREATED,
+            ProofControlTaskStatus.ASSIGNED,
+            ProofControlTaskStatus.READY,
+            ProofControlTaskStatus.RUNNING,
+            ProofControlTaskStatus.DEFERRED,
+            ProofControlTaskStatus.BLOCKED,
+        }
+        pending = [
+            task
+            for task in control.state.assumption_challenger_tasks.values()
+            if task.executable_task_id is not None
+            and control.state.executable_tasks[task.executable_task_id].status
+            in live_statuses
+            and task.execution_action_id is not None
+            and control.state.control_actions[task.execution_action_id].status
+            not in {
+                ControlActionStatus.EXECUTED,
+                ControlActionStatus.FAILED,
+                ControlActionStatus.REJECTED,
+            }
+        ]
+        if not pending:
+            return False, False
+
+        async def execute(task) -> AssumptionChallengeResult:
+            family = control.state.assumption_families[task.family_id]
+            default_action = AssumptionChallengeAction.REFUTE
+            if runner.ledger.remaining_calls <= allocator.minimum_finish_reserve + 1:
+                return AssumptionChallengeResult(
+                    result_id=(
+                        "assumption_challenge_result_"
+                        + stable_hash(
+                            {
+                                "task_id": task.task_id,
+                                "round": state.current_round,
+                                "reason": "protected_finish_reserve",
+                            }
+                        )[:20]
+                    ),
+                    task_id=task.task_id,
+                    family_id=task.family_id,
+                    action=default_action,
+                    outcome=AssumptionChallengeOutcome.BLOCKED,
+                    detail=(
+                        "The protected finalization reserve leaves no independent "
+                        "challenge-and-review pair."
+                    ),
+                    completed_round=state.current_round,
+                )
+
+            excluded_authors = self._route_authors(registry, task.route_ids)
+            try:
+                challenger = runner.pool.select(
+                    "counterexample_hunter",
+                    exclude=excluded_authors,
+                    specialty_hints=family.semantic_tags,
+                    strict_exclude=True,
+                )
+            except RuntimeError:
+                return AssumptionChallengeResult(
+                    result_id=(
+                        "assumption_challenge_result_"
+                        + stable_hash(
+                            {
+                                "task_id": task.task_id,
+                                "round": state.current_round,
+                                "reason": "independent_challenger_unavailable",
+                            }
+                        )[:20]
+                    ),
+                    task_id=task.task_id,
+                    family_id=task.family_id,
+                    action=default_action,
+                    outcome=AssumptionChallengeOutcome.BLOCKED,
+                    detail="No agent independent of the affected route authors is available.",
+                    completed_round=state.current_round,
+                )
+            task.assigned_agent_id = challenger.id
+            executable = control.state.executable_tasks[task.executable_task_id]
+            executable.assigned_agent_id = challenger.id
+            proposal_call = await self._safe_call(
+                runner,
+                "counterexample_hunter",
+                prompts.challenge_critical_assumption(
+                    problem=problem,
+                    challenger_task=task,
+                    assumption_family=family,
+                    member_assumptions=[
+                        control.state.critical_assumptions[assumption_id]
+                        for assumption_id in family.member_assumption_ids
+                        if assumption_id in control.state.critical_assumptions
+                    ],
+                    dependency_atoms=[
+                        control.state.dependency_atoms[atom_id]
+                        for atom_id in family.dependency_atom_ids
+                        if atom_id in control.state.dependency_atoms
+                    ],
+                    affected_routes=[
+                        registry.get(route_id)
+                        for route_id in task.route_ids
+                        if any(route.route_id == route_id for route in registry.routes)
+                    ],
+                    verified_facts=(
+                        state.typed_memory.facts
+                        if state.typed_memory is not None
+                        else []
+                    ),
+                    premise_eligible=False,
+                ),
+                fixed_agent=challenger,
+                budget_bucket="depth",
+            )
+            if proposal_call is None:
+                return AssumptionChallengeResult(
+                    result_id=(
+                        "assumption_challenge_result_"
+                        + stable_hash(
+                            {
+                                "task_id": task.task_id,
+                                "round": state.current_round,
+                                "reason": "challenger_returned_no_artifact",
+                            }
+                        )[:20]
+                    ),
+                    task_id=task.task_id,
+                    family_id=task.family_id,
+                    action=default_action,
+                    outcome=AssumptionChallengeOutcome.INCONCLUSIVE,
+                    challenger_agent_id=challenger.id,
+                    detail="The challenger returned no usable structured artifact.",
+                    completed_round=state.current_round,
+                )
+            proposal = proposal_call.value
+            proposal_name = f"assumption_challenge_proposal_{task.task_id}"
+            store.write_json("structured", proposal_name, proposal)
+            proposal_ref = proposal_call.raw_ref or f"structured:{proposal_name}"
+
+            try:
+                reviewer = runner.pool.select(
+                    "detailed_verifier",
+                    exclude={challenger.id},
+                    specialty_hints=family.semantic_tags,
+                    prefer_provider_not=challenger.provider,
+                    strict_exclude=True,
+                )
+            except RuntimeError:
+                return AssumptionChallengeResult(
+                    result_id=(
+                        "assumption_challenge_result_"
+                        + stable_hash(
+                            {
+                                "task_id": task.task_id,
+                                "proposal_id": proposal.proposal_id,
+                                "reason": "independent_reviewer_unavailable",
+                            }
+                        )[:20]
+                    ),
+                    task_id=task.task_id,
+                    family_id=task.family_id,
+                    action=proposal.action,
+                    outcome=AssumptionChallengeOutcome.BLOCKED,
+                    challenger_agent_id=challenger.id,
+                    evidence_refs=[proposal_ref],
+                    detail="No independent reviewer is available for the challenge.",
+                    completed_round=state.current_round,
+                )
+            review_call = await self._safe_call(
+                runner,
+                "detailed_verifier",
+                prompts.review_critical_assumption_challenge(
+                    problem=problem,
+                    challenger_task=task,
+                    assumption_family=family,
+                    proposal=proposal,
+                    dependency_atoms=[
+                        control.state.dependency_atoms[atom_id]
+                        for atom_id in family.dependency_atom_ids
+                        if atom_id in control.state.dependency_atoms
+                    ],
+                    verified_facts=(
+                        state.typed_memory.facts
+                        if state.typed_memory is not None
+                        else []
+                    ),
+                    proof_control_constraints={
+                        "may_promote_fact": False,
+                        "may_close_obligation": False,
+                        "requires_dependency_independence_for_avoidance": True,
+                    },
+                ),
+                fixed_agent=reviewer,
+                exclude={challenger.id},
+                prefer_provider_not=challenger.provider,
+                budget_bucket="verification",
+            )
+            if review_call is None:
+                return AssumptionChallengeResult(
+                    result_id=(
+                        "assumption_challenge_result_"
+                        + stable_hash(
+                            {
+                                "task_id": task.task_id,
+                                "proposal_id": proposal.proposal_id,
+                                "reason": "review_returned_no_artifact",
+                            }
+                        )[:20]
+                    ),
+                    task_id=task.task_id,
+                    family_id=task.family_id,
+                    action=proposal.action,
+                    outcome=AssumptionChallengeOutcome.INCONCLUSIVE,
+                    challenger_agent_id=challenger.id,
+                    reviewer_agent_id=reviewer.id,
+                    evidence_refs=[proposal_ref],
+                    detail="Independent review returned no usable structured artifact.",
+                    completed_round=state.current_round,
+                )
+            review = review_call.value
+            review_name = f"assumption_challenge_review_{task.task_id}"
+            store.write_json("structured", review_name, review)
+            review_ref = review_call.raw_ref or f"structured:{review_name}"
+            outcome = AssumptionChallengeOutcome.INCONCLUSIVE
+            created_route_ids: list[str] = []
+            alternative_strategy_ids: list[str] = []
+            target_matches = control.common_mode.statements_semantically_match(
+                proposal.target_statement,
+                family.canonical_statement,
+            )
+            review_passed = (
+                target_matches and review.verdict == "pass" and review.action_supported
+            )
+
+            if (
+                proposal.action == AssumptionChallengeAction.PROVE
+                and bool(proposal.proof_steps)
+                and review_passed
+                and review.proof_complete
+            ):
+                outcome = AssumptionChallengeOutcome.VERIFIED
+            elif (
+                proposal.action == AssumptionChallengeAction.REFUTE
+                and proposal.counterexample
+                and review_passed
+                and review.exact_counterexample_confirmed
+            ):
+                outcome = AssumptionChallengeOutcome.REFUTED
+            elif proposal.action in {
+                AssumptionChallengeAction.AVOID,
+                AssumptionChallengeAction.WEAKEN,
+            }:
+                alternative = proposal.alternative_strategy
+                weaker_ok = proposal.action == AssumptionChallengeAction.AVOID or bool(
+                    proposal.weaker_condition and review.weaker_sufficient_confirmed
+                )
+                independent = bool(
+                    alternative is not None
+                    and review_passed
+                    and review.independence_confirmed
+                    and weaker_ok
+                    and control.strategy_is_independent_from_common_mode(alternative)
+                    and self._common_mode_alternative_has_new_mechanism(
+                        alternative,
+                        state.strategies,
+                        task.route_ids,
+                        registry,
+                    )
+                )
+                if (
+                    independent
+                    and alternative is not None
+                    and len(state.strategies) < self.config.budget.max_paths
+                    and all(
+                        item.strategy_id != alternative.strategy_id
+                        for item in state.strategies
+                    )
+                ):
+                    selected, _records = control.admit_routes([alternative])
+                    if selected:
+                        state.strategies.extend(selected)
+                        assignments = router.assign_explorers(selected)
+                        for strategy, agent in assignments:
+                            route = registry.register_route(strategy)
+                            registry.assign_member(
+                                route.route_id,
+                                agent.id,
+                                RouteRole.PROVER,
+                                state.current_round,
+                            )
+                            created_route_ids.append(route.route_id)
+                            alternative_strategy_ids.append(strategy.strategy_id)
+                            store.append_event(
+                                "common_mode_independent_route_registered",
+                                {
+                                    "task_id": task.task_id,
+                                    "family_id": task.family_id,
+                                    "route_id": route.route_id,
+                                    "strategy_id": strategy.strategy_id,
+                                },
+                            )
+                        registry.recompute_neighbors()
+                        attempts = await self._parallel_round_exploration(
+                            problem,
+                            state,
+                            assignments,
+                            state.current_round,
+                            runner,
+                            prompts,
+                            router,
+                            memory,
+                            store,
+                            tools,
+                            max_segments_this_call=1,
+                        )
+                        accepted_attempts = self._record_attempts(
+                            state,
+                            attempts,
+                            store,
+                        )
+                        if accepted_attempts:
+                            await self._extract_claims_many(
+                                problem,
+                                accepted_attempts,
+                                runner,
+                                prompts,
+                                memory,
+                                store,
+                                budget_bucket="breadth",
+                            )
+                        if created_route_ids:
+                            outcome = AssumptionChallengeOutcome.AVOIDED
+
+            result_id = (
+                "assumption_challenge_result_"
+                + stable_hash(
+                    {
+                        "task_id": task.task_id,
+                        "proposal_id": proposal.proposal_id,
+                        "outcome": outcome.value,
+                        "created_route_ids": created_route_ids,
+                    }
+                )[:20]
+            )
+            return AssumptionChallengeResult(
+                result_id=result_id,
+                task_id=task.task_id,
+                family_id=task.family_id,
+                action=proposal.action,
+                outcome=outcome,
+                challenger_agent_id=challenger.id,
+                reviewer_agent_id=reviewer.id,
+                evidence_refs=[proposal_ref],
+                independent_review_refs=[review_ref],
+                created_route_ids=created_route_ids,
+                alternative_strategy_ids=alternative_strategy_ids,
+                detail=review.concise_feedback,
+                completed_round=state.current_round,
+            )
+
+        completed = await control.execute_pending_assumption_challengers(
+            current_round=state.current_round,
+            executor=execute,
+        )
+        store.append_event(
+            "assumption_challenger_dispatch_cycle",
+            {
+                "round_index": state.current_round,
+                "pending_task_ids": sorted(task.task_id for task in pending),
+                "completed_task_ids": sorted(task.task_id for task in completed),
+            },
+        )
+        return True, bool(completed)
+
+    @staticmethod
+    def _common_mode_alternative_has_new_mechanism(
+        candidate: StrategyCard,
+        strategies: Sequence[StrategyCard],
+        affected_route_ids: Sequence[str],
+        registry: RouteRegistry,
+    ) -> bool:
+        affected_strategy_ids = {
+            registry.get(route_id).strategy_id
+            for route_id in affected_route_ids
+            if any(route.route_id == route_id for route in registry.routes)
+        }
+        candidate_mechanism = " ".join(
+            [
+                *candidate.tags,
+                candidate.key_original_step or "",
+                candidate.core_idea,
+            ]
+        )
+        for existing in strategies:
+            if existing.strategy_id not in affected_strategy_ids:
+                continue
+            existing_mechanism = " ".join(
+                [
+                    *existing.tags,
+                    existing.key_original_step or "",
+                    existing.core_idea,
+                ]
+            )
+            if jaccard_similarity(candidate_mechanism, existing_mechanism) >= 0.80:
+                return False
+        return True
+
+    async def _execute_pending_meta_pivot(
+        self,
+        state: SolveState,
+        *,
+        problem: ProblemContract,
+        store: ArtifactStore,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        allocator: SoftBudgetAllocator,
+        router: SparseTopologyRouter,
+        memory: LemmaMemory,
+        tools: ToolBroker,
+    ) -> tuple[bool, bool]:
+        control = state.proof_control
+        pivot = control.state.meta_pivot_state if control is not None else None
+        if (
+            control is None
+            or not control.active
+            or pivot is None
+            or pivot.status
+            not in {
+                MetaPivotStatus.REQUESTED,
+                MetaPivotStatus.ADMITTED,
+                MetaPivotStatus.EXECUTING,
+            }
+        ):
+            return False, False
+
+        async def execute(_pivot) -> dict[str, list[str]]:
+            engine = state.inspiration_engine
+            if engine is None or not engine.enabled:
+                raise RuntimeError("active Inspiration is unavailable for meta pivot")
+            snapshot = self._inspiration_snapshot(
+                state,
+                remaining_calls=runner.ledger.remaining_calls,
+            )
+            if snapshot is None:
+                raise RuntimeError("meta pivot could not build an Inspiration snapshot")
+            if runner.ledger.remaining_calls <= snapshot.finalization_reserve_calls:
+                raise BudgetExhaustedError(
+                    "meta pivot cannot spend the protected finalization reserve"
+                )
+            route_ids_before = {
+                route.route_id
+                for route in (
+                    state.route_registry.routes
+                    if state.route_registry is not None
+                    else []
+                )
+            }
+            fact_ids_before = {
+                item.message_id
+                for item in (
+                    state.typed_memory.facts if state.typed_memory is not None else []
+                )
+            }
+            obligation_ids_before = {
+                item.obligation_id
+                for item in (
+                    state.proof_graph.obligations
+                    if state.proof_graph is not None
+                    else []
+                )
+            }
+            evidence_before = {
+                "proposals": len(engine.proposals),
+                "directives": len(engine.meta_directives),
+                "materializations": len(engine.materializations),
+            }
+            await self._run_inspiration_round(
+                state,
+                problem=problem,
+                remaining_calls=runner.ledger.remaining_calls,
+                store=store,
+                runner=runner,
+                prompts=prompts,
+                allocator=allocator,
+                router=router,
+                memory=memory,
+                tools=tools,
+            )
+            evidence_after = {
+                "proposals": len(engine.proposals),
+                "directives": len(engine.meta_directives),
+                "materializations": len(engine.materializations),
+            }
+            if evidence_after == evidence_before:
+                raise RuntimeError(
+                    "meta pivot produced no executable artifact; budget or "
+                    "an eligible agent was unavailable"
+                )
+            created_route_ids = sorted(
+                {
+                    route.route_id
+                    for route in (
+                        state.route_registry.routes
+                        if state.route_registry is not None
+                        else []
+                    )
+                }
+                - route_ids_before
+            )
+            result_fact_ids = sorted(
+                {
+                    item.message_id
+                    for item in (
+                        state.typed_memory.facts
+                        if state.typed_memory is not None
+                        else []
+                    )
+                }
+                - fact_ids_before
+            )
+            result_obligation_ids = sorted(
+                {
+                    item.obligation_id
+                    for item in (
+                        state.proof_graph.obligations
+                        if state.proof_graph is not None
+                        else []
+                    )
+                }
+                - obligation_ids_before
+            )
+            return {
+                "created_route_ids": created_route_ids,
+                "result_fact_ids": result_fact_ids,
+                "result_obligation_ids": result_obligation_ids,
+            }
+
+        result = await control.execute_pending_meta_pivot(
+            current_round=state.current_round,
+            executor=execute,
+        )
+        if result.status == MetaPivotStatus.FAILED:
+            store.append_event(
+                "meta_pivot_unexecuted",
+                {
+                    "pivot_id": result.pivot_id,
+                    "round_index": state.current_round,
+                    "failure_reason": result.failure_reason,
+                },
+            )
+            return True, False
+        return True, result.status in {
+            MetaPivotStatus.EXECUTED,
+            MetaPivotStatus.EVALUATED,
+        }
+
     async def _run_inspiration_round(
         self,
         state: SolveState,
@@ -4109,6 +6142,7 @@ class ProofMeshOrchestrator:
                 precomputed,
                 counterexamples,
                 hidden_assumptions,
+                deferred_proposal_ids,
             ) = await self._review_inspiration_proposals(
                 engine,
                 proposals,
@@ -4116,6 +6150,7 @@ class ProofMeshOrchestrator:
                 problem=problem,
                 runner=runner,
                 prompts=prompts,
+                proof_control=state.proof_control,
             )
         except Exception:
             self._finish_inspiration_reservations(engine, tasks, interrupted=True)
@@ -4130,14 +6165,19 @@ class ProofMeshOrchestrator:
                 phase="proposal_review_pipeline",
             )
         try:
+            reviewed_proposals = [
+                proposal
+                for proposal in proposals
+                if proposal.proposal_id not in deferred_proposal_ids
+            ]
             reviews = await engine.review(
-                proposals,
+                reviewed_proposals,
                 precomputed_reviews=precomputed,
                 immediate_counterexamples=counterexamples,
                 hidden_assumptions=hidden_assumptions,
             )
             compositions = engine.queue_compositions(
-                proposals,
+                reviewed_proposals,
                 reviews,
                 snapshot,
             )
@@ -4249,6 +6289,7 @@ class ProofMeshOrchestrator:
                 "triggers": triggers,
                 "tasks": tasks,
                 "proposals": proposals,
+                "deferred_proposal_ids": sorted(deferred_proposal_ids),
                 "reviews": reviews,
                 "compositions_queued": compositions,
                 "materializations": materializations,
@@ -4631,14 +6672,37 @@ class ProofMeshOrchestrator:
         problem: ProblemContract,
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
+        proof_control: ProofControlLayer | None,
     ) -> tuple[
         dict[str, InspirationReview],
         dict[str, list[str]],
         dict[str, list[str]],
+        set[str],
     ]:
         precomputed: dict[str, InspirationReview] = {}
         counterexamples: dict[str, list[str]] = {}
         hidden: dict[str, list[str]] = {}
+        deferred: set[str] = set()
+
+        def defer_review(proposal: InspirationProposal, reason: str) -> None:
+            if proof_control is None or not proof_control.active:
+                raise RuntimeError(
+                    "active inspiration review deferral requires active proof control"
+                )
+            action = proof_control.defer_inspiration_review(
+                proposal_id=proposal.proposal_id,
+                task_id=proposal.task_id,
+                reason=reason,
+                current_round=snapshot.round_index,
+            )
+            if action.status != ControlActionStatus.EXECUTED:
+                raise RuntimeError(
+                    "inspiration review deferral was not materialized: "
+                    f"{action.status.value}"
+                )
+            deferred.add(proposal.proposal_id)
+            engine.typed_memory.add_insight(proposal)
+
         for proposal in proposals:
             eligible = [
                 agent
@@ -4647,11 +6711,37 @@ class ProofMeshOrchestrator:
                 and agent.supports_role("inspiration_referee")
                 and not agent.in_cooldown
             ]
+            review_budget_available = (
+                runner.ledger.remaining_calls > snapshot.finalization_reserve_calls
+            )
+            if engine.inspiration_config.mode != "active":
+                local = engine.referee.review(
+                    proposal,
+                    reviewer_agent_id="local_deterministic_referee",
+                    open_obligation_ids=snapshot.open_obligation_ids,
+                    existing_signatures=snapshot.route_signatures,
+                )
+                precomputed[proposal.proposal_id] = (
+                    local.model_copy(update={"recommendation": "store_insight"})
+                    if engine.inspiration_config.require_inspiration_referee
+                    else local
+                )
+                continue
             if (
-                engine.inspiration_config.mode != "active"
-                or not eligible
-                or runner.ledger.remaining_calls <= snapshot.finalization_reserve_calls
+                proof_control is not None
+                and proof_control.active
+                and (not eligible or not review_budget_available)
             ):
+                defer_review(
+                    proposal,
+                    (
+                        "no independent inspiration referee is available"
+                        if not eligible
+                        else "inspiration referee budget is exhausted"
+                    ),
+                )
+                continue
+            if not eligible or not review_budget_available:
                 local = engine.referee.review(
                     proposal,
                     reviewer_agent_id="local_deterministic_referee",
@@ -4685,18 +6775,81 @@ class ProofMeshOrchestrator:
                 budget_reservation_id=engine.reservation_id_for_task(proposal.task_id),
             )
             if result is None:
-                local = engine.referee.review(
-                    proposal,
-                    reviewer_agent_id="local_deterministic_referee",
-                    open_obligation_ids=snapshot.open_obligation_ids,
-                    existing_signatures=snapshot.route_signatures,
-                )
-                precomputed[proposal.proposal_id] = (
-                    local.model_copy(update={"recommendation": "store_insight"})
-                    if engine.inspiration_config.require_inspiration_referee
-                    else local
-                )
-                continue
+                if proof_control is not None and proof_control.active:
+                    defer_review(
+                        proposal,
+                        "inspiration referee call failed or returned no review",
+                    )
+                    reassignment_candidates = [
+                        agent
+                        for agent in eligible
+                        if agent.id != reviewer.id and not agent.in_cooldown
+                    ]
+                    if (
+                        reassignment_candidates
+                        and runner.ledger.remaining_calls
+                        > snapshot.finalization_reserve_calls
+                    ):
+                        reassigned = max(
+                            reassignment_candidates,
+                            key=lambda item: (item.trust_score, item.id),
+                        )
+                        action = proof_control.reassign_inspiration_review(
+                            proposal_id=proposal.proposal_id,
+                            reviewer_agent_id=reassigned.id,
+                            current_round=snapshot.round_index,
+                        )
+                        if action.status != ControlActionStatus.EXECUTED:
+                            raise RuntimeError(
+                                "inspiration review reassignment was not "
+                                f"materialized: {action.status.value}"
+                            )
+                        result = await self._safe_call(
+                            runner,
+                            "inspiration_referee",
+                            prompts.inspiration_referee(
+                                problem=problem,
+                                proposal=proposal.model_dump(mode="json"),
+                                open_obligation_ids=snapshot.open_obligation_ids,
+                                existing_novelty_signatures=[
+                                    item.model_dump(mode="json")
+                                    for item in snapshot.route_signatures
+                                ],
+                            ),
+                            fixed_agent=reassigned,
+                            budget_bucket="verification",
+                            budget_reservation_id=engine.reservation_id_for_task(
+                                proposal.task_id
+                            ),
+                        )
+                        if result is not None:
+                            reviewer = reassigned
+                            deferred.discard(proposal.proposal_id)
+                            proof_control.complete_inspiration_review(
+                                proposal_id=proposal.proposal_id,
+                                reviewer_agent_id=reviewer.id,
+                            )
+                        else:
+                            defer_review(
+                                proposal,
+                                "reassigned inspiration referee call failed or "
+                                "returned no review",
+                            )
+                    if result is None:
+                        continue
+                else:
+                    local = engine.referee.review(
+                        proposal,
+                        reviewer_agent_id="local_deterministic_referee",
+                        open_obligation_ids=snapshot.open_obligation_ids,
+                        existing_signatures=snapshot.route_signatures,
+                    )
+                    precomputed[proposal.proposal_id] = (
+                        local.model_copy(update={"recommendation": "store_insight"})
+                        if engine.inspiration_config.require_inspiration_referee
+                        else local
+                    )
+                    continue
             review = result.value
             review.proposal_id = proposal.proposal_id
             review.reviewer_agent_id = reviewer.id
@@ -4768,7 +6921,7 @@ class ProofMeshOrchestrator:
                     passed=True,
                     reason="quick skeptic found no blocking counterexample",
                 )
-        return precomputed, counterexamples, hidden
+        return precomputed, counterexamples, hidden, deferred
 
     async def _execute_hierarchical_action(
         self,
@@ -4872,6 +7025,8 @@ class ProofMeshOrchestrator:
                     for attempt in state.attempts
                 )
             ]
+            if state.proof_control is not None and pending:
+                pending, _ = state.proof_control.admit_routes(pending)
             if not pending:
                 return materialized_this_round
             assignments = router.assign_explorers(pending)
@@ -5491,10 +7646,18 @@ class ProofMeshOrchestrator:
             capability_domain=str(payload.get("capability_domain", "algebra")),
             global_no_progress_rounds=int(payload.get("global_no_progress_rounds", 0)),
             global_meta_pivot_used=bool(payload.get("global_meta_pivot_used", False)),
+            pivot_grace_used=bool(payload.get("pivot_grace_used", False)),
+            hard_stopped=bool(payload.get("hard_stopped", False)),
             last_progress_signature=payload.get("last_progress_signature"),
             certified_counterexample_hashes=[
                 str(item) for item in payload.get("certified_counterexample_hashes", [])
             ],
+            termination_reason=payload.get("termination_reason"),
+            admission_starvation=(
+                dict(payload["admission_starvation"])
+                if isinstance(payload.get("admission_starvation"), dict)
+                else None
+            ),
         )
 
     async def _prepare_problem_contract(
@@ -5655,6 +7818,7 @@ class ProofMeshOrchestrator:
                 "Do not change hypotheses, quantifiers, domains, or requested conclusions.",
                 "Distinguish proved claims from conjectures and unresolved gaps.",
                 "Every downstream artifact must retain the frozen goal hash.",
+                "Any semantic_view is non-authoritative; exact_statement wins on conflict.",
             ],
             allowed_tools=self._allowed_tools(),
             output_language=self.config.runtime.output_language,
@@ -5702,6 +7866,36 @@ class ProofMeshOrchestrator:
         )
         return problem
 
+    @staticmethod
+    def _attach_problem_semantic_view(
+        problem: ProblemContract,
+        triage: TriageResult,
+        store: ArtifactStore,
+    ) -> None:
+        candidate = triage.semantic_view_candidate
+        if candidate is None or not contains_cjk(problem.exact_statement):
+            return
+        view = build_problem_semantic_view(problem.exact_statement, candidate)
+        store.write_json("structured", "problem_semantic_view", view)
+        store.append_event(
+            "problem_semantic_view_audited",
+            {
+                "source_statement_hash": view.source_statement_hash,
+                "status": view.status,
+                "candidate_confidence": view.candidate_confidence,
+                "missing_protected_fragments": view.missing_protected_fragments,
+                "deterministic_audit_passed": view.deterministic_audit_passed,
+                "failed_invariants": [
+                    finding.invariant
+                    for finding in view.audit_findings
+                    if finding.status == "fail"
+                ],
+                "authoritative": False,
+            },
+        )
+        if view.status == "usable":
+            problem.semantic_view = view
+
     async def _triage(
         self,
         problem: ProblemContract,
@@ -5744,6 +7938,8 @@ class ProofMeshOrchestrator:
         prompts: PromptFactory,
         router: SparseTopologyRouter,
         store: ArtifactStore,
+        *,
+        state: SolveState,
     ) -> list[StrategyCard]:
         scoped_discovery_task = (
             TaskRequirement.CONJECTURE in problem.task_requirements
@@ -5776,6 +7972,39 @@ class ProofMeshOrchestrator:
         candidates = self._deduplicate_strategy_cards(
             self._attach_planner_computation_hints(strategy_set.strategies)
         )
+        # Hard problems get one extra INDEPENDENT sampling pass with the
+        # first batch's mechanisms forbidden. Thinking-mode providers ignore
+        # temperature, so negative-constraint resampling is the only real
+        # diversity lever; a single-shot batch mode-collapses.
+        if (
+            result is not None
+            and not scoped_discovery_task
+            and triage.difficulty in {Difficulty.OLYMPIAD, Difficulty.RESEARCH}
+            and runner.ledger.remaining_calls > 1
+        ):
+            resample = await self._safe_call(
+                runner,
+                "planner",
+                prompts.strategies(
+                    problem,
+                    triage,
+                    requested,
+                    prior_strategy_titles=[item.title for item in candidates],
+                    forbidden_mechanisms=[
+                        f"{item.title}: {item.core_idea[:160]}" for item in candidates
+                    ],
+                ),
+                budget_bucket="breadth",
+            )
+            if resample is not None:
+                candidates = self._deduplicate_strategy_cards(
+                    [
+                        *candidates,
+                        *self._attach_planner_computation_hints(
+                            resample.value.strategies
+                        ),
+                    ]
+                )
         selected = router.select_diverse_strategies(
             candidates, min(target, len(candidates))
         )
@@ -5817,9 +8046,462 @@ class ProofMeshOrchestrator:
             selected = router.select_diverse_strategies(
                 candidates, min(target, len(candidates))
             )
+        if state.proof_control is not None:
+            admission_candidates = list(selected)
+            selected, admission_records = state.proof_control.admit_routes(selected)
+            semantic_repair_attempted = False
+            if (
+                state.proof_control.active
+                and not selected
+                and admission_records
+                and runner.ledger.remaining_calls > 0
+            ):
+                # Cheapest recovery first: one batched reviewer call that
+                # restates unparseable statements, then one re-admission of
+                # the SAME mathematical strategies. Only if that fails do we
+                # burn a full planner regeneration.
+                (
+                    selected,
+                    admission_records,
+                    semantic_repair_attempted,
+                ) = await self._attempt_semantic_repair_admission(
+                    problem,
+                    candidates=admission_candidates,
+                    state=state,
+                    runner=runner,
+                    prompts=prompts,
+                    store=store,
+                    prior_records=admission_records,
+                )
+            if (
+                state.proof_control.active
+                and not selected
+                and admission_records
+                and self.config.topology.proof_control.route_admission.max_regeneration_attempts
+                > 0
+                and runner.ledger.remaining_calls > 0
+            ):
+                review_task_kind = self._admission_regeneration_task_kind(
+                    admission_records
+                )
+                review_task = state.proof_control.executable_task_controller.create_admission_review_task(
+                    task_kind=review_task_kind,
+                    target_obligation_ids=[
+                        obligation_id
+                        for record in admission_records
+                        for obligation_id in record.target_obligation_ids
+                    ],
+                    strategy_ids=[record.strategy_id for record in admission_records],
+                    created_round=state.current_round,
+                    prompt_ref="route_admission_regeneration",
+                )
+                state.proof_control.executable_task_controller.mark_running(
+                    review_task.task_id,
+                    current_round=state.current_round,
+                )
+                regulator_feedback = [
+                    "Proof-control route admission rejected every initial strategy.",
+                    *[
+                        f"{record.strategy_id}: " + "; ".join(record.reasons)
+                        for record in admission_records
+                    ],
+                    (
+                        "Regenerate genuinely different strategies that target the "
+                        "registered main obligation, state one exact falsification "
+                        "test, avoid necessary-only conclusions, and predict a core "
+                        "obligation reduction."
+                    ),
+                ]
+                regenerated = await self._safe_call(
+                    runner,
+                    "planner",
+                    prompts.strategies(
+                        problem,
+                        triage,
+                        target,
+                        prior_strategy_titles=[
+                            item.title for item in strategy_set.strategies
+                        ],
+                        regulator_feedback=regulator_feedback,
+                    ),
+                    budget_bucket="breadth",
+                )
+                regenerated_candidates = (
+                    regenerated.value.strategies if regenerated is not None else []
+                )
+                regenerated_candidates = self._deduplicate_strategy_cards(
+                    self._attach_planner_computation_hints(regenerated_candidates)
+                )
+                regenerated_selected = router.select_diverse_strategies(
+                    regenerated_candidates,
+                    min(target, len(regenerated_candidates)),
+                )
+                selected, admission_records = state.proof_control.admit_routes(
+                    regenerated_selected
+                )
+                if regenerated is None:
+                    state.proof_control.executable_task_controller.fail(
+                        review_task.task_id,
+                        current_round=state.current_round,
+                        reason="planner_regeneration_failed",
+                    )
+                else:
+                    state.proof_control.executable_task_controller.complete_work(
+                        review_task.task_id,
+                        current_round=state.current_round,
+                        result_refs=[
+                            f"regenerated:{len(regenerated_selected)}",
+                            f"admitted:{len(selected)}",
+                        ],
+                        reason="bounded_route_admission_regeneration_completed",
+                    )
+                store.append_event(
+                    "proof_control_strategy_regeneration",
+                    {
+                        "attempt": 1,
+                        "candidate_count": len(regenerated_selected),
+                        "admitted_count": len(selected),
+                    },
+                )
+            if state.proof_control.active and not selected and admission_records:
+                starvation = self._classify_admission_starvation(admission_records)
+                starvation["repair_attempted"] = semantic_repair_attempted
+                if semantic_repair_attempted:
+                    starvation["repair_exhausted"] = True
+                state.admission_starvation = starvation
+                state.termination_reason = self._admission_termination_reason(
+                    starvation
+                )
+                store.append_event("admission_starvation_detected", starvation)
+                store.append_event(
+                    "no_routes_admitted",
+                    {
+                        "category": starvation["category"],
+                        "strategy_count": len(admission_records),
+                    },
+                )
         store.write_json("structured", "strategy_set", strategy_set)
         store.write_json("structured", "selected_strategies", selected)
         return selected
+
+    def _restore_baseline_budget_limits(self) -> None:
+        budget = self.config.budget
+        continuation = self.config.continuation
+        budget.max_total_calls = self._budget_scaling_baseline["max_total_calls"]
+        budget.max_rounds = self._budget_scaling_baseline["max_rounds"]
+        continuation.max_segments_per_path = self._budget_scaling_baseline[
+            "max_segments_per_path"
+        ]
+
+    def _apply_difficulty_budget_scaling(
+        self,
+        triage: TriageResult,
+        store: ArtifactStore,
+    ) -> dict[str, Any]:
+        """Apply an opt-in, idempotent effective budget for this run.
+
+        42 calls versus 12-segment depth was arithmetically unreachable:
+        every real hard run died at segment 1. Token and cost ceilings are
+        deliberately NOT scaled — they remain the user's hard spend limits.
+        """
+        self._restore_baseline_budget_limits()
+        budget = self.config.budget
+        continuation = self.config.continuation
+        eligible = bool(
+            budget.scale_budget_with_difficulty
+            and triage.difficulty in {Difficulty.OLYMPIAD, Difficulty.RESEARCH}
+            and (
+                budget.hard_problem_call_multiplier > 1.0
+                or budget.hard_problem_extra_rounds > 0
+            )
+        )
+        if eligible:
+            budget.max_total_calls = min(
+                10000,
+                int(
+                    self._budget_scaling_baseline["max_total_calls"]
+                    * budget.hard_problem_call_multiplier
+                ),
+            )
+            budget.max_rounds = min(
+                64,
+                self._budget_scaling_baseline["max_rounds"]
+                + budget.hard_problem_extra_rounds,
+            )
+            continuation.max_segments_per_path = min(
+                64,
+                int(
+                    self._budget_scaling_baseline["max_segments_per_path"]
+                    * budget.hard_problem_call_multiplier
+                ),
+            )
+        effective = {
+            "max_total_calls": budget.max_total_calls,
+            "max_rounds": budget.max_rounds,
+            "max_segments_per_path": continuation.max_segments_per_path,
+        }
+        record = {
+            "difficulty": triage.difficulty.value,
+            "enabled": budget.scale_budget_with_difficulty,
+            "applied": effective != self._budget_scaling_baseline,
+            "baseline": dict(self._budget_scaling_baseline),
+            "effective": effective,
+            "max_total_tokens_unchanged": self.config.budget.max_total_tokens,
+            "max_cost_usd_unchanged": self.config.budget.max_cost_usd,
+        }
+        store.write_json("structured", "difficulty_budget_scaling", record)
+        store.write_json("structured", "config_redacted", self.config.redacted_dict())
+        store.append_event("difficulty_budget_scaling_evaluated", record)
+        if record["applied"]:
+            store.append_event("difficulty_budget_scaled", record)
+        return record
+
+    async def _attempt_semantic_repair_admission(
+        self,
+        problem: ProblemContract,
+        *,
+        candidates: list[StrategyCard],
+        state: SolveState,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        store: ArtifactStore,
+        prior_records: list[RouteAdmissionRecord],
+    ) -> tuple[list[StrategyCard], list[RouteAdmissionRecord], bool]:
+        """Batched form-repair of NEEDS_NORMALIZATION statements + one
+        re-admission of the same mathematical strategies.
+
+        Budget contract: calls are booked to the breadth bucket and hard
+        capped at min(max_semantic_repair_calls, fraction * total budget).
+        Every batch has an explicit ExecutableTaskRecord with a terminal
+        reason, so the repair path is auditable and can never dangle.
+        """
+        control = state.proof_control
+        cfg = self.config.topology.proof_control.route_admission
+        if control is None or not cfg.semantic_repair_enabled:
+            return [], prior_records, False
+        backlog = control.normalization_backlog(candidates)
+        if not backlog:
+            return [], prior_records, False
+        cap = min(
+            cfg.max_semantic_repair_calls,
+            int(
+                cfg.semantic_repair_budget_fraction * self.config.budget.max_total_calls
+            ),
+        )
+        if cap < 1 or runner.ledger.remaining_calls <= 1:
+            store.append_event(
+                "semantic_repair_refused",
+                {"reason": "budget", "backlog": len(backlog)},
+            )
+            return [], prior_records, False
+        tasks = control.executable_task_controller
+        batch_size = min(
+            cfg.blueprint_review.max_nodes_per_batch,
+            cfg.blueprint_review.max_batch_repair_items,
+        )
+        current_candidates = list(candidates)
+        current_records = list(prior_records)
+        calls_made = 0
+        for repair_round in range(cfg.blueprint_review.max_repair_rounds):
+            backlog = control.normalization_backlog(current_candidates)
+            if not backlog or calls_made >= cap:
+                break
+            replacements: dict[str, str] = {}
+            round_call_cap = min(
+                cap - calls_made,
+                cfg.blueprint_review.max_review_calls_per_round,
+            )
+            calls_before_round = calls_made
+            for offset in range(0, len(backlog), batch_size):
+                if (
+                    calls_made - calls_before_round >= round_call_cap
+                    or runner.ledger.remaining_calls <= 1
+                ):
+                    break
+                batch = backlog[offset : offset + batch_size]
+                task = tasks.create_admission_review_task(
+                    task_kind="batch_repair",
+                    target_obligation_ids=[item["node_id"] for item in batch],
+                    strategy_ids=[item["strategy_id"] for item in batch],
+                    created_round=state.current_round,
+                    prompt_ref=f"normalize_statements:round:{repair_round}",
+                )
+                if task.status.value in {
+                    "completed",
+                    "inconclusive",
+                    "failed",
+                    "expired",
+                }:
+                    store.append_event(
+                        "semantic_repair_task_replay_suppressed",
+                        {
+                            "task_id": task.task_id,
+                            "status": task.status.value,
+                        },
+                    )
+                    continue
+                tasks.mark_running(task.task_id, current_round=state.current_round)
+                result = await self._safe_call(
+                    runner,
+                    "structural_verifier",
+                    prompts.normalize_statements(
+                        problem,
+                        [
+                            {
+                                "statement": item["statement"],
+                                "needs": item["needs"],
+                            }
+                            for item in batch
+                        ],
+                    ),
+                    budget_bucket="breadth",
+                )
+                calls_made += 1
+                if result is None:
+                    tasks.fail(
+                        task.task_id,
+                        current_round=state.current_round,
+                        reason="normalizer_call_failed",
+                    )
+                    continue
+                batch_replacements = 0
+                for item in result.value.items:
+                    original = item.original_statement.strip()
+                    normalized = item.normalized_statement.strip()
+                    if (
+                        item.is_mathematical_proposition
+                        and original
+                        and normalized
+                        and normalized != original
+                    ):
+                        replacements[original] = normalized
+                        batch_replacements += 1
+                tasks.complete_work(
+                    task.task_id,
+                    current_round=state.current_round,
+                    result_refs=[f"normalized:{batch_replacements}"],
+                    reason="batched_normalization_completed",
+                )
+            if calls_made == calls_before_round or not replacements:
+                break
+            current_candidates = control.apply_normalized_statements(
+                current_candidates,
+                replacements,
+            )
+            selected, current_records = control.admit_routes(current_candidates)
+            store.append_event(
+                "semantic_repair_readmission",
+                {
+                    "repair_round": repair_round + 1,
+                    "candidate_count": len(current_candidates),
+                    "admitted_count": len(selected),
+                    "normalized": len(replacements),
+                },
+            )
+            if selected:
+                store.append_event(
+                    "semantic_repair_completed",
+                    {
+                        "backlog": len(backlog),
+                        "normalized": len(replacements),
+                        "calls": calls_made,
+                        "call_cap": cap,
+                        "repair_rounds": repair_round + 1,
+                    },
+                )
+                return selected, current_records, True
+        if calls_made == 0:
+            return [], prior_records, False
+        store.append_event(
+            "semantic_repair_completed",
+            {
+                "backlog": len(backlog),
+                "calls": calls_made,
+                "call_cap": cap,
+                "repair_rounds": cfg.blueprint_review.max_repair_rounds,
+            },
+        )
+        return [], current_records, True
+
+    @staticmethod
+    def _admission_regeneration_task_kind(
+        records: Sequence[RouteAdmissionRecord],
+    ) -> Literal[
+        "blueprint_review",
+        "repair_direct_target",
+        "edge_review",
+        "generate_plan",
+    ]:
+        reasons = " ".join(
+            reason for record in records for reason in record.reasons
+        ).casefold()
+        if "direct target" in reasons or "could not be aligned" in reasons:
+            return "repair_direct_target"
+        if "edge" in reasons or "blueprint path" in reasons:
+            return "edge_review"
+        if "blueprint is unavailable" in reasons:
+            return "blueprint_review"
+        return "generate_plan"
+
+    @staticmethod
+    def _classify_admission_starvation(
+        records: Sequence[RouteAdmissionRecord],
+    ) -> dict[str, Any]:
+        """Separate 'the gate is broken' from 'the strategies are bad'.
+
+        A homogeneous batch of parsing/normalization rejections is a
+        repairable control-plane failure: regenerating or widening the
+        planner re-runs the same doomed pipeline and must be stopped.
+        """
+        repairable_markers = (
+            "no semantically admissible direct target",
+            "needs normalization",
+            "not materialized",
+            "system parsing issue",
+            "blueprint is unavailable",
+            "could not be aligned",
+            "not_truth_apt",
+            "missing_explicit",
+            "missing_quantifier",
+        )
+        mathematical_markers = (
+            "refuted",
+            "duplicate",
+            "unrelated",
+            "scope_invalid",
+            "necessary-only",
+        )
+        repairable = 0
+        mathematical = 0
+        for record in records:
+            joined = " ".join(record.reasons).casefold()
+            if any(marker in joined for marker in repairable_markers):
+                repairable += 1
+            elif any(marker in joined for marker in mathematical_markers):
+                mathematical += 1
+        total = max(1, len(records))
+        if repairable / total >= 0.8:
+            category = "systemic_semantic_failure"
+        elif mathematical / total >= 0.8:
+            category = "strategy_space_exhausted"
+        else:
+            category = "mixed_admission_failure"
+        return {
+            "category": category,
+            "repairable_count": repairable,
+            "mathematical_count": mathematical,
+            "total": len(records),
+            "sample_reasons": [
+                reason for record in records[:4] for reason in record.reasons[:2]
+            ],
+        }
+
+    @staticmethod
+    def _admission_termination_reason(starvation: Mapping[str, Any]) -> str:
+        if starvation.get("repair_exhausted"):
+            return "NO_ROUTES_ADMITTED(repair_exhausted)"
+        category = str(starvation.get("category") or "unknown")
+        return f"NO_ROUTES_ADMITTED({category})"
 
     def _attach_planner_computation_hints(
         self, strategies: Iterable[StrategyCard]
@@ -5989,6 +8671,83 @@ class ProofMeshOrchestrator:
             return 0
         return max(route.stagnation_rounds, route.no_progress_strikes)
 
+    async def _run_materialized_falsification_tasks(
+        self,
+        problem: ProblemContract,
+        strategy: StrategyCard,
+        author: AgentRuntime,
+        *,
+        state: SolveState | None,
+        round_index: int,
+        path_id: str,
+        parent_checkpoint_id: str | None,
+        meta_review_approved: bool,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        tools: ToolBroker,
+        budget_bucket: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if (
+            state is None
+            or state.proof_control is None
+            or not state.proof_control.active
+        ):
+            return [], []
+        route = (
+            state.route_registry.route_for_strategy(strategy.strategy_id)
+            if state.route_registry is not None
+            else None
+        )
+        route_id = route.route_id if route is not None else None
+        lane = self.config.topology.proof_control.falsification_fast_lane
+        tasks = state.proof_control.pending_falsification_specs(
+            strategy.strategy_id,
+            route_id=route_id,
+        )[: lane.max_tasks_per_round]
+        feedback: list[dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
+        for task in tasks:
+            assert task.experiment_spec is not None
+            state.proof_control.mark_falsification_running(task.task_id)
+            try:
+                decision, result = await self._run_requested_computation(
+                    problem,
+                    task.experiment_spec.model_copy(deep=True),
+                    author,
+                    path_id=path_id,
+                    parent_checkpoint_id=parent_checkpoint_id,
+                    stalled_rounds=self._computation_stalled_rounds(
+                        state,
+                        strategy,
+                        round_index=round_index,
+                    ),
+                    meta_review_approved=meta_review_approved,
+                    runner=runner,
+                    prompts=prompts,
+                    tools=tools,
+                    budget_bucket=budget_bucket,
+                    state=state,
+                    proof_control_task_id=task.task_id,
+                    proof_control_target_obligation_id=(task.target_obligation_id),
+                    proof_control_target_claim_id=task.target_claim_id,
+                )
+            except BaseException as exc:
+                state.proof_control.record_falsification_execution_failure(
+                    task.task_id,
+                    error=exc,
+                )
+                raise
+            feedback.append(decision.model_dump(mode="json"))
+            if result is None:
+                state.proof_control.record_falsification_decision(
+                    task.task_id,
+                    decision=decision.decision.value,
+                    reason=decision.reason,
+                )
+                continue
+            results.append(result.model_dump(mode="json"))
+        return feedback, results
+
     async def _retry_deferred_computations(
         self,
         problem: ProblemContract,
@@ -6051,6 +8810,7 @@ class ProofMeshOrchestrator:
                 prompts=prompts,
                 tools=tools,
                 budget_bucket=budget_bucket,
+                state=state,
             )
             feedback.append(decision.model_dump(mode="json"))
             if experiment is not None:
@@ -6303,6 +9063,10 @@ class ProofMeshOrchestrator:
         prompts: PromptFactory,
         tools: ToolBroker,
         budget_bucket: str,
+        state: SolveState | None = None,
+        proof_control_task_id: str | None = None,
+        proof_control_target_obligation_id: str | None = None,
+        proof_control_target_claim_id: str | None = None,
     ) -> tuple[ComputationDecision, ExperimentResult | None]:
         # Provenance is authoritative and deliberately excluded from the semantic
         # request hash so the same mathematical request can be reused from cache.
@@ -6314,6 +9078,34 @@ class ProofMeshOrchestrator:
             stalled_rounds=stalled_rounds,
             meta_review_approved=meta_review_approved,
             remaining_llm_calls=runner.ledger.remaining_calls,
+            proof_control_fast_lane=bool(
+                state is not None
+                and state.proof_control is not None
+                and state.proof_control.active
+            ),
+            target_obligation_id=(
+                proof_control_target_obligation_id
+                or (
+                    state.proof_graph.main_goal_obligation_ids()[0]
+                    if state is not None
+                    and state.proof_control is not None
+                    and state.proof_graph is not None
+                    and state.proof_graph.main_goal_obligation_ids()
+                    else None
+                )
+            ),
+            target_claim_id=(
+                proof_control_target_claim_id
+                or (
+                    f"claim_{stable_hash(spec.target_claim)[:12]}"
+                    if state is not None and state.proof_control is not None
+                    else None
+                )
+            ),
+            fast_lane_tasks_this_round=sum(
+                item.parent_checkpoint_id == parent_checkpoint_id
+                for item in tools.results_for_path(path_id)
+            ),
         )
         decision = tools.decide(spec, context)
         if decision.rule_id in {
@@ -6420,6 +9212,18 @@ class ProofMeshOrchestrator:
             decision,
             program=program,
         )
+        if (
+            state is not None
+            and state.proof_control is not None
+            and (
+                proof_control_task_id is not None
+                or decision.rule_id == "fast_path.proof_control_falsification"
+            )
+        ):
+            state.proof_control.record_falsification_result(
+                result,
+                task_id=proof_control_task_id,
+            )
         return decision, result
 
     async def _repair_computation_contract(
@@ -6881,6 +9685,11 @@ class ProofMeshOrchestrator:
             broker=state.message_broker,
             typed_memory=state.typed_memory,
             proof_graph=state.proof_graph,
+            control_hints=(
+                state.proof_control.route_hints(route_id)
+                if state.proof_control is not None
+                else None
+            ),
         )
         return route_id, delivered, context
 
@@ -7301,6 +10110,28 @@ class ProofMeshOrchestrator:
         result.global_share_allowed = (
             result.global_share_allowed and execution.fact_promotion_allowed
         )
+        if state.proof_control is not None and result.claim_dispositions:
+            independent_reports = [
+                item
+                for item in [result.skeptic_result]
+                if isinstance(item, VerificationReport)
+                and item.verdict == VerificationVerdict.PASS
+                and item.agent_id != author.id
+            ]
+            state.proof_control.apply_route_referee_records(
+                result.claim_dispositions,
+                claims=delta.new_claims,
+                local_steps=delta.new_steps,
+                structurally_verified_step_ids={
+                    item.step_id for item in delta.new_steps
+                },
+                independent_report_ids=[item.report_id for item in independent_reports],
+                confidence=(
+                    min(item.confidence for item in independent_reports)
+                    if independent_reports
+                    else 1.0
+                ),
+            )
         store.append_event(
             "validation_escalation_executed",
             {
@@ -7350,6 +10181,9 @@ class ProofMeshOrchestrator:
             "global_share_allowed": result.global_share_allowed,
             "validation_passed": execution.passed,
             "validation_execution": execution.model_dump(mode="json"),
+            "claim_dispositions": [
+                item.model_dump(mode="json") for item in result.claim_dispositions
+            ],
             "diagnostics": list(result.diagnostics),
         }
         if state.route_team_reviews is None:
@@ -7621,7 +10455,12 @@ class ProofMeshOrchestrator:
                 )
         else:
             checkpoint = make_genesis_checkpoint(
-                problem, strategy, source_agent_id=agent.id
+                problem,
+                strategy,
+                source_agent_id=agent.id,
+                proof_sketch=(
+                    previous_attempt.proof_sketch if previous_attempt else ""
+                ),
             )
             store.commit_proof_checkpoint(checkpoint)
             resumed_from = None
@@ -7680,6 +10519,20 @@ class ProofMeshOrchestrator:
                 and state.proof_graph is not None
                 and route_id is not None
                 else None
+            )
+            proof_control_closed_core_before = (
+                {
+                    item.obligation_id
+                    for item in state.proof_graph.obligations_in_core_closure(
+                        route_id=route_id
+                    )
+                    if item.status == "closed"
+                }
+                if state is not None
+                and state.proof_control is not None
+                and state.proof_graph is not None
+                and route_id is not None
+                else set()
             )
             next_segment = checkpoint.segment_index + 1
             current_goal_before_segment = checkpoint.current_goal
@@ -7790,8 +10643,23 @@ class ProofMeshOrchestrator:
                     current_round=round_index,
                 )
             )
-            experiment_results: list[dict[str, Any]] = []
-            computation_feedback: list[dict[str, Any]] = []
+            (
+                computation_feedback,
+                experiment_results,
+            ) = await self._run_materialized_falsification_tasks(
+                problem,
+                strategy,
+                agent,
+                state=state,
+                round_index=round_index,
+                path_id=path_id,
+                parent_checkpoint_id=checkpoint.checkpoint_id,
+                meta_review_approved=computation_meta_approved,
+                runner=runner,
+                prompts=prompts,
+                tools=tools,
+                budget_bucket=budget_bucket,
+            )
             (
                 deferred_feedback,
                 deferred_results,
@@ -7821,7 +10689,7 @@ class ProofMeshOrchestrator:
                 and item.get("evidence_strength")
                 == EvidenceStrength.COUNTEREXAMPLE.value
                 and bool(item.get("independently_verified"))
-                for item in deferred_results
+                for item in experiment_results
             )
             delta: ProofDelta | None = None
             result: StructuredCallResult[Any] | None = None
@@ -7913,6 +10781,9 @@ class ProofMeshOrchestrator:
                             remaining_call_budget=runner.ledger.remaining_calls,
                             experiment_results=experiment_results,
                             computation_feedback=computation_feedback,
+                            negative_knowledge=self._negative_knowledge_context(
+                                memory, state, strategy.strategy_id
+                            ),
                         )
                     return PromptBundle(
                         bundle.stage,
@@ -8112,6 +10983,125 @@ class ProofMeshOrchestrator:
                     ContinuationAction.COMPLETE,
                 }:
                     delta = turn.delta
+                    if delta is not None:
+                        # Bookkeeping fields are the server's, not the
+                        # model's: backfill them so a copy typo burns neither
+                        # a repair call nor the whole segment. The
+                        # mathematical content is untouched.
+                        delta = delta.model_copy(
+                            update={
+                                "problem_hash": problem.integrity_hash,
+                                "path_id": checkpoint.path_id,
+                                "strategy_id": checkpoint.strategy_id,
+                                "parent_checkpoint_id": checkpoint.checkpoint_id,
+                                "round_index": round_index,
+                                "segment_index": next_segment,
+                            }
+                        )
+                    if (
+                        delta is not None
+                        and delta.detected_conflicts
+                        and not delta.new_steps
+                        and cfg.allow_checkpoint_rollback
+                    ):
+                        rollback_parent = (
+                            store.load_proof_checkpoint(
+                                checkpoint.path_id,
+                                checkpoint.parent_checkpoint_id,
+                            )
+                            if checkpoint.parent_checkpoint_id is not None
+                            else None
+                        )
+                        rollback_reports = (
+                            await self._verify_proof_delta(
+                                problem,
+                                strategy,
+                                checkpoint,
+                                delta,
+                                result.agent,
+                                runner,
+                                prompts,
+                                memory,
+                                tools,
+                                store,
+                                state=state,
+                            )
+                            if rollback_parent is not None
+                            else []
+                        )
+                        if state is not None:
+                            state.reports.extend(rollback_reports)
+                        rollback_confirmed = bool(
+                            rollback_parent is not None
+                            and self._checkpoint_rollback_confirmed(
+                                checkpoint,
+                                rollback_parent,
+                                author_id=result.agent.id,
+                                reports=rollback_reports,
+                                confidence_threshold=cfg.checkpoint_pass_threshold,
+                            )
+                        )
+                        store.save_proof_delta(
+                            delta.delta_id,
+                            delta,
+                            rejected=not rollback_confirmed,
+                        )
+                        if rollback_confirmed and rollback_parent is not None:
+                            abandoned = checkpoint
+                            restored = store.rollback_proof_checkpoint(
+                                checkpoint.path_id,
+                                reason="; ".join(delta.detected_conflicts)[:400],
+                            )
+                            if restored is not None:
+                                self._reconcile_checkpoint_rollback(
+                                    state=state,
+                                    memory=memory,
+                                    store=store,
+                                    abandoned=abandoned,
+                                    restored=restored,
+                                    rollback_reports=rollback_reports,
+                                )
+                                checkpoint = restored
+                                targeted_feedback = [
+                                    *targeted_feedback,
+                                    (
+                                        "Independent verification confirmed a "
+                                        "contradiction in the latest checkpoint "
+                                        "segment. The path was rolled back one "
+                                        "segment and its derived evidence was "
+                                        "invalidated. Rebuild from the restored "
+                                        "checkpoint and avoid the refuted step: "
+                                        + "; ".join(delta.detected_conflicts)[:300]
+                                    ),
+                                ]
+                        else:
+                            deep_outcome_reason = (
+                                "the author's rollback request was not confirmed "
+                                "by an independent, step-specific review"
+                            )
+                            targeted_feedback = [
+                                *targeted_feedback,
+                                (
+                                    "The latest verified checkpoint remains "
+                                    "authoritative. A rollback requires an "
+                                    "independent verifier to identify and confirm "
+                                    "the exact invalid step introduced by its "
+                                    "latest segment."
+                                ),
+                            ]
+                            store.append_event(
+                                "proof_checkpoint_rollback_not_confirmed",
+                                {
+                                    "checkpoint_id": checkpoint.checkpoint_id,
+                                    "delta_id": delta.delta_id,
+                                    "author_id": result.agent.id,
+                                    "report_ids": [
+                                        report.report_id for report in rollback_reports
+                                    ],
+                                },
+                            )
+                        delta = None
+                        break
                     break
                 if turn.action == ContinuationAction.ABANDON:
                     deep_outcome = ExplorationOutcome.NO_VERIFIED_PROGRESS
@@ -8147,6 +11137,7 @@ class ProofMeshOrchestrator:
                     prompts=prompts,
                     tools=tools,
                     budget_bucket=budget_bucket,
+                    state=state,
                 )
                 computation_feedback.append(decision.model_dump(mode="json"))
                 if decision.decision == ComputationDecisionStatus.DEFER:
@@ -8297,7 +11288,24 @@ class ProofMeshOrchestrator:
             )
             store.save_working_checkpoint(working_checkpoint)
 
-            local_report = local_delta_verification(problem, checkpoint, delta)
+            if state is not None and state.proof_control is not None:
+                state.proof_control.register_delta(
+                    delta,
+                    source_attempt_id=attempt_id,
+                )
+            # The guard must accept exactly the cross-path IDs the prompt
+            # offered the author as usable dependencies: verified lemma
+            # library claims (legacy mode) and delivered broker messages
+            # (hierarchical mode).
+            prompt_shared_ids = {claim.claim_id for claim in relevant} | {
+                message.message_id for message in delivered_messages
+            }
+            local_report = local_delta_verification(
+                problem,
+                checkpoint,
+                delta,
+                shared_dependency_ids=prompt_shared_ids,
+            )
             policy_issues: list[VerificationIssue] = []
             for gate_failure in calculation_gate_result.failures:
                 policy_issues.append(
@@ -8423,6 +11431,62 @@ class ProofMeshOrchestrator:
                 for report in reports
                 if report.agent_id != "local-integrity-guard"
             ]
+            # UNCERTAIN on a technically hard step is common and repairable;
+            # dropping the whole segment for it punished exactly the bold
+            # multi-step work hard problems need. One extra arbiter breaks
+            # the tie before the segment is discarded.
+            if (
+                cfg.verify_each_delta
+                and local_report.verdict == VerificationVerdict.PASS
+                and independent
+                and any(
+                    report.verdict == VerificationVerdict.UNCERTAIN
+                    for report in independent
+                )
+                and not any(
+                    report.verdict == VerificationVerdict.FAIL for report in independent
+                )
+                and runner.ledger.remaining_calls > 1
+            ):
+                arbiter_reports = await self._verify_proof_delta(
+                    problem,
+                    strategy,
+                    checkpoint,
+                    delta,
+                    result.agent,
+                    runner,
+                    prompts,
+                    memory,
+                    tools,
+                    store,
+                    state=state,
+                    exclude_extra={report.agent_id for report in independent},
+                )
+                if arbiter_reports:
+                    reports.extend(arbiter_reports)
+                    store.append_event(
+                        "delta_uncertain_arbitration",
+                        {
+                            "delta_id": delta.delta_id,
+                            "arbiter_verdicts": [
+                                report.verdict.value for report in arbiter_reports
+                            ],
+                        },
+                    )
+                    independent = [
+                        report
+                        for report in reports
+                        if report.agent_id != "local-integrity-guard"
+                    ]
+                    if all(
+                        report.verdict == VerificationVerdict.PASS
+                        for report in arbiter_reports
+                    ):
+                        independent = [
+                            report
+                            for report in independent
+                            if report.verdict != VerificationVerdict.UNCERTAIN
+                        ]
             accepted = local_report.verdict == VerificationVerdict.PASS
             if cfg.verify_each_delta:
                 accepted = (
@@ -8434,6 +11498,66 @@ class ProofMeshOrchestrator:
                     )
                     and min(report.confidence for report in independent)
                     >= cfg.checkpoint_pass_threshold
+                )
+
+            proof_control_continue = True
+            if (
+                state is not None
+                and state.proof_control is not None
+                and state.proof_graph is not None
+                and route_id is not None
+            ):
+                control_report = next(
+                    (
+                        item
+                        for item in reports
+                        if item.verdict != VerificationVerdict.PASS
+                    ),
+                    max(reports, key=lambda item: item.confidence),
+                )
+                prior_core_history = state.proof_control.state.core_debt_history.get(
+                    route_id, []
+                )
+                prior_core_debt = prior_core_history[-1] if prior_core_history else None
+                state.proof_control.process_verification_report(
+                    control_report,
+                    route_id=route_id,
+                    delta=delta,
+                )
+                current_core_debt = float(
+                    state.proof_control.route_signals(route_id)["core_proof_debt"]
+                )
+                proof_control_closed_core_after = {
+                    item.obligation_id
+                    for item in state.proof_graph.obligations_in_core_closure(
+                        route_id=route_id
+                    )
+                    if item.status == "closed"
+                }
+                proof_control_continue = state.proof_control.allow_deepen(
+                    route_id=route_id,
+                    segment_index=next_segment,
+                    report=control_report,
+                    core_obligation_closed=bool(
+                        proof_control_closed_core_after
+                        - proof_control_closed_core_before
+                    ),
+                    core_debt_reduced=bool(
+                        prior_core_debt is not None
+                        and current_core_debt < prior_core_debt - 1e-9
+                    ),
+                    verified_bridge_gain=bool(
+                        accepted
+                        and any(
+                            state.proof_control.state.proof_roles.get(claim.claim_id)
+                            in {
+                                ProofRole.CORE_BRIDGE,
+                                ProofRole.SUFFICIENT_CONDITION,
+                                ProofRole.EQUIVALENT_REDUCTION,
+                            }
+                            for claim in delta.new_claims
+                        )
+                    ),
                 )
 
             if not accepted:
@@ -8549,12 +11673,22 @@ class ProofMeshOrchestrator:
                         report.confidence for report in independent
                     )
             memory.add_many(claims)
+            for claim in claims:
+                memory.mark_claim_checkpoint_verified(
+                    claim.claim_id,
+                    report_ids=[item.report_id for item in reports],
+                    confidence=min(item.confidence for item in reports),
+                    independent=bool(independent),
+                )
             verified_delta_claims.extend(claims)
             checkpoint = merge_verified_delta(
                 checkpoint,
                 delta,
                 reports,
                 failover_chain=tried_agents,
+            )
+            memory.register_committed_step_ids(
+                step.step_id for step in checkpoint.verified_steps
             )
             self._record_route_checkpoint_outcome(
                 state,
@@ -8588,7 +11722,7 @@ class ProofMeshOrchestrator:
                 and state.message_broker is not None
                 and acknowledged_receipts
             ):
-                record_verified_message_usage(
+                used_message_ids = record_verified_message_usage(
                     state.message_broker,
                     delivered_messages,
                     acknowledged_receipts,
@@ -8597,6 +11731,12 @@ class ProofMeshOrchestrator:
                     proof_graph=state.proof_graph,
                     proof_debt_before=proof_debt_before,
                 )
+                if state.proof_control is not None:
+                    for message_id in used_message_ids:
+                        state.proof_control.record_message_usage(
+                            message_id,
+                            consumer_route_id=route_id,
+                        )
             store.write_json(
                 "structured",
                 f"proof_checkpoint_{checkpoint.checkpoint_id}",
@@ -8623,6 +11763,8 @@ class ProofMeshOrchestrator:
                         "proof_complete": checkpoint.proof_complete,
                     },
                 )
+            if not proof_control_continue:
+                break
 
         attempt = attempt_from_checkpoint(
             checkpoint,
@@ -8646,6 +11788,105 @@ class ProofMeshOrchestrator:
         store.append_event("attempt_completed", attempt)
         return attempt
 
+    @staticmethod
+    def _checkpoint_rollback_confirmed(
+        abandoned: ProofCheckpoint,
+        restored: ProofCheckpoint,
+        *,
+        author_id: str,
+        reports: list[VerificationReport],
+        confidence_threshold: float,
+    ) -> bool:
+        """Require independent, step-specific agreement before rollback."""
+
+        restored_step_ids = {step.step_id for step in restored.verified_steps}
+        latest_segment_step_ids = {
+            step.step_id for step in abandoned.verified_steps
+        } - restored_step_ids
+        independent = [report for report in reports if report.agent_id != author_id]
+        return bool(latest_segment_step_ids and independent) and all(
+            report.problem_integrity_ok
+            and report.verdict == VerificationVerdict.PASS
+            and report.confidence >= confidence_threshold
+            and report.first_error_step in latest_segment_step_ids
+            and report.first_error_step in report.checked_dependencies
+            for report in independent
+        )
+
+    def _reconcile_checkpoint_rollback(
+        self,
+        *,
+        state: SolveState | None,
+        memory: LemmaMemory,
+        store: ArtifactStore,
+        abandoned: ProofCheckpoint,
+        restored: ProofCheckpoint,
+        rollback_reports: list[VerificationReport],
+    ) -> None:
+        """Revoke live authority derived only from an abandoned descendant."""
+
+        protected_claim_ids = {
+            memory.resolve_claim_id(claim_id)
+            for claim_id in restored.verified_claim_ids
+        }
+        removed_claim_ids = {
+            memory.resolve_claim_id(claim_id)
+            for claim_id in abandoned.verified_claim_ids
+        } - protected_claim_ids
+        invalidated_claim_ids = memory.invalidate_checkpoint_claims(
+            removed_claim_ids,
+            rollback_report_ids=[report.report_id for report in rollback_reports],
+        )
+        claims_by_id = {claim.claim_id: claim for claim in memory.claims}
+        invalidated_message_ids = [
+            f"msg_claim_{claims_by_id[claim_id].content_hash[:12]}"
+            for claim_id in invalidated_claim_ids
+            if claim_id in claims_by_id
+        ]
+
+        active_checkpoints = store.list_proof_checkpoints()
+        memory.replace_committed_step_ids(
+            step.step_id
+            for active_checkpoint in active_checkpoints
+            for step in active_checkpoint.verified_steps
+        )
+        if state is not None:
+            state.checkpoints = active_checkpoints
+            if state.typed_memory is not None:
+                dependent_message_ids = state.typed_memory.invalidate_dependents(
+                    invalidated_message_ids,
+                    reason=f"checkpoint_rolled_back:{abandoned.checkpoint_id}",
+                )
+                invalidated_message_ids = self._deduplicate_strings(
+                    [*invalidated_message_ids, *dependent_message_ids]
+                )
+            if state.message_broker is not None:
+                state.message_broker.invalidate_messages(
+                    invalidated_message_ids,
+                    reason=f"checkpoint_rolled_back:{abandoned.checkpoint_id}",
+                )
+            if state.proof_graph is not None:
+                state.proof_graph.invalidate_evidence_messages(
+                    invalidated_message_ids,
+                    reason=f"checkpoint_rolled_back:{abandoned.checkpoint_id}",
+                )
+            if state.route_registry is not None:
+                route = state.route_registry.route_for_strategy(abandoned.strategy_id)
+                if route is not None:
+                    route.latest_checkpoint_id = restored.checkpoint_id
+            if state.proof_control is not None:
+                state.proof_control.persist()
+            self._persist_hierarchical_route_runtime(state, store)
+        store.append_event(
+            "proof_checkpoint_rollback_reconciled",
+            {
+                "abandoned_checkpoint_id": abandoned.checkpoint_id,
+                "restored_checkpoint_id": restored.checkpoint_id,
+                "invalidated_claim_ids": invalidated_claim_ids,
+                "invalidated_message_ids": invalidated_message_ids,
+            },
+        )
+
     async def _verify_proof_delta(
         self,
         problem: ProblemContract,
@@ -8660,6 +11901,7 @@ class ProofMeshOrchestrator:
         store: ArtifactStore,
         *,
         state: SolveState | None = None,
+        exclude_extra: set[str] | None = None,
     ) -> list[VerificationReport]:
         reports: list[VerificationReport] = []
         experiment_audit = tools.audit_key_results(
@@ -8692,7 +11934,7 @@ class ProofMeshOrchestrator:
                 }
             ),
         )
-        excluded = {author.id}
+        excluded = {author.id, *(exclude_extra or set())}
         replicas = self.config.continuation.delta_verifier_replicas
         for _ in range(replicas):
             try:
@@ -8867,8 +12109,23 @@ class ProofMeshOrchestrator:
             if previous_attempt and previous_attempt.path_id
             else f"path_{strategy.strategy_id}"
         )
-        experiment_results: list[dict[str, Any]] = []
-        computation_feedback: list[dict[str, Any]] = []
+        (
+            computation_feedback,
+            experiment_results,
+        ) = await self._run_materialized_falsification_tasks(
+            problem,
+            strategy,
+            agent,
+            state=state,
+            round_index=round_index,
+            path_id=path_id,
+            parent_checkpoint_id=None,
+            meta_review_approved=computation_meta_approved,
+            runner=runner,
+            prompts=prompts,
+            tools=tools,
+            budget_bucket=budget_bucket,
+        )
         (
             deferred_feedback,
             deferred_results,
@@ -8906,7 +12163,7 @@ class ProofMeshOrchestrator:
             item.get("outcome") == ExperimentOutcome.COUNTEREXAMPLE_FOUND.value
             and item.get("evidence_strength") == EvidenceStrength.COUNTEREXAMPLE.value
             and bool(item.get("independently_verified"))
-            for item in deferred_results
+            for item in experiment_results
         )
         cumulative_usage = UsageRecord()
         latest_raw_ref: str | None = None
@@ -8925,6 +12182,9 @@ class ProofMeshOrchestrator:
                 runner.ledger.remaining_calls,
                 experiment_results,
                 computation_feedback,
+                negative_knowledge=self._negative_knowledge_context(
+                    memory, state, strategy.strategy_id
+                ),
             )
             result = await self._safe_call(
                 runner,
@@ -9021,6 +12281,7 @@ class ProofMeshOrchestrator:
                 prompts=prompts,
                 tools=tools,
                 budget_bucket=budget_bucket,
+                state=state,
             )
             computation_feedback.append(decision.model_dump(mode="json"))
             if decision.decision == ComputationDecisionStatus.DEFER:
@@ -9356,6 +12617,7 @@ class ProofMeshOrchestrator:
             role="structural_verifier",
             count=1,
         )
+        committed_known = self._committed_dependency_ids(attempt, memory, state)
         structural_reports = await self._call_structural_reviewers(
             problem,
             attempt,
@@ -9363,6 +12625,7 @@ class ProofMeshOrchestrator:
             runner,
             prompts,
             store,
+            known_dependency_ids=committed_known,
         )
         reports.extend(structural_reports)
 
@@ -9387,6 +12650,7 @@ class ProofMeshOrchestrator:
                 runner,
                 prompts,
                 store,
+                known_dependency_ids=committed_known,
             )
             structural_reports.extend(extra_reports)
             reports.extend(extra_reports)
@@ -9409,6 +12673,30 @@ class ProofMeshOrchestrator:
         may_detail = structural_aggregate.verdict == VerificationVerdict.PASS
         if not self.config.verification.detailed_only_after_structural_pass:
             may_detail = structural_aggregate.verdict != VerificationVerdict.FAIL
+        # A structural FAIL from LLM judgment alone (no deterministic guard
+        # issue) still deserves one detailed pass: deep attempts need
+        # first-error-level repair feedback, and a single same-model
+        # reviewer's structural hallucination must not be able to bury a
+        # route unexamined. Deterministic guard failures stay hard.
+        deterministic_structural_failure = any(
+            issue.phase
+            in {
+                "local_dependency_guard",
+                "local_completeness_guard",
+                "hard_constraint_guard",
+                "experiment_audit_guard",
+            }
+            and issue.severity in {Severity.ERROR, Severity.CRITICAL}
+            for report in structural_reports
+            for issue in report.issues
+        )
+        if (
+            not may_detail
+            and structural_aggregate.verdict == VerificationVerdict.FAIL
+            and not deterministic_structural_failure
+            and runner.ledger.remaining_calls > 1
+        ):
+            may_detail = True
 
         if may_detail and runner.ledger.remaining_calls > 0:
             replica_count = router.verification_replicas(attempt, structural_reports)
@@ -9472,20 +12760,56 @@ class ProofMeshOrchestrator:
                 reports.extend(extra_reports)
 
         if structural_aggregate.verdict == VerificationVerdict.FAIL:
+            detailed_dissent = bool(detailed_reports) and all(
+                report.verdict == VerificationVerdict.PASS
+                for report in detailed_reports
+            )
             aggregate = VerificationReport(
                 target_id=attempt.attempt_id,
                 target_type="attempt",
                 agent_id="system-aggregate",
                 stage=VerificationStage.DETAILED,
                 problem_integrity_ok=structural_aggregate.problem_integrity_ok,
-                verdict=VerificationVerdict.FAIL,
+                # A step-level audit that unanimously passes outranks a
+                # single structural reviewer's judgment call: the verdict
+                # becomes UNCERTAIN (repairable disagreement), never a
+                # silent burial of the route. Deterministic guard failures
+                # never reach this branch with detailed reports.
+                verdict=(
+                    VerificationVerdict.UNCERTAIN
+                    if detailed_dissent
+                    else VerificationVerdict.FAIL
+                ),
                 first_error_step=structural_aggregate.first_error_step,
-                issues=structural_aggregate.issues,
-                checked_dependencies=structural_aggregate.checked_dependencies,
+                issues=[
+                    *structural_aggregate.issues,
+                    *[issue for report in detailed_reports for issue in report.issues],
+                ],
+                checked_dependencies=sorted(
+                    {
+                        *structural_aggregate.checked_dependencies,
+                        *[
+                            dep
+                            for report in detailed_reports
+                            for dep in report.checked_dependencies
+                        ],
+                    }
+                ),
                 failure_level=structural_aggregate.failure_level,
-                confidence=structural_aggregate.confidence,
-                concise_feedback="Detailed verification skipped because the structural gate failed. "
-                + structural_aggregate.concise_feedback,
+                confidence=(
+                    min(structural_aggregate.confidence, 0.6)
+                    if detailed_dissent
+                    else structural_aggregate.confidence
+                ),
+                concise_feedback=(
+                    (
+                        "Structural gate failed but every detailed audit "
+                        "passed; treat as a repairable disagreement. "
+                        if detailed_dissent
+                        else "Structural gate failed. "
+                    )
+                    + structural_aggregate.concise_feedback
+                ),
             )
         elif not detailed_reports:
             aggregate = VerificationReport(
@@ -9549,6 +12873,72 @@ class ProofMeshOrchestrator:
             )
         return VerificationBundle(aggregate=aggregate, reports=reports)
 
+    @staticmethod
+    def _negative_knowledge_context(
+        memory: LemmaMemory,
+        state: SolveState | None,
+        strategy_id: str,
+        *,
+        limit: int = 6,
+    ) -> list[dict[str, Any]]:
+        """Refuted claims and cross-route dead ends for prompt injection.
+
+        Without this, isolated explorers re-derive already-refuted lemmas
+        and re-walk dead ends other routes paid for; failure produced no
+        knowledge, only lost budget.
+        """
+        packets: list[dict[str, Any]] = []
+        for claim in memory.rejected()[:limit]:
+            packets.append(
+                {
+                    "kind": "refuted_claim",
+                    "statement": claim.statement,
+                    "scope_limitations": claim.scope_limitations[:3],
+                }
+            )
+        if state is not None:
+            seen: set[str] = set()
+            for attempt in reversed(state.attempts):
+                if attempt.strategy_id == strategy_id:
+                    continue
+                for dead_end in attempt.dead_ends:
+                    key = dead_end.strip().casefold()
+                    if key and key not in seen:
+                        seen.add(key)
+                        packets.append(
+                            {
+                                "kind": "dead_end",
+                                "strategy_id": attempt.strategy_id,
+                                "statement": dead_end,
+                            }
+                        )
+                if len(packets) >= 2 * limit:
+                    break
+        return packets[: 2 * limit]
+
+    @staticmethod
+    def _committed_dependency_ids(
+        attempt: ProofAttempt,
+        memory: LemmaMemory,
+        state: SolveState | None,
+    ) -> set[str]:
+        """IDs an attempt may legitimately depend on beyond its own steps.
+
+        Multi-round attempts carry checkpoint steps whose dependencies point
+        at claims committed in EARLIER segments; those claims live in the
+        checkpoint chain and the global lemma memory, not in this call's
+        proposed_lemmas. Excluding them made the dependency guard
+        deterministically fail every deep proof.
+        """
+        known: set[str] = set()
+        checkpoints = state.checkpoints if state is not None else []
+        for checkpoint in checkpoints:
+            if attempt.path_id is not None and checkpoint.path_id == attempt.path_id:
+                known.update(checkpoint.verified_claim_ids)
+                known.update(step.step_id for step in checkpoint.verified_steps)
+        known.update(claim.claim_id for claim in memory.verified())
+        return known
+
     async def _call_structural_reviewers(
         self,
         problem: ProblemContract,
@@ -9557,6 +12947,8 @@ class ProofMeshOrchestrator:
         runner: StructuredAgentRunner,
         prompts: PromptFactory,
         store: ArtifactStore,
+        *,
+        known_dependency_ids: set[str] | None = None,
     ) -> list[VerificationReport]:
         async def one(reviewer: AgentRuntime) -> VerificationReport:
             bundle = prompts.structural_verify(
@@ -9589,7 +12981,12 @@ class ProofMeshOrchestrator:
                 raw_ref=result.raw_ref,
                 usage=result.usage,
             )
-            self._apply_local_attempt_integrity_guard(problem, attempt, report)
+            self._apply_local_attempt_integrity_guard(
+                problem,
+                attempt,
+                report,
+                known_dependency_ids=known_dependency_ids,
+            )
             store.write_json("structured", f"report_{report.report_id}", report)
             return report
 
@@ -10041,9 +13438,35 @@ class ProofMeshOrchestrator:
         if not previous_candidates:
             return None
         previous = max(previous_candidates, key=lambda a: a.round_index)
+        # After two stagnant rounds the same explorer keeps replaying its own
+        # fixed ideas; hand the checkpoint to a different agent for a fresh
+        # rollout of the same verified prefix.
+        stagnation_rounds = 0
+        if route is not None:
+            stagnation_rounds = max(
+                getattr(route, "stagnation_rounds", 0) or 0,
+                getattr(route, "no_progress_strikes", 0) or 0,
+            )
+        swap_explorer = stagnation_rounds >= 2 and len(runner.pool.agents) > 1
         try:
-            agent = runner.pool.get(previous.agent_id)
-        except KeyError:
+            if swap_explorer:
+                agent = runner.pool.select(
+                    "explorer",
+                    exclude={previous.agent_id},
+                    specialty_hints=strategy.tags,
+                )
+                store.append_event(
+                    "deepen_explorer_swapped",
+                    {
+                        "strategy_id": strategy_id,
+                        "previous_agent_id": previous.agent_id,
+                        "new_agent_id": agent.id,
+                        "stagnation_rounds": stagnation_rounds,
+                    },
+                )
+            else:
+                agent = runner.pool.get(previous.agent_id)
+        except (KeyError, RuntimeError):
             agent = runner.pool.select("explorer", specialty_hints=strategy.tags)
         feedback = self._targeted_feedback(previous, state)
         computation_meta_approved = any(
@@ -10161,6 +13584,10 @@ class ProofMeshOrchestrator:
         if not genuinely_new:
             return []
         selected = router.select_diverse_strategies(genuinely_new, count)
+        if state.proof_control is not None:
+            selected, _ = state.proof_control.admit_routes(selected)
+        if not selected:
+            return []
         state.strategies.extend(selected)
         assignments = router.assign_explorers(selected)
         if state.route_registry is not None:
@@ -10389,6 +13816,34 @@ class ProofMeshOrchestrator:
             artifact_store=artifact_store,
         )
 
+    @staticmethod
+    def _final_review_author_ids(
+        proof: FinalProof,
+        state: SolveState | None,
+        synthesizer: AgentRuntime | None,
+    ) -> set[str]:
+        """Return every agent that authored the winning proof lineage."""
+
+        excluded = {synthesizer.id} if synthesizer is not None else set()
+        if state is None:
+            return excluded
+        source_ids = set(proof.source_attempt_ids)
+        author_paths: set[str] = set()
+        for attempt in state.attempts:
+            if attempt.attempt_id not in source_ids:
+                continue
+            excluded.add(attempt.agent_id)
+            excluded.update(attempt.failover_chain)
+            if attempt.path_id:
+                author_paths.add(attempt.path_id)
+        for checkpoint in state.checkpoints:
+            if checkpoint.path_id not in author_paths:
+                continue
+            if checkpoint.source_agent_id:
+                excluded.add(checkpoint.source_agent_id)
+            excluded.update(checkpoint.failover_chain)
+        return excluded
+
     async def _verify_final(
         self,
         problem: ProblemContract,
@@ -10507,12 +13962,35 @@ class ProofMeshOrchestrator:
         failed_experiment_audits = [
             record for record in experiment_audit if not record.get("valid", False)
         ]
-        exclude = {synthesizer.id} if synthesizer is not None else set()
-        structural = runner.pool.select(
-            "structural_verifier",
-            exclude=exclude,
-            prefer_provider_not=synthesizer.provider if synthesizer else None,
-        )
+        # Independence is a hard final-gate invariant. If the pool has no
+        # non-author reviewer, verification remains uncertain instead of
+        # silently allowing an author to approve their own winning chain.
+        exclude = self._final_review_author_ids(proof, state, synthesizer)
+        try:
+            structural = runner.pool.select(
+                "structural_verifier",
+                exclude=exclude,
+                prefer_provider_not=synthesizer.provider if synthesizer else None,
+                strict_exclude=True,
+            )
+        except RuntimeError:
+            store.append_event(
+                "final_verification_author_exclusion_exhausted",
+                {
+                    "reason": "no_independent_structural_reviewer",
+                    "excluded_agent_ids": sorted(exclude),
+                },
+            )
+            report = self._synthetic_verification_failure(
+                "final_proof",
+                "final_proof",
+                VerificationStage.FINAL,
+                "Final verification could not run because every eligible "
+                "reviewer authored the winning proof lineage.",
+                uncertain=True,
+            )
+            store.write_json("structured", f"final_verification_{new_id('v')}", report)
+            return VerificationBundle(aggregate=report, reports=[report])
         router.add_edge(
             source=synthesizer.id if synthesizer else "synthesizer",
             target=structural.id,
@@ -10635,9 +14113,29 @@ class ProofMeshOrchestrator:
             "final_verifier",
             self.config.budget.base_verifier_replicas,
             exclude=exclude | {structural.id},
+            strict_exclude=True,
         )
         if not final_reviewers:
-            final_reviewers = [runner.pool.select("final_verifier", exclude=exclude)]
+            store.append_event(
+                "final_verification_author_exclusion_exhausted",
+                {
+                    "reason": "no_independent_detailed_reviewer",
+                    "excluded_agent_ids": sorted(exclude | {structural.id}),
+                },
+            )
+            unavailable = self._synthetic_verification_failure(
+                "final_proof",
+                "final_proof",
+                VerificationStage.FINAL,
+                "Final detailed verification could not run because no "
+                "non-author reviewer remained after the structural gate.",
+                uncertain=True,
+            )
+            reports.append(unavailable)
+            store.write_json(
+                "structured", f"final_verification_{new_id('v')}", unavailable
+            )
+            return VerificationBundle(aggregate=unavailable, reports=reports)
         for reviewer in final_reviewers:
             router.add_edge(
                 source=synthesizer.id if synthesizer else "synthesizer",
@@ -10690,6 +14188,7 @@ class ProofMeshOrchestrator:
                 "final_verifier",
                 1,
                 exclude=exclude | {structural.id} | {r.agent_id for r in detailed},
+                strict_exclude=True,
             )
             if blind_detailed:
                 extra_reports = await self._call_blind_final_reviewers(
@@ -10987,8 +14486,14 @@ class ProofMeshOrchestrator:
 
     @staticmethod
     def _raise_if_provider_circuit(results: Iterable[Any]) -> None:
+        """Re-raise fatal run-level exceptions swallowed by gather().
+
+        Budget exhaustion is fatal for the whole run: converting it into a
+        synthetic FAILED report both masks the true stop reason and lets
+        later stages keep issuing doomed calls.
+        """
         for result in results:
-            if isinstance(result, ProviderCircuitOpenError):
+            if isinstance(result, (ProviderCircuitOpenError, BudgetExhaustedError)):
                 raise result
 
     def _aggregate_reports(
@@ -11102,11 +14607,13 @@ class ProofMeshOrchestrator:
         problem: ProblemContract,
         attempt: ProofAttempt,
         report: VerificationReport,
+        *,
+        known_dependency_ids: set[str] | None = None,
     ) -> None:
         self._apply_local_target_integrity_guard(problem, attempt, report)
         step_ids = {step.step_id for step in attempt.proof_steps}
         claim_ids = {claim.claim_id for claim in attempt.proposed_lemmas}
-        known = step_ids | claim_ids
+        known = step_ids | claim_ids | (known_dependency_ids or set())
         missing: set[str] = set()
         for step in attempt.proof_steps:
             for dep in step.dependencies:
@@ -11140,6 +14647,76 @@ class ProofMeshOrchestrator:
                 )
             )
             report.verdict = VerificationVerdict.FAIL
+        constraint_hits = self._hard_constraint_violations(
+            problem,
+            [
+                dep
+                for step in attempt.proof_steps
+                for dep in step.dependencies
+                if dep.startswith("external:")
+            ],
+        )
+        for hit in constraint_hits:
+            report.issues.append(
+                VerificationIssue(
+                    phase="hard_constraint_guard",
+                    severity=Severity.CRITICAL,
+                    description=hit,
+                    repair_hint=(
+                        "Remove the forbidden citation and derive the result "
+                        "from admissible tools."
+                    ),
+                )
+            )
+            report.failure_level = max(
+                report.failure_level,
+                FailureLevel.STRATEGY,
+                key=self._failure_rank,
+            )
+            report.verdict = VerificationVerdict.FAIL
+
+    @staticmethod
+    def _hard_constraint_violations(
+        problem: ProblemContract,
+        external_dependencies: Sequence[str],
+    ) -> list[str]:
+        """Deterministic enforcement of explicit citation bans.
+
+        A hard constraint of the form "不得引用X" / "do not use X" bans any
+        external:<name> dependency whose name contains X. Free-text
+        constraints that name no theorem stay reviewer-enforced.
+        """
+        markers = (
+            "不得引用",
+            "不得使用",
+            "禁止引用",
+            "禁止使用",
+            "do not use",
+            "do not cite",
+            "must not use",
+            "must not cite",
+            "forbidden:",
+        )
+        violations: list[str] = []
+        dependencies = [dep.casefold() for dep in external_dependencies]
+        for constraint in problem.hard_constraints:
+            lowered = constraint.casefold()
+            for marker in markers:
+                index = lowered.find(marker)
+                if index < 0:
+                    continue
+                fragment = lowered[index + len(marker) :]
+                fragment = re.split(r"[，,。;；.!?？]", fragment)[0].strip()
+                fragment = fragment.strip("\"'“”‘’ 的定理")
+                if len(fragment) < 2:
+                    continue
+                for dep in dependencies:
+                    if fragment in dep:
+                        violations.append(
+                            "External citation violates a hard constraint: "
+                            f"{constraint!r} bans {dep!r}."
+                        )
+        return violations
 
     def _apply_local_target_integrity_guard(
         self,
@@ -11192,21 +14769,17 @@ class ProofMeshOrchestrator:
             lean_rejected = (
                 result.kind == "lean_check" and payload.get("accepted") is False
             )
-            if refuted or typed_refuted or lean_rejected:
+            if refuted or typed_refuted:
                 report.issues.append(
                     VerificationIssue(
                         phase="deterministic_tool_guard",
                         severity=Severity.CRITICAL if refuted else Severity.ERROR,
                         description=(
                             "Verifier-requested deterministic check produced an independently confirmed counterexample."
-                            if refuted or typed_refuted
-                            else "Submitted Lean fragment was rejected by the configured checker."
                         ),
                         counterexample=str(
                             payload.get("assignment") or payload.get("counterexample")
-                        )
-                        if refuted or typed_refuted
-                        else None,
+                        ),
                         repair_hint="Check the formalization mapping, then repair or remove the refuted inference.",
                     )
                 )
@@ -11222,6 +14795,27 @@ class ProofMeshOrchestrator:
                     "A deterministic check refuted a requested subclaim. "
                     + report.concise_feedback
                 )
+            elif lean_rejected:
+                # Formalization failure is an obligation, not a refutation:
+                # it caps PASS at UNCERTAIN but must never fail the target.
+                report.issues.append(
+                    VerificationIssue(
+                        phase="deterministic_tool_guard",
+                        severity=Severity.WARNING,
+                        description=(
+                            "Submitted Lean fragment was rejected by the checker; "
+                            "the natural-language claim remains unverified by Lean, "
+                            "not refuted."
+                        ),
+                        repair_hint=(
+                            "Repair the formalization mapping or drop the Lean "
+                            "certificate; the mathematical claim itself is "
+                            "unaffected."
+                        ),
+                    )
+                )
+                if report.verdict == VerificationVerdict.PASS:
+                    report.verdict = VerificationVerdict.UNCERTAIN
 
     def _apply_experiment_audit_guard(
         self,
@@ -11277,6 +14871,18 @@ class ProofMeshOrchestrator:
                 [target.answer] + [step.statement for step in target.proof_steps]
             )
         normalized_target = self._normalize_statement(mathematical_text).casefold()
+        if isinstance(target, ProofAttempt):
+            referenced_ids = {
+                dep for step in target.proof_steps for dep in step.dependencies
+            } | {claim.claim_id for claim in target.proposed_lemmas}
+        elif isinstance(target, ProofDelta):
+            referenced_ids = {
+                dep for step in target.new_steps for dep in step.dependencies
+            } | {claim.claim_id for claim in target.new_claims}
+        else:
+            referenced_ids = {
+                dep for step in target.proof_steps for dep in step.dependencies
+            } | set(target.dependencies)
         for experiment in experiments:
             if (
                 experiment.outcome != ExperimentOutcome.COUNTEREXAMPLE_FOUND
@@ -11285,7 +14891,21 @@ class ProofMeshOrchestrator:
             ):
                 continue
             claim = self._normalize_statement(experiment.target_claim).casefold()
-            if len(claim) < 8 or claim not in normalized_target:
+            # Structured ID binding first: a rewording of the refuted claim
+            # must not escape the guard. Verbatim text match stays as the
+            # fallback, plus a token-overlap match for paraphrases.
+            id_bound = bool(
+                experiment.target_claim_id
+                and experiment.target_claim_id in referenced_ids
+            )
+            verbatim = len(claim) >= 8 and claim in normalized_target
+            claim_tokens = {tok for tok in re.findall(r"\w{2,}", claim)}
+            token_overlap = bool(claim_tokens) and (
+                sum(1 for tok in claim_tokens if tok in normalized_target)
+                / len(claim_tokens)
+                >= 0.8
+            )
+            if not (id_bound or verbatim or token_overlap):
                 continue
             report.issues.append(
                 VerificationIssue(
@@ -11337,10 +14957,10 @@ class ProofMeshOrchestrator:
                     and result.result.get("outcome") == "counterexample_found"
                     and result.result.get("independently_verified") is True
                 )
-                or (
-                    result.kind == "lean_check"
-                    and result.result.get("accepted") is False
-                )
+                # lean_check rejection is deliberately NOT here: a failed
+                # formalization (syntax error, missing import, sorry marker)
+                # is a formalization obligation, never a mathematical
+                # refutation of the target claim.
             )
             for result in report.tool_results
         )
@@ -11382,6 +15002,25 @@ class ProofMeshOrchestrator:
                     description="The verifier did not identify the first erroneous step.",
                 )
             )
+        # A PASS that names nothing it checked is a zero-effort review, not
+        # an audit; it may not gate a proof forward.
+        if (
+            stage == VerificationStage.DETAILED
+            and report.verdict == VerificationVerdict.PASS
+            and not report.checked_dependencies
+        ):
+            report.issues.append(
+                VerificationIssue(
+                    phase="verification_protocol",
+                    severity=Severity.WARNING,
+                    description=(
+                        "PASS was returned without any checked_dependencies; "
+                        "an audit must enumerate what it verified."
+                    ),
+                )
+            )
+            report.verdict = VerificationVerdict.UNCERTAIN
+            report.confidence = min(report.confidence, 0.5)
 
     def _record_verification_bundles(
         self,
@@ -11391,6 +15030,19 @@ class ProofMeshOrchestrator:
         for bundle in bundles:
             state.reports.extend(bundle.reports)
             state.aggregate_reports[bundle.aggregate.target_id] = bundle.aggregate
+            if state.proof_control is not None:
+                attempt = next(
+                    (
+                        item
+                        for item in state.attempts
+                        if item.attempt_id == bundle.aggregate.target_id
+                    ),
+                    None,
+                )
+                state.proof_control.process_verification_report(
+                    bundle.aggregate,
+                    attempt=attempt,
+                )
             if state.capability_profile is None or state.triage is None:
                 continue
             domain = state.capability_domain
@@ -12028,6 +15680,12 @@ class ProofMeshOrchestrator:
                 prover.update_trust(-0.03)
         except KeyError:
             pass
+        # Reviewer trust must reward EVIDENCE, not agreement with the
+        # majority: paying for conformity teaches same-model reviewers to
+        # rubber-stamp each other and buries exactly the dissent that finds
+        # correlated blind spots. Credit is earned by reports whose FAIL is
+        # backed by a deterministic refutation or a concrete counterexample
+        # issue; dissent alone is never penalized.
         for report in reports:
             if report.agent_id.startswith("system-"):
                 continue
@@ -12035,22 +15693,39 @@ class ProofMeshOrchestrator:
                 reviewer = pool.get(report.agent_id)
             except KeyError:
                 continue
-            if aggregate.verdict == VerificationVerdict.UNCERTAIN:
-                continue
-            reviewer.update_trust(
-                0.01 if report.verdict == aggregate.verdict else -0.015
+            evidence_backed_fail = report.verdict == VerificationVerdict.FAIL and (
+                self._has_deterministic_refutation(report)
+                or any(bool(issue.counterexample) for issue in report.issues)
             )
+            if evidence_backed_fail:
+                reviewer.update_trust(0.02)
+            elif (
+                report.verdict == VerificationVerdict.PASS
+                and not report.checked_dependencies
+            ):
+                reviewer.update_trust(-0.01)
 
     def _has_synthesis_ready_candidate(self, state: SolveState) -> bool:
         return any(
-            attempt.status == AttemptStatus.COMPLETE
-            and bool(attempt.proof_steps)
-            and state.aggregate_reports.get(attempt.attempt_id) is not None
-            and state.aggregate_reports[attempt.attempt_id].verdict
-            == VerificationVerdict.PASS
-            and state.aggregate_reports[attempt.attempt_id].confidence
-            >= self.config.budget.synthesis_threshold
+            self._is_verified_synthesis_candidate(state, attempt)
             for attempt in state.attempts
+        )
+
+    def _is_verified_synthesis_candidate(
+        self,
+        state: SolveState,
+        attempt: ProofAttempt,
+    ) -> bool:
+        report = state.aggregate_reports.get(attempt.attempt_id)
+        return bool(
+            attempt.status == AttemptStatus.COMPLETE
+            and attempt.proof_steps
+            and not attempt.unresolved_gaps
+            and report is not None
+            and report.verdict == VerificationVerdict.PASS
+            and report.problem_integrity_ok
+            and report.first_error_step is None
+            and report.confidence >= self.config.budget.synthesis_threshold
         )
 
     def _can_enter_synthesis(self, state: SolveState) -> bool:
@@ -12058,6 +15733,110 @@ class ProofMeshOrchestrator:
             return True
         ranked = self._rank_attempts(state.attempts)
         return bool(self._meta_selected_execution_repairs(state, ranked))
+
+    def _proof_control_allows_synthesis(self, state: SolveState) -> bool:
+        if state.proof_control is None:
+            return True
+        selected = self._select_for_synthesis(state)
+        verified_selected = [
+            attempt
+            for attempt in selected
+            if self._is_verified_synthesis_candidate(state, attempt)
+        ]
+        candidate_attempts = verified_selected or selected
+        subject_ids: set[str] = set()
+        local_subject_ids: set[str] = set()
+        candidate_artifact_refs: set[str] = set()
+        unresolved_statements: set[str] = set()
+        raw_dependencies: set[str] = set()
+        for attempt in candidate_attempts:
+            subject_ids.add(attempt.strategy_id)
+            step_ids = {item.step_id for item in attempt.proof_steps}
+            claim_ids = {item.claim_id for item in attempt.proposed_lemmas}
+            subject_ids.update(step_ids)
+            subject_ids.update(claim_ids)
+            local_subject_ids.update(step_ids)
+            local_subject_ids.update(claim_ids)
+            lineage_checkpoint_ids = set(attempt.checkpoint_ids)
+            candidate_artifact_refs.update(
+                lineage_attempt.raw_artifact_ref
+                for lineage_attempt in state.attempts
+                if lineage_attempt.raw_artifact_ref
+                and lineage_attempt.strategy_id == attempt.strategy_id
+                and lineage_attempt.path_id == attempt.path_id
+                and (
+                    lineage_attempt.attempt_id == attempt.attempt_id
+                    or (
+                        lineage_attempt.latest_checkpoint_id is not None
+                        and lineage_attempt.latest_checkpoint_id
+                        in lineage_checkpoint_ids
+                    )
+                )
+            )
+            unresolved_statements.update(
+                self._normalize_statement(item) for item in attempt.unresolved_gaps
+            )
+            raw_dependencies.update(
+                dependency
+                for step in attempt.proof_steps
+                for dependency in step.dependencies
+            )
+        if state.message_broker is not None and candidate_artifact_refs:
+            subject_ids.update(
+                message.message_id
+                for message in state.message_broker.messages
+                if candidate_artifact_refs.intersection(message.artifact_refs)
+            )
+        obligation_ids = [
+            item.obligation_id
+            for item in (
+                state.proof_graph.obligations if state.proof_graph is not None else []
+            )
+            if item.status != "closed"
+            and self._normalize_statement(item.normalized_statement)
+            in unresolved_statements
+        ]
+        admitted = (
+            state.message_broker.admitted_facts()
+            if state.message_broker is not None
+            else []
+        )
+        candidate_fact_ids = [
+            message.message_id
+            for message in admitted
+            if message.message_id in raw_dependencies
+            or message.content_hash in raw_dependencies
+        ]
+        admitted_dependency_ids = {
+            value
+            for message in admitted
+            for value in (message.message_id, message.content_hash)
+        }
+        candidate_dependency_ids = sorted(
+            {
+                *obligation_ids,
+                *(
+                    dependency
+                    for dependency in raw_dependencies
+                    if dependency not in local_subject_ids
+                    and dependency not in admitted_dependency_ids
+                ),
+            }
+        )
+        conflicts = (
+            state.contradiction_broker.unresolved()
+            if state.contradiction_broker is not None
+            else []
+        )
+        record = state.proof_control.synthesis_readiness(
+            conflicts=conflicts,
+            candidate_subject_ids=subject_ids,
+            candidate_dependency_ids=candidate_dependency_ids,
+            candidate_fact_ids=candidate_fact_ids,
+            candidate_proof_verified=bool(verified_selected),
+            candidate_verified_subject_ids=subject_ids,
+        )
+        return record.verdict != GateVerdict.BLOCK
 
     def _build_research_progress_report(
         self,
@@ -12142,6 +15921,9 @@ class ProofMeshOrchestrator:
                     "dead_ends": list(attempt.dead_ends),
                 }
             )
+        # Draft (tentative) obligations belong to blueprints that never became
+        # admitted routes; counting them as open mathematics would disguise a
+        # control-plane failure as unfinished proof work.
         open_obligations = (
             [
                 {
@@ -12151,13 +15933,27 @@ class ProofMeshOrchestrator:
                     "route_ids": item.route_ids,
                 }
                 for item in state.proof_graph.obligations
-                if item.status != "closed"
+                if item.status in {"open", "blocked"}
             ]
             if state.proof_graph is not None
             else []
         )
+        draft_obligation_count = (
+            sum(
+                1
+                for item in state.proof_graph.obligations
+                if item.status == "tentative"
+            )
+            if state.proof_graph is not None
+            else 0
+        )
         negative_evidence = (
             [item.statement for item in state.typed_memory.negatives]
+            if state.typed_memory is not None
+            else []
+        )
+        verified_local_claim_ids = (
+            [item.message_id for item in state.typed_memory.facts]
             if state.typed_memory is not None
             else []
         )
@@ -12166,28 +15962,59 @@ class ProofMeshOrchestrator:
             + [str(item["statement"]) for item in open_obligations]
         )
         zh = self.config.runtime.output_language.lower().startswith("zh")
-        summary = (
-            f"尚未建立完整证明。保留 {len(verified_attempts)} 条通过局部审查的路线、"
-            f"{len(verified_step_ids)} 个已审查步骤、{len(refuted_routes)} 条失败路线，"
-            f"以及 {len(open_obligations)} 个开放证明义务。"
-            if zh
-            else (
-                "No complete proof was established. Preserved "
-                f"{len(verified_attempts)} locally passed routes, "
-                f"{len(verified_step_ids)} reviewed steps, {len(refuted_routes)} failed "
-                f"routes, and {len(open_obligations)} open proof obligations."
+        if state.admission_starvation is not None:
+            category = state.admission_starvation.get("category", "unknown")
+            summary = (
+                f"没有任何路线通过准入（{category}）：这是控制面故障或策略空间问题，"
+                f"不是数学上留下了未解决的证明义务。候选策略 "
+                f"{state.admission_starvation.get('total', 0)} 条全部被拒，"
+                f"其中可修复类 {state.admission_starvation.get('repairable_count', 0)} 条。"
+                if zh
+                else (
+                    f"No route passed admission ({category}): this is a "
+                    "control-plane or strategy-space failure, not open "
+                    "mathematics. "
+                    f"{state.admission_starvation.get('total', 0)} candidate "
+                    "strategies were all rejected, "
+                    f"{state.admission_starvation.get('repairable_count', 0)} "
+                    "of them for repairable reasons."
+                )
             )
-        )
+        else:
+            summary = (
+                f"尚未建立完整证明。保留 {len(verified_attempts)} 条通过局部审查的路线、"
+                f"{len(verified_step_ids)} 个已审查步骤、"
+                f"{len(verified_local_claim_ids)} 个已验证局部结论、"
+                f"{len(refuted_routes)} 条失败路线，"
+                f"{len(open_obligations)} 个开放证明义务"
+                + (
+                    f"（另有 {draft_obligation_count} 个未准入草稿义务，不计入开放数学）。"
+                    if draft_obligation_count
+                    else "。"
+                )
+                if zh
+                else (
+                    "No complete proof was established. Preserved "
+                    f"{len(verified_attempts)} locally passed routes, "
+                    f"{len(verified_step_ids)} reviewed steps, "
+                    f"{len(verified_local_claim_ids)} verified local claims, "
+                    f"{len(refuted_routes)} failed routes, and "
+                    f"{len(open_obligations)} open proof obligations"
+                    + (
+                        f" (plus {draft_obligation_count} unadmitted draft "
+                        "obligations, not counted as open mathematics)."
+                        if draft_obligation_count
+                        else "."
+                    )
+                )
+            )
         return ResearchProgressReport(
             problem_hash=problem.integrity_hash,
+            termination_reason=state.termination_reason,
             valid_partial_attempt_ids=[item.attempt_id for item in reviewed],
             strongest_partial_attempt_id=(reviewed[0].attempt_id if reviewed else None),
             verified_step_ids=self._deduplicate_strings(verified_step_ids),
-            verified_local_claim_ids=(
-                [item.message_id for item in state.typed_memory.facts]
-                if state.typed_memory is not None
-                else []
-            ),
+            verified_local_claim_ids=verified_local_claim_ids,
             refuted_routes=refuted_routes,
             negative_evidence=self._deduplicate_strings(negative_evidence),
             open_obligations=open_obligations,
@@ -12258,6 +16085,29 @@ class ProofMeshOrchestrator:
         elif status == RunStatus.FAILED:
             execution_status = ExecutionStatus.FAILED
         experiment_payloads = store.list_experiment_results()
+        experiments = [
+            ExperimentResult.model_validate(payload) for payload in experiment_payloads
+        ]
+        coverage_steps = (
+            list(state.final_proof.proof_steps)
+            if state.final_proof is not None
+            else [
+                step
+                for attempt in state.attempts
+                if (
+                    (report := state.aggregate_reports.get(attempt.attempt_id))
+                    is not None
+                    and report.verdict == VerificationVerdict.PASS
+                )
+                for step in attempt.proof_steps
+            ]
+        )
+        coverage = formalization_coverage(coverage_steps, experiments)
+        if state.research_progress_report is not None:
+            state.research_progress_report.formalization_coverage = coverage
+            store.write_json(
+                "reports", "research_progress_report", state.research_progress_report
+            )
         task_status, deliverable_assessments = assess_task_deliverables(
             problem,
             state,
@@ -12310,19 +16160,18 @@ class ProofMeshOrchestrator:
             deliverable_assessments=deliverable_assessments,
             math_status=math_status,
             execution_status=execution_status,
+            termination_reason=state.termination_reason,
             problem=problem,
             final_proof=state.final_proof,
             final_verification=state.final_verification,
             research_progress_report=state.research_progress_report,
+            formalization_coverage=coverage,
             attempts=state.attempts,
             claims=memory.claims,
             verification_reports=state.reports,
             meta_reviews=state.meta_reviews,
             proof_checkpoints=store.list_proof_checkpoints(),
-            experiments=[
-                ExperimentResult.model_validate(payload)
-                for payload in experiment_payloads
-            ],
+            experiments=experiments,
             resumed=state.resumed,
             resumed_from_checkpoint_id=state.resumed_from_checkpoint_id,
             agent_metrics=metrics,
@@ -12388,7 +16237,9 @@ class ProofMeshOrchestrator:
         store.checkpoint(
             stage,
             {
-                "schema_version": "0.7",
+                "schema_version": (
+                    "0.8.2" if state.proof_control is not None else "0.7"
+                ),
                 "triage": state.triage,
                 "strategies": state.strategies,
                 "attempts": state.attempts,
@@ -12407,10 +16258,22 @@ class ProofMeshOrchestrator:
                 "research_progress_report": state.research_progress_report,
                 "global_no_progress_rounds": state.global_no_progress_rounds,
                 "global_meta_pivot_used": state.global_meta_pivot_used,
+                "pivot_grace_used": state.pivot_grace_used,
+                "hard_stopped": state.hard_stopped,
                 "last_progress_signature": state.last_progress_signature,
+                "proof_control_config_hash": stable_hash(
+                    self.config.model_dump(mode="json")
+                ),
+                "proof_control_goal_hash": (
+                    state.proof_graph.problem_hash
+                    if state.proof_graph is not None
+                    else None
+                ),
                 "certified_counterexample_hashes": (
                     state.certified_counterexample_hashes
                 ),
+                "termination_reason": state.termination_reason,
+                "admission_starvation": state.admission_starvation,
                 **export_hierarchical_checkpoint(
                     current_round=state.current_round,
                     graph_frozen=state.graph_frozen,
@@ -12427,6 +16290,7 @@ class ProofMeshOrchestrator:
                     inspiration_engine=state.inspiration_engine,
                     capability_profile=state.capability_profile,
                     deep_exploration_registry=state.deep_exploration_registry,
+                    proof_control=state.proof_control,
                 ),
                 "claims": memory.claims,
                 "calls_started": runner.ledger.calls_started,
@@ -12494,6 +16358,8 @@ class ProofMeshOrchestrator:
                     "deep_exploration_registry",
                     state.deep_exploration_registry.export_state(),
                 )
+            if state.proof_control is not None:
+                state.proof_control.persist()
             write_hierarchical_reports(
                 store,
                 route_registry=route_registry_state,
@@ -12533,6 +16399,8 @@ class ProofMeshOrchestrator:
                     "bounded_greedy_sequence",
                     "candidate_period_check",
                     "exact_geometry",
+                    "real_inequality",
+                    "number_theory_check",
                 ]
             )
         if (

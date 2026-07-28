@@ -460,9 +460,18 @@ class CriticalCalculationGate:
                 "request": request.model_dump(mode="json", exclude={"request_id"}),
             }
         )[:20]
+        # ToolRequest.purpose is free text; the documented discovery marker is
+        # the literal enum value. Ignoring it misjudged exploratory requests
+        # as assertion-mode and demanded claimed_values they cannot have.
+        purpose = (
+            ComputationPurpose.DISCOVER_PATTERN
+            if request.purpose.strip().casefold()
+            == ComputationPurpose.DISCOVER_PATTERN.value
+            else ComputationPurpose.CHECK_DERIVED_IDENTITY
+        )
         return ExperimentSpec(
             experiment_id=f"critical_calc_{identity}",
-            purpose=ComputationPurpose.CHECK_DERIVED_IDENTITY,
+            purpose=purpose,
             target_claim=f"Finite calculation assertion: {request.purpose}",
             assumptions=[],
             reasoning_basis=(
@@ -484,7 +493,7 @@ class CriticalCalculationGate:
             domains=raw_domains,
             arguments=arguments,
             exact_arithmetic=True,
-            broad_search=False,
+            broad_search=purpose == ComputationPurpose.DISCOVER_PATTERN,
             max_cases=max_cases,
             seed=self.config.runtime.random_seed,
             requested_by=requested_by,

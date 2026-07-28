@@ -63,8 +63,45 @@ _TOOL_ARGUMENTS: dict[ComputationMethod, set[str]] = {
         "start_index",
     },
     ComputationMethod.EXACT_GEOMETRY: {"points", "assertion"},
+    ComputationMethod.REAL_INEQUALITY: {
+        "lhs",
+        "rhs",
+        "relation",
+        "variables",
+        "max_runtime_ms",
+    },
+    ComputationMethod.NUMBER_THEORY_CHECK: {
+        "operation",
+        "a",
+        "n",
+        "p",
+        "residues",
+        "moduli",
+        "expression",
+        "assignment",
+        "claimed",
+    },
     ComputationMethod.SANDBOXED_PYTHON: {"input"},
     ComputationMethod.LEAN_CHECK: {"source"},
+}
+
+_REAL_INEQUALITY_DOMAIN_KEYS = {
+    "min",
+    "max",
+    "min_exclusive",
+    "max_exclusive",
+    "positive",
+    "nonnegative",
+    "nonzero",
+}
+
+_NUMBER_THEORY_OPERATIONS = {
+    "multiplicative_order",
+    "crt",
+    "p_adic_valuation",
+    "primitive_root",
+    "is_prime",
+    "factorization",
 }
 
 _NO_DOMAIN_METHODS = {
@@ -77,6 +114,7 @@ _NO_DOMAIN_METHODS = {
     ComputationMethod.BOUNDED_GREEDY_SEQUENCE,
     ComputationMethod.CANDIDATE_PERIOD_CHECK,
     ComputationMethod.EXACT_GEOMETRY,
+    ComputationMethod.NUMBER_THEORY_CHECK,
     ComputationMethod.SANDBOXED_PYTHON,
     ComputationMethod.LEAN_CHECK,
 }
@@ -233,8 +271,76 @@ def experiment_tool_catalog(
             "method": "exact_geometry",
             "required_arguments": ["points", "assertion"],
             "constraints": [
-                "assertion.kind is collinear, orientation, equal_distance, or point_on_segment."
+                "assertion.kind is collinear, orientation, equal_distance, "
+                "point_on_segment, concyclic, parallel, perpendicular, or "
+                "equal_angle.",
+                "concyclic/parallel/perpendicular take 4 point names; "
+                "equal_angle takes 6 (angle at the 2nd name versus angle at "
+                "the 5th); all checks use exact rational arithmetic.",
             ],
+        },
+        {
+            "method": "real_inequality",
+            "scope": (
+                "Prove or refute one polynomial/rational inequality over the "
+                "reals (on a box or all of R^n) via the Z3 QF_NRA decision "
+                "procedure."
+            ),
+            "required_arguments": ["lhs"],
+            "optional_arguments": ["rhs", "relation", "variables", "max_runtime_ms"],
+            "argument_shapes": {
+                "relation": sorted(_RELATIONS),
+                "max_runtime_ms": "integer >= 1, default 10000, capped at 60000",
+            },
+            "constraints": [
+                "Only + - * / with integer powers (plus Min/Max/Abs) of real "
+                "variables are supported; other functions return inconclusive.",
+                "unsat certifies the inequality over the declared domain only; "
+                "sat models are re-verified with exact SymPy rationals before "
+                "any counterexample is accepted.",
+            ],
+            "domains": (
+                "Optional per-variable real bounds: min/max (each with an "
+                "optional min_exclusive/max_exclusive flag) plus "
+                "positive/nonnegative/nonzero flags; undeclared variables "
+                "range over all reals."
+            ),
+        },
+        {
+            "method": "number_theory_check",
+            "scope": (
+                "One exact finite number-theory computation, certified only "
+                "for the specific finite assertion checked."
+            ),
+            "required_arguments": ["operation"],
+            "optional_arguments": [
+                "a",
+                "n",
+                "p",
+                "residues",
+                "moduli",
+                "expression",
+                "assignment",
+                "claimed",
+            ],
+            "operations": {
+                "multiplicative_order": "a and n with gcd(a, n) = 1",
+                "crt": "equal-length residues and moduli lists; solves and verifies",
+                "p_adic_valuation": (
+                    "prime p and an integer-valued expression with an integer "
+                    "assignment for its variables"
+                ),
+                "primitive_root": "n; claimed may be a candidate root or a boolean",
+                "is_prime": "n up to 10^18",
+                "factorization": "n below 10^12",
+            },
+            "constraints": [
+                "Certificates cover only the specific finite assertion "
+                "checked, never any infinite generalization.",
+                "Inputs beyond the guard bounds (factorization 10^12, "
+                "order/CRT moduli 10^12, primality 10^18) return inconclusive.",
+            ],
+            "domains": "unused",
         },
         {
             "method": "sandboxed_python",
@@ -297,6 +403,10 @@ def validate_experiment_contract(spec: ExperimentSpec) -> list[str]:
         _validate_candidate_period(args, issues)
     elif spec.method == ComputationMethod.EXACT_GEOMETRY:
         _validate_geometry(args, issues)
+    elif spec.method == ComputationMethod.REAL_INEQUALITY:
+        _validate_real_inequality(spec, issues)
+    elif spec.method == ComputationMethod.NUMBER_THEORY_CHECK:
+        _validate_number_theory(args, issues)
     elif spec.method == ComputationMethod.SANDBOXED_PYTHON:
         if not isinstance(args.get("input"), dict):
             issues.append("input must be a JSON object")
@@ -573,10 +683,15 @@ def _validate_geometry(args: dict[str, Any], issues: list[str]) -> None:
         "orientation": 3,
         "equal_distance": 4,
         "point_on_segment": 3,
+        "concyclic": 4,
+        "parallel": 4,
+        "perpendicular": 4,
+        "equal_angle": 6,
     }
     if kind not in expected_counts:
         issues.append(
-            "assertion.kind must be collinear, orientation, equal_distance, or point_on_segment"
+            "assertion.kind must be collinear, orientation, equal_distance, "
+            "point_on_segment, concyclic, parallel, perpendicular, or equal_angle"
         )
         return
     names = assertion.get("points")
@@ -584,6 +699,96 @@ def _validate_geometry(args: dict[str, Any], issues: list[str]) -> None:
         issues.append(f"{kind} requires exactly {expected_counts[kind]} point names")
     elif isinstance(points, dict) and any(str(name) not in points for name in names):
         issues.append("geometry assertion references an undeclared point")
+
+
+def _validate_real_inequality(spec: ExperimentSpec, issues: list[str]) -> None:
+    args = spec.arguments
+    _require_nonempty_string(args, "lhs", issues)
+    if "rhs" in args:
+        _require_nonempty_string(args, "rhs", issues)
+    if args.get("relation", "ge") not in _RELATIONS:
+        issues.append("relation must be one of: " + ", ".join(sorted(_RELATIONS)))
+    variables = args.get("variables")
+    if variables is not None:
+        if not isinstance(variables, list) or not all(
+            isinstance(value, str) and value.strip() for value in variables
+        ):
+            issues.append("variables must be a list of non-empty names")
+        elif len(variables) != len(set(variables)):
+            issues.append("variables must be unique")
+    if "max_runtime_ms" in args:
+        raw_timeout = args["max_runtime_ms"]
+        if (
+            isinstance(raw_timeout, bool)
+            or not isinstance(raw_timeout, int)
+            or raw_timeout < 1
+        ):
+            issues.append("max_runtime_ms must be an integer >= 1")
+    for name, domain in spec.domains.items():
+        if not isinstance(domain, dict):
+            issues.append(f"domain for {name!r} must be a mapping")
+            continue
+        unknown = sorted(set(domain) - _REAL_INEQUALITY_DOMAIN_KEYS)
+        if unknown:
+            issues.append(
+                f"domain for {name!r} has unsupported keys: {', '.join(unknown)}"
+            )
+        for key in ("min", "max"):
+            if key in domain and not _is_exact_rational(domain[key]):
+                issues.append(
+                    f"domain {key} for {name!r} must be an exact rational number"
+                )
+        for key in (
+            "min_exclusive",
+            "max_exclusive",
+            "positive",
+            "nonnegative",
+            "nonzero",
+        ):
+            if key in domain and not isinstance(domain[key], bool):
+                issues.append(f"domain {key} for {name!r} must be a boolean")
+
+
+def _validate_number_theory(args: dict[str, Any], issues: list[str]) -> None:
+    operation = args.get("operation")
+    if operation not in _NUMBER_THEORY_OPERATIONS:
+        issues.append(
+            "operation must be one of: " + ", ".join(sorted(_NUMBER_THEORY_OPERATIONS))
+        )
+        return
+    if operation == "multiplicative_order":
+        for name in ("a", "n"):
+            if not _is_exact_integer(args.get(name)):
+                issues.append(f"{name} must be an integer")
+    elif operation == "crt":
+        residues = args.get("residues")
+        moduli = args.get("moduli")
+        for label, values in (("residues", residues), ("moduli", moduli)):
+            if not isinstance(values, list) or not values:
+                issues.append(f"{label} must be a non-empty list of integers")
+            elif not all(_is_exact_integer(value) for value in values):
+                issues.append(f"{label} must contain only exact integers")
+        if (
+            isinstance(residues, list)
+            and isinstance(moduli, list)
+            and residues
+            and moduli
+            and len(residues) != len(moduli)
+        ):
+            issues.append("residues and moduli must have the same length")
+    elif operation == "p_adic_valuation":
+        if not _is_exact_integer(args.get("p")):
+            issues.append("p must be an integer")
+        _require_nonempty_string(args, "expression", issues)
+        assignment = args.get("assignment")
+        if assignment is not None:
+            if not isinstance(assignment, dict):
+                issues.append("assignment must map variable names to integers")
+            elif not all(_is_exact_integer(value) for value in assignment.values()):
+                issues.append("assignment values must be exact integers")
+    elif operation in {"primitive_root", "is_prime", "factorization"}:
+        if not _is_exact_integer(args.get("n")):
+            issues.append("n must be an integer")
 
 
 def _require_nonempty_string(
@@ -605,3 +810,13 @@ def _is_exact_integer(value: Any) -> bool:
         return Fraction(str(value)).denominator == 1
     except (TypeError, ValueError, ZeroDivisionError):
         return False
+
+
+def _is_exact_rational(value: Any) -> bool:
+    if value is None or isinstance(value, (bool, float)):
+        return False
+    try:
+        Fraction(str(value))
+    except (TypeError, ValueError, ZeroDivisionError):
+        return False
+    return True

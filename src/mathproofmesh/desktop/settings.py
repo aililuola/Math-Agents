@@ -9,7 +9,13 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 
-DesktopProfile = Literal["smoke", "formal", "active"]
+DesktopProfile = Literal[
+    "smoke",
+    "formal",
+    "active",
+    "proof_control_shadow",
+    "proof_control_active",
+]
 
 
 class DesktopSettings(BaseModel):

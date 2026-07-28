@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 from .config import SystemConfig
 from .schemas import (
@@ -16,6 +16,10 @@ from .schemas import (
 )
 from .store import ArtifactStore
 
+if TYPE_CHECKING:
+    from .proof_control.claim_lifecycle import ClaimLifecycleController
+    from .proof_control.models import ClaimVerificationLedgerEntry
+
 
 class LemmaMemory:
     """Structured claim store that preserves provenance and never upgrades uncertainty silently."""
@@ -24,18 +28,98 @@ class LemmaMemory:
         self.store = store
         self._claims: dict[str, ClaimCard] = {}
         self._hash_to_id: dict[str, str] = {}
+        # Dropped-duplicate claim_id -> canonical claim_id. Checkpoints may
+        # already reference the dropped ID; without the alias every later
+        # lookup on it either crashed or silently failed.
+        self._claim_aliases: dict[str, str] = {}
+        # Step IDs committed into any verified checkpoint. Claims may
+        # legitimately reference them even though they are not local steps.
+        self._committed_step_ids: set[str] = set()
+        from .proof_control.claim_lifecycle import ClaimLifecycleController
+
+        self._claim_lifecycle: ClaimLifecycleController = ClaimLifecycleController(
+            self._claims
+        )
 
     @property
     def claims(self) -> list[ClaimCard]:
         return list(self._claims.values())
 
+    def resolve_claim_id(self, claim_id: str) -> str:
+        current = claim_id
+        seen: set[str] = set()
+        while current in self._claim_aliases and current not in seen:
+            seen.add(current)
+            current = self._claim_aliases[current]
+        return current
+
+    def register_committed_step_ids(self, step_ids: Iterable[str]) -> None:
+        before = len(self._committed_step_ids)
+        self._committed_step_ids.update(step_ids)
+        if len(self._committed_step_ids) != before:
+            self._persist()
+
+    def replace_committed_step_ids(self, step_ids: Iterable[str]) -> None:
+        """Replace the live step registry after a checkpoint-lineage change."""
+
+        self._committed_step_ids = set(step_ids)
+        self._downgrade_invalid_dependency_cycles()
+        self._persist()
+
+    def export_runtime_state(self) -> dict[str, Any]:
+        """Return non-mathematical indexes needed for exact process resume."""
+
+        return {
+            "schema_version": 1,
+            "claim_aliases": dict(sorted(self._claim_aliases.items())),
+            "committed_step_ids": sorted(self._committed_step_ids),
+        }
+
+    def restore_runtime_state(self, state: dict[str, Any] | None) -> None:
+        """Restore sidecar indexes while accepting runs that predate them."""
+
+        payload = state or {}
+        candidates = {
+            str(alias): str(target)
+            for alias, target in dict(payload.get("claim_aliases", {})).items()
+            if alias and target and alias != target
+        }
+        combined = {**candidates, **self._claim_aliases}
+
+        def canonical_target(target: str) -> str:
+            current = target
+            seen: set[str] = set()
+            while current in combined and current not in seen:
+                seen.add(current)
+                current = combined[current]
+            return current
+
+        for alias, target in candidates.items():
+            canonical = canonical_target(target)
+            if alias not in self._claims and canonical in self._claims:
+                self._claim_aliases[alias] = canonical
+        self._committed_step_ids.update(
+            str(step_id)
+            for step_id in payload.get("committed_step_ids", [])
+            if str(step_id)
+        )
+        self._downgrade_invalid_dependency_cycles()
+        self._persist()
+
     def add_many(self, claims: Iterable[ClaimCard]) -> list[ClaimCard]:
+        pending = list(claims)
+        self._normalize_dependency_ref_sidecars(pending)
         added: list[ClaimCard] = []
-        for claim in claims:
+        for claim in pending:
             existing_id = self._hash_to_id.get(claim.content_hash)
             if existing_id:
                 existing = self._claims[existing_id]
-                # Merge provenance/evidence without upgrading status.
+                if claim.claim_id != existing_id:
+                    self._claim_aliases[claim.claim_id] = existing_id
+                # Merge provenance/evidence. Status never upgrades silently,
+                # but a duplicate carrying REAL verification evidence (a
+                # delta-verified card) may lift a PROPOSED/UNCERTAIN twin —
+                # dropping that evidence lost independently verified work.
                 known_refs = {e.artifact_ref for e in existing.evidence_refs}
                 existing.evidence_refs.extend(
                     e for e in claim.evidence_refs if e.artifact_ref not in known_refs
@@ -48,80 +132,129 @@ class LemmaMemory:
                 )
                 if existing.source_delta_id is None and claim.source_delta_id:
                     existing.source_delta_id = claim.source_delta_id
+                if (
+                    claim.status == ClaimStatus.VERIFIED
+                    and claim.verification_confidence is not None
+                    and existing.status in {ClaimStatus.PROPOSED, ClaimStatus.UNCERTAIN}
+                ):
+                    existing.status = ClaimStatus.VERIFIED
+                    existing.verification_confidence = max(
+                        existing.verification_confidence or 0.0,
+                        claim.verification_confidence,
+                    )
+                    self.store.append_event(
+                        "claim_status_upgraded_by_evidence",
+                        {
+                            "canonical_claim_id": existing_id,
+                            "duplicate_claim_id": claim.claim_id,
+                            "verification_confidence": (
+                                existing.verification_confidence
+                            ),
+                        },
+                    )
                 continue
             self._claims[claim.claim_id] = claim
             self._hash_to_id[claim.content_hash] = claim.claim_id
+            self._claim_lifecycle.register_claim(claim)
             added.append(claim)
             self.store.append_event("claim_added", claim)
         self._persist()
         return added
 
+    def _normalize_dependency_ref_sidecars(self, claims: list[ClaimCard]) -> None:
+        """Canonicalize typed dependency metadata before mutating memory."""
+
+        from .proof_control.models import DependencyRef
+
+        known_claims = [*self._claims.values(), *claims]
+        context = {
+            "local_claim_ids": {claim.claim_id for claim in known_claims},
+            "local_step_ids": {
+                *self._committed_step_ids,
+                *(step.step_id for claim in known_claims for step in claim.proof_steps),
+            },
+        }
+        migrations: list[dict[str, str]] = []
+
+        def normalize(
+            values: list[Any],
+            *,
+            owner_kind: str,
+            owner_id: str,
+        ) -> list[DependencyRef]:
+            normalized: list[DependencyRef] = []
+            for value in values:
+                was_legacy = isinstance(value, dict) and value.get("kind") == "external"
+                ref = (
+                    value
+                    if isinstance(value, DependencyRef)
+                    else DependencyRef.model_validate(value, context=context)
+                )
+                normalized.append(ref)
+                if was_legacy:
+                    migrations.append(
+                        {
+                            "owner_kind": owner_kind,
+                            "owner_id": owner_id,
+                            "target_id": ref.target_id,
+                            "canonical_kind": ref.kind.value,
+                            "kind_migration": ref.kind_migration or "",
+                        }
+                    )
+            return normalized
+
+        for claim in claims:
+            claim.dependency_refs = normalize(
+                claim.dependency_refs,
+                owner_kind="claim",
+                owner_id=claim.claim_id,
+            )
+            for step in claim.proof_steps:
+                step.dependency_refs = normalize(
+                    step.dependency_refs,
+                    owner_kind="step",
+                    owner_id=step.step_id,
+                )
+        if migrations:
+            self.store.append_event(
+                "dependency_ref_checkpoint_migrated",
+                {"migrations": migrations},
+            )
+
     def mark_attempt_verified(
         self, attempt_id: str, report: VerificationReport
     ) -> list[ClaimCard]:
-        """Apply an attempt audit without erasing narrower verified evidence.
+        """Record attempt completeness without projecting it onto child Claims."""
 
-        An incomplete or otherwise failed proof attempt does not refute every
-        independently audited lemma produced along that route. A child Claim is
-        rejected only when the report explicitly identifies that Claim (or one
-        of its proof steps), or when problem integrity itself failed. Untargeted
-        candidate Claims become uncertain; already verified Claims keep their
-        narrower checkpoint verdict.
-        """
-
-        changed: list[ClaimCard] = []
-        issue_claim_ids = {
-            issue.claim_id for issue in report.issues if issue.claim_id is not None
+        before = {
+            claim.claim_id: claim.status
+            for claim in self._claims.values()
+            if claim.source_attempt_id == attempt_id
         }
-        issue_step_ids = {
-            issue.step_id for issue in report.issues if issue.step_id is not None
-        }
-        if report.first_error_step is not None:
-            issue_step_ids.add(report.first_error_step)
-        preserved_verified_ids: list[str] = []
-        explicitly_rejected_ids: list[str] = []
-        uncertain_ids: list[str] = []
-        for claim in self._claims.values():
-            if claim.source_attempt_id != attempt_id:
-                continue
-            if report.verdict == VerificationVerdict.PASS:
-                claim.status = ClaimStatus.VERIFIED
-                claim.verification_confidence = report.confidence
-            elif report.verdict == VerificationVerdict.FAIL:
-                claim_step_ids = {step.step_id for step in claim.proof_steps}
-                explicitly_rejected = (
-                    not report.problem_integrity_ok
-                    or claim.claim_id in issue_claim_ids
-                    or bool(claim_step_ids & issue_step_ids)
-                )
-                if explicitly_rejected:
-                    claim.status = ClaimStatus.REJECTED
-                    claim.verification_confidence = report.confidence
-                    explicitly_rejected_ids.append(claim.claim_id)
-                elif claim.status == ClaimStatus.VERIFIED:
-                    preserved_verified_ids.append(claim.claim_id)
-                else:
-                    claim.status = ClaimStatus.UNCERTAIN
-                    claim.verification_confidence = report.confidence
-                    uncertain_ids.append(claim.claim_id)
-            else:
-                if claim.status == ClaimStatus.VERIFIED:
-                    preserved_verified_ids.append(claim.claim_id)
-                else:
-                    claim.status = ClaimStatus.UNCERTAIN
-                    claim.verification_confidence = report.confidence
-                    uncertain_ids.append(claim.claim_id)
-            changed.append(claim)
-        if preserved_verified_ids or explicitly_rejected_ids or uncertain_ids:
+        changed = self._claim_lifecycle.apply_attempt_report(attempt_id, report)
+        preserved_ids = [
+            claim.claim_id
+            for claim in changed
+            if claim.status == before.get(claim.claim_id)
+        ]
+        explicitly_rejected_ids = [
+            claim.claim_id
+            for claim in changed
+            if before.get(claim.claim_id) != ClaimStatus.REJECTED
+            and claim.status == ClaimStatus.REJECTED
+        ]
+        if changed:
             self.store.append_event(
                 "attempt_claim_scope_reconciled",
                 {
                     "attempt_id": attempt_id,
                     "report_id": report.report_id,
                     "attempt_verdict": report.verdict.value,
-                    "preserved_verified_claim_ids": preserved_verified_ids,
+                    "preserved_claim_ids": preserved_ids,
                     "explicitly_rejected_claim_ids": explicitly_rejected_ids,
-                    "uncertain_claim_ids": uncertain_ids,
+                    "source_attempt_incomplete": (
+                        report.verdict != VerificationVerdict.PASS
+                    ),
                 },
             )
         self._downgrade_invalid_dependency_cycles()
@@ -132,16 +265,85 @@ class LemmaMemory:
         claim = self._claims.get(report.target_id)
         if claim is None:
             return None
-        if report.verdict == VerificationVerdict.PASS:
-            claim.status = ClaimStatus.VERIFIED
-        elif report.verdict == VerificationVerdict.FAIL:
-            claim.status = ClaimStatus.REJECTED
-        else:
-            claim.status = ClaimStatus.UNCERTAIN
-        claim.verification_confidence = report.confidence
+        self._claim_lifecycle.apply_claim_report(report)
         self._downgrade_invalid_dependency_cycles()
         self._persist()
         return claim
+
+    def attach_claim_lifecycle(
+        self,
+        ledger: dict[str, ClaimVerificationLedgerEntry],
+    ) -> ClaimLifecycleController:
+        from .proof_control.claim_lifecycle import ClaimLifecycleController
+
+        self._claim_lifecycle = ClaimLifecycleController(self._claims, ledger)
+        return self._claim_lifecycle
+
+    def mark_claim_checkpoint_verified(
+        self,
+        claim_id: str,
+        *,
+        report_ids: list[str],
+        confidence: float,
+        independent: bool,
+    ) -> ClaimCard | None:
+        claim_id = self.resolve_claim_id(claim_id)
+        if claim_id not in self._claims:
+            # A deduplicated-and-unaliased ID (for example from a checkpoint
+            # written before the alias table existed) must degrade to a
+            # recorded no-op, not crash the whole run.
+            self.store.append_event(
+                "claim_checkpoint_verification_skipped",
+                {"claim_id": claim_id, "reason": "unknown_claim_id"},
+            )
+            return None
+        self._claim_lifecycle.record_checkpoint_verification(
+            claim_id,
+            report_ids=report_ids,
+            confidence=confidence,
+            independent=independent,
+        )
+        self._downgrade_invalid_dependency_cycles()
+        self._persist()
+        return self._claims[claim_id]
+
+    def invalidate_checkpoint_claims(
+        self,
+        claim_ids: Iterable[str],
+        *,
+        rollback_report_ids: Iterable[str],
+    ) -> list[str]:
+        """Invalidate claims whose only authority was a rolled-back checkpoint."""
+
+        evidence_ids = sorted(set(rollback_report_ids))
+        invalidated: set[str] = set()
+        for raw_claim_id in claim_ids:
+            claim_id = self.resolve_claim_id(raw_claim_id)
+            if claim_id not in self._claims or claim_id in invalidated:
+                continue
+            self._claim_lifecycle.invalidate_claim(
+                claim_id,
+                reason="checkpoint_rolled_back",
+                evidence_ids=evidence_ids,
+            )
+            invalidated.add(claim_id)
+            invalidated.update(
+                self._claim_lifecycle.invalidate_dependents(
+                    claim_id,
+                    evidence_ids=evidence_ids,
+                )
+            )
+        if invalidated:
+            self._downgrade_invalid_dependency_cycles()
+            self.store.append_event(
+                "checkpoint_claims_invalidated",
+                {
+                    "claim_ids": sorted(invalidated),
+                    "rollback_report_ids": evidence_ids,
+                },
+            )
+            self._persist()
+        return sorted(invalidated)
 
     def verified(self) -> list[ClaimCard]:
         valid_ids = self._valid_verified_ids()
@@ -178,10 +380,14 @@ class LemmaMemory:
             for claim_id, claim in verified.items():
                 if claim_id in valid:
                     continue
-                claim_dependencies = [
-                    d for d in claim.dependencies if not d.startswith("external:")
-                ]
-                if all(dep in valid for dep in claim_dependencies):
+                local_claim_ids, local_steps_valid, ambiguous = (
+                    self._claim_local_dependencies(claim)
+                )
+                if (
+                    local_steps_valid
+                    and not ambiguous
+                    and all(dep in valid for dep in local_claim_ids)
+                ):
                     valid.add(claim_id)
                     changed = True
         return valid
@@ -198,24 +404,49 @@ class LemmaMemory:
             indegree.setdefault(claim_id, 0)
         for claim_id in verified_ids:
             claim = self._claims[claim_id]
-            for dep in claim.dependencies:
+            local_claim_ids, local_steps_valid, ambiguous = (
+                self._claim_local_dependencies(claim)
+            )
+            if ambiguous:
+                claim.status = ClaimStatus.UNCERTAIN
+                limitation = "ambiguous dependency requires normalization review"
+                if limitation not in claim.scope_limitations:
+                    claim.scope_limitations.append(limitation)
+                for dependency_id in self._ambiguous_legacy_dependency_ids(claim):
+                    missing = f"missing dependency: {dependency_id}"
+                    if missing not in claim.scope_limitations:
+                        claim.scope_limitations.append(missing)
+            if not local_steps_valid:
+                missing_steps = self._missing_local_step_ids(claim)
+                self._claim_lifecycle.invalidate_claim(
+                    claim.claim_id,
+                    reason="dependency_invalidated",
+                    evidence_ids=missing_steps,
+                )
+                for step_id in missing_steps:
+                    limitation = f"missing local proof step: {step_id}"
+                    if limitation not in claim.scope_limitations:
+                        claim.scope_limitations.append(limitation)
+            for dep in local_claim_ids:
                 if dep in verified_ids:
                     graph[dep].append(claim_id)
                     indegree[claim_id] = indegree.get(claim_id, 0) + 1
-                elif dep.startswith("external:"):
-                    # External dependencies are allowed only when their exact statement and applicability
-                    # are carried in the claim's proof/citation packet; the verifier remains responsible.
-                    continue
                 elif dep in self._claims:
                     # A verified claim depending on a non-verified stored claim is not reusable as verified.
-                    claim.status = ClaimStatus.UNCERTAIN
+                    self._claim_lifecycle.invalidate_claim(
+                        claim.claim_id,
+                        reason="dependency_invalidated",
+                        evidence_ids=[dep],
+                    )
                     limitation = f"dependency is not verified: {dep}"
                     if limitation not in claim.scope_limitations:
                         claim.scope_limitations.append(limitation)
                 else:
-                    # Missing IDs are never silently ignored. This also catches accidental use of a
-                    # local proof-step ID in ClaimCard.dependencies.
-                    claim.status = ClaimStatus.UNCERTAIN
+                    self._claim_lifecycle.invalidate_claim(
+                        claim.claim_id,
+                        reason="dependency_invalidated",
+                        evidence_ids=[dep],
+                    )
                     limitation = f"missing dependency: {dep}"
                     if limitation not in claim.scope_limitations:
                         claim.scope_limitations.append(limitation)
@@ -230,16 +461,103 @@ class LemmaMemory:
                     queue.append(nxt)
         cycle_nodes = verified_ids - visited
         for claim_id in cycle_nodes:
-            self._claims[claim_id].status = ClaimStatus.UNCERTAIN
+            self._claim_lifecycle.invalidate_claim(
+                claim_id,
+                reason="dependency_invalidated",
+                evidence_ids=sorted(cycle_nodes),
+            )
             limitations = self._claims[claim_id].scope_limitations
             if "dependency cycle detected" not in limitations:
                 limitations.append("dependency cycle detected")
+
+    @staticmethod
+    def _typed_dependency_parts(value: Any) -> tuple[str | None, str | None]:
+        if isinstance(value, dict):
+            kind = value.get("kind")
+            target_id = value.get("target_id")
+        else:
+            kind = getattr(value, "kind", None)
+            target_id = getattr(value, "target_id", None)
+        kind_value = getattr(kind, "value", kind)
+        return (
+            str(kind_value) if kind_value is not None else None,
+            str(target_id) if target_id is not None else None,
+        )
+
+    def _claim_local_dependencies(
+        self,
+        claim: ClaimCard,
+    ) -> tuple[set[str], bool, bool]:
+        step_ids = {step.step_id for step in claim.proof_steps}
+        local_claim_ids: set[str] = set()
+        referenced_step_ids: set[str] = set()
+        ambiguous = False
+
+        for value in claim.dependency_refs:
+            kind, target_id = self._typed_dependency_parts(value)
+            if not target_id:
+                ambiguous = True
+            elif kind == "local_step":
+                referenced_step_ids.add(target_id)
+            elif kind == "local_claim":
+                local_claim_ids.add(target_id)
+
+        for raw in claim.dependencies:
+            prefix, separator, target_id = raw.partition(":")
+            if separator:
+                if prefix == "step":
+                    referenced_step_ids.add(target_id)
+                elif prefix == "claim":
+                    local_claim_ids.add(self.resolve_claim_id(target_id))
+                continue
+            if raw in step_ids or raw in self._committed_step_ids:
+                referenced_step_ids.add(raw)
+            elif self.resolve_claim_id(raw) in self._claims:
+                local_claim_ids.add(self.resolve_claim_id(raw))
+            elif not claim.dependency_refs:
+                # Untyped legacy IDs are reviewed by the dependency normalizer,
+                # not treated as missing global facts by LemmaMemory.
+                ambiguous = True
+
+        # Steps committed into a verified checkpoint are legitimate targets
+        # even though they are not local to this claim.
+        return (
+            local_claim_ids,
+            referenced_step_ids.issubset(step_ids | self._committed_step_ids),
+            ambiguous,
+        )
+
+    def _missing_local_step_ids(self, claim: ClaimCard) -> list[str]:
+        step_ids = {step.step_id for step in claim.proof_steps}
+        referenced: set[str] = set()
+        for value in claim.dependency_refs:
+            kind, target_id = self._typed_dependency_parts(value)
+            if kind == "local_step" and target_id:
+                referenced.add(target_id)
+        for raw in claim.dependencies:
+            prefix, separator, target_id = raw.partition(":")
+            if separator and prefix == "step":
+                referenced.add(target_id)
+        return sorted(referenced - step_ids - self._committed_step_ids)
+
+    def _ambiguous_legacy_dependency_ids(self, claim: ClaimCard) -> list[str]:
+        step_ids = {step.step_id for step in claim.proof_steps}
+        return sorted(
+            raw
+            for raw in claim.dependencies
+            if ":" not in raw and raw not in step_ids and raw not in self._claims
+        )
 
     def _persist(self) -> None:
         self.store.write_json(
             "structured",
             "lemma_memory",
             [claim.model_dump(mode="json") for claim in self._claims.values()],
+        )
+        self.store.write_json(
+            "structured",
+            "lemma_memory_runtime",
+            self.export_runtime_state(),
         )
 
 
@@ -406,10 +724,17 @@ class TypedMemory:
     def _store_message(
         self, message: MessageEnvelope, tier: MemoryTier
     ) -> MessageEnvelope:
+        prior = self._messages.get(message.message_id)
+        if (
+            prior is not None
+            and self._content_index.get(prior.content_hash) == message.message_id
+        ):
+            del self._content_index[prior.content_hash]
         self._messages[message.message_id] = message
         self._tiers[message.message_id] = tier
-        self._content_index.setdefault(message.content_hash, message.message_id)
+        self._content_index[message.content_hash] = message.message_id
         self._provenance[message.message_id].add(message.source_agent_id)
+        self._invalidated.pop(message.message_id, None)
         self._persist()
         return message
 

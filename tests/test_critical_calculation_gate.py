@@ -181,6 +181,44 @@ def test_generated_request_id_does_not_duplicate_the_calculation_node(
     )
 
 
+def test_discover_pattern_request_uses_discovery_contract(
+    tmp_path: Path,
+) -> None:
+    _config, store, gate = _gate(tmp_path, "discovery-contract-check")
+    strategy = StrategyCard(
+        strategy_id="strategy-candidate-period",
+        title="Candidate period",
+        core_idea="Use a finite exact check to propose a candidate period.",
+        independence_basis="A finite periodicity probe.",
+        bottleneck="Turn the finite observation into a universal argument.",
+        falsification_test="Check the proposed period against the finite values.",
+        estimated_success=0.4,
+        calculation_checks=[
+            ToolRequest(
+                request_id="check-candidate-period",
+                kind="candidate_period_check",
+                purpose="discover_pattern",
+                arguments={
+                    "values": [2, 5, 2, 5],
+                    "candidate_period": 2,
+                    "start_index": 0,
+                },
+                max_cases=100,
+            )
+        ],
+    )
+
+    result = gate.evaluate_strategy(
+        strategy,
+        path_id="path-strategy-candidate-period",
+        requested_by="explorer-a",
+    )
+
+    assert result.passed is True
+    assert result.records[0].verdict == CalculationGateVerdict.PASSED
+    assert store.list_experiment_results()
+
+
 def test_result_only_symbolic_method_is_not_admitted_as_assertion_check(
     tmp_path: Path,
 ) -> None:

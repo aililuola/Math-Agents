@@ -1,0 +1,14 @@
+{
+  "case_id": "common_mode_assumption",
+  "route_assumptions": [
+    "Assume H",
+    "Suppose that H",
+    "Hypothesis: H",
+    "Using H",
+    "H"
+  ],
+  "expected_canonical_assumption": "h",
+  "expected_min_routes": 5,
+  "votes_are_evidence": false,
+  "expected_action": "challenger"
+}

@@ -19,6 +19,8 @@ datas = [
     (str(project_root / "config.deepseek-v4-pro.smoke.yaml"), "."),
     (str(project_root / "config.deepseek-v4-pro.yaml"), "."),
     (str(project_root / "config.deepseek-v4-pro.topology-active.yaml"), "."),
+    (str(project_root / "config.deepseek-v4-pro.proof-control-shadow.yaml"), "."),
+    (str(project_root / "config.deepseek-v4-pro.proof-control-active.yaml"), "."),
     (str(project_root / "benchmarks" / "analogy_library.jsonl"), "benchmarks"),
     (str(project_root / "LICENSE"), "."),
 ]

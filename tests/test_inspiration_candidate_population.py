@@ -175,7 +175,8 @@ def test_warm_and_cold_contexts_are_bounded_and_distinct(tmp_path) -> None:
     assert cold["proof_graph"] == {}
     assert cold["route_novelty_signatures"] == []
     assert cold["target_obligation_ids"] == ["goal-1"]
-    assert cold["generation_contract"]["forbidden_existing_mechanisms"]
+    assert cold["generation_contract"]["blocked_mechanism_chains"] == []
+    assert cold["generation_contract"]["forbidden_existing_mechanisms"] == []
     assert (
         warm["generation_contract"]["diversity_axis"]
         != cold["generation_contract"]["diversity_axis"]

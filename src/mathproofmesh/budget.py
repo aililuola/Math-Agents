@@ -224,6 +224,12 @@ class AdaptiveBudgetManager:
         graph_fields = {
             "proof_debt",
             "proof_debt_reduction",
+            "core_proof_debt",
+            "core_proof_debt_reduction",
+            "core_open_obligation_count",
+            "core_verified_bridge_gain",
+            "goal_alignment_score",
+            "common_mode_risk",
             "verified_fact_gain",
             "shared_obligation_count",
             "high_centrality_obligation_count",
@@ -676,6 +682,11 @@ class AdaptiveBudgetManager:
             and self.config.topology.proof_graph.enabled
             and graph_mode == "active"
         )
+        proof_control_active = (
+            hierarchical
+            and self.config.topology.proof_control.enabled
+            and self.config.topology.proof_control.mode == "active"
+        )
         inspiration_mode = self.config.topology.inspiration.mode
         inspiration_active = (
             hierarchical
@@ -764,6 +775,21 @@ class AdaptiveBudgetManager:
                     - scheduler.route_redundancy_penalty * stat.route_redundancy
                     - scheduler.contradiction_priority_weight
                     * min(1.0, stat.contradiction_count)
+                )
+            if proof_control_active:
+                scheduler = self.config.scheduler
+                auxiliary_gain = max(
+                    0, stat.verified_fact_gain - stat.core_verified_bridge_gain
+                )
+                depth_score += (
+                    scheduler.core_proof_debt_reduction_weight
+                    * max(0.0, stat.core_proof_debt_reduction)
+                    + scheduler.core_verified_bridge_gain_weight
+                    * min(1.0, stat.core_verified_bridge_gain)
+                    + scheduler.auxiliary_fact_gain_weight
+                    * min(1.0, auxiliary_gain / 2)
+                    + scheduler.goal_alignment_weight * stat.goal_alignment_score
+                    - scheduler.common_mode_risk_penalty * stat.common_mode_risk
                 )
             candidates.append(
                 BudgetAction(

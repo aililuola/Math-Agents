@@ -4,12 +4,42 @@ from typing import Protocol, runtime_checkable
 
 from ..proof_graph.store import ProofGraphStore
 from ..schemas import (
+    EvidenceStrength,
+    ExperimentOutcome,
+    ExperimentResult,
     FormalCertificateRef,
+    FormalizationCoverageReport,
     FormalStatementPacket,
     ObligationKind,
     ProofObligation,
+    ProofStep,
     stable_hash,
 )
+
+
+def formalization_coverage(
+    steps: list[ProofStep],
+    results: list[ExperimentResult],
+) -> FormalizationCoverageReport:
+    """Measure formal certificates bound to exact proof-step IDs."""
+
+    step_ids = {step.step_id for step in steps}
+    certified = sorted(
+        {
+            result.target_claim_id
+            for result in results
+            if result.target_claim_id in step_ids
+            and result.outcome == ExperimentOutcome.CERTIFIED
+            and result.evidence_strength == EvidenceStrength.FORMAL_CERTIFICATE
+            and result.independently_verified
+        }
+    )
+    total = len(step_ids)
+    return FormalizationCoverageReport(
+        total_step_count=total,
+        formally_certified_step_ids=certified,
+        coverage=(len(certified) / total if total else 0.0),
+    )
 
 
 @runtime_checkable

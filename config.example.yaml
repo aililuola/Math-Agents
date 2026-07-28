@@ -2,6 +2,14 @@ system_name: MathProofMesh
 
 # Each entry is one isolated sub-agent and consumes one API key.
 # Keys are read from environment variables and are never written to run logs.
+#
+# HETEROGENEITY MATTERS ON HARD PROBLEMS: a pool of same-model keys is one
+# distribution sampled N times — reviewers inherit the prover's blind spots,
+# and thinking-mode providers ignore temperature, so config-level diversity
+# is the only real lever. Put at least one verifier (and ideally one
+# explorer) on a DIFFERENT provider/model family than the provers, as the
+# explorer-2/verifier examples below show. The pool automatically prefers a
+# cross-provider reviewer for verification (prefer_provider_not).
 agents:
   - id: planner-1
     provider: openai_compatible

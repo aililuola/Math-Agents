@@ -158,6 +158,46 @@ def test_broker_resume_preserves_exactly_once_prompt_delivery(tmp_path) -> None:
     assert restored.receipts[0].status == ReceiptStatus.ACCEPTED
 
 
+def test_invalidated_delivery_is_archived_without_blocking_republication(
+    tmp_path,
+) -> None:
+    config = make_v07_config(tmp_path / "runs")
+    _, _, typed_memory, graph, broker = make_broker_runtime(config, tmp_path)
+    fact = make_fact(message_id="reusable", target_routes=["route-b"])
+    assert broker.publish(
+        fact,
+        referee_agent_id="referee-a",
+        current_round=1,
+    ).accepted
+
+    reason = "checkpoint_rolled_back:checkpoint-abandoned"
+    invalidated = typed_memory.invalidate_dependents(
+        [fact.message_id],
+        reason=reason,
+    )
+    broker.invalidate_messages(invalidated, reason=reason)
+    graph.invalidate_evidence_messages(invalidated, reason=reason)
+
+    state = broker.export_state()
+    assert state["deliveries"] == {}
+    archived = next(iter(state["invalidated_deliveries"].values()))
+    assert archived["delivery_state"] == "invalidated"
+    assert archived["invalidation_reason"] == reason
+    assert broker.inbox("route-b", current_round=1) == []
+
+    republished = broker.publish(
+        fact,
+        referee_agent_id="referee-a",
+        current_round=2,
+    )
+    assert republished.accepted
+    assert republished.selected_targets == ["route-b"]
+    assert broker.delivery_record(fact.message_id, "route-b") is not None
+    assert [item.message_id for item in broker.inbox("route-b", current_round=2)] == [
+        fact.message_id
+    ]
+
+
 def test_receipt_rejects_quantifier_reversal_and_binding_scope_change(tmp_path) -> None:
     config = make_v07_config(tmp_path / "runs")
     _, _, _, _, broker = make_broker_runtime(config, tmp_path)

@@ -6,24 +6,94 @@ import pytest
 
 from mathproofmesh.agents import CallLedger
 from mathproofmesh.budget import AdaptiveBudgetManager, SoftBudgetAllocator
-from mathproofmesh.config import SchedulerConfig, load_config
+from mathproofmesh.config import (
+    BudgetConfig,
+    ComputationConfig,
+    SchedulerConfig,
+    load_config,
+)
 from mathproofmesh.llm.pool import AgentPool
+from mathproofmesh.orchestrator import ProofMeshOrchestrator
 from mathproofmesh.schemas import (
     ActionKind,
     AttemptStatus,
     CandidateAssessment,
+    Difficulty,
     FailureLevel,
     MetaReview,
     PathStats,
+    ProblemKind,
     ProofAttempt,
     ProofStep,
     Severity,
     StrategyCard,
+    TriageResult,
     VerificationIssue,
     VerificationReport,
     VerificationStage,
     VerificationVerdict,
 )
+
+
+def _triage(difficulty: Difficulty) -> TriageResult:
+    return TriageResult(
+        problem_kind=ProblemKind.PROOF,
+        difficulty=difficulty,
+        rationale="Deterministic budget-scaling test.",
+        confidence=1.0,
+    )
+
+
+def test_difficulty_scaling_and_extra_compute_are_opt_in() -> None:
+    assert not BudgetConfig().scale_budget_with_difficulty
+    assert ComputationConfig().max_compute_cycles_per_segment == 1
+
+
+def test_difficulty_budget_scaling_is_idempotent_and_audited(
+    demo_config,
+    artifact_store,
+) -> None:
+    demo_config.budget.max_total_calls = 10
+    demo_config.budget.max_rounds = 3
+    demo_config.continuation.max_segments_per_path = 4
+    demo_config.budget.scale_budget_with_difficulty = True
+    demo_config.budget.hard_problem_call_multiplier = 2.0
+    demo_config.budget.hard_problem_extra_rounds = 2
+    orchestrator = ProofMeshOrchestrator(demo_config)
+
+    first = orchestrator._apply_difficulty_budget_scaling(
+        _triage(Difficulty.OLYMPIAD),
+        artifact_store,
+    )
+    second = orchestrator._apply_difficulty_budget_scaling(
+        _triage(Difficulty.OLYMPIAD),
+        artifact_store,
+    )
+
+    assert demo_config.budget.max_total_calls == 20
+    assert demo_config.budget.max_rounds == 5
+    assert demo_config.continuation.max_segments_per_path == 8
+    assert first["effective"] == second["effective"]
+    assert (
+        artifact_store.read_named_json("structured", "difficulty_budget_scaling")[
+            "effective"
+        ]["max_total_calls"]
+        == 20
+    )
+    assert (
+        artifact_store.read_named_json("structured", "config_redacted")["budget"][
+            "max_total_calls"
+        ]
+        == 20
+    )
+
+    orchestrator._apply_difficulty_budget_scaling(
+        _triage(Difficulty.MEDIUM),
+        artifact_store,
+    )
+    assert demo_config.budget.max_total_calls == 10
+    assert demo_config.budget.max_rounds == 3
+    assert demo_config.continuation.max_segments_per_path == 4
 
 
 def _strategy(index: int) -> StrategyCard:

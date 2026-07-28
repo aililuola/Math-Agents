@@ -2,7 +2,7 @@
 
 MathProofMesh 是面向高难度数学证明、逻辑推演和研究型推理任务的多智能体系统。它强调四件事：**隔离探索、抽象推理优先、独立验证、可恢复执行**。
 
-当前源码版本为 **0.7.0**；实际包版本以 `pyproject.toml`、`BUILD_INFO.json` 和 `mathproofmesh.__version__` 为准。
+当前源码版本为 **0.8.2**；实际包版本以 `pyproject.toml`、`BUILD_INFO.json` 和 `mathproofmesh.__version__` 为准。
 
 > `verified` 表示结果通过了当前配置的独立审计链，并不等价于 Lean、Coq 或 Isabelle 内核证明。高风险结论仍应由领域专家或形式化证明助手复核。
 
@@ -175,8 +175,9 @@ Activity 只显示阶段、任务和结构化结果摘要，不显示原始 `rea
 | --- | ---: | ---: |
 | 文件 | `config.deepseek-v4-pro.smoke.yaml` | `config.deepseek-v4-pro.yaml` |
 | Agent 数 | 5 | 5 |
-| 单个 Agent 输出上限 | 50,000 tokens | 100,000 tokens |
-| 单个证明分段输出上限 | 50,000 tokens | 100,000 tokens |
+| 普通 Route Prover 输出上限 | 96,000 tokens | 100,000 tokens |
+| Planner strategy generation 上限 | 128,000 tokens | 384,000 tokens |
+| 单个证明分段输出上限 | 96,000 tokens | 100,000 tokens |
 | 每段最多新增结构化步骤 | 8 | 12 |
 | 每条路线最多分段数 | 4 | 12 |
 | 初始路线 / 最大路线 | 2 / 3 | 3 / 6 |
@@ -186,6 +187,8 @@ Activity 只显示阶段、任务和结构化结果摘要，不显示原始 `rea
 | 配置费用上限 | USD 0.75 | USD 5.00 |
 | 强类型计算工具 | 开启 | 开启 |
 | 模型生成 Python 沙箱 | 开启（需 Docker） | 开启（需 Docker） |
+
+本表只记录仓库已有配置档位；本轮证明控制修复和文档整理没有调整 token、证明分段、Deep Exploration、Agent 数量或预算默认值。
 
 “正式版最多 12 步”指 `continuation.max_new_steps_per_call: 12`：一次分段调用最多提交 12 个新的结构化证明步骤。它不表示整道题只能有 12 步。正式版每条路线最多 12 个分段，仍受总调用、总 token、费用和调度预算限制。
 
@@ -277,7 +280,7 @@ hierarchical 报告把 `Broker-admitted global Fact` 与 `Legacy ClaimMemory his
 
 Blind packet 不再暴露 `artifact://` 原始路径，只携带实际文件内容的 SHA-256、证书类型和 replay 状态。这样不会通过文件名泄漏 Agent/Route，同时保留可审计证据身份。
 
-本轮离线验收基线为：安装 `.[dev,server]`（包含 `z3-solver`）后 `345 passed`、Ruff check 通过、Ruff format check 通过、`compileall` 通过、topology component-contract Mock benchmark 通过且真实 provider 调用数为 0。该 Mock benchmark 验证组件契约和消融开关，不代表真实 IMO 求解性能。
+本轮离线验收基线为：安装 `.[dev,server,desktop]`（包含 `z3-solver` 和 Desktop 测试依赖）后 `706 passed`、Ruff check 通过、Ruff format check 通过、`compileall` 通过、topology 与 proof-control component-contract Mock benchmark 通过且真实 provider 调用数为 0。这些 Mock benchmark 验证组件契约和消融开关，不代表真实 IMO 求解性能。
 
 ## 推理优先计算流程
 
@@ -491,6 +494,7 @@ python -m benchmarks.topology.run_mock_benchmark
 
 ## 文档
 
+- [0.7.0 历史综合介绍与使用指南](docs/MATHPROOFMESH_0.7_OVERVIEW.md)
 - [推理优先计算策略、Schema、门控与证据语义](docs/COMPUTATION_POLICY.md)
 - [系统架构、通信拓扑与预算](docs/ARCHITECTURE.md)
 - [分层通信拓扑](docs/COMMUNICATION_TOPOLOGY.md)
@@ -507,6 +511,8 @@ python -m benchmarks.topology.run_mock_benchmark
 - [部署与扩展](docs/DEPLOYMENT.md)
 - [可复现验证记录](docs/VALIDATION.md)
 - [0.7.0 发布说明](RELEASE_NOTES_0.7.0.md)
+- [0.8.2 发布说明](RELEASE_NOTES_0.8.2.md)
+- [0.8.1 发布说明](RELEASE_NOTES_0.8.1.md)
 - [0.6.0 发布说明](RELEASE_NOTES_0.6.0.md)
 
 ## 安全与正确性边界

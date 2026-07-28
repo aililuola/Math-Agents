@@ -1,0 +1,10 @@
+{
+  "case_id": "image_inclusion_not_surjective",
+  "domain": [0],
+  "codomain": [0, 1],
+  "mapping": {"0": 0},
+  "premise": "the image is contained in the codomain",
+  "invalid_conclusion": "the map is surjective",
+  "expected_risk": "image_inclusion_to_surjectivity",
+  "counterexample_target": 1
+}

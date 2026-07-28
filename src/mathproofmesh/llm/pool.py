@@ -311,11 +311,12 @@ class AgentRuntime:
                 last_error: Exception | None = None
                 last_retryable = True
                 last_status: int | None = None
+                attempt_messages = messages
                 for attempt in range(self.request_retries + 1):
                     self.provider_circuit.assert_available(self.provider_scope)
                     try:
                         response = await self.client.complete_with_policy(
-                            messages,
+                            attempt_messages,
                             temperature=self.config.temperature
                             if temperature is None
                             else temperature,
@@ -360,6 +361,7 @@ class AgentRuntime:
                             )
                         if not last_retryable or attempt >= self.request_retries:
                             break
+                        attempt_messages = self._messages_for_retry(messages, exc)
                     except (
                         httpx.TimeoutException,
                         httpx.NetworkError,
@@ -385,6 +387,7 @@ class AgentRuntime:
                             )
                         if attempt >= self.request_retries:
                             break
+                        attempt_messages = self._messages_for_retry(messages, exc)
                     except (
                         Exception
                     ) as exc:  # Provider-specific parse/transport failures.
@@ -397,6 +400,7 @@ class AgentRuntime:
                         )
                         if attempt >= self.request_retries:
                             break
+                        attempt_messages = self._messages_for_retry(messages, exc)
                     delay = min(8.0, 0.5 * (2**attempt))
                     logger.warning(
                         "Agent %s call failed (%s); retrying after %.1fs",
@@ -428,6 +432,29 @@ class AgentRuntime:
                 ) from last_error
             finally:
                 self.active_calls -= 1
+
+    @staticmethod
+    def _messages_for_retry(
+        messages: list[Message],
+        error: BaseException,
+    ) -> list[Message]:
+        """Carry only bounded public stream output into a retry request."""
+
+        partial = getattr(error, "mathproofmesh_partial_content", "")
+        if not isinstance(partial, str) or not partial:
+            return messages
+        bounded = partial[-12_000:]
+        digest = getattr(error, "mathproofmesh_partial_content_sha256", None)
+        recovery = (
+            "The prior response stream disconnected. Return one complete answer "
+            "to the original request. The following is public answer content "
+            "already emitted by that response; use it only to avoid restarting "
+            "the work, and do not treat it as verified evidence.\n"
+            f"PARTIAL_CONTENT_SHA256: {digest}\n"
+            "PUBLIC_OUTPUT_PREFIX:\n"
+            f"{bounded}"
+        )
+        return [*messages, {"role": "user", "content": recovery}]
 
     @staticmethod
     def _failure_category(error: Exception) -> str:
@@ -588,6 +615,7 @@ class AgentPool:
         exclude: set[str] | None = None,
         specialty_hints: list[str] | None = None,
         prefer_provider_not: str | None = None,
+        strict_exclude: bool = False,
     ) -> AgentRuntime:
         exclude = exclude or set()
         candidates = [
@@ -606,6 +634,10 @@ class AgentPool:
         if not candidates:
             candidates = [a for a in self.agents if a.id not in exclude]
         if not candidates:
+            if strict_exclude and exclude:
+                raise RuntimeError(
+                    f"no agent satisfies strict exclusion for role {role}"
+                )
             # Last-resort reuse. Per-agent semaphores still prevent accidental concurrent key sharing.
             candidates = self.agents
         if not candidates:
@@ -649,6 +681,7 @@ class AgentPool:
         exclude: set[str] | None = None,
         specialty_hints: list[str] | None = None,
         distinct_when_possible: bool = True,
+        strict_exclude: bool = False,
     ) -> list[AgentRuntime]:
         selected: list[AgentRuntime] = []
         current_exclude = set(exclude or set())
@@ -660,6 +693,7 @@ class AgentPool:
                     if distinct_when_possible
                     else (exclude or set()),
                     specialty_hints=specialty_hints,
+                    strict_exclude=strict_exclude,
                 )
             except RuntimeError:
                 break

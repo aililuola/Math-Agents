@@ -1,0 +1,10 @@
+{
+  "case_id": "abstract_realizer_repair",
+  "representation_kind": "quotient descent",
+  "abstract_reduction": "descend on class complexity",
+  "first_realizer": "choose an arbitrary representative",
+  "first_failure": "the representative violates the lower bound",
+  "repair_operator": "replace_realizer_preserve_structure",
+  "second_realizer": "choose the least admissible representative above the boundary",
+  "expected_structure_status": "validated_structure"
+}

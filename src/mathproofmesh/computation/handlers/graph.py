@@ -11,6 +11,14 @@ def _edge_key(left: str, right: str, directed: bool) -> tuple[str, str]:
     return (left, right) if directed or left <= right else (right, left)
 
 
+# Properties whose certificate is a model-supplied witness for an existence
+# claim; rejecting the witness cannot refute the claim itself. "connected"
+# is absent on purpose: there the graph itself is the object under test.
+_CERTIFICATE_EXISTENCE_PROPERTIES = frozenset(
+    {"proper_coloring", "path", "cycle", "matching"}
+)
+
+
 def run_graph_certificate(spec: ExperimentSpec) -> HandlerEvidence:
     try:
         import networkx as nx  # type: ignore[import-not-found]
@@ -143,6 +151,27 @@ def run_graph_certificate(spec: ExperimentSpec) -> HandlerEvidence:
             ],
         )
     if not nx_valid:
+        if property_name in _CERTIFICATE_EXISTENCE_PROPERTIES:
+            return HandlerEvidence(
+                outcome=ExperimentOutcome.INCONCLUSIVE,
+                evidence_strength=EvidenceStrength.HEURISTIC,
+                raw_output={
+                    "property": property_name,
+                    "supplied_certificate": certificate,
+                    "details": details,
+                },
+                scope={
+                    "node_count": len(nodes),
+                    "edge_count": len(edges),
+                    "directed": directed,
+                },
+                exact_arithmetic=True,
+                cases_checked=1,
+                verification_notes=[
+                    "The supplied certificate is invalid; this does not refute the existence claim.",
+                    "Both NetworkX and an independent property-specific checker rejected the supplied certificate.",
+                ],
+            )
         return HandlerEvidence(
             outcome=ExperimentOutcome.COUNTEREXAMPLE_FOUND,
             evidence_strength=EvidenceStrength.COUNTEREXAMPLE,
@@ -160,7 +189,7 @@ def run_graph_certificate(spec: ExperimentSpec) -> HandlerEvidence:
             cases_checked=1,
             independently_verified=True,
             verification_notes=[
-                "Both NetworkX and an independent property-specific checker rejected the supplied certificate."
+                "Both NetworkX and an independent direct check rejected the graph property."
             ],
         )
     return HandlerEvidence(

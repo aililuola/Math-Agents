@@ -30,6 +30,7 @@ from ..schemas import (
     MetaDirectiveAudit,
     MetaDirectiveExecution,
     MetaStrategyDecision,
+    MechanismChainSignature,
     MemoryTier,
     MessageEnvelope,
     MessageType,
@@ -125,6 +126,7 @@ class InspirationEngine:
         self.broker = broker
         self.store = store
         self.activity = activity
+        self.proof_control_context_provider = None
         self.project_root = (
             Path(project_root) if project_root is not None else Path.cwd()
         )
@@ -173,6 +175,7 @@ class InspirationEngine:
         self.tasks: dict[str, InspirationTask] = {}
         self.proposal_assignment_plans: dict[str, InspirationAssignmentPlan] = {}
         self.proposals: dict[str, InspirationProposal] = {}
+        self.mechanism_chain_signatures: dict[str, MechanismChainSignature] = {}
         self.reviews: dict[str, InspirationReview] = {}
         self.materializations: dict[str, InspirationMaterialization] = {}
         self.credit_targets: dict[str, InspirationCreditTarget] = {}
@@ -218,6 +221,15 @@ class InspirationEngine:
     @property
     def enabled(self) -> bool:
         return self.inspiration_config.enabled and self.inspiration_config.mode != "off"
+
+    def _record_mechanism_chain(
+        self,
+        proposal_id: str,
+        signature: NoveltySignature,
+    ) -> None:
+        chain = MechanismChainSignature.from_novelty_signature(signature)
+        if chain.complete:
+            self.mechanism_chain_signatures[proposal_id] = chain
 
     def _load_cross_run_learning(self) -> None:
         if not self.cross_run_store.enabled:
@@ -376,6 +388,10 @@ class InspirationEngine:
                 if proposal.proposal_id in self.proposals:
                     continue
                 self.proposals[proposal.proposal_id] = proposal
+                self._record_mechanism_chain(
+                    proposal.proposal_id,
+                    proposal.novelty_signature,
+                )
                 self._register_outcome(proposal, snapshot)
                 generated.append(proposal)
                 self.mechanism_stats[task.mechanism.value]["proposal_count"] += 1
@@ -518,6 +534,9 @@ class InspirationEngine:
                     }
                 )
         payload = proposal.model_dump(mode="json")
+        raw_chain = MechanismChainSignature.from_novelty_signature(
+            proposal.novelty_signature
+        )
         normalized_signature = self.mechanism_normalizer.normalize_signature(
             proposal.novelty_signature
         )
@@ -537,6 +556,13 @@ class InspirationEngine:
         if existing is not None:
             return existing
         self.proposals[normalized.proposal_id] = normalized
+        if raw_chain.complete:
+            self.mechanism_chain_signatures[normalized.proposal_id] = raw_chain
+        else:
+            self._record_mechanism_chain(
+                normalized.proposal_id,
+                normalized.novelty_signature,
+            )
         self._register_outcome(normalized, snapshot)
         self.mechanism_stats[task.mechanism.value]["proposal_count"] += 1
         generated_event = {
@@ -1170,6 +1196,12 @@ class InspirationEngine:
         for proposal in proposals:
             if proposal.proposal_id in self.reviews:
                 continue
+            supplied_review = supplied.get(proposal.proposal_id)
+            if (
+                supplied_review is not None
+                and supplied_review.review_status == "deferred"
+            ):
+                continue
             local_review = self.referee.review(
                 proposal,
                 reviewer_agent_id=reviewer_agent_id,
@@ -1178,7 +1210,7 @@ class InspirationEngine:
                 immediate_counterexamples=counterexamples.get(proposal.proposal_id, []),
                 hidden_assumptions=assumptions.get(proposal.proposal_id, []),
             )
-            review = supplied.get(proposal.proposal_id, local_review)
+            review = supplied_review or local_review
             if review.proposal_id != proposal.proposal_id:
                 raise ValueError("inspiration review targets the wrong proposal")
             if review.reviewer_agent_id == proposal.source_agent_id:
@@ -1367,6 +1399,10 @@ class InspirationEngine:
             return proposal
         snapshot = self._coerce_snapshot(state)
         self.proposals[proposal.proposal_id] = proposal
+        self._record_mechanism_chain(
+            proposal.proposal_id,
+            proposal.novelty_signature,
+        )
         self._register_outcome(proposal, snapshot)
         self.mechanism_stats[InspirationMechanism.INSPIRATION_COMPOSITION.value][
             "proposal_count"
@@ -1414,6 +1450,8 @@ class InspirationEngine:
         snapshot = self._coerce_snapshot(state)
         decisions: list[InspirationMaterialization] = []
         for review in reviews:
+            if review.review_status != "completed":
+                continue
             if review.proposal_id in self.materializations:
                 continue
             proposal = self.proposals[review.proposal_id]
@@ -2623,6 +2661,10 @@ class InspirationEngine:
                 key: value.model_dump(mode="json")
                 for key, value in self.proposals.items()
             },
+            "mechanism_chain_signatures": {
+                key: value.model_dump(mode="json")
+                for key, value in self.mechanism_chain_signatures.items()
+            },
             "reviews": {
                 key: value.model_dump(mode="json")
                 for key, value in self.reviews.items()
@@ -2729,6 +2771,16 @@ class InspirationEngine:
             str(key): InspirationProposal.model_validate(value)
             for key, value in dict(state.get("proposals", {})).items()
         }
+        self.mechanism_chain_signatures = {
+            str(key): MechanismChainSignature.model_validate(value)
+            for key, value in dict(state.get("mechanism_chain_signatures", {})).items()
+        }
+        if not self.mechanism_chain_signatures:
+            for proposal in self.proposals.values():
+                self._record_mechanism_chain(
+                    proposal.proposal_id,
+                    proposal.novelty_signature,
+                )
         self.reviews = {
             str(key): InspirationReview.model_validate(value)
             for key, value in dict(state.get("reviews", {})).items()

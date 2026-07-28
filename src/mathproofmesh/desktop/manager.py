@@ -174,6 +174,7 @@ class DesktopRunManager:
         *,
         run_id: str,
         profile: DesktopProfile,
+        resume_mode: str = "normal",
     ) -> dict[str, object]:
         safe_id = validate_run_id(run_id)
         async with self._lock:
@@ -210,7 +211,16 @@ class DesktopRunManager:
                 activity_listener=activity_listener,
             )
             session.task = asyncio.create_task(
-                self._execute(session, orchestrator, resume=True),
+                self._execute(
+                    session,
+                    orchestrator,
+                    resume=True,
+                    resume_intervention=(
+                        None
+                        if resume_mode is None or resume_mode == "normal"
+                        else resume_mode
+                    ),
+                ),
                 name=f"mathproofmesh-resume-{safe_id}",
             )
             self._publish(session, "state", session.snapshot())
@@ -334,6 +344,7 @@ class DesktopRunManager:
         orchestrator: ProofMeshOrchestrator,
         *,
         resume: bool,
+        resume_intervention: str | None = None,
     ) -> None:
         session.metadata.lifecycle = "running"
         session.metadata.updated_at = utc_now()
@@ -341,7 +352,10 @@ class DesktopRunManager:
         self._publish(session, "state", session.snapshot())
         try:
             result = (
-                await orchestrator.resume(session.metadata.run_id)
+                await orchestrator.resume(
+                    session.metadata.run_id,
+                    intervention=resume_intervention,
+                )
                 if resume
                 else await orchestrator.solve(
                     session.problem,

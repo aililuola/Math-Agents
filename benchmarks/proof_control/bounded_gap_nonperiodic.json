@@ -1,0 +1,9 @@
+{
+  "case_id": "bounded_gap_nonperiodic",
+  "construction": "a_0=0 and a_(n+1)=a_n+1+t_n, where t_n is the Thue-Morse sequence",
+  "gap_values": [1, 2],
+  "premise": "the strictly increasing sequence has bounded differences with finite range",
+  "invalid_conclusion": "therefore the sequence is eventually periodic",
+  "expected_risk": "finite_range_to_finite_state",
+  "expected_action": "open_countermodel"
+}

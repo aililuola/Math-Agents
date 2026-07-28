@@ -20,11 +20,12 @@ def export_hierarchical_checkpoint(
     inspiration_engine: Any,
     capability_profile: Any,
     deep_exploration_registry: Any = None,
+    proof_control: Any = None,
 ) -> dict[str, Any]:
     def state_of(component: Any) -> dict[str, Any] | None:
         return component.export_state() if component is not None else None
 
-    return {
+    payload = {
         "current_round": current_round,
         "graph_frozen": graph_frozen,
         "final_repair_failed": final_repair_failed,
@@ -41,3 +42,6 @@ def export_hierarchical_checkpoint(
         "agent_capability": state_of(capability_profile),
         "deep_exploration_registry": state_of(deep_exploration_registry),
     }
+    if proof_control is not None:
+        payload["proof_control_state"] = state_of(proof_control)
+    return payload

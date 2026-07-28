@@ -71,6 +71,29 @@ def make_v07_config(
     return SystemConfig.model_validate(payload)
 
 
+def make_proof_control_config(
+    run_root: str | Path,
+    *,
+    mode: str,
+    inspiration_mode: str = "off",
+) -> SystemConfig:
+    payload = make_v07_config(
+        run_root,
+        graph_mode="active",
+        inspiration_mode=inspiration_mode,
+    ).model_dump(mode="python")
+    control = payload["topology"]["proof_control"]
+    control.update({"enabled": True, "mode": mode})
+    for gate_name in (
+        "route_admission",
+        "continue_gate",
+        "synthesis_readiness",
+        "bottleneck",
+    ):
+        control[gate_name]["mode"] = mode
+    return SystemConfig.model_validate(payload)
+
+
 def make_strategy(index: int, *, tag: str | None = None) -> StrategyCard:
     mechanism = tag or f"mechanism-{index}"
     return StrategyCard(

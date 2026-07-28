@@ -15,6 +15,8 @@ from pydantic import (
     model_validator,
 )
 
+from .schemas import ComputationPurpose
+
 
 class ConfigModel(BaseModel):
     model_config = ConfigDict(
@@ -147,6 +149,11 @@ class BudgetConfig(ConfigModel):
     depth_share: float = Field(default=0.35, ge=0.0, le=1.0)
     verification_share: float = Field(default=0.25, ge=0.0, le=1.0)
     synthesis_share: float = Field(default=0.10, ge=0.0, le=1.0)
+    # Optional test-time compute scaling. It remains off unless a caller opts
+    # in explicitly, preserving all v0.8 budget defaults.
+    scale_budget_with_difficulty: bool = False
+    hard_problem_call_multiplier: float = Field(default=2.0, ge=1.0, le=8.0)
+    hard_problem_extra_rounds: int = Field(default=2, ge=0, le=16)
 
     @model_validator(mode="after")
     def validate_shares_and_paths(self) -> "BudgetConfig":
@@ -220,6 +227,11 @@ class SchedulerConfig(ConfigModel):
     construction_relevance_weight: float = Field(default=0.14, ge=0.0, le=4.0)
     surprise_exploration_weight: float = Field(default=0.10, ge=0.0, le=4.0)
     meta_replan_weight: float = Field(default=0.15, ge=0.0, le=4.0)
+    core_proof_debt_reduction_weight: float = Field(default=0.32, ge=0.0, le=4.0)
+    core_verified_bridge_gain_weight: float = Field(default=0.25, ge=0.0, le=4.0)
+    auxiliary_fact_gain_weight: float = Field(default=0.08, ge=0.0, le=4.0)
+    goal_alignment_weight: float = Field(default=0.18, ge=0.0, le=4.0)
+    common_mode_risk_penalty: float = Field(default=0.30, ge=0.0, le=4.0)
 
     # Proof-obligation weights used by ProofGraphStore.proof_debt().
     obligation_base_weight: float = Field(default=1.0, ge=0.0, le=100.0)
@@ -505,6 +517,219 @@ class FinalTopologyConfig(ConfigModel):
     remove_self_confidence: bool = True
 
 
+class GoalAlignmentControlConfig(ConfigModel):
+    enabled: bool = True
+    min_alignment_confidence: float = Field(default=0.72, ge=0.0, le=1.0)
+    overstrength_penalty: float = Field(default=0.25, ge=0.0, le=2.0)
+    require_target_obligation: bool = True
+    require_implication_outline: bool = True
+    run_countermodel_on_unknown_relation: bool = True
+    max_strategy_rewrite_attempts: int = Field(default=1, ge=0, le=8)
+
+
+class ScopeGuardControlConfig(ConfigModel):
+    enabled: bool = True
+    deterministic_first: bool = True
+    ambiguous_model_review: bool = True
+    risk_confidence_threshold: float = Field(default=0.70, ge=0.0, le=1.0)
+    max_countermodel_tasks_per_round: int = Field(default=2, ge=0, le=16)
+    block_fact_promotion_on_open_scope_risk: bool = True
+    block_obligation_close_on_scope_mismatch: bool = True
+
+
+class CoreDebtControlConfig(ConfigModel):
+    enabled: bool = True
+    main_goal_weight: float = Field(default=4.0, ge=0.0, le=100.0)
+    core_bridge_weight: float = Field(default=2.5, ge=0.0, le=100.0)
+    auxiliary_weight: float = Field(default=0.35, ge=0.0, le=100.0)
+    necessary_only_weight: float = Field(default=0.15, ge=0.0, le=100.0)
+    unresolved_scope_risk_weight: float = Field(default=1.5, ge=0.0, le=100.0)
+    common_mode_weight: float = Field(default=1.5, ge=0.0, le=100.0)
+    core_stagnation_rounds: int = Field(default=2, ge=1, le=32)
+
+
+class RealizerControlConfig(ConfigModel):
+    enabled: bool = True
+    max_realizer_repairs_per_structure: int = Field(default=2, ge=0, le=16)
+    require_explicit_admissibility: bool = True
+    require_well_founded_descent: bool = True
+    require_falsification_test: bool = True
+    preserve_abstract_proposal_after_candidate_failure: bool = True
+
+
+class InductionControlConfig(ConfigModel):
+    enabled: bool = True
+    max_candidates_per_trigger: int = Field(default=3, ge=1, le=16)
+    trigger_on_first_occurrence_barrier: bool = True
+    trigger_on_recursive_same_type_dependency: bool = True
+    trigger_on_repeated_feature: bool = True
+    require_well_foundedness_statement: bool = True
+
+
+class FailureControlConfig(ConfigModel):
+    enabled: bool = True
+    ambiguous_model_review: bool = True
+    min_classification_confidence: float = Field(default=0.70, ge=0.0, le=1.0)
+    max_blueprint_rewrites_per_route: int = Field(default=1, ge=0, le=8)
+    framing_failure_forces_reanchor: bool = True
+    plan_failure_blocks_local_deepen: bool = True
+    bridge_failure_prefers_bridge_action: bool = True
+
+
+class BottleneckControlConfig(ConfigModel):
+    enabled: bool = True
+    mode: Literal["off", "shadow", "active"] = "shadow"
+    compression_interval_rounds: int = Field(default=1, ge=1, le=16)
+    equivalence_threshold: float = Field(default=0.84, ge=0.0, le=1.0)
+    dominance_threshold: float = Field(default=0.90, ge=0.0, le=1.0)
+    max_cluster_members: int = Field(default=64, ge=2, le=1000)
+    preserve_original_nodes: bool = True
+    min_open_growth_for_forced_compression: int = Field(default=8, ge=1, le=1000)
+
+
+class CommonModeControlConfig(ConfigModel):
+    enabled: bool = True
+    min_routes: int = Field(default=3, ge=2, le=32)
+    risk_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
+    max_challengers_per_round: int = Field(default=1, ge=0, le=8)
+    include_strategy_prerequisites: bool = True
+    include_critical_claims: bool = True
+    include_unverified_dependencies: bool = True
+
+
+class MessageUtilityControlConfig(ConfigModel):
+    enabled: bool = True
+    require_utility_contract_for_cross_route: bool = True
+    broadcast_min_expected_core_debt_reduction: float = Field(
+        default=0.0, ge=0.0, le=1000.0
+    )
+    max_target_obligations: int = Field(default=8, ge=1, le=64)
+    utility_credit_horizon_rounds: int = Field(default=3, ge=1, le=32)
+    no_use_cooldown_threshold: int = Field(default=3, ge=1, le=32)
+    final_citation_credit: float = Field(default=1.0, ge=0.0, le=4.0)
+    obligation_close_credit: float = Field(default=0.8, ge=0.0, le=4.0)
+    verified_step_credit: float = Field(default=0.5, ge=0.0, le=4.0)
+    refutation_credit: float = Field(default=0.8, ge=0.0, le=4.0)
+    blueprint_rewrite_credit: float = Field(default=0.4, ge=0.0, le=4.0)
+
+
+class NearMissControlConfig(ConfigModel):
+    enabled: bool = True
+    min_verifier_confidence: float = Field(default=0.65, ge=0.0, le=1.0)
+    max_records: int = Field(default=512, ge=0, le=10000)
+    max_route_context_items: int = Field(default=6, ge=0, le=64)
+    extraction_requires_salvageable_component: bool = True
+    allow_model_extraction_on_ambiguous: bool = True
+
+
+class FalsificationFastLaneControlConfig(ConfigModel):
+    enabled: bool = True
+    exact_arithmetic_only: bool = True
+    max_runtime_seconds: float = Field(default=10.0, ge=0.1, le=120.0)
+    max_memory_mb: int = Field(default=256, ge=32, le=4096)
+    max_cases: int = Field(default=100_000, ge=1, le=10_000_000)
+    max_tasks_per_round: int = Field(default=2, ge=0, le=16)
+    allow_sandboxed_python: bool = False
+    auto_fact_promotion: bool = False
+    allowed_purposes: list[ComputationPurpose] = Field(
+        default_factory=lambda: [
+            ComputationPurpose.FALSIFY_CLAIM,
+            ComputationPurpose.TEST_BOUNDARY_CASES,
+        ]
+    )
+
+
+class BlueprintReviewControlConfig(ConfigModel):
+    """Hard bounds for route-admission review and repair work."""
+
+    max_review_calls_per_round: int = Field(default=2, ge=0, le=16)
+    max_nodes_per_batch: int = Field(default=12, ge=1, le=128)
+    max_repair_rounds: int = Field(default=2, ge=0, le=8)
+    max_batch_repair_items: int = Field(default=12, ge=1, le=128)
+
+
+class RouteAdmissionControlConfig(ConfigModel):
+    enabled: bool = True
+    mode: Literal["off", "shadow", "active"] = "shadow"
+    min_goal_alignment: float = Field(default=0.65, ge=0.0, le=1.0)
+    reject_necessary_only_as_main_route: bool = True
+    reject_heuristic_only_as_main_route: bool = True
+    require_falsification_test: bool = True
+    require_mechanism_novelty: bool = True
+    max_regeneration_attempts: int = Field(default=1, ge=0, le=4)
+    fail_closed_if_all_rejected: bool = True
+    # Batched LLM repair of NEEDS_NORMALIZATION blueprint statements before
+    # burning a full planner regeneration on the same doomed pipeline.
+    semantic_repair_enabled: bool = True
+    max_semantic_repair_calls: int = Field(default=2, ge=0, le=8)
+    # Hard ceiling as a fraction of the run's total call budget; the
+    # effective cap is min(max_semantic_repair_calls, fraction * total).
+    semantic_repair_budget_fraction: float = Field(default=0.1, ge=0.0, le=0.5)
+    blueprint_review: BlueprintReviewControlConfig = Field(
+        default_factory=BlueprintReviewControlConfig
+    )
+
+
+class ContinueGateControlConfig(ConfigModel):
+    enabled: bool = True
+    mode: Literal["off", "shadow", "active"] = "shadow"
+    no_core_progress_segments: int = Field(default=2, ge=1, le=16)
+    require_any_core_signal: bool = True
+    allow_on_core_obligation_closed: bool = True
+    allow_on_core_debt_reduced: bool = True
+    allow_on_first_error_changed: bool = True
+    allow_on_verified_bridge_gain: bool = True
+    force_blueprint_rewrite_after_block: bool = True
+
+
+class SynthesisReadinessControlConfig(ConfigModel):
+    enabled: bool = True
+    mode: Literal["off", "shadow", "active"] = "shadow"
+    require_core_dependency_closure: bool = True
+    require_no_open_scope_risks: bool = True
+    require_no_unresolved_high_centrality_conflicts: bool = True
+    require_no_necessary_only_bridge_as_sufficient: bool = True
+    max_open_auxiliary_obligations: int = Field(default=16, ge=0, le=10000)
+    high_centrality_threshold: float = Field(default=0.70, ge=0.0, le=1.0)
+    produce_progress_report_when_blocked: bool = True
+
+
+class ProofControlConfig(ConfigModel):
+    enabled: bool = False
+    mode: Literal["off", "shadow", "active"] = "off"
+    strict_fail_closed: bool = True
+    goal_alignment: GoalAlignmentControlConfig = Field(
+        default_factory=GoalAlignmentControlConfig
+    )
+    scope_guard: ScopeGuardControlConfig = Field(
+        default_factory=ScopeGuardControlConfig
+    )
+    core_debt: CoreDebtControlConfig = Field(default_factory=CoreDebtControlConfig)
+    realizer: RealizerControlConfig = Field(default_factory=RealizerControlConfig)
+    induction: InductionControlConfig = Field(default_factory=InductionControlConfig)
+    failure: FailureControlConfig = Field(default_factory=FailureControlConfig)
+    bottleneck: BottleneckControlConfig = Field(default_factory=BottleneckControlConfig)
+    common_mode: CommonModeControlConfig = Field(
+        default_factory=CommonModeControlConfig
+    )
+    message_utility: MessageUtilityControlConfig = Field(
+        default_factory=MessageUtilityControlConfig
+    )
+    near_miss: NearMissControlConfig = Field(default_factory=NearMissControlConfig)
+    falsification_fast_lane: FalsificationFastLaneControlConfig = Field(
+        default_factory=FalsificationFastLaneControlConfig
+    )
+    route_admission: RouteAdmissionControlConfig = Field(
+        default_factory=RouteAdmissionControlConfig
+    )
+    continue_gate: ContinueGateControlConfig = Field(
+        default_factory=ContinueGateControlConfig
+    )
+    synthesis_readiness: SynthesisReadinessControlConfig = Field(
+        default_factory=SynthesisReadinessControlConfig
+    )
+
+
 class TopologyConfig(ConfigModel):
     neighbor_k: int = Field(default=2, ge=1, le=16)
     prefer_cross_provider_review: bool = True
@@ -532,6 +757,7 @@ class TopologyConfig(ConfigModel):
     agent_capability: AgentCapabilityConfig = Field(
         default_factory=AgentCapabilityConfig
     )
+    proof_control: ProofControlConfig = Field(default_factory=ProofControlConfig)
 
     @model_validator(mode="after")
     def validate_hierarchical_topology(self) -> "TopologyConfig":
@@ -547,6 +773,28 @@ class TopologyConfig(ConfigModel):
             raise ValueError("inspiration.mode requires inspiration.enabled=true")
         return self
 
+    @model_validator(mode="after")
+    def validate_proof_control(self) -> "TopologyConfig":
+        control = self.proof_control
+        if control.mode != "off" and not control.enabled:
+            raise ValueError("proof_control.mode requires proof_control.enabled=true")
+        if control.mode == "active":
+            if self.mode != "hierarchical_sparse":
+                raise ValueError("active proof control requires hierarchical_sparse")
+            if not self.proof_graph.enabled or self.proof_graph.mode != "active":
+                raise ValueError("active proof control requires active proof graph")
+            if not self.typed_memory.enabled:
+                raise ValueError("active proof control requires typed memory")
+            if not self.typed_communication.enabled:
+                raise ValueError("active proof control requires typed communication")
+        if control.falsification_fast_lane.auto_fact_promotion:
+            raise ValueError("fast-lane computation must never auto-promote Fact")
+        if control.falsification_fast_lane.allow_sandboxed_python:
+            raise ValueError(
+                "automatic falsification fast lane cannot use sandboxed Python"
+            )
+        return self
+
 
 class VerificationConfig(ConfigModel):
     structural_first: bool = True
@@ -558,7 +806,19 @@ class VerificationConfig(ConfigModel):
     enable_numeric_counterexamples: bool = True
     enable_lean: bool = False
     lean_command: str = "lake env lean"
+    lean_sandbox_required: Literal[True] = True
+    lean_sandbox_image: str | None = None
+    lean_sandbox_memory_mb: int = Field(default=1024, ge=128, le=8192)
+    lean_sandbox_pids_limit: int = Field(default=128, ge=16, le=1024)
+    lean_sandbox_cpus: float = Field(default=1.0, gt=0.0, le=8.0)
     external_tool_timeout_seconds: float = Field(default=20.0, ge=1.0, le=600.0)
+
+    @field_validator("lean_sandbox_image")
+    @classmethod
+    def require_pinned_lean_image(cls, value: str | None) -> str | None:
+        if value is not None and "@sha256:" not in value:
+            raise ValueError("lean_sandbox_image must be pinned by sha256 digest")
+        return value
 
 
 class ContinuationConfig(ConfigModel):
@@ -575,6 +835,10 @@ class ContinuationConfig(ConfigModel):
     max_segments_per_path: int = Field(default=12, ge=1, le=128)
     verify_each_delta: bool = True
     delta_verifier_replicas: int = Field(default=1, ge=1, le=4)
+    # Proof search is tree search: when the author reports a contradiction
+    # with the committed checkpoint, roll the resume pointer back one
+    # segment and branch, instead of abandoning the whole path.
+    allow_checkpoint_rollback: bool = True
     checkpoint_pass_threshold: float = Field(default=0.78, ge=0.0, le=1.0)
     resume_on_disconnect: bool = True
     allow_cross_agent_failover: bool = True
@@ -742,6 +1006,13 @@ class RuntimeConfig(ConfigModel):
     max_parallel_calls: int = Field(default=8, ge=1, le=128)
     parse_retries: int = Field(default=1, ge=0, le=5)
     request_retries: int = Field(default=3, ge=0, le=10)
+    # Two-phase generation: phase 1 spends the whole output budget on free-form
+    # mathematics, phase 2 formats that write-up into the required JSON schema.
+    # Off by default; when off the single-phase path is byte-for-byte unchanged.
+    two_phase_output: bool = False
+    two_phase_stages: list[str] = Field(
+        default_factory=lambda: ["independent_exploration", "proof_continuation"]
+    )
     checkpoint_every_stage: bool = True
     save_raw_provider_responses: bool = True
     redact_prompts_in_console: bool = True

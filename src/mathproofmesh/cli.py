@@ -168,6 +168,7 @@ def _run_resume_with_activity(
     *,
     run_id: str,
     mode: ActivityMode,
+    resume_mode: str | None = None,
     mock_responders=None,
 ):
     config.runtime.activity_mode = mode
@@ -184,8 +185,35 @@ def _run_resume_with_activity(
                 config,
                 mock_responders=mock_responders,
                 activity_listener=listener,
-            ).resume(run_id)
+            ).resume(
+                run_id,
+                intervention=(
+                    None
+                    if resume_mode is None or resume_mode == "normal"
+                    else resume_mode
+                ),
+            )
         )
+
+
+def _apply_desktop_resume_context(
+    config: SystemConfig,
+    desktop_home: Path,
+) -> SystemConfig:
+    """Reuse a Desktop run root and its DPAPI-protected credentials."""
+
+    from .desktop.configuration import DesktopConfigService
+    from .desktop.paths import DesktopPaths
+    from .desktop.security import CredentialVault
+    from .desktop.settings import SettingsStore
+
+    paths = DesktopPaths.discover(desktop_home)
+    settings = SettingsStore(paths.settings_file).load()
+    service = DesktopConfigService(
+        paths,
+        CredentialVault(paths.credentials_file),
+    )
+    return service.apply_runtime_context(config, settings)
 
 
 @app.command()
@@ -288,9 +316,36 @@ def resume(
     proof_graph_mode: Optional[str] = typer.Option(None, "--proof-graph-mode"),
     disable_route_teams: bool = typer.Option(False, "--disable-route-teams"),
     disable_cross_route: bool = typer.Option(False, "--disable-cross-route"),
+    resume_mode: Optional[str] = typer.Option(
+        None,
+        "--resume-mode",
+        help=(
+            "Optional intervention: normal, reopen_with_pivot, "
+            "reset_stagnation, or replay_stage."
+        ),
+    ),
+    desktop_home: Optional[Path] = typer.Option(
+        None,
+        "--desktop-home",
+        exists=True,
+        file_okay=False,
+        readable=True,
+        help=(
+            "Reuse a Desktop home directory for its run root, settings, "
+            "learning state, and DPAPI-protected API credentials."
+        ),
+    ),
 ) -> None:
     """Resume from the latest stage snapshot and verified proof checkpoint."""
     cfg = load_config(config)
+    if desktop_home is not None:
+        try:
+            cfg = _apply_desktop_resume_context(cfg, desktop_home)
+        except RuntimeError as exc:
+            raise typer.BadParameter(
+                str(exc),
+                param_hint="--desktop-home",
+            ) from exc
     cfg = _apply_topology_overrides(
         cfg,
         topology_mode=topology_mode,
@@ -300,7 +355,12 @@ def resume(
     )
     _configure_logging(cfg.runtime.log_level)
     mode = _resolve_activity_mode(cfg, activity, json_output=json_output)
-    result = _run_resume_with_activity(cfg, run_id=run_id, mode=mode)
+    result = _run_resume_with_activity(
+        cfg,
+        run_id=run_id,
+        mode=mode,
+        resume_mode=resume_mode,
+    )
     if json_output:
         console.print_json(
             json.dumps(result.model_dump(mode="json"), ensure_ascii=False)

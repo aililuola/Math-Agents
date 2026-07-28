@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from .communication.broker import MessageBroker
 from .proof_graph.store import ProofGraphStore
@@ -16,9 +16,16 @@ def record_verified_message_usage(
     route_id: str,
     proof_graph: ProofGraphStore | None,
     proof_debt_before: float | None,
+    refuted_claim_ids_by_message: Mapping[str, Sequence[str]] | None = None,
+    produced_message_ids_by_message: Mapping[str, Sequence[str]] | None = None,
+    blueprint_rewrite_ids_by_message: Mapping[str, Sequence[str]] | None = None,
+    final_cited_message_ids: Sequence[str] = (),
 ) -> list[str]:
     """Credit a message only when the accepted delta demonstrably cites or closes it."""
     messages = {message.message_id: message for message in delivered}
+    refuted_claim_ids_by_message = refuted_claim_ids_by_message or {}
+    produced_message_ids_by_message = produced_message_ids_by_message or {}
+    blueprint_rewrite_ids_by_message = blueprint_rewrite_ids_by_message or {}
     step_by_id = {step.step_id: step for step in delta.new_steps}
     used: list[str] = []
     debt_after = proof_graph.proof_debt(route_id) if proof_graph is not None else None
@@ -54,6 +61,16 @@ def record_verified_message_usage(
             route_id,
             referenced_step_ids=valid_steps,
             closed_obligation_ids=valid_obligations,
+            refuted_claim_ids=list(
+                refuted_claim_ids_by_message.get(message.message_id, ())
+            ),
+            produced_message_ids=list(
+                produced_message_ids_by_message.get(message.message_id, ())
+            ),
+            blueprint_rewrite_request_ids=list(
+                blueprint_rewrite_ids_by_message.get(message.message_id, ())
+            ),
+            cited_by_final_proof=message.message_id in set(final_cited_message_ids),
             proof_debt_before=proof_debt_before,
             proof_debt_after=debt_after,
         ):

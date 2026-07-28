@@ -41,11 +41,22 @@ async def test_active_rejected_inspiration_survives_blind_finalization(
             context = _context(messages)
             segment = int(context.get("authoritative_ids", {}).get("segment_index", 1))
             if segment == 1:
+                checkpoint_subgoals = list(
+                    context.get("checkpoint", {}).get("remaining_subgoals", [])
+                )
+                completed_subgoal = (
+                    checkpoint_subgoals[0]
+                    if checkpoint_subgoals
+                    else "Establish one local identity."
+                )
                 payload["action"] = "submit_delta"
                 payload["delta"].update(
                     {
-                        "completed_subgoal": "Establish one local identity.",
-                        "remaining_subgoals": ["Find a mechanism-level bridge."],
+                        "completed_subgoal": completed_subgoal,
+                        "remaining_subgoals": [
+                            *checkpoint_subgoals[1:],
+                            "Find a mechanism-level bridge.",
+                        ],
                         "current_goal": "Find a mechanism-level bridge.",
                         "candidate_final_answer": None,
                         "proof_complete": False,

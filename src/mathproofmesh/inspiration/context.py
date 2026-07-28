@@ -11,6 +11,7 @@ from ..schemas import (
     InspirationMechanism,
     InspirationProposal,
     InspirationTask,
+    MechanismChainSignature,
     MessageEnvelope,
 )
 from ..topology import jaccard_similarity
@@ -166,6 +167,21 @@ def _enforce_context_budget(
     if _context_chars(context) <= max_chars:
         return context
     context["context_truncated"] = True
+    control_context = context.get("proof_control_context")
+    if isinstance(control_context, dict):
+        for key in (
+            "common_mode_assumption_families",
+            "verified_near_miss_salvage",
+            "active_induction_measures",
+            "minimal_bridge_requests",
+        ):
+            values = control_context.get(key)
+            while (
+                isinstance(values, list)
+                and values
+                and _context_chars(context) > max_chars
+            ):
+                values.pop()
     for key in (
         "domain_operator_catalog",
         "route_novelty_signatures",
@@ -263,25 +279,33 @@ def build_inspiration_prompt_context(
         engine.mechanism_normalizer.normalize_signature(item)
         for item in snapshot.route_signatures
     ]
-    forbidden = list(
-        dict.fromkeys(
-            tag
-            for signature in normalized_signatures
-            for tag in (
-                *signature.representation_tags,
-                *signature.mechanism_tags,
-                *signature.key_transformations,
-                *signature.proof_principles,
-            )
+    blocked_chains = []
+    seen_chain_hashes: set[str] = set()
+    route_chains = [
+        MechanismChainSignature.from_novelty_signature(signature)
+        for signature in snapshot.route_signatures
+    ]
+    stored_chains = list(getattr(engine, "mechanism_chain_signatures", {}).values())
+    for chain in [*route_chains, *stored_chains]:
+        if not chain.complete or chain.chain_hash in seen_chain_hashes:
+            continue
+        seen_chain_hashes.add(chain.chain_hash)
+        blocked_chains.append(
+            {
+                **chain.normalized_payload(),
+                "chain_hash": chain.chain_hash,
+            }
         )
-    )[:32]
+        if len(blocked_chains) >= 16:
+            break
     contract = {
         "proposal_slot": proposal_slot,
         "context_mode": context_mode.value,
         "diversity_axis": _SLOT_DIRECTIVES[proposal_slot % len(_SLOT_DIRECTIVES)],
         "must_target_open_obligation": True,
         "must_include_fast_failure_test": True,
-        "forbidden_existing_mechanisms": forbidden,
+        "blocked_mechanism_chains": blocked_chains,
+        "forbidden_existing_mechanisms": blocked_chains,
     }
     compact_metrics = {
         "round_index": snapshot.round_index,
@@ -315,6 +339,15 @@ def build_inspiration_prompt_context(
         "domain_operator_catalog": [],
         "surprise_mutation_directive": None,
     }
+    control_context_provider = getattr(
+        engine,
+        "proof_control_context_provider",
+        None,
+    )
+    if callable(control_context_provider):
+        base["proof_control_context"] = control_context_provider(
+            target_obligation_ids=task.target_obligation_ids,
+        )
     operator_catalog = engine.domain_operator_catalog(task, snapshot)
     if context_mode == InspirationContextMode.COLD and operator_catalog:
         base["domain_operator_catalog"] = [

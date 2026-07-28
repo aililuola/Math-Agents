@@ -25,6 +25,7 @@ class SolveRequest(BaseModel):
 
 class ResumeRequest(BaseModel):
     run_id: str = Field(min_length=1)
+    resume_mode: str = "normal"
 
 
 def _sse_message(event: str, data: dict[str, Any]) -> str:
@@ -126,7 +127,12 @@ def create_app(config_path: str | None = None):
         authorize(authorization)
         try:
             async with run_semaphore:
-                result = await ProofMeshOrchestrator(config).resume(request.run_id)
+                result = await ProofMeshOrchestrator(config).resume(
+                    request.run_id,
+                    intervention=(
+                        None if request.resume_mode == "normal" else request.resume_mode
+                    ),
+                )
             return result.model_dump(mode="json")
         except (ValueError, FileNotFoundError, RuntimeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -228,7 +234,14 @@ def create_app(config_path: str | None = None):
                 async with run_semaphore:
                     result = await ProofMeshOrchestrator(
                         config, activity_listener=activity_listener
-                    ).resume(request.run_id)
+                    ).resume(
+                        request.run_id,
+                        intervention=(
+                            None
+                            if request.resume_mode == "normal"
+                            else request.resume_mode
+                        ),
+                    )
                 await queue.put(("result", result.model_dump(mode="json")))
             except asyncio.CancelledError:
                 raise

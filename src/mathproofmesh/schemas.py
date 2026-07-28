@@ -171,6 +171,8 @@ class ComputationMethod(StrEnum):
     CANDIDATE_PERIOD_CHECK = "candidate_period_check"
     EXACT_GEOMETRY = "exact_geometry"
     NUMERIC_COUNTEREXAMPLE = "numeric_counterexample"
+    REAL_INEQUALITY = "real_inequality"
+    NUMBER_THEORY_CHECK = "number_theory_check"
     SANDBOXED_PYTHON = "sandboxed_python"
     LEAN_CHECK = "lean_check"
 
@@ -222,7 +224,10 @@ class RouteRole(StrEnum):
 
 class RouteStatus(StrEnum):
     ACTIVE = "active"
+    WAITING = "waiting"
     REPAIR_ONCE = "repair_once"
+    FROZEN = "frozen"
+    TERMINAL = "terminal"
     FROZEN_STALLED = "frozen_stalled"
     REFUTED = "refuted"
     COOLING = "cooling"
@@ -245,6 +250,23 @@ class MessageType(StrEnum):
     STRATEGY_REWRITE_REQUEST = "strategy_rewrite_request"
     FAILURE_RECORD = "failure_record"
     ROUTE_CHECKPOINT = "route_checkpoint"
+
+
+class MessagePriority(StrEnum):
+    CRITICAL = "critical"
+    HIGH = "high"
+    NORMAL = "normal"
+    LOW = "low"
+
+
+class DeliveryState(StrEnum):
+    QUEUED = "queued"
+    SCHEDULED = "scheduled"
+    PRESENTED = "presented"
+    ACKNOWLEDGED = "acknowledged"
+    USED = "used"
+    EXPIRED_WITHOUT_OPPORTUNITY = "expired_without_opportunity"
+    INVALIDATED = "invalidated"
 
 
 class EvidenceType(StrEnum):
@@ -422,6 +444,7 @@ class MessageEnvelope(StrictModel):
     quantifiers: list[QuantifierSpec] = Field(default_factory=list)
     variable_bindings: list[VariableBinding] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
+    dependency_refs: list[Any] = Field(default_factory=list)
     scope_limitations: list[str] = Field(default_factory=list)
 
     evidence_type: EvidenceType
@@ -589,6 +612,7 @@ class ProofObligation(StrictModel):
     assumptions: list[str] = Field(default_factory=list)
     quantifiers: list[QuantifierSpec] = Field(default_factory=list)
     dependency_ids: list[str] = Field(default_factory=list)
+    dependency_refs: list[Any] = Field(default_factory=list)
     status: Literal["open", "tentative", "closed", "refuted", "blocked"] = "open"
     priority: float = Field(default=0.5, ge=0.0, le=1.0)
     centrality: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -633,6 +657,9 @@ class BrokerDecision(StrictModel):
     bridge_task_id: str | None = None
     contradiction_id: str | None = None
     score_breakdown: dict[str, float] = Field(default_factory=dict)
+    accepted_claim_ids: list[str] = Field(default_factory=list)
+    rejected_claim_ids: list[str] = Field(default_factory=list)
+    deferred_claim_ids: list[str] = Field(default_factory=list)
 
 
 class BridgeTask(StrictModel):
@@ -686,6 +713,71 @@ class NoveltySignature(StrictModel):
             raise ValueError("novelty signature hash mismatch")
         object.__setattr__(self, "normalized_hash", expected)
         return self
+
+
+class MechanismChainSignature(StrictModel):
+    representation: list[str] = Field(default_factory=list)
+    transformations: list[str] = Field(default_factory=list)
+    bridge_pattern: list[str] = Field(default_factory=list)
+    terminal_argument: list[str] = Field(default_factory=list)
+    chain_hash: str = ""
+
+    def normalized_payload(self) -> dict[str, list[str]]:
+        def normalize(values: list[str]) -> list[str]:
+            return list(
+                dict.fromkeys(
+                    " ".join(value.casefold().split())
+                    for value in values
+                    if value.strip()
+                )
+            )
+
+        return {
+            "representation": normalize(self.representation),
+            "transformations": normalize(self.transformations),
+            "bridge_pattern": normalize(self.bridge_pattern),
+            "terminal_argument": normalize(self.terminal_argument),
+        }
+
+    @property
+    def complete(self) -> bool:
+        payload = self.normalized_payload()
+        populated_stages = sum(bool(values) for values in payload.values())
+        component_count = sum(len(values) for values in payload.values())
+        return populated_stages >= 3 and component_count >= 4
+
+    @model_validator(mode="after")
+    def set_chain_hash(self) -> "MechanismChainSignature":
+        expected = stable_hash(self.normalized_payload())
+        if self.chain_hash and self.chain_hash != expected:
+            raise ValueError("mechanism chain hash mismatch")
+        object.__setattr__(self, "chain_hash", expected)
+        return self
+
+    @classmethod
+    def from_novelty_signature(
+        cls,
+        signature: NoveltySignature,
+    ) -> "MechanismChainSignature":
+        return cls(
+            representation=list(signature.representation_tags),
+            transformations=list(signature.key_transformations),
+            bridge_pattern=list(signature.mechanism_tags),
+            terminal_argument=list(signature.proof_principles),
+        )
+
+    def to_novelty_signature(
+        self,
+        *,
+        targeted_obligation_ids: list[str] | None = None,
+    ) -> NoveltySignature:
+        return NoveltySignature(
+            representation_tags=list(self.representation),
+            mechanism_tags=list(self.bridge_pattern),
+            key_transformations=list(self.transformations),
+            proof_principles=list(self.terminal_argument),
+            targeted_obligation_ids=list(targeted_obligation_ids or []),
+        )
 
 
 class InspirationTrigger(StrictModel):
@@ -1070,6 +1162,15 @@ class InspirationReview(StrictModel):
         "request_bridge_verification",
     ]
     confidence: float = Field(ge=0.0, le=1.0)
+    review_status: Literal["completed", "deferred"] = "completed"
+    deferred_reason: str = ""
+    review_action_id: str | None = None
+
+    @model_validator(mode="after")
+    def deferred_review_requires_reason(self) -> "InspirationReview":
+        if self.review_status == "deferred" and not self.deferred_reason.strip():
+            raise ValueError("deferred inspiration review requires a reason")
+        return self
 
 
 class InspirationTask(StrictModel):
@@ -1421,6 +1522,10 @@ class ExperimentResult(StrictModel):
     path_id: str | None = None
     parent_checkpoint_id: str | None = None
     target_claim: str
+    # Structured binding of the refuted/confirmed claim to a claim or step
+    # ID, so a confirmed counterexample cannot be escaped by rewording the
+    # claim text.
+    target_claim_id: str | None = None
     method: ComputationMethod
     outcome: ExperimentOutcome
     evidence_strength: EvidenceStrength
@@ -1734,6 +1839,61 @@ class GoalClarificationDecision(StrictModel):
     selected_candidate_index: int | None = Field(default=None, ge=0)
 
 
+class ProblemSemanticViewCandidate(StrictModel):
+    """Model-proposed English reading; never an authoritative problem statement."""
+
+    english_statement: str = Field(min_length=1)
+    preserves_hypotheses: bool
+    preserves_quantifiers: bool
+    preserves_domains: bool
+    preserves_conclusion: bool
+    confidence: float = Field(ge=0.0, le=1.0)
+    notes: list[str] = Field(default_factory=list)
+
+
+class SemanticInvariantAudit(StrictModel):
+    invariant: str = Field(min_length=1)
+    status: Literal["pass", "fail", "not_applicable"]
+    source_values: list[str] = Field(default_factory=list)
+    target_values: list[str] = Field(default_factory=list)
+    detail: str = Field(min_length=1)
+
+
+class ProblemSemanticView(StrictModel):
+    """Audited prompt sidecar excluded from the frozen goal identity."""
+
+    source_statement_hash: str
+    source_language: str
+    english_statement: str
+    candidate_confidence: float = Field(ge=0.0, le=1.0)
+    protected_fragments: list[str] = Field(default_factory=list)
+    missing_protected_fragments: list[str] = Field(default_factory=list)
+    deterministic_audit_passed: bool = False
+    audit_findings: list[SemanticInvariantAudit] = Field(default_factory=list)
+    status: Literal["usable", "rejected"]
+    authoritative: Literal[False] = False
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def quarantine_legacy_unaudited_view(self) -> "ProblemSemanticView":
+        if self.status == "usable" and not self.deterministic_audit_passed:
+            object.__setattr__(self, "status", "rejected")
+            object.__setattr__(
+                self,
+                "notes",
+                list(
+                    dict.fromkeys(
+                        [
+                            *self.notes,
+                            "legacy semantic view rejected because it has no "
+                            "deterministic bilingual audit",
+                        ]
+                    )
+                ),
+            )
+        return self
+
+
 class ProblemContract(StrictModel):
     problem_id: str = Field(default_factory=lambda: new_id("problem"))
     exact_statement: str
@@ -1757,6 +1917,7 @@ class ProblemContract(StrictModel):
     hard_constraints: list[str] = Field(default_factory=list)
     allowed_tools: list[str] = Field(default_factory=list)
     output_language: str = "zh-CN"
+    semantic_view: ProblemSemanticView | None = None
     integrity_hash: str = ""
     created_at: str = Field(default_factory=utc_now_iso)
 
@@ -1814,6 +1975,7 @@ class TriageResult(StrictModel):
     proof_mode: Literal["direct", "decomposition", "hybrid"] = "hybrid"
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
+    semantic_view_candidate: ProblemSemanticViewCandidate | None = None
 
 
 class CriticalClaim(StrictModel):
@@ -1888,22 +2050,55 @@ class StrategySet(StrictModel):
         return value
 
 
+class PropositionNormalizationItem(StrictModel):
+    """One repaired statement from the batched semantic normalizer.
+
+    The normalizer restates form only: explicit objects, quantifiers,
+    relation, and scope. It must never prove, refute, strengthen, or weaken
+    the mathematics of the original statement.
+    """
+
+    original_statement: str
+    normalized_statement: str
+    is_mathematical_proposition: bool = True
+    note: str = ""
+
+
+class PropositionNormalizationBatch(StrictModel):
+    items: list[PropositionNormalizationItem] = Field(default_factory=list)
+
+
 class ProofStep(StrictModel):
     step_id: str
     statement: str
     justification: str
     dependencies: list[str] = Field(default_factory=list)
+    dependency_refs: list[Any] = Field(default_factory=list)
     calculations: list[str] = Field(default_factory=list)
     calculation_checks: list[ToolRequest] = Field(default_factory=list)
     calculation_evidence_refs: list[EvidenceRef] = Field(default_factory=list)
     citations: list[CitationRecord] = Field(default_factory=list)
     is_key_step: bool = False
+    # Scope semantics: typed steps let deterministic guards (and a future
+    # formal backend) mechanically track assumption discharge and case
+    # exhaustiveness instead of trusting prose.
+    step_type: Literal[
+        "derivation",
+        "assumption_intro",
+        "assumption_discharge",
+        "case_split",
+        "case_close",
+        "definition",
+        "construction",
+    ] = "derivation"
+    branch_label: str | None = None
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
 
     def checkpoint_payload(self) -> dict[str, Any]:
-        """Keep old checkpoint hashes valid when the new fields are empty."""
+        """Keep sidecar metadata out of the mathematical checkpoint hash."""
 
         payload = self.model_dump(mode="json")
+        payload.pop("dependency_refs", None)
         if not self.calculation_checks:
             payload.pop("calculation_checks", None)
         if not self.calculation_evidence_refs:
@@ -1918,6 +2113,7 @@ class ClaimCard(StrictModel):
     conclusion: str
     proof_steps: list[ProofStep] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
+    dependency_refs: list[Any] = Field(default_factory=list)
     status: ClaimStatus = ClaimStatus.PROPOSED
     source_delta_id: str | None = None
     source_attempt_id: str | None = None
@@ -2016,6 +2212,11 @@ class ProofAttempt(StrictModel):
     unresolved_gaps: list[str] = Field(default_factory=list)
     falsification_checks: list[str] = Field(default_factory=list)
     self_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    # A global route map produced on the first exploration turn
+    # (Draft-Sketch-Prove style): the intended lemma chain and techniques.
+    # Non-authoritative; persisted on the path and re-injected into every
+    # continuation segment.
+    proof_sketch: str = Field(default="", max_length=4000)
     path_id: str | None = None
     latest_checkpoint_id: str | None = None
     checkpoint_ids: list[str] = Field(default_factory=list)
@@ -2048,7 +2249,10 @@ class ProofDelta(StrictModel):
     new_steps: list[ProofStep] = Field(default_factory=list)
     new_claims: list[ClaimCard] = Field(default_factory=list)
     candidate_conjectures: list[CandidateConjecture] = Field(default_factory=list)
-    active_assumptions: list[str] = Field(default_factory=list)
+    # None inherits the parent checkpoint's assumptions; an explicit empty
+    # list discharges them all (end of a contradiction or case analysis).
+    active_assumptions: list[str] | None = None
+    dependency_refs: list[Any] = Field(default_factory=list)
     remaining_subgoals: list[str] = Field(default_factory=list)
     current_goal: str | None = None
     known_risks: list[str] = Field(default_factory=list)
@@ -2057,6 +2261,11 @@ class ProofDelta(StrictModel):
     proof_complete: bool = False
     ready_for_verification: bool = True
     normalization_notes: list[str] = Field(default_factory=list)
+    # Non-authoritative scratch plan for the author's own next segment:
+    # route map, failed directions, planned techniques. Never a dependency,
+    # never verified, never evidence — it only fights the cold-start caused
+    # by provider reasoning being discarded between segments.
+    working_notes: str = Field(default="", max_length=4000)
     self_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     raw_artifact_ref: str | None = None
     usage: UsageRecord = Field(default_factory=UsageRecord)
@@ -2159,6 +2368,10 @@ class ProofCheckpoint(StrictModel):
     status: CheckpointStatus = CheckpointStatus.COMMITTED
     verification_report_ids: list[str] = Field(default_factory=list)
     failover_chain: list[str] = Field(default_factory=list)
+    # Non-authoritative continuity channels, excluded from the content hash:
+    # the author's latest scratch plan and the route-level proof sketch.
+    working_notes: str = Field(default="", max_length=4000)
+    proof_sketch: str = Field(default="", max_length=4000)
     created_at: str = Field(default_factory=utc_now_iso)
     content_hash: str = ""
 
@@ -2275,6 +2488,9 @@ class VerificationIssue(StrictModel):
     description: str
     counterexample: str | None = None
     repair_hint: str | None = None
+    issue_code: str | None = None
+    premise_summary: str = ""
+    conclusion_summary: str = ""
 
 
 class BlindVerificationReport(StrictModel):
@@ -2284,6 +2500,7 @@ class BlindVerificationReport(StrictModel):
     verdict: VerificationVerdict
     first_error_step: str | None = None
     issues: list[VerificationIssue] = Field(default_factory=list)
+    structured_issues: list[Any] = Field(default_factory=list)
     checked_dependencies: list[str] = Field(default_factory=list)
     tool_requests: list[ToolRequest] = Field(default_factory=list)
     tool_results: list[ToolResult] = Field(default_factory=list)
@@ -2314,6 +2531,7 @@ class VerificationReport(StrictModel):
     verdict: VerificationVerdict
     first_error_step: str | None = None
     issues: list[VerificationIssue] = Field(default_factory=list)
+    structured_issues: list[Any] = Field(default_factory=list)
     checked_dependencies: list[str] = Field(default_factory=list)
     tool_requests: list[ToolRequest] = Field(default_factory=list)
     tool_results: list[ToolResult] = Field(default_factory=list)
@@ -2401,6 +2619,12 @@ class PathStats(StrictModel):
     meta_review_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     proof_debt: float = Field(default=0.0, ge=0.0)
     proof_debt_reduction: float = 0.0
+    core_proof_debt: float = Field(default=0.0, ge=0.0)
+    core_proof_debt_reduction: float = 0.0
+    core_open_obligation_count: int = Field(default=0, ge=0)
+    core_verified_bridge_gain: int = Field(default=0, ge=0)
+    goal_alignment_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    common_mode_risk: float = Field(default=0.0, ge=0.0, le=1.0)
     verified_fact_gain: int = Field(default=0, ge=0)
     shared_obligation_count: int = Field(default=0, ge=0)
     high_centrality_obligation_count: int = Field(default=0, ge=0)
@@ -2479,8 +2703,16 @@ class ExecutionStatus(StrEnum):
     FAILED = "failed"
 
 
+class FormalizationCoverageReport(StrictModel):
+    total_step_count: int = Field(default=0, ge=0)
+    formally_certified_step_ids: list[str] = Field(default_factory=list)
+    coverage: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
 class ResearchProgressReport(StrictModel):
     problem_hash: str
+    termination_reason: str | None = None
+    formalization_coverage: FormalizationCoverageReport | None = None
     valid_partial_attempt_ids: list[str] = Field(default_factory=list)
     strongest_partial_attempt_id: str | None = None
     verified_step_ids: list[str] = Field(default_factory=list)
@@ -2517,10 +2749,12 @@ class RunResult(StrictModel):
     deliverable_assessments: list[DeliverableAssessment] = Field(default_factory=list)
     math_status: MathStatus = MathStatus.INCONCLUSIVE
     execution_status: ExecutionStatus = ExecutionStatus.COMPLETED
+    termination_reason: str | None = None
     problem: ProblemContract
     final_proof: FinalProof | None = None
     final_verification: VerificationReport | None = None
     research_progress_report: ResearchProgressReport | None = None
+    formalization_coverage: FormalizationCoverageReport | None = None
     attempts: list[ProofAttempt] = Field(default_factory=list)
     claims: list[ClaimCard] = Field(default_factory=list)
     verification_reports: list[VerificationReport] = Field(default_factory=list)

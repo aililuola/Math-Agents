@@ -147,5 +147,5 @@ def test_attempt_failure_only_rejects_explicitly_targeted_child_claim(
     memory.mark_attempt_verified("attempt", report)
 
     assert rejected.status == ClaimStatus.REJECTED
-    assert unresolved.status == ClaimStatus.UNCERTAIN
+    assert unresolved.status == ClaimStatus.PROPOSED
     assert memory.rejected() == [rejected]

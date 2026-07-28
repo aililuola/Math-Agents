@@ -1,0 +1,10 @@
+{
+  "case_id": "occurrence_induction",
+  "trigger_text": [
+    "Ordinary induction on n fails at the first occurrence of the feature.",
+    "The same feature appears repeatedly in an earlier object."
+  ],
+  "hint": "use the number of occurrences",
+  "expected_measure": "occurrence_count",
+  "requires_well_foundedness": true
+}

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..config import SystemConfig
+from ..proof_control.falsification import evaluate_fast_lane_eligibility
 from ..schemas import (
     ComputationDecision,
     ComputationDecisionStatus,
@@ -21,6 +22,12 @@ class ComputationContext:
     meta_review_approved: bool = False
     remaining_llm_calls: int = 0
     mandatory_calculation_gate: bool = False
+    proof_control_fast_lane: bool = False
+    target_obligation_id: str | None = None
+    target_claim_id: str | None = None
+    fast_lane_tasks_this_round: int = 0
+    requested_runtime_seconds: float | None = None
+    requested_memory_mb: int | None = None
 
 
 class ComputationGate:
@@ -37,12 +44,17 @@ class ComputationGate:
         ComputationMethod.BOUNDED_GREEDY_SEQUENCE,
         ComputationMethod.CANDIDATE_PERIOD_CHECK,
         ComputationMethod.EXACT_GEOMETRY,
+        ComputationMethod.REAL_INEQUALITY,
+        ComputationMethod.NUMBER_THEORY_CHECK,
         ComputationMethod.NUMERIC_COUNTEREXAMPLE,
         ComputationMethod.LEAN_CHECK,
     }
+    # real_inequality is excluded from the cheap-probe fast path: its cost is
+    # bounded by a solver timeout rather than an enumerable case count.
     _BOUNDED_TYPED_PROBE_METHODS = _TYPED_METHODS - {
         ComputationMethod.NUMERIC_COUNTEREXAMPLE,
         ComputationMethod.LEAN_CHECK,
+        ComputationMethod.REAL_INEQUALITY,
     }
 
     def __init__(
@@ -242,6 +254,18 @@ class ComputationGate:
                 ComputationDecisionStatus.REJECT,
                 "numeric_counterexample must declare exact_arithmetic=false; only a reproduced candidate is exact evidence.",
                 "request.invalid_precision_claim",
+            )
+        fast_lane = evaluate_fast_lane_eligibility(
+            spec,
+            context,
+            self.config,
+            registered_methods=self._TYPED_METHODS,
+        )
+        if fast_lane.eligible:
+            return decision(
+                ComputationDecisionStatus.ALLOW,
+                fast_lane.reason,
+                "fast_path.proof_control_falsification",
             )
         if context.mandatory_calculation_gate:
             return decision(
