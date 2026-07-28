@@ -78,6 +78,8 @@ from .models import (
     ControlActionResult,
     ControlActionStatus,
     ControlActionType,
+    CountermodelOutcome,
+    CountermodelResult,
     CountermodelTaskRecord,
     DependencyKind,
     DependencyRef,
@@ -164,6 +166,8 @@ class ProofControlLayer:
         self.message_broker = message_broker
         self.route_registry = route_registry
         self.state = state or ProofControlState()
+        self._countermodel_executor: Callable[..., Any] | None = None
+        self._countermodel_execution_round = 0
         self._assumption_challenger_executor: Callable[..., Any] | None = None
         self._assumption_challenger_execution_round = 0
         self._meta_pivot_executor: Callable[..., Any] | None = None
@@ -266,6 +270,11 @@ class ProofControlLayer:
             ControlActionType.CREATE_COUNTERMODEL_TASK,
             self._handle_create_countermodel_task,
             postcondition=self._countermodel_task_postcondition,
+        )
+        self.action_dispatcher.register_handler(
+            ControlActionType.EXECUTE_COUNTERMODEL_TASK,
+            self._handle_execute_countermodel_task,
+            postcondition=self._countermodel_execution_postcondition,
         )
         self.action_dispatcher.register_handler(
             ControlActionType.CLOSE_BY_DIRECT_PREMISE,
@@ -1712,6 +1721,169 @@ class ProofControlLayer:
             )
         self.schedule_pending_route_updates(current_round=current_round)
         self.persist()
+
+    def _ensure_countermodel_execution_action(
+        self,
+        task: CountermodelTaskRecord,
+        *,
+        current_round: int,
+    ) -> ControlActionRecord:
+        if (
+            task.execution_action_id is not None
+            and task.execution_action_id in self.state.control_actions
+        ):
+            return self.state.control_actions[task.execution_action_id]
+        action = self.action_dispatcher.propose(
+            ControlActionType.EXECUTE_COUNTERMODEL_TASK,
+            source_record_ids=[task.task_id],
+            route_ids=list(task.route_ids),
+            target_obligation_ids=[task.target_obligation_id],
+            payload={"task_id": task.task_id},
+            current_round=current_round,
+        )
+        task.execution_action_id = action.action_id
+        self._emit(
+            "countermodel_execution_action_reconciled",
+            {
+                "task_id": task.task_id,
+                "executable_task_id": task.executable_task_id,
+                "execution_action_id": action.action_id,
+                "round": current_round,
+            },
+        )
+        return action
+
+    async def execute_pending_countermodels(
+        self,
+        *,
+        current_round: int,
+        executor: Callable[[CountermodelTaskRecord], Any],
+    ) -> list[CountermodelTaskRecord]:
+        """Execute materialized countermodels exactly once through the dispatcher."""
+
+        live_task_statuses = {
+            "pending",
+            "assigned",
+            "ready",
+            "running",
+            "deferred",
+            "blocked",
+        }
+        live_executable_statuses = {
+            TaskStatus.CREATED,
+            TaskStatus.ASSIGNED,
+            TaskStatus.READY,
+            TaskStatus.RUNNING,
+        }
+        for task in sorted(
+            self.state.countermodel_tasks.values(),
+            key=lambda item: item.task_id,
+        ):
+            if task.status not in live_task_statuses or task.executable_task_id is None:
+                continue
+            executable = self.state.executable_tasks.get(task.executable_task_id)
+            if executable is None or executable.status not in live_executable_statuses:
+                continue
+            self._ensure_countermodel_execution_action(
+                task,
+                current_round=current_round,
+            )
+
+        candidates = sorted(
+            (
+                task
+                for task in self.state.countermodel_tasks.values()
+                if task.status in live_task_statuses
+                and task.executable_task_id is not None
+                and task.execution_action_id is not None
+                and self.state.executable_tasks[task.executable_task_id].status
+                in live_executable_statuses
+                and self.state.control_actions[task.execution_action_id].status
+                not in {
+                    ControlActionStatus.EXECUTED,
+                    ControlActionStatus.FAILED,
+                    ControlActionStatus.REJECTED,
+                }
+            ),
+            key=lambda item: item.task_id,
+        )[: self.control_config.scope_guard.max_countermodel_tasks_per_round]
+        completed: list[CountermodelTaskRecord] = []
+        self._countermodel_executor = executor
+        self._countermodel_execution_round = current_round
+        try:
+            for task in candidates:
+                assert task.execution_action_id is not None
+                try:
+                    action = await self.action_dispatcher.execute(
+                        task.execution_action_id,
+                        current_round=current_round,
+                    )
+                except Exception:
+                    completed.append(task)
+                    continue
+                if action.status in {
+                    ControlActionStatus.REJECTED,
+                    ControlActionStatus.FAILED,
+                }:
+                    task.status = (
+                        "inapplicable"
+                        if action.status == ControlActionStatus.REJECTED
+                        else "failed"
+                    )
+                    task.reason = action.failure_reason or action.admission_reason
+                    executable = self.state.executable_tasks.get(
+                        task.executable_task_id or ""
+                    )
+                    if (
+                        executable is not None
+                        and executable.status
+                        not in ExecutableTaskController.TERMINAL_STATUSES
+                    ):
+                        self.executable_task_controller.fail(
+                            executable.task_id,
+                            current_round=current_round,
+                            reason=task.reason or "countermodel action was rejected",
+                        )
+                    completed.append(task)
+                    continue
+                if task.status in {"completed", "inconclusive", "inapplicable"}:
+                    completed.append(task)
+        finally:
+            self._countermodel_executor = None
+            self._countermodel_execution_round = 0
+        self.persist()
+        return completed
+
+    def countermodel_blocks_stagnation_stop(self) -> bool:
+        if not self.active:
+            return False
+        live = {
+            TaskStatus.CREATED,
+            TaskStatus.ASSIGNED,
+            TaskStatus.READY,
+            TaskStatus.RUNNING,
+        }
+        return any(
+            task.status
+            in {
+                "pending",
+                "assigned",
+                "ready",
+                "running",
+            }
+            and task.executable_task_id is not None
+            and (executable := self.state.executable_tasks.get(task.executable_task_id))
+            is not None
+            and executable.status in live
+            and executable.registered_handler == "countermodel_agent_dispatcher"
+            for task in self.state.countermodel_tasks.values()
+        )
+
+    def executable_work_blocks_stagnation_stop(self) -> bool:
+        return (
+            self.common_mode_blocks_stagnation_stop()
+            or self.countermodel_blocks_stagnation_stop()
+        )
 
     async def execute_pending_assumption_challengers(
         self,
@@ -4654,6 +4826,15 @@ class ProofControlLayer:
             executable_task_id=executable.task_id,
         )
         self.state.countermodel_tasks[task_id] = task
+        execution_action = self.action_dispatcher.propose(
+            ControlActionType.EXECUTE_COUNTERMODEL_TASK,
+            source_record_ids=[task.task_id],
+            route_ids=list(task.route_ids),
+            target_obligation_ids=[task.target_obligation_id],
+            payload={"task_id": task.task_id},
+            current_round=action.created_round,
+        )
+        task.execution_action_id = execution_action.action_id
         if link is not None:
             link.countermodel_status = (
                 "pending" if assigned_agent_id is not None else "deferred"
@@ -4661,7 +4842,7 @@ class ProofControlLayer:
         if risk is not None:
             risk.countermodel_task_id = task_id
         return ControlActionResult(
-            result_refs=[task_id, executable.task_id],
+            result_refs=[task_id, executable.task_id, execution_action.action_id],
             postcondition_met=True,
         )
 
@@ -4699,12 +4880,199 @@ class ProofControlLayer:
             and executable is not None
             and task.task_id in result.result_refs
             and executable.task_id in result.result_refs
+            and task.execution_action_id is not None
+            and task.execution_action_id in self.state.control_actions
+            and task.execution_action_id in result.result_refs
             and (
                 executable.assigned_agent_id is not None
                 or executable.registered_handler is not None
                 or bool(executable.wake_conditions)
                 or executable.status in ExecutableTaskController.TERMINAL_STATUSES
             )
+        )
+
+    async def _handle_execute_countermodel_task(
+        self,
+        action: ControlActionRecord,
+    ) -> ControlActionResult:
+        task_id = str(action.payload["task_id"])
+        task = self.state.countermodel_tasks[task_id]
+        if task.result_id is not None:
+            existing_result = self.state.countermodel_results.get(task.result_id)
+            if (
+                existing_result is not None
+                and existing_result.outcome != CountermodelOutcome.BLOCKED
+            ):
+                return ControlActionResult(
+                    result_refs=[
+                        task.task_id,
+                        task.executable_task_id or "",
+                        existing_result.result_id,
+                    ],
+                    postcondition_met=True,
+                    detail="existing terminal countermodel result reused",
+                )
+        executor = self._countermodel_executor
+        if executor is None:
+            self.action_dispatcher.defer(
+                action.action_id,
+                reason="countermodel executor is not attached",
+            )
+            return ControlActionResult(detail="countermodel executor is not attached")
+        if task.executable_task_id is None:
+            return ControlActionResult(detail="countermodel has no executable task")
+        executable = self.state.executable_tasks[task.executable_task_id]
+        if executable.status in {TaskStatus.ASSIGNED, TaskStatus.READY}:
+            self.executable_task_controller.mark_running(
+                executable.task_id,
+                current_round=self._countermodel_execution_round,
+            )
+        task.status = "running"
+        self._emit("countermodel_task_running", task.model_dump(mode="json"))
+        self.persist()
+        try:
+            raw_result = executor(task)
+            if inspect.isawaitable(raw_result):
+                raw_result = await raw_result
+            result = (
+                raw_result
+                if isinstance(raw_result, CountermodelResult)
+                else CountermodelResult.model_validate(raw_result)
+            )
+            if result.task_id != task.task_id:
+                raise ValueError("countermodel result does not match its task")
+            if result.outcome == CountermodelOutcome.COUNTEREXAMPLE_FOUND and (
+                result.challenger_agent_id is None
+                or result.reviewer_agent_id is None
+                or not result.evidence_refs
+                or not result.independent_review_refs
+            ):
+                raise ValueError(
+                    "confirmed countermodel requires challenger and independent "
+                    "review evidence"
+                )
+        except Exception as exc:
+            task.status = "failed"
+            task.reason = f"{type(exc).__name__}: {exc}"
+            if executable.status == TaskStatus.RUNNING:
+                self.executable_task_controller.fail(
+                    executable.task_id,
+                    current_round=self._countermodel_execution_round,
+                    reason=task.reason,
+                )
+            self._emit(
+                "countermodel_task_failed",
+                {"task_id": task.task_id, "reason": task.reason},
+            )
+            self.persist()
+            raise
+
+        self.state.countermodel_results[result.result_id] = result
+        task.result_id = result.result_id
+        task.assigned_agent_id = result.challenger_agent_id
+        task.result_refs = list(
+            dict.fromkeys(
+                [
+                    result.result_id,
+                    *result.evidence_refs,
+                    *result.independent_review_refs,
+                ]
+            )
+        )
+        task.reason = result.detail
+        if result.outcome == CountermodelOutcome.BLOCKED:
+            task.status = "blocked"
+            self.executable_task_controller.defer(
+                executable.task_id,
+                current_round=self._countermodel_execution_round,
+                reason=result.detail or "countermodel execution is blocked",
+                wake_kind=result.wake_condition or WakeConditionKind.REVIEWER_AVAILABLE,
+            )
+            self.action_dispatcher.defer(
+                action.action_id,
+                reason=result.detail or "countermodel execution is blocked",
+            )
+            self._emit("countermodel_task_blocked", result.model_dump(mode="json"))
+            self.persist()
+            return ControlActionResult(
+                result_refs=[task.task_id, executable.task_id, result.result_id],
+                detail=result.detail,
+            )
+
+        if result.outcome == CountermodelOutcome.COUNTEREXAMPLE_FOUND:
+            task.status = "completed"
+            self.executable_task_controller.complete_work(
+                executable.task_id,
+                current_round=self._countermodel_execution_round,
+                result_refs=task.result_refs,
+                reason="independently_reviewed_countermodel_found",
+            )
+            source_risk = self.state.inference_risks.get(task.source_record_id)
+            if source_risk is not None:
+                source_risk.status = "refuted"
+            source_link = (
+                self.state.goal_links.get(task.source_goal_link_id)
+                if task.source_goal_link_id is not None
+                else None
+            )
+            if source_link is not None:
+                source_link.countermodel_status = "found"
+                source_link.evidence_refs = list(
+                    dict.fromkeys([*source_link.evidence_refs, *task.result_refs])
+                )
+            for route_id in task.route_ids:
+                try:
+                    self.route_registry.mark_refuted(
+                        route_id,
+                        "independently reviewed countermodel refuted a required inference",
+                    )
+                except KeyError:
+                    continue
+        else:
+            task.status = "inconclusive"
+            self.executable_task_controller.complete_inconclusive(
+                executable.task_id,
+                current_round=self._countermodel_execution_round,
+                result_refs=task.result_refs,
+                reason=result.detail or "countermodel search was inconclusive",
+            )
+            source_link = (
+                self.state.goal_links.get(task.source_goal_link_id)
+                if task.source_goal_link_id is not None
+                else None
+            )
+            if source_link is not None:
+                source_link.countermodel_status = (
+                    "none_found_bounded"
+                    if result.outcome == CountermodelOutcome.NOT_REFUTED_BOUNDED
+                    else "deferred"
+                )
+
+        self._emit("countermodel_task_completed", result.model_dump(mode="json"))
+        self.persist()
+        return ControlActionResult(
+            result_refs=[task.task_id, executable.task_id, result.result_id],
+            postcondition_met=True,
+        )
+
+    def _countermodel_execution_postcondition(
+        self,
+        action: ControlActionRecord,
+        result: ControlActionResult,
+    ) -> bool:
+        task = self.state.countermodel_tasks.get(str(action.payload.get("task_id", "")))
+        if task is None or task.result_id is None or task.executable_task_id is None:
+            return False
+        executable = self.state.executable_tasks.get(task.executable_task_id)
+        countermodel_result = self.state.countermodel_results.get(task.result_id)
+        return bool(
+            executable is not None
+            and executable.status in ExecutableTaskController.TERMINAL_STATUSES
+            and countermodel_result is not None
+            and countermodel_result.outcome != CountermodelOutcome.BLOCKED
+            and task.task_id in result.result_refs
+            and executable.task_id in result.result_refs
+            and countermodel_result.result_id in result.result_refs
         )
 
     def _handle_direct_premise_request(
@@ -7015,6 +7383,7 @@ class ProofControlLayer:
             self.state.dependency_normalization_tasks,
             self.state.premise_closure_records,
             self.state.countermodel_tasks,
+            self.state.countermodel_results,
             self.state.falsification_tasks,
             self.state.typed_falsification_contracts,
             self.state.executable_tasks,

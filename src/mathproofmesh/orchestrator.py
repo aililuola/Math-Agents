@@ -88,6 +88,9 @@ from .proof_control.models import (
     AssumptionChallengeResult,
     ClaimVerificationState,
     ControlActionStatus,
+    CountermodelOutcome,
+    CountermodelResult,
+    CountermodelTaskRecord,
     DependencyKind,
     GateVerdict,
     MetaPivotEffect,
@@ -880,6 +883,17 @@ class ProofMeshOrchestrator:
                     store=store,
                 )
                 (
+                    countermodel_attempted,
+                    countermodel_performed,
+                ) = await self._execute_pending_countermodels(
+                    state,
+                    problem=problem,
+                    store=store,
+                    runner=runner,
+                    prompts=prompts,
+                    allocator=allocator,
+                )
+                (
                     challenger_attempted,
                     challenger_performed,
                 ) = await self._execute_pending_assumption_challengers(
@@ -900,7 +914,7 @@ class ProofMeshOrchestrator:
                     runner=runner,
                     prompts=prompts,
                 )
-                if challenger_attempted:
+                if challenger_attempted or countermodel_attempted:
                     pivot_attempted, pivot_performed = False, False
                 else:
                     (
@@ -1045,7 +1059,10 @@ class ProofMeshOrchestrator:
                     )
 
                 performed = (
-                    challenger_performed or route_update_performed or pivot_performed
+                    countermodel_performed
+                    or challenger_performed
+                    or route_update_performed
+                    or pivot_performed
                 )
                 action_calls_started = runner.ledger.calls_started
                 for action in decision.actions:
@@ -1423,6 +1440,7 @@ class ProofMeshOrchestrator:
                     and (
                         state.proof_control.meta_pivot_blocks_stagnation_stop()
                         or state.proof_control.common_mode_blocks_stagnation_stop()
+                        or self._proof_control_work_blocks_no_action_stop(state)
                     )
                 )
                 if performed:
@@ -1432,7 +1450,11 @@ class ProofMeshOrchestrator:
                 # A single empty round (for example a widen whose candidates
                 # were all similarity-filtered) must not abandon the whole
                 # remaining budget; require two consecutive empty rounds.
-                if hard_stagnation_stop or consecutive_no_action_rounds >= 2:
+                if self._should_stop_after_adaptive_round(
+                    hard_stagnation_stop=hard_stagnation_stop,
+                    no_action_rounds=consecutive_no_action_rounds,
+                    control_work_blocks_stop=pivot_blocks_stop,
+                ):
                     break
 
             if (
@@ -2503,17 +2525,21 @@ class ProofMeshOrchestrator:
                     pool=pool,
                     runner=runner,
                 )
-                route_update_performed = await self._run_scheduled_route_updates(
+                (
+                    countermodel_attempted,
+                    countermodel_performed,
+                ) = await self._execute_pending_countermodels(
                     state,
                     problem=problem,
-                    current_round=resume_round,
+                    store=store,
                     runner=runner,
                     prompts=prompts,
+                    allocator=allocator,
                 )
                 (
-                    pivot_attempted,
-                    pivot_performed,
-                ) = await self._execute_pending_meta_pivot(
+                    challenger_attempted,
+                    challenger_performed,
+                ) = await self._execute_pending_assumption_challengers(
                     state,
                     problem=problem,
                     store=store,
@@ -2524,6 +2550,30 @@ class ProofMeshOrchestrator:
                     memory=memory,
                     tools=tools,
                 )
+                route_update_performed = await self._run_scheduled_route_updates(
+                    state,
+                    problem=problem,
+                    current_round=resume_round,
+                    runner=runner,
+                    prompts=prompts,
+                )
+                if countermodel_attempted or challenger_attempted:
+                    pivot_attempted, pivot_performed = False, False
+                else:
+                    (
+                        pivot_attempted,
+                        pivot_performed,
+                    ) = await self._execute_pending_meta_pivot(
+                        state,
+                        problem=problem,
+                        store=store,
+                        runner=runner,
+                        prompts=prompts,
+                        allocator=allocator,
+                        router=router,
+                        memory=memory,
+                        tools=tools,
+                    )
                 updated_attempts: list[ProofAttempt] = []
                 for strategy in state.strategies:
                     path_attempts = [
@@ -2699,16 +2749,28 @@ class ProofMeshOrchestrator:
                 pivot_blocks_stop = (
                     state.proof_control is not None
                     and state.proof_control.active
-                    and state.proof_control.meta_pivot_blocks_stagnation_stop()
+                    and (
+                        state.proof_control.meta_pivot_blocks_stagnation_stop()
+                        or state.proof_control.common_mode_blocks_stagnation_stop()
+                        or self._proof_control_work_blocks_no_action_stop(state)
+                    )
                 )
                 round_performed = bool(
-                    updated_attempts or route_update_performed or pivot_performed
+                    updated_attempts
+                    or countermodel_performed
+                    or challenger_performed
+                    or route_update_performed
+                    or pivot_performed
                 )
                 if round_performed:
                     resume_no_action_rounds = 0
                 elif not pivot_blocks_stop:
                     resume_no_action_rounds += 1
-                if hard_stagnation_stop or resume_no_action_rounds >= 2:
+                if self._should_stop_after_adaptive_round(
+                    hard_stagnation_stop=hard_stagnation_stop,
+                    no_action_rounds=resume_no_action_rounds,
+                    control_work_blocks_stop=pivot_blocks_stop,
+                ):
                     break
 
             if (
@@ -5071,6 +5133,296 @@ class ProofMeshOrchestrator:
                 if item.status != "closed"
             },
         )
+
+    @staticmethod
+    def _proof_control_work_blocks_no_action_stop(state: SolveState) -> bool:
+        control = state.proof_control
+        return bool(
+            control is not None
+            and control.active
+            and control.executable_work_blocks_stagnation_stop()
+        )
+
+    @staticmethod
+    def _should_stop_after_adaptive_round(
+        *,
+        hard_stagnation_stop: bool,
+        no_action_rounds: int,
+        control_work_blocks_stop: bool,
+    ) -> bool:
+        return hard_stagnation_stop or (
+            no_action_rounds >= 2 and not control_work_blocks_stop
+        )
+
+    async def _execute_pending_countermodels(
+        self,
+        state: SolveState,
+        *,
+        problem: ProblemContract,
+        store: ArtifactStore,
+        runner: StructuredAgentRunner,
+        prompts: PromptFactory,
+        allocator: SoftBudgetAllocator,
+    ) -> tuple[bool, bool]:
+        control = state.proof_control
+        registry = state.route_registry
+        if control is None or not control.active or registry is None:
+            return False, False
+        live_statuses = {
+            ProofControlTaskStatus.CREATED,
+            ProofControlTaskStatus.ASSIGNED,
+            ProofControlTaskStatus.READY,
+            ProofControlTaskStatus.RUNNING,
+        }
+        pending = [
+            task
+            for task in control.state.countermodel_tasks.values()
+            if task.status
+            in {
+                "pending",
+                "assigned",
+                "ready",
+                "running",
+                "deferred",
+                "blocked",
+            }
+            and task.executable_task_id is not None
+            and control.state.executable_tasks[task.executable_task_id].status
+            in live_statuses
+        ]
+        if not pending:
+            return False, False
+
+        async def execute(task: CountermodelTaskRecord) -> CountermodelResult:
+            default_outcome = CountermodelOutcome.INCONCLUSIVE
+
+            def result(
+                *,
+                outcome: CountermodelOutcome,
+                detail: str,
+                challenger_agent_id: str | None = None,
+                reviewer_agent_id: str | None = None,
+                evidence_refs: Sequence[str] = (),
+                independent_review_refs: Sequence[str] = (),
+                wake_condition: WakeConditionKind | None = None,
+            ) -> CountermodelResult:
+                return CountermodelResult(
+                    result_id=(
+                        "countermodel_result_"
+                        + stable_hash(
+                            {
+                                "task_id": task.task_id,
+                                "round": state.current_round,
+                                "outcome": outcome.value,
+                                "evidence_refs": list(evidence_refs),
+                                "review_refs": list(independent_review_refs),
+                            }
+                        )[:20]
+                    ),
+                    task_id=task.task_id,
+                    outcome=outcome,
+                    challenger_agent_id=challenger_agent_id,
+                    reviewer_agent_id=reviewer_agent_id,
+                    evidence_refs=list(evidence_refs),
+                    independent_review_refs=list(independent_review_refs),
+                    wake_condition=wake_condition,
+                    detail=detail,
+                    completed_round=state.current_round,
+                )
+
+            if runner.ledger.remaining_calls <= allocator.minimum_finish_reserve + 1:
+                return result(
+                    outcome=CountermodelOutcome.BLOCKED,
+                    detail=(
+                        "The protected finalization reserve leaves no independent "
+                        "countermodel search-and-review pair."
+                    ),
+                    wake_condition=WakeConditionKind.BUDGET_AVAILABLE,
+                )
+
+            source_risk = control.state.inference_risks.get(task.source_record_id)
+            source_link = (
+                control.state.goal_links.get(task.source_goal_link_id)
+                if task.source_goal_link_id is not None
+                else None
+            )
+            try:
+                target_obligation = control.proof_graph.get_obligation(
+                    task.target_obligation_id
+                )
+            except KeyError:
+                target_obligation = None
+            if source_risk is not None and source_risk.explanation.strip():
+                exact_target_statement = source_risk.explanation.strip()
+            elif source_link is not None and target_obligation is not None:
+                exact_target_statement = (
+                    f"The recorded subject {source_link.subject_id} implies "
+                    f"{target_obligation.statement}"
+                )
+            elif target_obligation is not None:
+                exact_target_statement = target_obligation.statement
+            else:
+                return result(
+                    outcome=default_outcome,
+                    detail="The countermodel task has no recoverable exact scoped target.",
+                )
+
+            excluded_authors = self._route_authors(registry, task.route_ids)
+            specialty_hints = (
+                [source_risk.risk_type.value] if source_risk is not None else []
+            )
+            try:
+                challenger = runner.pool.select(
+                    "counterexample_hunter",
+                    exclude=excluded_authors,
+                    specialty_hints=specialty_hints,
+                    strict_exclude=True,
+                )
+            except RuntimeError:
+                return result(
+                    outcome=default_outcome,
+                    detail=(
+                        "No counterexample hunter independent of the affected route "
+                        "authors is available."
+                    ),
+                )
+            task.assigned_agent_id = challenger.id
+            executable = control.state.executable_tasks[task.executable_task_id]
+            executable.assigned_agent_id = challenger.id
+            proposal_call = await self._safe_call(
+                runner,
+                "counterexample_hunter",
+                prompts.challenge_countermodel_task(
+                    problem=problem,
+                    countermodel_task=task,
+                    exact_target_statement=exact_target_statement,
+                    inference_risk=source_risk,
+                    goal_link=source_link,
+                    target_obligation=target_obligation,
+                    verified_facts=(
+                        state.typed_memory.facts
+                        if state.typed_memory is not None
+                        else []
+                    ),
+                    proof_control_constraints={
+                        "may_promote_fact": False,
+                        "may_close_obligation": False,
+                        "requires_exact_counterexample": True,
+                    },
+                ),
+                fixed_agent=challenger,
+                budget_bucket="depth",
+            )
+            if proposal_call is None:
+                return result(
+                    outcome=default_outcome,
+                    challenger_agent_id=challenger.id,
+                    detail="The countermodel search returned no structured artifact.",
+                )
+            proposal = proposal_call.value
+            proposal_ref = store.write_json(
+                "structured",
+                f"countermodel_proposal_{task.task_id}",
+                proposal,
+            )
+
+            try:
+                reviewer = runner.pool.select(
+                    "detailed_verifier",
+                    exclude={challenger.id},
+                    specialty_hints=specialty_hints,
+                    prefer_provider_not=challenger.provider,
+                    strict_exclude=True,
+                )
+            except RuntimeError:
+                return result(
+                    outcome=default_outcome,
+                    challenger_agent_id=challenger.id,
+                    evidence_refs=[proposal_ref],
+                    detail="No independent reviewer is available for the countermodel.",
+                )
+            review_call = await self._safe_call(
+                runner,
+                "detailed_verifier",
+                prompts.review_countermodel_task(
+                    problem=problem,
+                    countermodel_task=task,
+                    exact_target_statement=exact_target_statement,
+                    proposal=proposal,
+                    inference_risk=source_risk,
+                    goal_link=source_link,
+                    target_obligation=target_obligation,
+                    verified_facts=(
+                        state.typed_memory.facts
+                        if state.typed_memory is not None
+                        else []
+                    ),
+                    proof_control_constraints={
+                        "may_promote_fact": False,
+                        "may_close_obligation": False,
+                        "bounded_non_refutation_is_inconclusive": True,
+                    },
+                ),
+                fixed_agent=reviewer,
+                exclude={challenger.id},
+                prefer_provider_not=challenger.provider,
+                budget_bucket="verification",
+            )
+            if review_call is None:
+                return result(
+                    outcome=default_outcome,
+                    challenger_agent_id=challenger.id,
+                    reviewer_agent_id=reviewer.id,
+                    evidence_refs=[proposal_ref],
+                    detail="Independent review returned no structured artifact.",
+                )
+            review = review_call.value
+            review_ref = store.write_json(
+                "structured",
+                f"countermodel_review_{task.task_id}",
+                review,
+            )
+            target_matches = self._normalize_statement(
+                proposal.target_statement
+            ) == self._normalize_statement(exact_target_statement)
+            confirmed = bool(
+                proposal.action == AssumptionChallengeAction.REFUTE
+                and proposal.counterexample
+                and target_matches
+                and review.proposal_id == proposal.proposal_id
+                and review.verdict == "pass"
+                and review.action_supported
+                and review.exact_counterexample_confirmed
+                and review.independence_confirmed
+            )
+            if confirmed:
+                outcome = CountermodelOutcome.COUNTEREXAMPLE_FOUND
+            elif proposal.counterexample is None:
+                outcome = CountermodelOutcome.NOT_REFUTED_BOUNDED
+            else:
+                outcome = CountermodelOutcome.INCONCLUSIVE
+            return result(
+                outcome=outcome,
+                challenger_agent_id=challenger.id,
+                reviewer_agent_id=reviewer.id,
+                evidence_refs=[proposal_ref],
+                independent_review_refs=[review_ref],
+                detail=review.concise_feedback,
+            )
+
+        completed = await control.execute_pending_countermodels(
+            current_round=state.current_round,
+            executor=execute,
+        )
+        store.append_event(
+            "countermodel_dispatch_cycle",
+            {
+                "round_index": state.current_round,
+                "pending_task_ids": sorted(task.task_id for task in pending),
+                "completed_task_ids": sorted(task.task_id for task in completed),
+            },
+        )
+        return True, bool(completed)
 
     async def _execute_pending_assumption_challengers(
         self,

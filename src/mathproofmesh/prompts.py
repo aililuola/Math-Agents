@@ -1870,6 +1870,39 @@ JSON SCHEMA:
             context,
         )
 
+    def challenge_countermodel_task(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "proof_control_countermodel_search",
+            (
+                "Try to refute only the supplied exact scoped inference. Set action "
+                "to refute and copy exact_target_statement verbatim into "
+                "target_statement. Provide a counterexample only when it is exact "
+                "and independently replayable. A bounded search that finds nothing "
+                "must keep counterexample null and list its limits in unresolved_gaps. "
+                "Do not promote a Fact, close an obligation, rewrite the target, or "
+                "expose private reasoning."
+            ),
+            AssumptionChallengeProposal,
+            context,
+            temperature=0.1,
+        )
+
+    def review_countermodel_task(self, **context: Any) -> PromptBundle:
+        return self._typed_stage(
+            "proof_control_countermodel_review",
+            (
+                "Independently audit the proposed countermodel against the supplied "
+                "exact scoped inference. Confirm target scope, premises, quantifier "
+                "order, and every substitution. exact_counterexample_confirmed may "
+                "be true only for a complete exact counterexample. Finite "
+                "non-refutation is inconclusive. Do not promote a Fact or close an "
+                "obligation."
+            ),
+            AssumptionChallengeReview,
+            context,
+            temperature=0.0,
+        )
+
     def challenge_critical_assumption(self, **context: Any) -> PromptBundle:
         return self._typed_stage(
             "proof_control_assumption_challenge",

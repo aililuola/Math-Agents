@@ -78,6 +78,7 @@ class ControlActionType(StrEnum):
     WEAKEN_TARGET = "weaken_target"
     CREATE_MINIMAL_BRIDGE = "create_minimal_bridge"
     CREATE_COUNTERMODEL_TASK = "create_countermodel_task"
+    EXECUTE_COUNTERMODEL_TASK = "execute_countermodel_task"
     ACTIVATE_INDUCTION_MEASURE = "activate_induction_measure"
     CREATE_ASSUMPTION_CHALLENGER = "create_assumption_challenger"
     EXECUTE_ASSUMPTION_CHALLENGER = "execute_assumption_challenger"
@@ -135,6 +136,13 @@ class AssumptionChallengeOutcome(StrEnum):
     VERIFIED = "verified"
     REFUTED = "refuted"
     AVOIDED = "avoided"
+    INCONCLUSIVE = "inconclusive"
+    BLOCKED = "blocked"
+
+
+class CountermodelOutcome(StrEnum):
+    COUNTEREXAMPLE_FOUND = "counterexample_found"
+    NOT_REFUTED_BOUNDED = "not_refuted_bounded"
     INCONCLUSIVE = "inconclusive"
     BLOCKED = "blocked"
 
@@ -671,6 +679,7 @@ class CountermodelTaskRecord(StrictModel):
         "inapplicable",
         "completed",
         "inconclusive",
+        "blocked",
         "failed",
         "expired",
     ] = "pending"
@@ -678,6 +687,21 @@ class CountermodelTaskRecord(StrictModel):
     result_refs: list[str] = Field(default_factory=list)
     assigned_agent_id: str | None = None
     executable_task_id: str | None = None
+    execution_action_id: str | None = None
+    result_id: str | None = None
+
+
+class CountermodelResult(StrictModel):
+    result_id: str
+    task_id: str
+    outcome: CountermodelOutcome
+    challenger_agent_id: str | None = None
+    reviewer_agent_id: str | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    independent_review_refs: list[str] = Field(default_factory=list)
+    wake_condition: WakeConditionKind | None = None
+    detail: str
+    completed_round: int = Field(ge=0)
 
 
 class ClaimGoalLink(StrictModel):

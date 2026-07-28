@@ -22,6 +22,7 @@ from .models import (
     ClaimVerificationLedgerEntry,
     ClaimGoalLink,
     ControlActionRecord,
+    CountermodelResult,
     CountermodelTaskRecord,
     ContinueGateRecord,
     CriticalAssumption,
@@ -83,6 +84,7 @@ class ProofControlState:
         self.dependency_normalization_tasks: dict[str, DependencyNormalizationTask] = {}
         self.premise_closure_records: dict[str, PremiseClosureRecord] = {}
         self.countermodel_tasks: dict[str, CountermodelTaskRecord] = {}
+        self.countermodel_results: dict[str, CountermodelResult] = {}
         self.falsification_tasks: dict[str, FalsificationTaskRecord] = {}
         self.typed_falsification_contracts: dict[str, TypedFalsificationContract] = {}
         self.executable_tasks: dict[str, ExecutableTaskRecord] = {}
@@ -157,6 +159,7 @@ class ProofControlState:
             ),
             "premise_closure_records": self._dump_models(self.premise_closure_records),
             "countermodel_tasks": self._dump_models(self.countermodel_tasks),
+            "countermodel_results": self._dump_models(self.countermodel_results),
             "falsification_tasks": self._dump_models(self.falsification_tasks),
             "typed_falsification_contracts": self._dump_models(
                 self.typed_falsification_contracts
@@ -277,6 +280,7 @@ class ProofControlState:
             ("dependency_normalization_tasks", DependencyNormalizationTask),
             ("premise_closure_records", PremiseClosureRecord),
             ("countermodel_tasks", CountermodelTaskRecord),
+            ("countermodel_results", CountermodelResult),
             ("falsification_tasks", FalsificationTaskRecord),
             ("typed_falsification_contracts", TypedFalsificationContract),
             ("executable_tasks", ExecutableTaskRecord),
