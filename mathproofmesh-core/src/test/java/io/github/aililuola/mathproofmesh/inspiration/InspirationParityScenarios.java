@@ -284,7 +284,7 @@ final class InspirationParityScenarios {
         distiller.distillNegative(
             value, "hash", 4, "scope mismatch", List.of("finite-only"), "verified-local");
 
-    Path projectRoot = Files.createTempDirectory(Path.of("target"), "phase11-cross-run-");
+    Path projectRoot = Files.createTempDirectory("phase11-cross-run-");
     CrossRunLearningStore store =
         new CrossRunLearningStore(projectRoot, Path.of("learning"), "tenant-a", true);
     assertTrue(store.isProjectLocal());

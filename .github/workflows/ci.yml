@@ -27,20 +27,30 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "25"
           cache: maven
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - name: Verify, security scan, SBOM, and source immutability
+      - name: Prepare Python sidecar environment
+        run: |
+          python -m venv .venv-baseline
+          .venv-baseline/bin/python -m pip install \
+            --disable-pip-version-check \
+            -r python-compute-service/requirements.in
+          mkdir -p .venv-baseline/Scripts
+          ln -s ../bin/python .venv-baseline/Scripts/python.exe
+      - name: Verify Java, sidecar, coverage, and security gates
         env:
           MPM_ALLOW_LIVE_PROVIDER_CALLS: "false"
           TESTCONTAINERS_RYUK_CONTAINER_IMAGE: testcontainers/ryuk@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0
-        run: ./scripts/verify-all.sh
+        run: ./mvnw -B -ntp clean verify
+      - name: Verify frozen source snapshot
+        run: sha256sum -c SHA256SUMS.txt
       - name: Package platform-neutral release
         run: ./scripts/package-release.sh
       - uses: actions/upload-artifact@v4
@@ -55,21 +65,19 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 75
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "25"
           cache: maven
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Package server, CLI, sidecar, and desktop
+      - name: Build server and CLI
         shell: powershell
-        run: .\scripts\package-release.ps1
+        run: .\mvnw.cmd -B -ntp -pl :mathproofmesh-server -am package -DskipTests
+      - name: Assemble Windows release bundle
+        shell: powershell
+        run: .\scripts\package-release.ps1 -SkipBuild -SkipDesktop
       - uses: actions/upload-artifact@v4
         with:
           name: java-mathproofmesh-windows
-          path: |
-            target/release/**
-            target/desktop-dist/**
+          path: target/release/**
