@@ -48,7 +48,7 @@ jobs:
         env:
           MPM_ALLOW_LIVE_PROVIDER_CALLS: "false"
           TESTCONTAINERS_RYUK_CONTAINER_IMAGE: testcontainers/ryuk@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0
-        run: ./mvnw -B -ntp clean verify
+        run: ./mvnw -B -ntp -Djavafx.platform=linux clean verify
       - name: Verify frozen source snapshot
         run: sha256sum -c SHA256SUMS.txt
       - name: Package platform-neutral release
