@@ -1,0 +1,116 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.FailureClassificationRecord",
+  "schema": {
+    "$defs": {
+      "ActionKind": {
+        "enum": [
+          "widen",
+          "deepen",
+          "verify",
+          "synthesize",
+          "revise",
+          "bridge",
+          "resolve_conflict",
+          "search_counterexample",
+          "merge_route",
+          "cooldown_route",
+          "switch_representation",
+          "trigger_inspiration",
+          "search_analogy",
+          "invent_construction",
+          "generate_invariant",
+          "reverse_goal",
+          "meta_replan",
+          "surprise_widen",
+          "stop"
+        ],
+        "title": "ActionKind",
+        "type": "string"
+      },
+      "FailureLevel": {
+        "enum": [
+          "none",
+          "execution",
+          "plan",
+          "strategy"
+        ],
+        "title": "FailureLevel",
+        "type": "string"
+      },
+      "ProofFailureClass": {
+        "enum": [
+          "execution",
+          "bridge",
+          "plan",
+          "framing"
+        ],
+        "title": "ProofFailureClass",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "confidence": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "control_failure_class": {
+        "$ref": "#/$defs/ProofFailureClass"
+      },
+      "evidence": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Evidence",
+        "type": "array"
+      },
+      "first_error_fingerprint": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "First Error Fingerprint"
+      },
+      "legacy_failure_level": {
+        "$ref": "#/$defs/FailureLevel"
+      },
+      "recommended_control_subaction": {
+        "title": "Recommended Control Subaction",
+        "type": "string"
+      },
+      "recommended_existing_action": {
+        "$ref": "#/$defs/ActionKind"
+      },
+      "record_id": {
+        "title": "Record Id",
+        "type": "string"
+      },
+      "route_id": {
+        "title": "Route Id",
+        "type": "string"
+      },
+      "target_id": {
+        "title": "Target Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "route_id",
+      "target_id",
+      "legacy_failure_level",
+      "control_failure_class",
+      "recommended_existing_action",
+      "recommended_control_subaction"
+    ],
+    "title": "FailureClassificationRecord",
+    "type": "object"
+  }
+}

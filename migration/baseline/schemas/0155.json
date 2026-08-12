@@ -1,0 +1,46 @@
+{
+  "qualified_name": "mathproofmesh.schemas.EvidenceRef",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "artifact_ref": {
+        "title": "Artifact Ref",
+        "type": "string"
+      },
+      "content_hash": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Content Hash"
+      },
+      "section": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Section"
+      },
+      "summary": {
+        "default": "",
+        "title": "Summary",
+        "type": "string"
+      }
+    },
+    "required": [
+      "artifact_ref"
+    ],
+    "title": "EvidenceRef",
+    "type": "object"
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "qualified_name": "mathproofmesh.config.CrossRouteConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "initial_isolation_rounds": {
+        "default": 1,
+        "maximum": 16,
+        "minimum": 0,
+        "title": "Initial Isolation Rounds",
+        "type": "integer"
+      },
+      "max_global_messages_per_round": {
+        "default": 24,
+        "maximum": 1024,
+        "minimum": 1,
+        "title": "Max Global Messages Per Round",
+        "type": "integer"
+      },
+      "max_messages_per_route_per_round": {
+        "default": 6,
+        "maximum": 128,
+        "minimum": 0,
+        "title": "Max Messages Per Route Per Round",
+        "type": "integer"
+      },
+      "max_neighbors_per_route": {
+        "default": 2,
+        "maximum": 32,
+        "minimum": 0,
+        "title": "Max Neighbors Per Route",
+        "type": "integer"
+      },
+      "message_ttl_rounds": {
+        "default": 2,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Message Ttl Rounds",
+        "type": "integer"
+      },
+      "share_counterexamples": {
+        "default": true,
+        "title": "Share Counterexamples",
+        "type": "boolean"
+      },
+      "share_failure_records": {
+        "default": true,
+        "title": "Share Failure Records",
+        "type": "boolean"
+      },
+      "share_open_obligations": {
+        "default": true,
+        "title": "Share Open Obligations",
+        "type": "boolean"
+      },
+      "share_unverified_insights": {
+        "default": false,
+        "title": "Share Unverified Insights",
+        "type": "boolean"
+      },
+      "share_verified_facts": {
+        "default": true,
+        "title": "Share Verified Facts",
+        "type": "boolean"
+      }
+    },
+    "title": "CrossRouteConfig",
+    "type": "object"
+  }
+}

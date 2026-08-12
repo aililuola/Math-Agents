@@ -1,0 +1,2476 @@
+[
+  {
+    "members": [
+      {
+        "name": "MAJOR",
+        "value": "major"
+      },
+      {
+        "name": "NORMAL",
+        "value": "normal"
+      },
+      {
+        "name": "DETAIL",
+        "value": "detail"
+      }
+    ],
+    "qualified_name": "mathproofmesh.activity.ActivityImportance"
+  },
+  {
+    "members": [
+      {
+        "name": "RUNNING",
+        "value": "running"
+      },
+      {
+        "name": "COMPLETED",
+        "value": "completed"
+      },
+      {
+        "name": "INFO",
+        "value": "info"
+      },
+      {
+        "name": "WARNING",
+        "value": "warning"
+      },
+      {
+        "name": "FAILED",
+        "value": "failed"
+      }
+    ],
+    "qualified_name": "mathproofmesh.activity.ActivityStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "INSPIRATION",
+        "value": "inspiration"
+      },
+      {
+        "name": "DELTA_VERIFICATION",
+        "value": "delta_verification"
+      },
+      {
+        "name": "ATTEMPT_VERIFICATION",
+        "value": "attempt_verification"
+      },
+      {
+        "name": "FINAL_VERIFICATION",
+        "value": "final_verification"
+      },
+      {
+        "name": "SYNTHESIS",
+        "value": "synthesis"
+      },
+      {
+        "name": "BLIND_REVIEW",
+        "value": "blind_review"
+      },
+      {
+        "name": "FINAL_REVISION",
+        "value": "final_revision"
+      }
+    ],
+    "qualified_name": "mathproofmesh.context_policy.ContextPurpose"
+  },
+  {
+    "members": [
+      {
+        "name": "RUNNING",
+        "value": "running"
+      },
+      {
+        "name": "VERIFIED_PROGRESS",
+        "value": "verified_progress"
+      },
+      {
+        "name": "VERIFIED_MECHANISM_CHANGE",
+        "value": "verified_mechanism_change"
+      },
+      {
+        "name": "USEFUL_COUNTEREXAMPLE",
+        "value": "useful_counterexample"
+      },
+      {
+        "name": "USABLE_PARTIAL",
+        "value": "usable_partial"
+      },
+      {
+        "name": "NO_ARTIFACT",
+        "value": "no_artifact"
+      },
+      {
+        "name": "NO_VERIFIED_PROGRESS",
+        "value": "no_verified_progress"
+      },
+      {
+        "name": "EXTERNAL_FAILURE",
+        "value": "external_failure"
+      },
+      {
+        "name": "INTERRUPTED",
+        "value": "interrupted"
+      }
+    ],
+    "qualified_name": "mathproofmesh.deep_exploration.ExplorationOutcome"
+  },
+  {
+    "members": [
+      {
+        "name": "DIRECT_PREMISE_CLOSURE",
+        "value": "direct_premise_closure"
+      },
+      {
+        "name": "VERIFIED_GRAPH_EDGE",
+        "value": "verified_graph_edge"
+      },
+      {
+        "name": "EXACT_EQUIVALENCE",
+        "value": "exact_equivalence"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.AlignmentExceptionCode"
+  },
+  {
+    "members": [
+      {
+        "name": "PROVE",
+        "value": "prove"
+      },
+      {
+        "name": "REFUTE",
+        "value": "refute"
+      },
+      {
+        "name": "WEAKEN",
+        "value": "weaken"
+      },
+      {
+        "name": "AVOID",
+        "value": "avoid"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.AssumptionChallengeAction"
+  },
+  {
+    "members": [
+      {
+        "name": "VERIFIED",
+        "value": "verified"
+      },
+      {
+        "name": "REFUTED",
+        "value": "refuted"
+      },
+      {
+        "name": "AVOIDED",
+        "value": "avoided"
+      },
+      {
+        "name": "INCONCLUSIVE",
+        "value": "inconclusive"
+      },
+      {
+        "name": "BLOCKED",
+        "value": "blocked"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.AssumptionChallengeOutcome"
+  },
+  {
+    "members": [
+      {
+        "name": "MATHEMATICAL",
+        "value": "mathematical"
+      },
+      {
+        "name": "SEARCH",
+        "value": "search"
+      },
+      {
+        "name": "PROTOCOL",
+        "value": "protocol"
+      },
+      {
+        "name": "PROCESS",
+        "value": "process"
+      },
+      {
+        "name": "TOOL",
+        "value": "tool"
+      },
+      {
+        "name": "VERIFICATION",
+        "value": "verification"
+      },
+      {
+        "name": "SAFETY",
+        "value": "safety"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.AssumptionDomain"
+  },
+  {
+    "members": [
+      {
+        "name": "GIVEN",
+        "value": "given"
+      },
+      {
+        "name": "CLAIM",
+        "value": "claim"
+      },
+      {
+        "name": "LEMMA",
+        "value": "lemma"
+      },
+      {
+        "name": "CONSTRUCTION",
+        "value": "construction"
+      },
+      {
+        "name": "CASE_SPLIT",
+        "value": "case_split"
+      },
+      {
+        "name": "COUNTERMODEL_TASK",
+        "value": "countermodel_task"
+      },
+      {
+        "name": "COMPUTATION_TASK",
+        "value": "computation_task"
+      },
+      {
+        "name": "TARGET",
+        "value": "target"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.BlueprintNodeKind"
+  },
+  {
+    "members": [
+      {
+        "name": "BROADCAST",
+        "value": "broadcast"
+      },
+      {
+        "name": "KEEP_LOCAL",
+        "value": "keep_local"
+      },
+      {
+        "name": "REJECT",
+        "value": "reject"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.BroadcastDecision"
+  },
+  {
+    "members": [
+      {
+        "name": "ACCEPT",
+        "value": "accept"
+      },
+      {
+        "name": "REJECT",
+        "value": "reject"
+      },
+      {
+        "name": "DEFER",
+        "value": "defer"
+      },
+      {
+        "name": "NEEDS_ADDITIONAL_REVIEW",
+        "value": "needs_additional_review"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.ClaimRefereeDisposition"
+  },
+  {
+    "members": [
+      {
+        "name": "PROPOSED",
+        "value": "proposed"
+      },
+      {
+        "name": "LOCALLY_VERIFIED",
+        "value": "locally_verified"
+      },
+      {
+        "name": "INDEPENDENTLY_VERIFIED",
+        "value": "independently_verified"
+      },
+      {
+        "name": "REFEREE_ACCEPTED",
+        "value": "referee_accepted"
+      },
+      {
+        "name": "FACT_CANDIDATE",
+        "value": "fact_candidate"
+      },
+      {
+        "name": "FACT",
+        "value": "fact"
+      },
+      {
+        "name": "INVALIDATED",
+        "value": "invalidated"
+      },
+      {
+        "name": "REJECTED",
+        "value": "rejected"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.ClaimVerificationState"
+  },
+  {
+    "members": [
+      {
+        "name": "PROPOSED",
+        "value": "proposed"
+      },
+      {
+        "name": "ADMITTED",
+        "value": "admitted"
+      },
+      {
+        "name": "EXECUTING",
+        "value": "executing"
+      },
+      {
+        "name": "EXECUTED",
+        "value": "executed"
+      },
+      {
+        "name": "DEFERRED",
+        "value": "deferred"
+      },
+      {
+        "name": "REJECTED",
+        "value": "rejected"
+      },
+      {
+        "name": "FAILED",
+        "value": "failed"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.ControlActionStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "CREATE_SUB_OBLIGATION",
+        "value": "create_sub_obligation"
+      },
+      {
+        "name": "BIND_ROUTE_TARGET",
+        "value": "bind_route_target"
+      },
+      {
+        "name": "REWRITE_BLUEPRINT",
+        "value": "rewrite_blueprint"
+      },
+      {
+        "name": "WEAKEN_TARGET",
+        "value": "weaken_target"
+      },
+      {
+        "name": "CREATE_MINIMAL_BRIDGE",
+        "value": "create_minimal_bridge"
+      },
+      {
+        "name": "CREATE_COUNTERMODEL_TASK",
+        "value": "create_countermodel_task"
+      },
+      {
+        "name": "EXECUTE_COUNTERMODEL_TASK",
+        "value": "execute_countermodel_task"
+      },
+      {
+        "name": "ACTIVATE_INDUCTION_MEASURE",
+        "value": "activate_induction_measure"
+      },
+      {
+        "name": "CREATE_ASSUMPTION_CHALLENGER",
+        "value": "create_assumption_challenger"
+      },
+      {
+        "name": "EXECUTE_ASSUMPTION_CHALLENGER",
+        "value": "execute_assumption_challenger"
+      },
+      {
+        "name": "MATERIALIZE_BOTTLENECK_CLUSTER",
+        "value": "materialize_bottleneck_cluster"
+      },
+      {
+        "name": "MATERIALIZE_FALSIFICATION_TASK",
+        "value": "materialize_falsification_task"
+      },
+      {
+        "name": "SCHEDULE_ROUTE_UPDATE",
+        "value": "schedule_route_update"
+      },
+      {
+        "name": "DEFER_INSPIRATION_REVIEW",
+        "value": "defer_inspiration_review"
+      },
+      {
+        "name": "REASSIGN_INSPIRATION_REVIEW",
+        "value": "reassign_inspiration_review"
+      },
+      {
+        "name": "EXECUTE_META_PIVOT",
+        "value": "execute_meta_pivot"
+      },
+      {
+        "name": "CLOSE_BY_DIRECT_PREMISE",
+        "value": "close_by_direct_premise"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.ControlActionType"
+  },
+  {
+    "members": [
+      {
+        "name": "COUNTEREXAMPLE_FOUND",
+        "value": "counterexample_found"
+      },
+      {
+        "name": "NOT_REFUTED_BOUNDED",
+        "value": "not_refuted_bounded"
+      },
+      {
+        "name": "INCONCLUSIVE",
+        "value": "inconclusive"
+      },
+      {
+        "name": "BLOCKED",
+        "value": "blocked"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.CountermodelOutcome"
+  },
+  {
+    "members": [
+      {
+        "name": "LOCAL_STEP",
+        "value": "local_step"
+      },
+      {
+        "name": "LOCAL_CLAIM",
+        "value": "local_claim"
+      },
+      {
+        "name": "GLOBAL_FACT",
+        "value": "global_fact"
+      },
+      {
+        "name": "MESSAGE",
+        "value": "message"
+      },
+      {
+        "name": "OBLIGATION",
+        "value": "obligation"
+      },
+      {
+        "name": "TOOL_CERTIFICATE",
+        "value": "tool_certificate"
+      },
+      {
+        "name": "FORMAL_CERTIFICATE",
+        "value": "formal_certificate"
+      },
+      {
+        "name": "EXTERNAL_RESULT",
+        "value": "external_result"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.DependencyKind"
+  },
+  {
+    "members": [
+      {
+        "name": "EXECUTABLE",
+        "value": "executable"
+      },
+      {
+        "name": "NEEDS_REWRITE",
+        "value": "needs_rewrite"
+      },
+      {
+        "name": "NON_AUTOMATABLE",
+        "value": "non_automatable"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.FalsificationCompilationStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "PASS",
+        "value": "pass"
+      },
+      {
+        "name": "BLOCK",
+        "value": "block"
+      },
+      {
+        "name": "REWRITE",
+        "value": "rewrite"
+      },
+      {
+        "name": "SHADOW_BLOCK",
+        "value": "shadow_block"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.GateVerdict"
+  },
+  {
+    "members": [
+      {
+        "name": "EQUIVALENT",
+        "value": "equivalent"
+      },
+      {
+        "name": "SUFFICIENT",
+        "value": "sufficient"
+      },
+      {
+        "name": "NECESSARY_ONLY",
+        "value": "necessary_only"
+      },
+      {
+        "name": "HEURISTIC_ONLY",
+        "value": "heuristic_only"
+      },
+      {
+        "name": "UNRELATED",
+        "value": "unrelated"
+      },
+      {
+        "name": "UNKNOWN",
+        "value": "unknown"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.GoalRelation"
+  },
+  {
+    "members": [
+      {
+        "name": "ALL",
+        "value": "all"
+      },
+      {
+        "name": "EVENTUAL",
+        "value": "eventual"
+      },
+      {
+        "name": "FINITE_PREFIX",
+        "value": "finite_prefix"
+      },
+      {
+        "name": "BOUNDED_RANGE",
+        "value": "bounded_range"
+      },
+      {
+        "name": "SINGLE_INSTANCE",
+        "value": "single_instance"
+      },
+      {
+        "name": "UNKNOWN",
+        "value": "unknown"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.IndexScope"
+  },
+  {
+    "members": [
+      {
+        "name": "NECESSARY_TO_SUFFICIENT",
+        "value": "necessary_to_sufficient"
+      },
+      {
+        "name": "EVENTUAL_TO_GLOBAL",
+        "value": "eventual_to_global"
+      },
+      {
+        "name": "POINTWISE_TO_UNIFORM",
+        "value": "pointwise_to_uniform"
+      },
+      {
+        "name": "FINITE_RANGE_TO_FINITE_STATE",
+        "value": "finite_range_to_finite_state"
+      },
+      {
+        "name": "IMAGE_INCLUSION_TO_SURJECTIVITY",
+        "value": "image_inclusion_to_surjectivity"
+      },
+      {
+        "name": "PROJECTION_TO_ORIGINAL",
+        "value": "projection_to_original"
+      },
+      {
+        "name": "LOCAL_TO_GLOBAL",
+        "value": "local_to_global"
+      },
+      {
+        "name": "EXISTENCE_TO_UNIFORM_EXISTENCE",
+        "value": "existence_to_uniform_existence"
+      },
+      {
+        "name": "PAIRWISE_TO_COMMON_WITNESS",
+        "value": "pairwise_to_common_witness"
+      },
+      {
+        "name": "EMPIRICAL_TO_UNIVERSAL",
+        "value": "empirical_to_universal"
+      },
+      {
+        "name": "PARTIAL_PROPERTY_TO_TOTAL_PROPERTY",
+        "value": "partial_property_to_total_property"
+      },
+      {
+        "name": "NONEMPTY_INTERSECTION_TO_SUBSET_CONTAINMENT",
+        "value": "nonempty_intersection_to_subset_containment"
+      },
+      {
+        "name": "EXISTS_COMPONENT_TO_ALL_COMPONENTS",
+        "value": "exists_component_to_all_components"
+      },
+      {
+        "name": "SOME_WITNESS_TO_ALL_WITNESSES",
+        "value": "some_witness_to_all_witnesses"
+      },
+      {
+        "name": "COVERAGE_TO_EXHAUSTIVENESS",
+        "value": "coverage_to_exhaustiveness"
+      },
+      {
+        "name": "AT_LEAST_ONE_TO_ONLY_FROM_SET",
+        "value": "at_least_one_to_only_from_set"
+      },
+      {
+        "name": "WRONG_DIRECTION",
+        "value": "wrong_direction"
+      },
+      {
+        "name": "QUANTIFIER_SWAP",
+        "value": "quantifier_swap"
+      },
+      {
+        "name": "DEPENDENCY_MISSING",
+        "value": "dependency_missing"
+      },
+      {
+        "name": "SCOPE_MISMATCH",
+        "value": "scope_mismatch"
+      },
+      {
+        "name": "AMBIGUOUS_SEMANTIC_LEAP",
+        "value": "ambiguous_semantic_leap"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.InferenceRiskType"
+  },
+  {
+    "members": [
+      {
+        "name": "CLOSE",
+        "value": "close"
+      },
+      {
+        "name": "REDUCE",
+        "value": "reduce"
+      },
+      {
+        "name": "REFUTE",
+        "value": "refute"
+      },
+      {
+        "name": "REWRITE",
+        "value": "rewrite"
+      },
+      {
+        "name": "PROVIDE_CONSTRUCTION",
+        "value": "provide_construction"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.MessageExpectedEffect"
+  },
+  {
+    "members": [
+      {
+        "name": "EFFECTIVE",
+        "value": "effective"
+      },
+      {
+        "name": "EMPTY",
+        "value": "empty"
+      },
+      {
+        "name": "DEFERRED",
+        "value": "deferred"
+      },
+      {
+        "name": "FAILED",
+        "value": "failed"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.MetaPivotEffect"
+  },
+  {
+    "members": [
+      {
+        "name": "NONE",
+        "value": "none"
+      },
+      {
+        "name": "REQUESTED",
+        "value": "requested"
+      },
+      {
+        "name": "ADMITTED",
+        "value": "admitted"
+      },
+      {
+        "name": "EXECUTING",
+        "value": "executing"
+      },
+      {
+        "name": "EXECUTED",
+        "value": "executed"
+      },
+      {
+        "name": "EVALUATED",
+        "value": "evaluated"
+      },
+      {
+        "name": "FAILED",
+        "value": "failed"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.MetaPivotStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "FULL_OBJECT",
+        "value": "full_object"
+      },
+      {
+        "name": "PROJECTION",
+        "value": "projection"
+      },
+      {
+        "name": "QUOTIENT",
+        "value": "quotient"
+      },
+      {
+        "name": "RESIDUE_CLASSES",
+        "value": "residue_classes"
+      },
+      {
+        "name": "SUBSTRUCTURE",
+        "value": "substructure"
+      },
+      {
+        "name": "UNKNOWN",
+        "value": "unknown"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.ObjectScope"
+  },
+  {
+    "members": [
+      {
+        "name": "MATHEMATICAL",
+        "value": "mathematical"
+      },
+      {
+        "name": "SEARCH",
+        "value": "search"
+      },
+      {
+        "name": "PROCESS",
+        "value": "process"
+      },
+      {
+        "name": "TOOL",
+        "value": "tool"
+      },
+      {
+        "name": "VERIFICATION",
+        "value": "verification"
+      },
+      {
+        "name": "PROTOCOL",
+        "value": "protocol"
+      },
+      {
+        "name": "SAFETY",
+        "value": "safety"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.ObligationDomain"
+  },
+  {
+    "members": [
+      {
+        "name": "ACCEPT",
+        "value": "accept"
+      },
+      {
+        "name": "NEEDS_NORMALIZATION",
+        "value": "needs_normalization"
+      },
+      {
+        "name": "SEARCH_OR_PROCESS_TASK",
+        "value": "search_or_process_task"
+      },
+      {
+        "name": "REJECT",
+        "value": "reject"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.ObligationSemanticVerdict"
+  },
+  {
+    "members": [
+      {
+        "name": "EXECUTION",
+        "value": "execution"
+      },
+      {
+        "name": "BRIDGE",
+        "value": "bridge"
+      },
+      {
+        "name": "PLAN",
+        "value": "plan"
+      },
+      {
+        "name": "FRAMING",
+        "value": "framing"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.ProofFailureClass"
+  },
+  {
+    "members": [
+      {
+        "name": "CORE_BRIDGE",
+        "value": "core_bridge"
+      },
+      {
+        "name": "AUXILIARY_BOUND",
+        "value": "auxiliary_bound"
+      },
+      {
+        "name": "NECESSARY_CONDITION",
+        "value": "necessary_condition"
+      },
+      {
+        "name": "SUFFICIENT_CONDITION",
+        "value": "sufficient_condition"
+      },
+      {
+        "name": "EQUIVALENT_REDUCTION",
+        "value": "equivalent_reduction"
+      },
+      {
+        "name": "TECHNICAL_LEMMA",
+        "value": "technical_lemma"
+      },
+      {
+        "name": "SEARCH_HEURISTIC",
+        "value": "search_heuristic"
+      },
+      {
+        "name": "COUNTEREXAMPLE",
+        "value": "counterexample"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.ProofRole"
+  },
+  {
+    "members": [
+      {
+        "name": "EXISTENTIAL",
+        "value": "existential"
+      },
+      {
+        "name": "PARTIAL",
+        "value": "partial"
+      },
+      {
+        "name": "UNIVERSAL",
+        "value": "universal"
+      },
+      {
+        "name": "EXHAUSTIVE",
+        "value": "exhaustive"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.PropertyStrength"
+  },
+  {
+    "members": [
+      {
+        "name": "ADMISSIBILITY",
+        "value": "admissibility"
+      },
+      {
+        "name": "LOWER_BOUND",
+        "value": "lower_bound"
+      },
+      {
+        "name": "UPPER_BOUND",
+        "value": "upper_bound"
+      },
+      {
+        "name": "DEGENERACY",
+        "value": "degeneracy"
+      },
+      {
+        "name": "SCOPE",
+        "value": "scope"
+      },
+      {
+        "name": "STRICT_DESCENT",
+        "value": "strict_descent"
+      },
+      {
+        "name": "UNKNOWN",
+        "value": "unknown"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.RealizerFailureType"
+  },
+  {
+    "members": [
+      {
+        "name": "RESUME_WORK",
+        "value": "resume_work"
+      },
+      {
+        "name": "NO_RESUMABLE_WORK",
+        "value": "no_resumable_work"
+      },
+      {
+        "name": "REOPEN_REQUIRED",
+        "value": "reopen_required"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.ResumeDecisionKind"
+  },
+  {
+    "members": [
+      {
+        "name": "VALID",
+        "value": "valid"
+      },
+      {
+        "name": "TAUTOLOGICAL",
+        "value": "tautological"
+      },
+      {
+        "name": "PLACEHOLDER",
+        "value": "placeholder"
+      },
+      {
+        "name": "NO_EXECUTABLE_STEP",
+        "value": "no_executable_step"
+      },
+      {
+        "name": "NO_TARGET",
+        "value": "no_target"
+      },
+      {
+        "name": "LOST_DOMAIN_MECHANISM",
+        "value": "lost_domain_mechanism"
+      },
+      {
+        "name": "SCOPE_INVALID",
+        "value": "scope_invalid"
+      },
+      {
+        "name": "DUPLICATE",
+        "value": "duplicate"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.RewriteSemanticVerdict"
+  },
+  {
+    "members": [
+      {
+        "name": "SAME",
+        "value": "same"
+      },
+      {
+        "name": "CLAIM_STRONGER",
+        "value": "claim_stronger"
+      },
+      {
+        "name": "CLAIM_WEAKER",
+        "value": "claim_weaker"
+      },
+      {
+        "name": "INCOMPARABLE",
+        "value": "incomparable"
+      },
+      {
+        "name": "UNKNOWN",
+        "value": "unknown"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.ScopeRelation"
+  },
+  {
+    "members": [
+      {
+        "name": "NONEMPTY_INTERSECTION",
+        "value": "nonempty_intersection"
+      },
+      {
+        "name": "SUBSET",
+        "value": "subset"
+      },
+      {
+        "name": "SUPERSET",
+        "value": "superset"
+      },
+      {
+        "name": "EQUALITY",
+        "value": "equality"
+      },
+      {
+        "name": "COVER",
+        "value": "cover"
+      },
+      {
+        "name": "PARTITION",
+        "value": "partition"
+      },
+      {
+        "name": "UNKNOWN",
+        "value": "unknown"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.SetRelationKind"
+  },
+  {
+    "members": [
+      {
+        "name": "ADMISSION_REWRITE",
+        "value": "admission_rewrite"
+      },
+      {
+        "name": "PLAN_FAILURE",
+        "value": "plan_failure"
+      },
+      {
+        "name": "SCOPE_REPAIR",
+        "value": "scope_repair"
+      },
+      {
+        "name": "BRIDGE_INSERTION",
+        "value": "bridge_insertion"
+      },
+      {
+        "name": "COUNTERMODEL_FEEDBACK",
+        "value": "countermodel_feedback"
+      },
+      {
+        "name": "USER_INTERVENTION",
+        "value": "user_intervention"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.StrategyRevisionReason"
+  },
+  {
+    "members": [
+      {
+        "name": "CREATED",
+        "value": "created"
+      },
+      {
+        "name": "NEEDS_REWRITE",
+        "value": "needs_rewrite"
+      },
+      {
+        "name": "ASSIGNED",
+        "value": "assigned"
+      },
+      {
+        "name": "READY",
+        "value": "ready"
+      },
+      {
+        "name": "RUNNING",
+        "value": "running"
+      },
+      {
+        "name": "COMPLETED",
+        "value": "completed"
+      },
+      {
+        "name": "INCONCLUSIVE",
+        "value": "inconclusive"
+      },
+      {
+        "name": "DEFERRED",
+        "value": "deferred"
+      },
+      {
+        "name": "BLOCKED",
+        "value": "blocked"
+      },
+      {
+        "name": "FAILED",
+        "value": "failed"
+      },
+      {
+        "name": "EXPIRED",
+        "value": "expired"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.TaskStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "UNIFORM",
+        "value": "uniform"
+      },
+      {
+        "name": "POINTWISE",
+        "value": "pointwise"
+      },
+      {
+        "name": "EXISTS_PER_INSTANCE",
+        "value": "exists_per_instance"
+      },
+      {
+        "name": "UNKNOWN",
+        "value": "unknown"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.UniformityScope"
+  },
+  {
+    "members": [
+      {
+        "name": "UNSUPPORTED_IMPLICATION",
+        "value": "unsupported_implication"
+      },
+      {
+        "name": "WRONG_DIRECTION",
+        "value": "wrong_direction"
+      },
+      {
+        "name": "FINITE_TO_UNIVERSAL",
+        "value": "finite_to_universal"
+      },
+      {
+        "name": "EVENTUAL_TO_GLOBAL",
+        "value": "eventual_to_global"
+      },
+      {
+        "name": "MISSING_UNIFORMITY",
+        "value": "missing_uniformity"
+      },
+      {
+        "name": "QUANTIFIER_SWAP",
+        "value": "quantifier_swap"
+      },
+      {
+        "name": "PROPERTY_STRENGTHENING",
+        "value": "property_strengthening"
+      },
+      {
+        "name": "UNVERIFIED_CANDIDATE_BOUND",
+        "value": "unverified_candidate_bound"
+      },
+      {
+        "name": "DEPENDENCY_MISSING",
+        "value": "dependency_missing"
+      },
+      {
+        "name": "SCOPE_MISMATCH",
+        "value": "scope_mismatch"
+      },
+      {
+        "name": "OTHER",
+        "value": "other"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.VerifierIssueCode"
+  },
+  {
+    "members": [
+      {
+        "name": "PROVIDER_AVAILABLE",
+        "value": "provider_available"
+      },
+      {
+        "name": "BUDGET_AVAILABLE",
+        "value": "budget_available"
+      },
+      {
+        "name": "DEPENDENCY_FACT_AVAILABLE",
+        "value": "dependency_fact_available"
+      },
+      {
+        "name": "OBLIGATION_STATE_CHANGED",
+        "value": "obligation_state_changed"
+      },
+      {
+        "name": "REVIEWER_AVAILABLE",
+        "value": "reviewer_available"
+      },
+      {
+        "name": "TASK_RECOMPILED",
+        "value": "task_recompiled"
+      },
+      {
+        "name": "USER_INTERVENTION",
+        "value": "user_intervention"
+      },
+      {
+        "name": "CONFIG_CHANGED",
+        "value": "config_changed"
+      },
+      {
+        "name": "ROUND_ADVANCED",
+        "value": "round_advanced"
+      }
+    ],
+    "qualified_name": "mathproofmesh.proof_control.models.WakeConditionKind"
+  },
+  {
+    "members": [
+      {
+        "name": "WIDEN",
+        "value": "widen"
+      },
+      {
+        "name": "DEEPEN",
+        "value": "deepen"
+      },
+      {
+        "name": "VERIFY",
+        "value": "verify"
+      },
+      {
+        "name": "SYNTHESIZE",
+        "value": "synthesize"
+      },
+      {
+        "name": "REVISE",
+        "value": "revise"
+      },
+      {
+        "name": "BRIDGE",
+        "value": "bridge"
+      },
+      {
+        "name": "RESOLVE_CONFLICT",
+        "value": "resolve_conflict"
+      },
+      {
+        "name": "SEARCH_COUNTEREXAMPLE",
+        "value": "search_counterexample"
+      },
+      {
+        "name": "MERGE_ROUTE",
+        "value": "merge_route"
+      },
+      {
+        "name": "COOLDOWN_ROUTE",
+        "value": "cooldown_route"
+      },
+      {
+        "name": "SWITCH_REPRESENTATION",
+        "value": "switch_representation"
+      },
+      {
+        "name": "TRIGGER_INSPIRATION",
+        "value": "trigger_inspiration"
+      },
+      {
+        "name": "SEARCH_ANALOGY",
+        "value": "search_analogy"
+      },
+      {
+        "name": "INVENT_CONSTRUCTION",
+        "value": "invent_construction"
+      },
+      {
+        "name": "GENERATE_INVARIANT",
+        "value": "generate_invariant"
+      },
+      {
+        "name": "REVERSE_GOAL",
+        "value": "reverse_goal"
+      },
+      {
+        "name": "META_REPLAN",
+        "value": "meta_replan"
+      },
+      {
+        "name": "SURPRISE_WIDEN",
+        "value": "surprise_widen"
+      },
+      {
+        "name": "STOP",
+        "value": "stop"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.ActionKind"
+  },
+  {
+    "members": [
+      {
+        "name": "COMPLETE",
+        "value": "complete"
+      },
+      {
+        "name": "PARTIAL",
+        "value": "partial"
+      },
+      {
+        "name": "FAILED",
+        "value": "failed"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.AttemptStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "PASSED",
+        "value": "passed"
+      },
+      {
+        "name": "MISSING_DECLARATION",
+        "value": "missing_declaration"
+      },
+      {
+        "name": "INVALID_CONTRACT",
+        "value": "invalid_contract"
+      },
+      {
+        "name": "REFUTED",
+        "value": "refuted"
+      },
+      {
+        "name": "INCONCLUSIVE",
+        "value": "inconclusive"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.CalculationGateVerdict"
+  },
+  {
+    "members": [
+      {
+        "name": "WORKING",
+        "value": "working"
+      },
+      {
+        "name": "TENTATIVE",
+        "value": "tentative"
+      },
+      {
+        "name": "VERIFIED",
+        "value": "verified"
+      },
+      {
+        "name": "REJECTED",
+        "value": "rejected"
+      },
+      {
+        "name": "COMMITTED",
+        "value": "committed"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.CheckpointStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "PROPOSED",
+        "value": "proposed"
+      },
+      {
+        "name": "VERIFIED",
+        "value": "verified"
+      },
+      {
+        "name": "REJECTED",
+        "value": "rejected"
+      },
+      {
+        "name": "UNCERTAIN",
+        "value": "uncertain"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.ClaimStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "RETRY_WITH_REPAIRED_SPEC",
+        "value": "retry_with_repaired_spec"
+      },
+      {
+        "name": "ABANDON_AS_UNREPRESENTABLE",
+        "value": "abandon_as_unrepresentable"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.ComputationContractRepairAction"
+  },
+  {
+    "members": [
+      {
+        "name": "NOT_NEEDED",
+        "value": "not_needed"
+      },
+      {
+        "name": "SUCCEEDED",
+        "value": "succeeded"
+      },
+      {
+        "name": "ABANDONED",
+        "value": "abandoned"
+      },
+      {
+        "name": "FAILED",
+        "value": "failed"
+      },
+      {
+        "name": "DISABLED",
+        "value": "disabled"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.ComputationContractRepairStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "ALLOW",
+        "value": "allow"
+      },
+      {
+        "name": "DEFER",
+        "value": "defer"
+      },
+      {
+        "name": "REJECT",
+        "value": "reject"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.ComputationDecisionStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "SYMPY_SIMPLIFY",
+        "value": "sympy_simplify"
+      },
+      {
+        "name": "SYMPY_EQUIVALENT",
+        "value": "sympy_equivalent"
+      },
+      {
+        "name": "POLYNOMIAL_FACTOR",
+        "value": "polynomial_factor"
+      },
+      {
+        "name": "MODULAR_EXHAUSTIVE",
+        "value": "modular_exhaustive"
+      },
+      {
+        "name": "BOUNDED_INTEGER_SEARCH",
+        "value": "bounded_integer_search"
+      },
+      {
+        "name": "GRAPH_CERTIFICATE",
+        "value": "graph_certificate"
+      },
+      {
+        "name": "RECURRENCE_CHECK",
+        "value": "recurrence_check"
+      },
+      {
+        "name": "BOUNDED_GREEDY_SEQUENCE",
+        "value": "bounded_greedy_sequence"
+      },
+      {
+        "name": "CANDIDATE_PERIOD_CHECK",
+        "value": "candidate_period_check"
+      },
+      {
+        "name": "EXACT_GEOMETRY",
+        "value": "exact_geometry"
+      },
+      {
+        "name": "NUMERIC_COUNTEREXAMPLE",
+        "value": "numeric_counterexample"
+      },
+      {
+        "name": "REAL_INEQUALITY",
+        "value": "real_inequality"
+      },
+      {
+        "name": "NUMBER_THEORY_CHECK",
+        "value": "number_theory_check"
+      },
+      {
+        "name": "SANDBOXED_PYTHON",
+        "value": "sandboxed_python"
+      },
+      {
+        "name": "LEAN_CHECK",
+        "value": "lean_check"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.ComputationMethod"
+  },
+  {
+    "members": [
+      {
+        "name": "FALSIFY_CLAIM",
+        "value": "falsify_claim"
+      },
+      {
+        "name": "CHECK_DERIVED_IDENTITY",
+        "value": "check_derived_identity"
+      },
+      {
+        "name": "TEST_BOUNDARY_CASES",
+        "value": "test_boundary_cases"
+      },
+      {
+        "name": "VERIFY_FINITE_REDUCTION",
+        "value": "verify_finite_reduction"
+      },
+      {
+        "name": "VALIDATE_CONSTRUCTED_EXAMPLE",
+        "value": "validate_constructed_example"
+      },
+      {
+        "name": "DISCOVER_PATTERN",
+        "value": "discover_pattern"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.ComputationPurpose"
+  },
+  {
+    "members": [
+      {
+        "name": "SUBMIT_DELTA",
+        "value": "submit_delta"
+      },
+      {
+        "name": "REQUEST_COMPUTATION",
+        "value": "request_computation"
+      },
+      {
+        "name": "COMPLETE",
+        "value": "complete"
+      },
+      {
+        "name": "ABANDON",
+        "value": "abandon"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.ContinuationAction"
+  },
+  {
+    "members": [
+      {
+        "name": "COMPLETED",
+        "value": "completed"
+      },
+      {
+        "name": "PARTIAL",
+        "value": "partial"
+      },
+      {
+        "name": "MISSING",
+        "value": "missing"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.DeliverableStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "QUEUED",
+        "value": "queued"
+      },
+      {
+        "name": "SCHEDULED",
+        "value": "scheduled"
+      },
+      {
+        "name": "PRESENTED",
+        "value": "presented"
+      },
+      {
+        "name": "ACKNOWLEDGED",
+        "value": "acknowledged"
+      },
+      {
+        "name": "USED",
+        "value": "used"
+      },
+      {
+        "name": "EXPIRED_WITHOUT_OPPORTUNITY",
+        "value": "expired_without_opportunity"
+      },
+      {
+        "name": "INVALIDATED",
+        "value": "invalidated"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.DeliveryState"
+  },
+  {
+    "members": [
+      {
+        "name": "EASY",
+        "value": "easy"
+      },
+      {
+        "name": "MEDIUM",
+        "value": "medium"
+      },
+      {
+        "name": "HARD",
+        "value": "hard"
+      },
+      {
+        "name": "OLYMPIAD",
+        "value": "olympiad"
+      },
+      {
+        "name": "RESEARCH",
+        "value": "research"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.Difficulty"
+  },
+  {
+    "members": [
+      {
+        "name": "HEURISTIC",
+        "value": "heuristic"
+      },
+      {
+        "name": "BOUNDED_EVIDENCE",
+        "value": "bounded_evidence"
+      },
+      {
+        "name": "COUNTEREXAMPLE",
+        "value": "counterexample"
+      },
+      {
+        "name": "EXHAUSTIVE_CERTIFICATE",
+        "value": "exhaustive_certificate"
+      },
+      {
+        "name": "FORMAL_CERTIFICATE",
+        "value": "formal_certificate"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.EvidenceStrength"
+  },
+  {
+    "members": [
+      {
+        "name": "UNVERIFIED_IDEA",
+        "value": "unverified_idea"
+      },
+      {
+        "name": "NUMERICAL_HEURISTIC",
+        "value": "numerical_heuristic"
+      },
+      {
+        "name": "BOUNDED_EXPERIMENT",
+        "value": "bounded_experiment"
+      },
+      {
+        "name": "EXACT_SYMBOLIC_IDENTITY",
+        "value": "exact_symbolic_identity"
+      },
+      {
+        "name": "COMPLETE_FINITE_ENUMERATION",
+        "value": "complete_finite_enumeration"
+      },
+      {
+        "name": "SAT_SMT_CERTIFICATE",
+        "value": "sat_smt_certificate"
+      },
+      {
+        "name": "COUNTEREXAMPLE",
+        "value": "counterexample"
+      },
+      {
+        "name": "NATURAL_PROOF_AUDITED",
+        "value": "natural_proof_audited"
+      },
+      {
+        "name": "FORMAL_KERNEL_CERTIFICATE",
+        "value": "formal_kernel_certificate"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.EvidenceType"
+  },
+  {
+    "members": [
+      {
+        "name": "COMPLETED",
+        "value": "completed"
+      },
+      {
+        "name": "BUDGET_EXHAUSTED",
+        "value": "budget_exhausted"
+      },
+      {
+        "name": "NETWORK_INTERRUPTED",
+        "value": "network_interrupted"
+      },
+      {
+        "name": "FAILED",
+        "value": "failed"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.ExecutionStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "NOT_REFUTED",
+        "value": "not_refuted"
+      },
+      {
+        "name": "COUNTEREXAMPLE_FOUND",
+        "value": "counterexample_found"
+      },
+      {
+        "name": "CERTIFIED",
+        "value": "certified"
+      },
+      {
+        "name": "INCONCLUSIVE",
+        "value": "inconclusive"
+      },
+      {
+        "name": "ERROR",
+        "value": "error"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.ExperimentOutcome"
+  },
+  {
+    "members": [
+      {
+        "name": "NONE",
+        "value": "none"
+      },
+      {
+        "name": "EXECUTION",
+        "value": "execution"
+      },
+      {
+        "name": "PLAN",
+        "value": "plan"
+      },
+      {
+        "name": "STRATEGY",
+        "value": "strategy"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.FailureLevel"
+  },
+  {
+    "members": [
+      {
+        "name": "DEPENDS_ON",
+        "value": "depends_on"
+      },
+      {
+        "name": "IMPLIES",
+        "value": "implies"
+      },
+      {
+        "name": "REFUTES",
+        "value": "refutes"
+      },
+      {
+        "name": "EQUIVALENT_TO",
+        "value": "equivalent_to"
+      },
+      {
+        "name": "STRENGTHENS",
+        "value": "strengthens"
+      },
+      {
+        "name": "WEAKENS",
+        "value": "weakens"
+      },
+      {
+        "name": "USES_CONSTRUCTION",
+        "value": "uses_construction"
+      },
+      {
+        "name": "CLOSES",
+        "value": "closes"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.GraphEdgeType"
+  },
+  {
+    "members": [
+      {
+        "name": "SUBMIT_ATTEMPT",
+        "value": "submit_attempt"
+      },
+      {
+        "name": "REQUEST_COMPUTATION",
+        "value": "request_computation"
+      },
+      {
+        "name": "ABANDON",
+        "value": "abandon"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.InitialExplorationAction"
+  },
+  {
+    "members": [
+      {
+        "name": "LOCAL",
+        "value": "local"
+      },
+      {
+        "name": "WARM",
+        "value": "warm"
+      },
+      {
+        "name": "COLD",
+        "value": "cold"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.InspirationContextMode"
+  },
+  {
+    "members": [
+      {
+        "name": "REPRESENTATION_SWITCH",
+        "value": "representation_switch"
+      },
+      {
+        "name": "STRUCTURAL_ANALOGY",
+        "value": "structural_analogy"
+      },
+      {
+        "name": "AUXILIARY_CONSTRUCTION",
+        "value": "auxiliary_construction"
+      },
+      {
+        "name": "INVARIANT_HYPOTHESIS",
+        "value": "invariant_hypothesis"
+      },
+      {
+        "name": "REVERSE_GOAL_ANALYSIS",
+        "value": "reverse_goal_analysis"
+      },
+      {
+        "name": "BRIDGE_LEMMA",
+        "value": "bridge_lemma"
+      },
+      {
+        "name": "SURPRISE_EXPLORATION",
+        "value": "surprise_exploration"
+      },
+      {
+        "name": "META_REPLAN",
+        "value": "meta_replan"
+      },
+      {
+        "name": "INSPIRATION_COMPOSITION",
+        "value": "inspiration_composition"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.InspirationMechanism"
+  },
+  {
+    "members": [
+      {
+        "name": "STAGNATION",
+        "value": "stagnation"
+      },
+      {
+        "name": "REPEATED_FIRST_ERROR",
+        "value": "repeated_first_error"
+      },
+      {
+        "name": "HIGH_ROUTE_REDUNDANCY",
+        "value": "high_route_redundancy"
+      },
+      {
+        "name": "ALL_ROUTES_FAILED",
+        "value": "all_routes_failed"
+      },
+      {
+        "name": "SHARED_BOTTLENECK",
+        "value": "shared_bottleneck"
+      },
+      {
+        "name": "PROOF_DEBT_PLATEAU",
+        "value": "proof_debt_plateau"
+      },
+      {
+        "name": "FINAL_REPAIR_FAILED",
+        "value": "final_repair_failed"
+      },
+      {
+        "name": "MANUAL",
+        "value": "manual"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.InspirationTriggerType"
+  },
+  {
+    "members": [
+      {
+        "name": "VERIFIED",
+        "value": "verified"
+      },
+      {
+        "name": "INCONCLUSIVE",
+        "value": "inconclusive"
+      },
+      {
+        "name": "REFUTED",
+        "value": "refuted"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.MathStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "FACT",
+        "value": "fact"
+      },
+      {
+        "name": "INSIGHT",
+        "value": "insight"
+      },
+      {
+        "name": "NEGATIVE",
+        "value": "negative"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.MemoryTier"
+  },
+  {
+    "members": [
+      {
+        "name": "CRITICAL",
+        "value": "critical"
+      },
+      {
+        "name": "HIGH",
+        "value": "high"
+      },
+      {
+        "name": "NORMAL",
+        "value": "normal"
+      },
+      {
+        "name": "LOW",
+        "value": "low"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.MessagePriority"
+  },
+  {
+    "members": [
+      {
+        "name": "CLAIM_PROPOSAL",
+        "value": "claim_proposal"
+      },
+      {
+        "name": "VERIFIED_LEMMA",
+        "value": "verified_lemma"
+      },
+      {
+        "name": "PROOF_OBLIGATION",
+        "value": "proof_obligation"
+      },
+      {
+        "name": "COUNTEREXAMPLE",
+        "value": "counterexample"
+      },
+      {
+        "name": "CONTRADICTION_NOTICE",
+        "value": "contradiction_notice"
+      },
+      {
+        "name": "COMPUTATION_PLAN",
+        "value": "computation_plan"
+      },
+      {
+        "name": "COMPUTATION_CERTIFICATE",
+        "value": "computation_certificate"
+      },
+      {
+        "name": "FORMAL_CERTIFICATE",
+        "value": "formal_certificate"
+      },
+      {
+        "name": "REPAIR_REQUEST",
+        "value": "repair_request"
+      },
+      {
+        "name": "BRIDGE_LEMMA_REQUEST",
+        "value": "bridge_lemma_request"
+      },
+      {
+        "name": "STRATEGY_REWRITE_REQUEST",
+        "value": "strategy_rewrite_request"
+      },
+      {
+        "name": "FAILURE_RECORD",
+        "value": "failure_record"
+      },
+      {
+        "name": "ROUTE_CHECKPOINT",
+        "value": "route_checkpoint"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.MessageType"
+  },
+  {
+    "members": [
+      {
+        "name": "CONTINUE",
+        "value": "continue"
+      },
+      {
+        "name": "REPAIR",
+        "value": "repair"
+      },
+      {
+        "name": "REWRITE_PLAN",
+        "value": "rewrite_plan"
+      },
+      {
+        "name": "SWITCH_REPRESENTATION",
+        "value": "switch_representation"
+      },
+      {
+        "name": "COOLDOWN_ROUTE",
+        "value": "cooldown_route"
+      },
+      {
+        "name": "ABANDON_ROUTE",
+        "value": "abandon_route"
+      },
+      {
+        "name": "MERGE_ROUTES",
+        "value": "merge_routes"
+      },
+      {
+        "name": "ALLOCATE_SURPRISE_BUDGET",
+        "value": "allocate_surprise_budget"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.MetaDirectiveAction"
+  },
+  {
+    "members": [
+      {
+        "name": "MAIN_GOAL",
+        "value": "main_goal"
+      },
+      {
+        "name": "SUBGOAL",
+        "value": "subgoal"
+      },
+      {
+        "name": "LEMMA",
+        "value": "lemma"
+      },
+      {
+        "name": "CASE_BRANCH",
+        "value": "case_branch"
+      },
+      {
+        "name": "CONSTRUCTION",
+        "value": "construction"
+      },
+      {
+        "name": "COMPUTATION_QUESTION",
+        "value": "computation_question"
+      },
+      {
+        "name": "FORMALIZATION_TASK",
+        "value": "formalization_task"
+      },
+      {
+        "name": "CONTRADICTION",
+        "value": "contradiction"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.ObligationKind"
+  },
+  {
+    "members": [
+      {
+        "name": "PROOF",
+        "value": "proof"
+      },
+      {
+        "name": "CALCULATION",
+        "value": "calculation"
+      },
+      {
+        "name": "LOGIC",
+        "value": "logic"
+      },
+      {
+        "name": "OPTIMIZATION",
+        "value": "optimization"
+      },
+      {
+        "name": "CONSTRUCTION",
+        "value": "construction"
+      },
+      {
+        "name": "RESEARCH",
+        "value": "research"
+      },
+      {
+        "name": "MIXED",
+        "value": "mixed"
+      },
+      {
+        "name": "UNKNOWN",
+        "value": "unknown"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.ProblemKind"
+  },
+  {
+    "members": [
+      {
+        "name": "ACCEPTED",
+        "value": "accepted"
+      },
+      {
+        "name": "REJECTED",
+        "value": "rejected"
+      },
+      {
+        "name": "DUPLICATE",
+        "value": "duplicate"
+      },
+      {
+        "name": "EXPIRED",
+        "value": "expired"
+      },
+      {
+        "name": "DEFERRED",
+        "value": "deferred"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.ReceiptStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "PROVER",
+        "value": "prover"
+      },
+      {
+        "name": "SKEPTIC",
+        "value": "skeptic"
+      },
+      {
+        "name": "TOOL_SPECIALIST",
+        "value": "tool_specialist"
+      },
+      {
+        "name": "REFEREE",
+        "value": "referee"
+      },
+      {
+        "name": "BRIDGE_PROVER",
+        "value": "bridge_prover"
+      },
+      {
+        "name": "CONFLICT_RESOLVER",
+        "value": "conflict_resolver"
+      },
+      {
+        "name": "COUNTEREXAMPLE_HUNTER",
+        "value": "counterexample_hunter"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.RouteRole"
+  },
+  {
+    "members": [
+      {
+        "name": "ACTIVE",
+        "value": "active"
+      },
+      {
+        "name": "WAITING",
+        "value": "waiting"
+      },
+      {
+        "name": "REPAIR_ONCE",
+        "value": "repair_once"
+      },
+      {
+        "name": "FROZEN",
+        "value": "frozen"
+      },
+      {
+        "name": "TERMINAL",
+        "value": "terminal"
+      },
+      {
+        "name": "FROZEN_STALLED",
+        "value": "frozen_stalled"
+      },
+      {
+        "name": "REFUTED",
+        "value": "refuted"
+      },
+      {
+        "name": "COOLING",
+        "value": "cooling"
+      },
+      {
+        "name": "MERGED",
+        "value": "merged"
+      },
+      {
+        "name": "ABANDONED",
+        "value": "abandoned"
+      },
+      {
+        "name": "COMPLETED",
+        "value": "completed"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.RouteStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "VERIFIED",
+        "value": "verified"
+      },
+      {
+        "name": "COMPLETED",
+        "value": "completed"
+      },
+      {
+        "name": "UNVERIFIED",
+        "value": "unverified"
+      },
+      {
+        "name": "BUDGET_EXHAUSTED",
+        "value": "budget_exhausted"
+      },
+      {
+        "name": "PAUSED_EXTERNAL_FAILURE",
+        "value": "paused_external_failure"
+      },
+      {
+        "name": "FAILED",
+        "value": "failed"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.RunStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "INFO",
+        "value": "info"
+      },
+      {
+        "name": "WARNING",
+        "value": "warning"
+      },
+      {
+        "name": "ERROR",
+        "value": "error"
+      },
+      {
+        "name": "CRITICAL",
+        "value": "critical"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.Severity"
+  },
+  {
+    "members": [
+      {
+        "name": "PROOF",
+        "value": "proof"
+      },
+      {
+        "name": "SOLUTION",
+        "value": "solution"
+      },
+      {
+        "name": "COMPUTATION",
+        "value": "computation"
+      },
+      {
+        "name": "CONJECTURE",
+        "value": "conjecture"
+      },
+      {
+        "name": "COUNTEREXAMPLE",
+        "value": "counterexample"
+      },
+      {
+        "name": "CLASSIFICATION",
+        "value": "classification"
+      },
+      {
+        "name": "OPTIMIZATION",
+        "value": "optimization"
+      },
+      {
+        "name": "CONSTRUCTION",
+        "value": "construction"
+      },
+      {
+        "name": "RESEARCH_PROGRESS",
+        "value": "research_progress"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.TaskRequirement"
+  },
+  {
+    "members": [
+      {
+        "name": "COMPLETED",
+        "value": "completed"
+      },
+      {
+        "name": "PARTIAL",
+        "value": "partial"
+      },
+      {
+        "name": "INCOMPLETE",
+        "value": "incomplete"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.TaskStatus"
+  },
+  {
+    "members": [
+      {
+        "name": "STRUCTURAL",
+        "value": "structural"
+      },
+      {
+        "name": "DETAILED",
+        "value": "detailed"
+      },
+      {
+        "name": "LEMMA",
+        "value": "lemma"
+      },
+      {
+        "name": "FINAL",
+        "value": "final"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.VerificationStage"
+  },
+  {
+    "members": [
+      {
+        "name": "PASS",
+        "value": "pass"
+      },
+      {
+        "name": "FAIL",
+        "value": "fail"
+      },
+      {
+        "name": "UNCERTAIN",
+        "value": "uncertain"
+      },
+      {
+        "name": "SKIPPED",
+        "value": "skipped"
+      }
+    ],
+    "qualified_name": "mathproofmesh.schemas.VerificationVerdict"
+  },
+  {
+    "members": [
+      {
+        "name": "DETERMINISTIC",
+        "value": "deterministic"
+      },
+      {
+        "name": "BLIND_SAME_MODEL",
+        "value": "blind_same_model"
+      },
+      {
+        "name": "ADVERSARIAL_BLIND",
+        "value": "adversarial_blind"
+      },
+      {
+        "name": "CROSS_PROVIDER",
+        "value": "cross_provider"
+      },
+      {
+        "name": "TOOL_OR_FORMAL",
+        "value": "tool_or_formal"
+      }
+    ],
+    "qualified_name": "mathproofmesh.verification.escalation.ValidationLevel"
+  },
+  {
+    "members": [
+      {
+        "name": "DROP_ASSUMPTION",
+        "value": "drop_assumption"
+      },
+      {
+        "name": "REVERSE_QUANTIFIER",
+        "value": "reverse_quantifier"
+      },
+      {
+        "name": "ALTER_SIGN",
+        "value": "alter_sign"
+      },
+      {
+        "name": "BREAK_DEPENDENCY",
+        "value": "break_dependency"
+      },
+      {
+        "name": "INSERT_CIRCULAR_STEP",
+        "value": "insert_circular_step"
+      }
+    ],
+    "qualified_name": "mathproofmesh.verification.mutation.MutationKind"
+  }
+]

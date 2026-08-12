@@ -1,0 +1,40 @@
+{
+  "qualified_name": "mathproofmesh.config.FinalTopologyConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "blind_detailed_review": {
+        "default": true,
+        "title": "Blind Detailed Review",
+        "type": "boolean"
+      },
+      "blind_structural_review": {
+        "default": true,
+        "title": "Blind Structural Review",
+        "type": "boolean"
+      },
+      "freeze_graph_before_synthesis": {
+        "default": true,
+        "title": "Freeze Graph Before Synthesis",
+        "type": "boolean"
+      },
+      "remove_agent_identity": {
+        "default": true,
+        "title": "Remove Agent Identity",
+        "type": "boolean"
+      },
+      "remove_route_ranking": {
+        "default": true,
+        "title": "Remove Route Ranking",
+        "type": "boolean"
+      },
+      "remove_self_confidence": {
+        "default": true,
+        "title": "Remove Self Confidence",
+        "type": "boolean"
+      }
+    },
+    "title": "FinalTopologyConfig",
+    "type": "object"
+  }
+}

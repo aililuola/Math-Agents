@@ -1,0 +1,71 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ComputationHint",
+  "schema": {
+    "$defs": {
+      "ComputationMethod": {
+        "enum": [
+          "sympy_simplify",
+          "sympy_equivalent",
+          "polynomial_factor",
+          "modular_exhaustive",
+          "bounded_integer_search",
+          "graph_certificate",
+          "recurrence_check",
+          "bounded_greedy_sequence",
+          "candidate_period_check",
+          "exact_geometry",
+          "numeric_counterexample",
+          "real_inequality",
+          "number_theory_check",
+          "sandboxed_python",
+          "lean_check"
+        ],
+        "title": "ComputationMethod",
+        "type": "string"
+      },
+      "ComputationPurpose": {
+        "enum": [
+          "falsify_claim",
+          "check_derived_identity",
+          "test_boundary_cases",
+          "verify_finite_reduction",
+          "validate_constructed_example",
+          "discover_pattern"
+        ],
+        "title": "ComputationPurpose",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "description": "A planner-authored possibility. It is deliberately not executable.",
+    "properties": {
+      "broad_search": {
+        "default": false,
+        "title": "Broad Search",
+        "type": "boolean"
+      },
+      "decision_use": {
+        "title": "Decision Use",
+        "type": "string"
+      },
+      "purpose": {
+        "$ref": "#/$defs/ComputationPurpose"
+      },
+      "suggested_method": {
+        "$ref": "#/$defs/ComputationMethod"
+      },
+      "target_claim": {
+        "title": "Target Claim",
+        "type": "string"
+      }
+    },
+    "required": [
+      "purpose",
+      "target_claim",
+      "suggested_method",
+      "decision_use"
+    ],
+    "title": "ComputationHint",
+    "type": "object"
+  }
+}

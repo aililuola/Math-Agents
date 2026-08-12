@@ -1,0 +1,83 @@
+{
+  "qualified_name": "mathproofmesh.deep_exploration.ExplorationAdmission",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "allowed": {
+        "title": "Allowed",
+        "type": "boolean"
+      },
+      "granted_tier": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Granted Tier"
+      },
+      "lease_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Lease Id"
+      },
+      "max_output_tokens": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Max Output Tokens"
+      },
+      "novelty_review_required": {
+        "default": false,
+        "title": "Novelty Review Required",
+        "type": "boolean"
+      },
+      "parallel_distinct_allowed": {
+        "default": true,
+        "title": "Parallel Distinct Allowed",
+        "type": "boolean"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "recovery_only": {
+        "default": false,
+        "title": "Recovery Only",
+        "type": "boolean"
+      },
+      "requested_tier": {
+        "title": "Requested Tier",
+        "type": "integer"
+      },
+      "signature_hash": {
+        "title": "Signature Hash",
+        "type": "string"
+      }
+    },
+    "required": [
+      "allowed",
+      "signature_hash",
+      "requested_tier",
+      "reason"
+    ],
+    "title": "ExplorationAdmission",
+    "type": "object"
+  }
+}

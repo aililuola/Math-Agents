@@ -1,0 +1,62 @@
+{
+  "qualified_name": "mathproofmesh.schemas.InspirationMaterialization",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "enum": [
+          "shadow_only",
+          "rejected",
+          "stored_insight",
+          "attached",
+          "route_created",
+          "computation_requested",
+          "bridge_requested"
+        ],
+        "title": "Action",
+        "type": "string"
+      },
+      "message_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Message Ids",
+        "type": "array"
+      },
+      "obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Obligation Ids",
+        "type": "array"
+      },
+      "proposal_id": {
+        "title": "Proposal Id",
+        "type": "string"
+      },
+      "reason": {
+        "default": "",
+        "title": "Reason",
+        "type": "string"
+      },
+      "route_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Route Id"
+      }
+    },
+    "required": [
+      "proposal_id",
+      "action"
+    ],
+    "title": "InspirationMaterialization",
+    "type": "object"
+  }
+}

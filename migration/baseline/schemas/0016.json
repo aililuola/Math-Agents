@@ -1,0 +1,27 @@
+{
+  "qualified_name": "mathproofmesh.config.ExplorationTierPolicyConfig",
+  "schema": {
+    "additionalProperties": false,
+    "description": "One server-owned deep-exploration operating tier.",
+    "properties": {
+      "artifact_recovery_tokens": {
+        "maximum": 128000,
+        "minimum": 256,
+        "title": "Artifact Recovery Tokens",
+        "type": "integer"
+      },
+      "output_tokens": {
+        "maximum": 384000,
+        "minimum": 512,
+        "title": "Output Tokens",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "output_tokens",
+      "artifact_recovery_tokens"
+    ],
+    "title": "ExplorationTierPolicyConfig",
+    "type": "object"
+  }
+}

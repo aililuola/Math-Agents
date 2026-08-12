@@ -1,0 +1,43 @@
+{
+  "qualified_name": "mathproofmesh.schemas.VariableBinding",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "aliases": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Aliases",
+        "type": "array"
+      },
+      "display_name": {
+        "minLength": 1,
+        "title": "Display Name",
+        "type": "string"
+      },
+      "domain": {
+        "minLength": 1,
+        "title": "Domain",
+        "type": "string"
+      },
+      "owner_scope": {
+        "minLength": 1,
+        "title": "Owner Scope",
+        "type": "string"
+      },
+      "variable_id": {
+        "minLength": 1,
+        "title": "Variable Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "variable_id",
+      "display_name",
+      "domain",
+      "owner_scope"
+    ],
+    "title": "VariableBinding",
+    "type": "object"
+  }
+}

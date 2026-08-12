@@ -1,0 +1,53 @@
+{
+  "qualified_name": "mathproofmesh.verification.mutation.ProofMutation",
+  "schema": {
+    "$defs": {
+      "MutationKind": {
+        "enum": [
+          "drop_assumption",
+          "reverse_quantifier",
+          "alter_sign",
+          "break_dependency",
+          "insert_circular_step"
+        ],
+        "title": "MutationKind",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "expected_verdict": {
+        "default": "fail",
+        "title": "Expected Verdict",
+        "type": "string"
+      },
+      "fault_description": {
+        "title": "Fault Description",
+        "type": "string"
+      },
+      "kind": {
+        "$ref": "#/$defs/MutationKind"
+      },
+      "mutated_statement": {
+        "title": "Mutated Statement",
+        "type": "string"
+      },
+      "mutation_id": {
+        "title": "Mutation Id",
+        "type": "string"
+      },
+      "original_step_id": {
+        "title": "Original Step Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "kind",
+      "original_step_id",
+      "mutated_statement",
+      "fault_description"
+    ],
+    "title": "ProofMutation",
+    "type": "object"
+  }
+}

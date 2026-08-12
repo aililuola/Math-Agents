@@ -1,0 +1,47 @@
+{
+    "captured_at_utc":  "2026-07-30T08:10:35.3829677Z",
+    "docker_server":  "29.6.2|Docker Desktop|linux|x86_64",
+    "compose":  "Docker Compose version v5.3.1",
+    "images":  [
+                   {
+                       "requested":  "postgres:18.4-bookworm",
+                       "id":  "sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296",
+                       "repo_tags":  [
+                                         "postgres:18.4-bookworm"
+                                     ],
+                       "repo_digests":  [
+                                            "postgres@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296"
+                                        ],
+                       "os":  "linux",
+                       "architecture":  "amd64",
+                       "variant":  null,
+                       "created":  "2026-07-14T01:36:18.736423353Z",
+                       "entrypoint":  [
+                                          "docker-entrypoint.sh"
+                                      ],
+                       "command":  [
+                                       "postgres"
+                                   ]
+                   },
+                   {
+                       "requested":  "temporalio/temporal:1.8.1",
+                       "id":  "sha256:59561b9ef060eaeb1f46cb6a1842d6cbdd8a393eb3b6d315ecef5fe2f0b1d7a6",
+                       "repo_tags":  [
+                                         "temporalio/temporal:1.8.1"
+                                     ],
+                       "repo_digests":  [
+                                            "temporalio/temporal@sha256:59561b9ef060eaeb1f46cb6a1842d6cbdd8a393eb3b6d315ecef5fe2f0b1d7a6"
+                                        ],
+                       "os":  "linux",
+                       "architecture":  "amd64",
+                       "variant":  null,
+                       "created":  "2026-07-21T17:55:43.408141029Z",
+                       "entrypoint":  [
+                                          "temporal"
+                                      ],
+                       "command":  [
+                                       null
+                                   ]
+                   }
+               ]
+}

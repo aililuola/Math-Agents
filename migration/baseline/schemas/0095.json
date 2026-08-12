@@ -1,0 +1,115 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.MetaPivotOutcome",
+  "schema": {
+    "$defs": {
+      "MetaPivotEffect": {
+        "enum": [
+          "effective",
+          "empty",
+          "deferred",
+          "failed"
+        ],
+        "title": "MetaPivotEffect",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "attempted_mechanisms": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Attempted Mechanisms",
+        "type": "array"
+      },
+      "changed_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Changed Route Ids",
+        "type": "array"
+      },
+      "completed_mechanisms": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Completed Mechanisms",
+        "type": "array"
+      },
+      "effect": {
+        "$ref": "#/$defs/MetaPivotEffect"
+      },
+      "new_counterexample_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "New Counterexample Ids",
+        "type": "array"
+      },
+      "new_fact_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "New Fact Ids",
+        "type": "array"
+      },
+      "new_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "New Obligation Ids",
+        "type": "array"
+      },
+      "new_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "New Route Ids",
+        "type": "array"
+      },
+      "new_task_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "New Task Ids",
+        "type": "array"
+      },
+      "pivot_id": {
+        "title": "Pivot Id",
+        "type": "string"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "revised_strategy_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Revised Strategy Ids",
+        "type": "array"
+      },
+      "unavailable_mechanisms": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Unavailable Mechanisms",
+        "type": "object"
+      },
+      "wake_condition_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Wake Condition Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "pivot_id",
+      "effect",
+      "reason"
+    ],
+    "title": "MetaPivotOutcome",
+    "type": "object"
+  }
+}

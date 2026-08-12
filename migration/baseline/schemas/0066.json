@@ -1,0 +1,123 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.BlueprintRewriteRequest",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "current_overstrong_targets": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Current Overstrong Targets",
+        "type": "array"
+      },
+      "execution_action_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Execution Action Id"
+      },
+      "failure_reason": {
+        "default": "",
+        "title": "Failure Reason",
+        "type": "string"
+      },
+      "failure_record_id": {
+        "title": "Failure Record Id",
+        "type": "string"
+      },
+      "historical_target_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Historical Target Obligation Ids",
+        "type": "array"
+      },
+      "invalidated_plan_elements": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Invalidated Plan Elements",
+        "type": "array"
+      },
+      "preserved_fact_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Preserved Fact Ids",
+        "type": "array"
+      },
+      "preserved_step_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Preserved Step Ids",
+        "type": "array"
+      },
+      "proposed_bridge_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Proposed Bridge Obligation Ids",
+        "type": "array"
+      },
+      "proposed_weaker_targets": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Proposed Weaker Targets",
+        "type": "array"
+      },
+      "representation_change_required": {
+        "title": "Representation Change Required",
+        "type": "boolean"
+      },
+      "request_id": {
+        "title": "Request Id",
+        "type": "string"
+      },
+      "result_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Result Obligation Ids",
+        "type": "array"
+      },
+      "route_id": {
+        "title": "Route Id",
+        "type": "string"
+      },
+      "status": {
+        "default": "pending",
+        "enum": [
+          "pending",
+          "accepted",
+          "rejected",
+          "executed",
+          "deferred",
+          "failed"
+        ],
+        "title": "Status",
+        "type": "string"
+      }
+    },
+    "required": [
+      "route_id",
+      "failure_record_id",
+      "preserved_fact_ids",
+      "preserved_step_ids",
+      "invalidated_plan_elements",
+      "current_overstrong_targets",
+      "proposed_weaker_targets",
+      "proposed_bridge_obligation_ids",
+      "representation_change_required"
+    ],
+    "title": "BlueprintRewriteRequest",
+    "type": "object"
+  }
+}

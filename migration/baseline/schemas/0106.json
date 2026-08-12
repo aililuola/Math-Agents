@@ -1,0 +1,187 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.RealizerRepairResult",
+  "schema": {
+    "$defs": {
+      "RealizerCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "admissibility_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Admissibility Conditions",
+            "type": "array"
+          },
+          "boundary_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Boundary Conditions",
+            "type": "array"
+          },
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "construction": {
+            "title": "Construction",
+            "type": "string"
+          },
+          "descent_measure": {
+            "title": "Descent Measure",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "expected_strict_decrease": {
+            "title": "Expected Strict Decrease",
+            "type": "string"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Failure Reason"
+          },
+          "failure_type": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RealizerFailureType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "falsification_tests": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Falsification Tests",
+            "type": "array"
+          },
+          "route_id": {
+            "title": "Route Id",
+            "type": "string"
+          },
+          "status": {
+            "default": "candidate",
+            "enum": [
+              "candidate",
+              "verified",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "structure_id": {
+            "title": "Structure Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "structure_id",
+          "route_id",
+          "construction",
+          "admissibility_conditions",
+          "boundary_conditions",
+          "descent_measure",
+          "expected_strict_decrease",
+          "falsification_tests"
+        ],
+        "title": "RealizerCandidate",
+        "type": "object"
+      },
+      "RealizerFailureType": {
+        "enum": [
+          "admissibility",
+          "lower_bound",
+          "upper_bound",
+          "degeneracy",
+          "scope",
+          "strict_descent",
+          "unknown"
+        ],
+        "title": "RealizerFailureType",
+        "type": "string"
+      },
+      "RealizerRepairTask": {
+        "additionalProperties": false,
+        "properties": {
+          "failed_candidate_id": {
+            "title": "Failed Candidate Id",
+            "type": "string"
+          },
+          "repair_operator": {
+            "enum": [
+              "replace_realizer_preserve_structure",
+              "minimal_admissible_realizer",
+              "alternative_representative",
+              "repair_boundary_conditions"
+            ],
+            "title": "Repair Operator",
+            "type": "string"
+          },
+          "required_constraints": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Constraints",
+            "type": "array"
+          },
+          "structure_id": {
+            "title": "Structure Id",
+            "type": "string"
+          },
+          "targeted_obligation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Targeted Obligation Ids",
+            "type": "array"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "structure_id",
+          "failed_candidate_id",
+          "repair_operator",
+          "required_constraints",
+          "targeted_obligation_ids"
+        ],
+        "title": "RealizerRepairTask",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "candidate": {
+        "$ref": "#/$defs/RealizerCandidate"
+      },
+      "task": {
+        "$ref": "#/$defs/RealizerRepairTask"
+      }
+    },
+    "required": [
+      "task",
+      "candidate"
+    ],
+    "title": "RealizerRepairResult",
+    "type": "object"
+  }
+}

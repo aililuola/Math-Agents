@@ -1,0 +1,383 @@
+{
+  "qualified_name": "mathproofmesh.schemas.PathStats",
+  "schema": {
+    "$defs": {
+      "ActionKind": {
+        "enum": [
+          "widen",
+          "deepen",
+          "verify",
+          "synthesize",
+          "revise",
+          "bridge",
+          "resolve_conflict",
+          "search_counterexample",
+          "merge_route",
+          "cooldown_route",
+          "switch_representation",
+          "trigger_inspiration",
+          "search_analogy",
+          "invent_construction",
+          "generate_invariant",
+          "reverse_goal",
+          "meta_replan",
+          "surprise_widen",
+          "stop"
+        ],
+        "title": "ActionKind",
+        "type": "string"
+      },
+      "FailureLevel": {
+        "enum": [
+          "none",
+          "execution",
+          "plan",
+          "strategy"
+        ],
+        "title": "FailureLevel",
+        "type": "string"
+      },
+      "VerificationVerdict": {
+        "enum": [
+          "pass",
+          "fail",
+          "uncertain",
+          "skipped"
+        ],
+        "title": "VerificationVerdict",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "analogy_opportunity": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Analogy Opportunity",
+        "type": "number"
+      },
+      "attempt_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Attempt Id"
+      },
+      "bridge_opportunity": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Bridge Opportunity",
+        "type": "number"
+      },
+      "common_mode_risk": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Common Mode Risk",
+        "type": "number"
+      },
+      "complete": {
+        "default": false,
+        "title": "Complete",
+        "type": "boolean"
+      },
+      "consecutive_failures": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Consecutive Failures",
+        "type": "integer"
+      },
+      "construction_opportunity": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Construction Opportunity",
+        "type": "number"
+      },
+      "contradiction_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Contradiction Count",
+        "type": "integer"
+      },
+      "core_open_obligation_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Core Open Obligation Count",
+        "type": "integer"
+      },
+      "core_proof_debt": {
+        "default": 0.0,
+        "minimum": 0.0,
+        "title": "Core Proof Debt",
+        "type": "number"
+      },
+      "core_proof_debt_reduction": {
+        "default": 0.0,
+        "title": "Core Proof Debt Reduction",
+        "type": "number"
+      },
+      "core_verified_bridge_gain": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Core Verified Bridge Gain",
+        "type": "integer"
+      },
+      "counterexample_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Counterexample Count",
+        "type": "integer"
+      },
+      "failed_repair_attempts": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Failed Repair Attempts",
+        "type": "integer"
+      },
+      "failure_confidence": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Failure Confidence",
+        "type": "number"
+      },
+      "failure_level": {
+        "$ref": "#/$defs/FailureLevel",
+        "default": "none"
+      },
+      "gap_reduction": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": -1.0,
+        "title": "Gap Reduction",
+        "type": "number"
+      },
+      "goal_alignment_score": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Goal Alignment Score",
+        "type": "number"
+      },
+      "high_centrality_obligation_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "High Centrality Obligation Count",
+        "type": "integer"
+      },
+      "incomplete_only": {
+        "default": false,
+        "title": "Incomplete Only",
+        "type": "boolean"
+      },
+      "inspiration_trigger_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Inspiration Trigger Count",
+        "type": "integer"
+      },
+      "last_round_index": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Last Round Index",
+        "type": "integer"
+      },
+      "latest_delta_rejected": {
+        "default": false,
+        "title": "Latest Delta Rejected",
+        "type": "boolean"
+      },
+      "latest_verdict": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/VerificationVerdict"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "marginal_progress": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": -1.0,
+        "title": "Marginal Progress",
+        "type": "number"
+      },
+      "message_utility": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Message Utility",
+        "type": "number"
+      },
+      "meta_preferred": {
+        "default": false,
+        "title": "Meta Preferred",
+        "type": "boolean"
+      },
+      "meta_recommended_action": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ActionKind"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "meta_review_confidence": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Meta Review Confidence",
+        "type": "number"
+      },
+      "negative_memory_hits": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Negative Memory Hits",
+        "type": "integer"
+      },
+      "novelty": {
+        "default": 0.5,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Novelty",
+        "type": "number"
+      },
+      "novelty_score": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Novelty Score",
+        "type": "number"
+      },
+      "progress": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Progress",
+        "type": "number"
+      },
+      "proof_debt": {
+        "default": 0.0,
+        "minimum": 0.0,
+        "title": "Proof Debt",
+        "type": "number"
+      },
+      "proof_debt_reduction": {
+        "default": 0.0,
+        "title": "Proof Debt Reduction",
+        "type": "number"
+      },
+      "rejected_delta_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Rejected Delta Count",
+        "type": "integer"
+      },
+      "representation_diversity": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Representation Diversity",
+        "type": "number"
+      },
+      "route_redundancy": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Route Redundancy",
+        "type": "number"
+      },
+      "shared_obligation_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Shared Obligation Count",
+        "type": "integer"
+      },
+      "stagnation_rounds": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Stagnation Rounds",
+        "type": "integer"
+      },
+      "strategy_id": {
+        "title": "Strategy Id",
+        "type": "string"
+      },
+      "structurally_valid": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Structurally Valid"
+      },
+      "surprise_budget_remaining": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Surprise Budget Remaining",
+        "type": "integer"
+      },
+      "tokens_spent": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Tokens Spent",
+        "type": "integer"
+      },
+      "uncertainty": {
+        "default": 1.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Uncertainty",
+        "type": "number"
+      },
+      "unresolved_gap_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Unresolved Gap Count",
+        "type": "integer"
+      },
+      "verification_score": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Verification Score",
+        "type": "number"
+      },
+      "verified_delta_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Verified Delta Count",
+        "type": "integer"
+      },
+      "verified_fact_gain": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Verified Fact Gain",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "strategy_id"
+    ],
+    "title": "PathStats",
+    "type": "object"
+  }
+}

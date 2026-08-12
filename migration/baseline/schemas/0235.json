@@ -1,0 +1,32 @@
+{
+  "qualified_name": "mathproofmesh.verification.mutation.MutationResult",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "agent_id": {
+        "title": "Agent Id",
+        "type": "string"
+      },
+      "detected": {
+        "title": "Detected",
+        "type": "boolean"
+      },
+      "first_error_correct": {
+        "title": "First Error Correct",
+        "type": "boolean"
+      },
+      "mutation_id": {
+        "title": "Mutation Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "mutation_id",
+      "agent_id",
+      "detected",
+      "first_error_correct"
+    ],
+    "title": "MutationResult",
+    "type": "object"
+  }
+}

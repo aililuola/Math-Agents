@@ -1,0 +1,61 @@
+{
+  "qualified_name": "mathproofmesh.config.RouteTeamConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "allow_role_reuse_after_stage": {
+        "default": true,
+        "title": "Allow Role Reuse After Stage",
+        "type": "boolean"
+      },
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "local_review_rounds": {
+        "default": 1,
+        "maximum": 8,
+        "minimum": 0,
+        "title": "Local Review Rounds",
+        "type": "integer"
+      },
+      "max_members_per_route": {
+        "default": 3,
+        "maximum": 8,
+        "minimum": 1,
+        "title": "Max Members Per Route",
+        "type": "integer"
+      },
+      "referee_must_differ_from_author": {
+        "default": true,
+        "title": "Referee Must Differ From Author",
+        "type": "boolean"
+      },
+      "referee_required_before_global_share": {
+        "default": true,
+        "title": "Referee Required Before Global Share",
+        "type": "boolean"
+      },
+      "skeptic_on_high_risk_only": {
+        "default": true,
+        "title": "Skeptic On High Risk Only",
+        "type": "boolean"
+      },
+      "skeptic_risk_threshold": {
+        "default": 0.55,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Skeptic Risk Threshold",
+        "type": "number"
+      },
+      "tool_agent_on_demand": {
+        "default": true,
+        "title": "Tool Agent On Demand",
+        "type": "boolean"
+      }
+    },
+    "title": "RouteTeamConfig",
+    "type": "object"
+  }
+}

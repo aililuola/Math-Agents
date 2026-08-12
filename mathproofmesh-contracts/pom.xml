@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.github.aililuola</groupId>
+    <artifactId>java-mathproofmesh-parent</artifactId>
+    <version>0.8.0</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>mathproofmesh-contracts</artifactId>
+  <name>MathProofMesh Contracts</name>
+  <description>Stable wire contracts, validation, and compatibility metadata.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-annotations</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>jakarta.validation</groupId>
+      <artifactId>jakarta.validation-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <directory>${maven.multiModuleProjectDirectory}/target/modules/mathproofmesh-contracts</directory>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>contracts-dependency-boundary</id>
+            <phase>validate</phase>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <searchTransitive>true</searchTransitive>
+                  <excludes>
+                    <exclude>org.springframework:*</exclude>
+                    <exclude>org.springframework.boot:*</exclude>
+                    <exclude>org.springframework.modulith:*</exclude>
+                    <exclude>io.temporal:*</exclude>
+                    <exclude>org.openjfx:*</exclude>
+                    <exclude>org.postgresql:*</exclude>
+                    <exclude>org.flywaydb:*</exclude>
+                    <exclude>io.github.aililuola:mathproofmesh-core</exclude>
+                    <exclude>io.github.aililuola:mathproofmesh-server</exclude>
+                    <exclude>io.github.aililuola:mathproofmesh-desktop</exclude>
+                    <exclude>io.github.aililuola:mathproofmesh-compatibility</exclude>
+                  </excludes>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

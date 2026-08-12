@@ -1,0 +1,22 @@
+{
+  "qualified_name": "mathproofmesh.config.PricingConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "input_per_million": {
+        "default": 0.0,
+        "minimum": 0.0,
+        "title": "Input Per Million",
+        "type": "number"
+      },
+      "output_per_million": {
+        "default": 0.0,
+        "minimum": 0.0,
+        "title": "Output Per Million",
+        "type": "number"
+      }
+    },
+    "title": "PricingConfig",
+    "type": "object"
+  }
+}

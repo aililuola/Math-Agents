@@ -1,0 +1,115 @@
+{
+  "schema_version": "1.0",
+  "phase": "04",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-30T13:24:19.204Z",
+  "scope": "PostgreSQL, Flyway, artifacts, outbox/inbox, and run lease",
+  "source": {
+    "authoritative_zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+    "source_files": 401,
+    "source_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "immutability": "PASS"
+  },
+  "database": {
+    "engine": "PostgreSQL 18.4",
+    "container_image": "postgres@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296",
+    "ryuk_image": "testcontainers/ryuk@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0",
+    "compose_config": "PASS",
+    "flyway_core": "12.4.0",
+    "flyway_database_postgresql": "12.4.0",
+    "postgresql_driver": "42.7.12",
+    "migration": "mathproofmesh-server/src/main/resources/db/migration/V1__initial_schema.sql",
+    "migration_sha256": "b6df538974e02c7fb5e17e1fdd5387321da53f94584afa0680d612c146706f9f",
+    "empty_schema_migration": "PASS",
+    "restart_idempotency": "PASS",
+    "application_tables": 40,
+    "text_ids": "PASS",
+    "lowercase_sha256_constraints": "PASS",
+    "run_id_isolation": "PASS",
+    "spring_jdbc_only": "PASS",
+    "jpa_hibernate_h2_absent": "PASS",
+    "concatenated_sql_absent": "PASS"
+  },
+  "artifact_store": {
+    "content_addressed_layout": "artifacts/sha256/<first2>/<full_hash>",
+    "same_directory_temporary_write": "PASS",
+    "file_and_directory_durability": "PASS",
+    "atomic_move_and_retry": "PASS",
+    "actual_byte_hash_validation": "PASS",
+    "absolute_and_traversal_rejection": "PASS",
+    "symlink_and_reparse_rejection": "PASS",
+    "size_limit": "PASS",
+    "quota": "PASS",
+    "metadata_persistence": "PASS",
+    "working_checkpoint_isolation": "PASS"
+  },
+  "transactional_state": {
+    "domain_and_outbox_same_transaction": "PASS",
+    "outbox_skip_locked_claim": "PASS",
+    "crash_rollback": "PASS",
+    "claim_recovery": "PASS",
+    "inbox_consumer_event_deduplication": "PASS",
+    "single_active_run_lease": "PASS",
+    "monotonic_fencing_token": "PASS",
+    "stale_writer_rejection": "PASS",
+    "optimistic_locking": "PASS",
+    "append_only_event_log": "PASS",
+    "legacy_store_port": "read-only"
+  },
+  "tests": {
+    "phase_04_tests": 21,
+    "artifact_and_policy_tests": 12,
+    "postgresql_integration_tests": 9,
+    "reactor_total": 703,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "online_clean_verify": "PASS",
+    "offline_clean_verify": "PASS",
+    "containers_remaining_after_tests": 0
+  },
+  "quality_and_dependency_security": {
+    "java": "Eclipse Temurin 25.0.4+7",
+    "maven": "3.9.16",
+    "maven_wrapper": "3.3.4 only-script",
+    "dependency_convergence": "PASS",
+    "external_snapshots": 0,
+    "duplicate_classes": 0,
+    "spotbugs_findsecbugs_reports": 5,
+    "spotbugs_findsecbugs_findings": 0,
+    "sbom": {
+      "format": "CycloneDX",
+      "spec_version": "1.6",
+      "components": 88,
+      "dependency_entries": 89,
+      "path": "migration/reports/phase-01-sbom.json",
+      "sha256": "53fff79ac235a38abf4efb333e7a47783cdb37491f9d9900a6b7c79b11e52963"
+    },
+    "owasp": {
+      "engine": "12.2.2",
+      "dependencies": 112,
+      "unsuppressed_vulnerable_dependencies": 0,
+      "unsuppressed_vulnerability_findings": 0,
+      "temporarily_suppressed_cves": [
+        "CVE-2026-54399",
+        "CVE-2026-54428"
+      ],
+      "suppression_scope": "Test-only docker-java zerodep transport over the trusted local Docker named pipe",
+      "suppression_owner": "dependency/CI maintenance",
+      "suppression_expires": "2026-10-31",
+      "suppression_file": "migration/dependency-check-suppressions.xml",
+      "report_json_sha256": "defc03d04bb6cc6503a7f4a4768ed777b3f41c3956748a35c1c83ab963417124",
+      "report_html_sha256": "881f4aaff66d8a091cc77fb78bd8b433ff91a40a8e92350dd8d3874f7fa9715a"
+    }
+  },
+  "mappings": {
+    "source_rows": "1/1 migrated",
+    "test_rows": "2/2 ported",
+    "auxiliary_rows": "0 phase-04 rows",
+    "state_rows": "142 + 167 + 92 = 401 unique paths"
+  },
+  "stop_condition": {
+    "phase_05_started": false
+  }
+}

@@ -1,0 +1,180 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ComposedInspiration",
+  "schema": {
+    "$defs": {
+      "NoveltySignature": {
+        "additionalProperties": false,
+        "properties": {
+          "core_objects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Core Objects",
+            "type": "array"
+          },
+          "extension_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Extension Tags",
+            "type": "array"
+          },
+          "key_transformations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Key Transformations",
+            "type": "array"
+          },
+          "mechanism_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Mechanism Tags",
+            "type": "array"
+          },
+          "normalization_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Normalization Confidence"
+          },
+          "normalized_hash": {
+            "default": "",
+            "title": "Normalized Hash",
+            "type": "string"
+          },
+          "normalizer_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Normalizer Version"
+          },
+          "proof_principles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Proof Principles",
+            "type": "array"
+          },
+          "raw_tags": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Raw Tags",
+            "type": "object"
+          },
+          "representation_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Representation Tags",
+            "type": "array"
+          },
+          "targeted_obligation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Targeted Obligation Ids",
+            "type": "array"
+          }
+        },
+        "title": "NoveltySignature",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "combined_mechanism": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Combined Mechanism",
+        "type": "array"
+      },
+      "compatibility_conditions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Compatibility Conditions",
+        "type": "array"
+      },
+      "composition_id": {
+        "title": "Composition Id",
+        "type": "string"
+      },
+      "estimated_cost": {
+        "default": 1,
+        "minimum": 0,
+        "title": "Estimated Cost",
+        "type": "integer"
+      },
+      "fast_failure_tests": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Fast Failure Tests",
+        "type": "array"
+      },
+      "first_executable_step": {
+        "minLength": 1,
+        "title": "First Executable Step",
+        "type": "string"
+      },
+      "new_obligations": {
+        "items": {
+          "type": "string"
+        },
+        "title": "New Obligations",
+        "type": "array"
+      },
+      "novelty_signature": {
+        "$ref": "#/$defs/NoveltySignature"
+      },
+      "source_proposal_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Source Proposal Ids",
+        "type": "array"
+      },
+      "target_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Obligation Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "composition_id",
+      "source_proposal_ids",
+      "target_obligation_ids",
+      "compatibility_conditions",
+      "combined_mechanism",
+      "first_executable_step",
+      "new_obligations",
+      "fast_failure_tests",
+      "novelty_signature"
+    ],
+    "title": "ComposedInspiration",
+    "type": "object"
+  }
+}

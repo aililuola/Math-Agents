@@ -1,0 +1,190 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.ScopeSignature",
+  "schema": {
+    "$defs": {
+      "IndexScope": {
+        "enum": [
+          "all",
+          "eventual",
+          "finite_prefix",
+          "bounded_range",
+          "single_instance",
+          "unknown"
+        ],
+        "title": "IndexScope",
+        "type": "string"
+      },
+      "ObjectScope": {
+        "enum": [
+          "full_object",
+          "projection",
+          "quotient",
+          "residue_classes",
+          "substructure",
+          "unknown"
+        ],
+        "title": "ObjectScope",
+        "type": "string"
+      },
+      "QuantifierSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "forall",
+              "exists",
+              "exists_unique"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "order": {
+            "minimum": 0,
+            "title": "Order",
+            "type": "integer"
+          },
+          "restrictions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restrictions",
+            "type": "array"
+          },
+          "variable_id": {
+            "minLength": 1,
+            "title": "Variable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order",
+          "kind",
+          "variable_id",
+          "display_name",
+          "domain"
+        ],
+        "title": "QuantifierSpec",
+        "type": "object"
+      },
+      "UniformityScope": {
+        "enum": [
+          "uniform",
+          "pointwise",
+          "exists_per_instance",
+          "unknown"
+        ],
+        "title": "UniformityScope",
+        "type": "string"
+      },
+      "VariableBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "owner_scope": {
+            "minLength": 1,
+            "title": "Owner Scope",
+            "type": "string"
+          },
+          "variable_id": {
+            "minLength": 1,
+            "title": "Variable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "variable_id",
+          "display_name",
+          "domain",
+          "owner_scope"
+        ],
+        "title": "VariableBinding",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "domain_constraints": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Domain Constraints",
+        "type": "array"
+      },
+      "exceptional_cases": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Exceptional Cases",
+        "type": "array"
+      },
+      "index_scope": {
+        "$ref": "#/$defs/IndexScope",
+        "default": "unknown"
+      },
+      "normalization_confidence": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Normalization Confidence",
+        "type": "number"
+      },
+      "object_scope": {
+        "$ref": "#/$defs/ObjectScope",
+        "default": "unknown"
+      },
+      "quantifiers": {
+        "items": {
+          "$ref": "#/$defs/QuantifierSpec"
+        },
+        "title": "Quantifiers",
+        "type": "array"
+      },
+      "subject_id": {
+        "title": "Subject Id",
+        "type": "string"
+      },
+      "uniformity": {
+        "$ref": "#/$defs/UniformityScope",
+        "default": "unknown"
+      },
+      "variable_bindings": {
+        "items": {
+          "$ref": "#/$defs/VariableBinding"
+        },
+        "title": "Variable Bindings",
+        "type": "array"
+      }
+    },
+    "required": [
+      "subject_id"
+    ],
+    "title": "ScopeSignature",
+    "type": "object"
+  }
+}

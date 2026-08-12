@@ -1,0 +1,375 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ReverseGoalPlan",
+  "schema": {
+    "$defs": {
+      "FrontierBridge": {
+        "additionalProperties": false,
+        "properties": {
+          "backward_frontier_id": {
+            "title": "Backward Frontier Id",
+            "type": "string"
+          },
+          "bridge_id": {
+            "title": "Bridge Id",
+            "type": "string"
+          },
+          "compatibility_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Compatibility Conditions",
+            "type": "array"
+          },
+          "forward_frontier_id": {
+            "title": "Forward Frontier Id",
+            "type": "string"
+          },
+          "lexical_overlap": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Lexical Overlap",
+            "type": "number"
+          },
+          "missing_implication": {
+            "minLength": 1,
+            "title": "Missing Implication",
+            "type": "string"
+          },
+          "required_supporting_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Supporting Conditions",
+            "type": "array"
+          },
+          "semantic_relationship": {
+            "default": "scope_only",
+            "enum": [
+              "scope_only",
+              "candidate_ingredient"
+            ],
+            "title": "Semantic Relationship",
+            "type": "string"
+          },
+          "source_sufficiency_assumed": {
+            "const": false,
+            "default": false,
+            "title": "Source Sufficiency Assumed",
+            "type": "boolean"
+          },
+          "status": {
+            "default": "open",
+            "enum": [
+              "open",
+              "refuted",
+              "closed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bridge_id",
+          "forward_frontier_id",
+          "backward_frontier_id",
+          "missing_implication",
+          "compatibility_conditions"
+        ],
+        "title": "FrontierBridge",
+        "type": "object"
+      },
+      "FrontierClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "direction": {
+            "enum": [
+              "forward",
+              "backward"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "frontier_id": {
+            "title": "Frontier Id",
+            "type": "string"
+          },
+          "quantifiers": {
+            "items": {
+              "$ref": "#/$defs/QuantifierSpec"
+            },
+            "title": "Quantifiers",
+            "type": "array"
+          },
+          "scope_limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scope Limitations",
+            "type": "array"
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Ref"
+          },
+          "statement": {
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          },
+          "supported": {
+            "default": false,
+            "title": "Supported",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "frontier_id",
+          "direction",
+          "statement"
+        ],
+        "title": "FrontierClaim",
+        "type": "object"
+      },
+      "NoveltySignature": {
+        "additionalProperties": false,
+        "properties": {
+          "core_objects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Core Objects",
+            "type": "array"
+          },
+          "extension_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Extension Tags",
+            "type": "array"
+          },
+          "key_transformations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Key Transformations",
+            "type": "array"
+          },
+          "mechanism_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Mechanism Tags",
+            "type": "array"
+          },
+          "normalization_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Normalization Confidence"
+          },
+          "normalized_hash": {
+            "default": "",
+            "title": "Normalized Hash",
+            "type": "string"
+          },
+          "normalizer_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Normalizer Version"
+          },
+          "proof_principles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Proof Principles",
+            "type": "array"
+          },
+          "raw_tags": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Raw Tags",
+            "type": "object"
+          },
+          "representation_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Representation Tags",
+            "type": "array"
+          },
+          "targeted_obligation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Targeted Obligation Ids",
+            "type": "array"
+          }
+        },
+        "title": "NoveltySignature",
+        "type": "object"
+      },
+      "QuantifierSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "forall",
+              "exists",
+              "exists_unique"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "order": {
+            "minimum": 0,
+            "title": "Order",
+            "type": "integer"
+          },
+          "restrictions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restrictions",
+            "type": "array"
+          },
+          "variable_id": {
+            "minLength": 1,
+            "title": "Variable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order",
+          "kind",
+          "variable_id",
+          "display_name",
+          "domain"
+        ],
+        "title": "QuantifierSpec",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "backward_frontier": {
+        "items": {
+          "$ref": "#/$defs/FrontierClaim"
+        },
+        "title": "Backward Frontier",
+        "type": "array"
+      },
+      "bridge_requests": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Bridge Requests",
+        "type": "array"
+      },
+      "fact_supported_claims": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Fact Supported Claims",
+        "type": "array"
+      },
+      "forward_frontier": {
+        "items": {
+          "$ref": "#/$defs/FrontierClaim"
+        },
+        "title": "Forward Frontier",
+        "type": "array"
+      },
+      "frontier_bridges": {
+        "items": {
+          "$ref": "#/$defs/FrontierBridge"
+        },
+        "title": "Frontier Bridges",
+        "type": "array"
+      },
+      "goal": {
+        "title": "Goal",
+        "type": "string"
+      },
+      "minimal_gaps": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Minimal Gaps",
+        "type": "array"
+      },
+      "novelty_signature": {
+        "$ref": "#/$defs/NoveltySignature"
+      },
+      "plan_id": {
+        "title": "Plan Id",
+        "type": "string"
+      },
+      "sufficient_intermediate_claims": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Sufficient Intermediate Claims",
+        "type": "array"
+      },
+      "target_obligation_id": {
+        "title": "Target Obligation Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "target_obligation_id",
+      "goal",
+      "sufficient_intermediate_claims",
+      "minimal_gaps",
+      "bridge_requests",
+      "novelty_signature"
+    ],
+    "title": "ReverseGoalPlan",
+    "type": "object"
+  }
+}

@@ -1,0 +1,1203 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ContinuationTurn",
+  "schema": {
+    "$defs": {
+      "CandidateConjecture": {
+        "additionalProperties": false,
+        "description": "A computation-inspired hypothesis that is explicitly not a proved fact.",
+        "properties": {
+          "confidence": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "conjecture_id": {
+            "title": "Conjecture Id",
+            "type": "string"
+          },
+          "content_hash": {
+            "default": "",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "$ref": "#/$defs/EvidenceRef"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "proof_obligations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Proof Obligations",
+            "type": "array"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "scope_limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scope Limitations",
+            "type": "array"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "status": {
+            "const": "candidate",
+            "default": "candidate",
+            "title": "Status",
+            "type": "string"
+          },
+          "supporting_experiment_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Supporting Experiment Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "statement",
+          "rationale",
+          "supporting_experiment_ids",
+          "scope_limitations",
+          "proof_obligations"
+        ],
+        "title": "CandidateConjecture",
+        "type": "object"
+      },
+      "CitationRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "applicability_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Applicability Conditions",
+            "type": "array"
+          },
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Authors",
+            "type": "array"
+          },
+          "exact_statement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Exact Statement"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Location"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Url"
+          },
+          "verified": {
+            "default": false,
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "CitationRecord",
+        "type": "object"
+      },
+      "ClaimCard": {
+        "additionalProperties": false,
+        "properties": {
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "conclusion": {
+            "title": "Conclusion",
+            "type": "string"
+          },
+          "content_hash": {
+            "default": "",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "counterexample_risk": {
+            "default": "unknown",
+            "title": "Counterexample Risk",
+            "type": "string"
+          },
+          "dependencies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dependencies",
+            "type": "array"
+          },
+          "dependency_refs": {
+            "items": {},
+            "title": "Dependency Refs",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "items": {
+              "$ref": "#/$defs/EvidenceRef"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "proof_steps": {
+            "items": {
+              "$ref": "#/$defs/ProofStep"
+            },
+            "title": "Proof Steps",
+            "type": "array"
+          },
+          "scope_limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scope Limitations",
+            "type": "array"
+          },
+          "self_confidence": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Self Confidence",
+            "type": "number"
+          },
+          "source_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Agent Id"
+          },
+          "source_attempt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Attempt Id"
+          },
+          "source_delta_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Delta Id"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/$defs/ClaimStatus",
+            "default": "proposed"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "verification_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Verification Confidence"
+          }
+        },
+        "required": [
+          "statement",
+          "conclusion"
+        ],
+        "title": "ClaimCard",
+        "type": "object"
+      },
+      "ClaimStatus": {
+        "enum": [
+          "proposed",
+          "verified",
+          "rejected",
+          "uncertain"
+        ],
+        "title": "ClaimStatus",
+        "type": "string"
+      },
+      "ComputationMethod": {
+        "enum": [
+          "sympy_simplify",
+          "sympy_equivalent",
+          "polynomial_factor",
+          "modular_exhaustive",
+          "bounded_integer_search",
+          "graph_certificate",
+          "recurrence_check",
+          "bounded_greedy_sequence",
+          "candidate_period_check",
+          "exact_geometry",
+          "numeric_counterexample",
+          "real_inequality",
+          "number_theory_check",
+          "sandboxed_python",
+          "lean_check"
+        ],
+        "title": "ComputationMethod",
+        "type": "string"
+      },
+      "ComputationPurpose": {
+        "enum": [
+          "falsify_claim",
+          "check_derived_identity",
+          "test_boundary_cases",
+          "verify_finite_reduction",
+          "validate_constructed_example",
+          "discover_pattern"
+        ],
+        "title": "ComputationPurpose",
+        "type": "string"
+      },
+      "ContinuationAction": {
+        "enum": [
+          "submit_delta",
+          "request_computation",
+          "complete",
+          "abandon"
+        ],
+        "title": "ContinuationAction",
+        "type": "string"
+      },
+      "EvidenceRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_ref": {
+            "title": "Artifact Ref",
+            "type": "string"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Section"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_ref"
+        ],
+        "title": "EvidenceRef",
+        "type": "object"
+      },
+      "ExperimentSpec": {
+        "additionalProperties": false,
+        "description": "An auditable, decision-linked request for a bounded computation.",
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "broad_search": {
+            "default": false,
+            "title": "Broad Search",
+            "type": "boolean"
+          },
+          "decision_if_confirmed": {
+            "minLength": 1,
+            "title": "Decision If Confirmed",
+            "type": "string"
+          },
+          "decision_if_refuted": {
+            "minLength": 1,
+            "title": "Decision If Refuted",
+            "type": "string"
+          },
+          "domains": {
+            "additionalProperties": true,
+            "title": "Domains",
+            "type": "object"
+          },
+          "exact_arithmetic": {
+            "default": true,
+            "title": "Exact Arithmetic",
+            "type": "boolean"
+          },
+          "execution_hash": {
+            "default": "",
+            "title": "Execution Hash",
+            "type": "string"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "max_cases": {
+            "default": 100000,
+            "maximum": 100000000,
+            "minimum": 1,
+            "title": "Max Cases",
+            "type": "integer"
+          },
+          "method": {
+            "$ref": "#/$defs/ComputationMethod"
+          },
+          "noncomputational_alternative": {
+            "minLength": 1,
+            "title": "Noncomputational Alternative",
+            "type": "string"
+          },
+          "parent_checkpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent Checkpoint Id"
+          },
+          "path_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path Id"
+          },
+          "purpose": {
+            "$ref": "#/$defs/ComputationPurpose",
+            "default": "falsify_claim"
+          },
+          "reasoning_basis": {
+            "minLength": 1,
+            "title": "Reasoning Basis",
+            "type": "string"
+          },
+          "request_hash": {
+            "default": "",
+            "title": "Request Hash",
+            "type": "string"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requested By"
+          },
+          "runtime_fingerprint": {
+            "additionalProperties": true,
+            "title": "Runtime Fingerprint",
+            "type": "object"
+          },
+          "seed": {
+            "default": 20260719,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "target_claim": {
+            "minLength": 1,
+            "title": "Target Claim",
+            "type": "string"
+          },
+          "typed_tool_gap": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Typed Tool Gap"
+          },
+          "why_computation_is_needed": {
+            "minLength": 1,
+            "title": "Why Computation Is Needed",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_claim",
+          "reasoning_basis",
+          "why_computation_is_needed",
+          "decision_if_confirmed",
+          "decision_if_refuted",
+          "noncomputational_alternative",
+          "method"
+        ],
+        "title": "ExperimentSpec",
+        "type": "object"
+      },
+      "FailureLevel": {
+        "enum": [
+          "none",
+          "execution",
+          "plan",
+          "strategy"
+        ],
+        "title": "FailureLevel",
+        "type": "string"
+      },
+      "MessageReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "acknowledged_at": {
+            "title": "Acknowledged At",
+            "type": "string"
+          },
+          "claimed_closed_obligation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Claimed Closed Obligation Ids",
+            "type": "array"
+          },
+          "delivered_round": {
+            "minimum": 0,
+            "title": "Delivered Round",
+            "type": "integer"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "parsed_assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parsed Assumptions",
+            "type": "array"
+          },
+          "parsed_conclusion": {
+            "default": "",
+            "title": "Parsed Conclusion",
+            "type": "string"
+          },
+          "parsed_quantifiers": {
+            "items": {
+              "$ref": "#/$defs/QuantifierSpec"
+            },
+            "title": "Parsed Quantifiers",
+            "type": "array"
+          },
+          "parsed_variable_bindings": {
+            "items": {
+              "$ref": "#/$defs/VariableBinding"
+            },
+            "title": "Parsed Variable Bindings",
+            "type": "array"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "receipt_id": {
+            "title": "Receipt Id",
+            "type": "string"
+          },
+          "receipt_token": {
+            "default": "",
+            "title": "Receipt Token",
+            "type": "string"
+          },
+          "referenced_in_step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Referenced In Step Ids",
+            "type": "array"
+          },
+          "semantic_hash": {
+            "default": "",
+            "title": "Semantic Hash",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/$defs/ReceiptStatus"
+          },
+          "target_route_id": {
+            "title": "Target Route Id",
+            "type": "string"
+          },
+          "used": {
+            "default": false,
+            "title": "Used",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "message_id",
+          "target_route_id",
+          "status",
+          "delivered_round"
+        ],
+        "title": "MessageReceipt",
+        "type": "object"
+      },
+      "ProofDelta": {
+        "additionalProperties": false,
+        "properties": {
+          "active_assumptions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Active Assumptions"
+          },
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "candidate_conjectures": {
+            "items": {
+              "$ref": "#/$defs/CandidateConjecture"
+            },
+            "title": "Candidate Conjectures",
+            "type": "array"
+          },
+          "candidate_final_answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Candidate Final Answer"
+          },
+          "completed_subgoal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Completed Subgoal"
+          },
+          "current_goal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Goal"
+          },
+          "delta_id": {
+            "title": "Delta Id",
+            "type": "string"
+          },
+          "dependency_refs": {
+            "items": {},
+            "title": "Dependency Refs",
+            "type": "array"
+          },
+          "detected_conflicts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Detected Conflicts",
+            "type": "array"
+          },
+          "known_risks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Known Risks",
+            "type": "array"
+          },
+          "new_claims": {
+            "items": {
+              "$ref": "#/$defs/ClaimCard"
+            },
+            "title": "New Claims",
+            "type": "array"
+          },
+          "new_steps": {
+            "items": {
+              "$ref": "#/$defs/ProofStep"
+            },
+            "title": "New Steps",
+            "type": "array"
+          },
+          "normalization_notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Normalization Notes",
+            "type": "array"
+          },
+          "parent_checkpoint_id": {
+            "title": "Parent Checkpoint Id",
+            "type": "string"
+          },
+          "path_id": {
+            "title": "Path Id",
+            "type": "string"
+          },
+          "problem_hash": {
+            "title": "Problem Hash",
+            "type": "string"
+          },
+          "proof_complete": {
+            "default": false,
+            "title": "Proof Complete",
+            "type": "boolean"
+          },
+          "raw_artifact_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Raw Artifact Ref"
+          },
+          "ready_for_verification": {
+            "default": true,
+            "title": "Ready For Verification",
+            "type": "boolean"
+          },
+          "referenced_checkpoint_step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Referenced Checkpoint Step Ids",
+            "type": "array"
+          },
+          "remaining_subgoals": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Remaining Subgoals",
+            "type": "array"
+          },
+          "round_index": {
+            "minimum": 0,
+            "title": "Round Index",
+            "type": "integer"
+          },
+          "segment_index": {
+            "minimum": 1,
+            "title": "Segment Index",
+            "type": "integer"
+          },
+          "self_confidence": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Self Confidence",
+            "type": "number"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/$defs/UsageRecord"
+          },
+          "working_notes": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Working Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "problem_hash",
+          "path_id",
+          "strategy_id",
+          "parent_checkpoint_id",
+          "agent_id",
+          "round_index",
+          "segment_index"
+        ],
+        "title": "ProofDelta",
+        "type": "object"
+      },
+      "ProofStep": {
+        "additionalProperties": false,
+        "properties": {
+          "branch_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branch Label"
+          },
+          "calculation_checks": {
+            "items": {
+              "$ref": "#/$defs/ToolRequest"
+            },
+            "title": "Calculation Checks",
+            "type": "array"
+          },
+          "calculation_evidence_refs": {
+            "items": {
+              "$ref": "#/$defs/EvidenceRef"
+            },
+            "title": "Calculation Evidence Refs",
+            "type": "array"
+          },
+          "calculations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Calculations",
+            "type": "array"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/$defs/CitationRecord"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "confidence": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "dependencies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dependencies",
+            "type": "array"
+          },
+          "dependency_refs": {
+            "items": {},
+            "title": "Dependency Refs",
+            "type": "array"
+          },
+          "is_key_step": {
+            "default": false,
+            "title": "Is Key Step",
+            "type": "boolean"
+          },
+          "justification": {
+            "title": "Justification",
+            "type": "string"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          },
+          "step_type": {
+            "default": "derivation",
+            "enum": [
+              "derivation",
+              "assumption_intro",
+              "assumption_discharge",
+              "case_split",
+              "case_close",
+              "definition",
+              "construction"
+            ],
+            "title": "Step Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id",
+          "statement",
+          "justification"
+        ],
+        "title": "ProofStep",
+        "type": "object"
+      },
+      "QuantifierSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "forall",
+              "exists",
+              "exists_unique"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "order": {
+            "minimum": 0,
+            "title": "Order",
+            "type": "integer"
+          },
+          "restrictions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restrictions",
+            "type": "array"
+          },
+          "variable_id": {
+            "minLength": 1,
+            "title": "Variable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order",
+          "kind",
+          "variable_id",
+          "display_name",
+          "domain"
+        ],
+        "title": "QuantifierSpec",
+        "type": "object"
+      },
+      "ReceiptStatus": {
+        "enum": [
+          "accepted",
+          "rejected",
+          "duplicate",
+          "expired",
+          "deferred"
+        ],
+        "title": "ReceiptStatus",
+        "type": "string"
+      },
+      "ToolRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "domains": {
+            "additionalProperties": true,
+            "title": "Domains",
+            "type": "object"
+          },
+          "kind": {
+            "enum": [
+              "sympy_simplify",
+              "sympy_equivalent",
+              "numeric_counterexample",
+              "polynomial_factor",
+              "modular_exhaustive",
+              "bounded_integer_search",
+              "graph_certificate",
+              "recurrence_check",
+              "bounded_greedy_sequence",
+              "candidate_period_check",
+              "exact_geometry",
+              "lean_check"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "max_cases": {
+            "default": 100000,
+            "maximum": 100000000,
+            "minimum": 1,
+            "title": "Max Cases",
+            "type": "integer"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "purpose"
+        ],
+        "title": "ToolRequest",
+        "type": "object"
+      },
+      "UsageRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "estimated_cost_usd": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Estimated Cost Usd",
+            "type": "number"
+          },
+          "input_tokens": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "latency_ms": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Latency Ms",
+            "type": "number"
+          },
+          "output_tokens": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "title": "UsageRecord",
+        "type": "object"
+      },
+      "VariableBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "owner_scope": {
+            "minLength": 1,
+            "title": "Owner Scope",
+            "type": "string"
+          },
+          "variable_id": {
+            "minLength": 1,
+            "title": "Variable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "variable_id",
+          "display_name",
+          "domain",
+          "owner_scope"
+        ],
+        "title": "VariableBinding",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "$ref": "#/$defs/ContinuationAction"
+      },
+      "delta": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ProofDelta"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "experiment_impact": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/FailureLevel"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "experiment_spec": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ExperimentSpec"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "message_receipts": {
+        "items": {
+          "$ref": "#/$defs/MessageReceipt"
+        },
+        "title": "Message Receipts",
+        "type": "array"
+      },
+      "reason": {
+        "default": "",
+        "title": "Reason",
+        "type": "string"
+      }
+    },
+    "required": [
+      "action"
+    ],
+    "title": "ContinuationTurn",
+    "type": "object"
+  }
+}

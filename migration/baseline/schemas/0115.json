@@ -1,0 +1,87 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.RouteUpdateTask",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "action_id": {
+        "title": "Action Id",
+        "type": "string"
+      },
+      "executable_task_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Executable Task Id"
+      },
+      "failure_reason": {
+        "default": "",
+        "title": "Failure Reason",
+        "type": "string"
+      },
+      "message_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Message Ids",
+        "type": "array"
+      },
+      "priority": {
+        "enum": [
+          "critical",
+          "high"
+        ],
+        "title": "Priority",
+        "type": "string"
+      },
+      "receipt_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Receipt Ids",
+        "type": "array"
+      },
+      "scheduled_round": {
+        "minimum": 0,
+        "title": "Scheduled Round",
+        "type": "integer"
+      },
+      "status": {
+        "default": "scheduled",
+        "enum": [
+          "scheduled",
+          "presented",
+          "deferred",
+          "acknowledged",
+          "used",
+          "expired_without_opportunity",
+          "failed"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "target_route_id": {
+        "title": "Target Route Id",
+        "type": "string"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "target_route_id",
+      "message_ids",
+      "priority",
+      "scheduled_round",
+      "action_id"
+    ],
+    "title": "RouteUpdateTask",
+    "type": "object"
+  }
+}

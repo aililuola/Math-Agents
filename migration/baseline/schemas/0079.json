@@ -1,0 +1,151 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.CriticalAssumption",
+  "schema": {
+    "$defs": {
+      "AssumptionDomain": {
+        "enum": [
+          "mathematical",
+          "search",
+          "protocol",
+          "process",
+          "tool",
+          "verification",
+          "safety"
+        ],
+        "title": "AssumptionDomain",
+        "type": "string"
+      },
+      "ClaimStatus": {
+        "enum": [
+          "proposed",
+          "verified",
+          "rejected",
+          "uncertain"
+        ],
+        "title": "ClaimStatus",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "assumption_id": {
+        "title": "Assumption Id",
+        "type": "string"
+      },
+      "challenger_task_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Challenger Task Id"
+      },
+      "common_mode_risk": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Common Mode Risk",
+        "type": "number"
+      },
+      "dependency_atom_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Dependency Atom Ids",
+        "type": "array"
+      },
+      "domain": {
+        "$ref": "#/$defs/AssumptionDomain",
+        "default": "mathematical"
+      },
+      "family_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Family Id"
+      },
+      "load_bearing_score": {
+        "default": 0.5,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Load Bearing Score",
+        "type": "number"
+      },
+      "necessity_by_route": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "title": "Necessity By Route",
+        "type": "object"
+      },
+      "normalized_statement": {
+        "title": "Normalized Statement",
+        "type": "string"
+      },
+      "proof_graph_neighborhood": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Proof Graph Neighborhood",
+        "type": "array"
+      },
+      "route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Route Ids",
+        "type": "array"
+      },
+      "scope_signature_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Scope Signature Ids",
+        "type": "array"
+      },
+      "semantic_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Semantic Tags",
+        "type": "array"
+      },
+      "source_subject_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Source Subject Ids",
+        "type": "array"
+      },
+      "typed_dependency_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Typed Dependency Ids",
+        "type": "array"
+      },
+      "verification_status": {
+        "$ref": "#/$defs/ClaimStatus"
+      }
+    },
+    "required": [
+      "normalized_statement",
+      "source_subject_ids",
+      "route_ids",
+      "verification_status",
+      "necessity_by_route",
+      "common_mode_risk"
+    ],
+    "title": "CriticalAssumption",
+    "type": "object"
+  }
+}

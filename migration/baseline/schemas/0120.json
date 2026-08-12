@@ -1,0 +1,122 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.StrategyLineageRecord",
+  "schema": {
+    "$defs": {
+      "StrategyRevisionReason": {
+        "enum": [
+          "admission_rewrite",
+          "plan_failure",
+          "scope_repair",
+          "bridge_insertion",
+          "countermodel_feedback",
+          "user_intervention"
+        ],
+        "title": "StrategyRevisionReason",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "added_claim_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Added Claim Ids",
+        "type": "array"
+      },
+      "parent_strategy_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Parent Strategy Id"
+      },
+      "preserved_domain_objects": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Preserved Domain Objects",
+        "type": "array"
+      },
+      "preserved_mechanism_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Preserved Mechanism Tags",
+        "type": "array"
+      },
+      "removed_claim_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Removed Claim Ids",
+        "type": "array"
+      },
+      "revision_number": {
+        "minimum": 0,
+        "title": "Revision Number",
+        "type": "integer"
+      },
+      "revision_reason": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/StrategyRevisionReason"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "root_strategy_id": {
+        "title": "Root Strategy Id",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "original",
+          "active",
+          "needs_rewrite",
+          "superseded",
+          "rejected_with_evidence",
+          "archived"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "strategy_id": {
+        "title": "Strategy Id",
+        "type": "string"
+      },
+      "superseded_by_strategy_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Superseded By Strategy Id"
+      }
+    },
+    "required": [
+      "strategy_id",
+      "parent_strategy_id",
+      "root_strategy_id",
+      "revision_number",
+      "revision_reason",
+      "preserved_mechanism_tags",
+      "preserved_domain_objects",
+      "removed_claim_ids",
+      "added_claim_ids",
+      "status"
+    ],
+    "title": "StrategyLineageRecord",
+    "type": "object"
+  }
+}

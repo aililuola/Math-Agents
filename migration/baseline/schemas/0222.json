@@ -1,0 +1,181 @@
+{
+  "qualified_name": "mathproofmesh.schemas.TriageResult",
+  "schema": {
+    "$defs": {
+      "Difficulty": {
+        "enum": [
+          "easy",
+          "medium",
+          "hard",
+          "olympiad",
+          "research"
+        ],
+        "title": "Difficulty",
+        "type": "string"
+      },
+      "ProblemKind": {
+        "enum": [
+          "proof",
+          "calculation",
+          "logic",
+          "optimization",
+          "construction",
+          "research",
+          "mixed",
+          "unknown"
+        ],
+        "title": "ProblemKind",
+        "type": "string"
+      },
+      "ProblemSemanticViewCandidate": {
+        "additionalProperties": false,
+        "description": "Model-proposed English reading; never an authoritative problem statement.",
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "english_statement": {
+            "minLength": 1,
+            "title": "English Statement",
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "preserves_conclusion": {
+            "title": "Preserves Conclusion",
+            "type": "boolean"
+          },
+          "preserves_domains": {
+            "title": "Preserves Domains",
+            "type": "boolean"
+          },
+          "preserves_hypotheses": {
+            "title": "Preserves Hypotheses",
+            "type": "boolean"
+          },
+          "preserves_quantifiers": {
+            "title": "Preserves Quantifiers",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "english_statement",
+          "preserves_hypotheses",
+          "preserves_quantifiers",
+          "preserves_domains",
+          "preserves_conclusion",
+          "confidence"
+        ],
+        "title": "ProblemSemanticViewCandidate",
+        "type": "object"
+      },
+      "TaskRequirement": {
+        "description": "The user-visible artifact that must be delivered for the task to finish.",
+        "enum": [
+          "proof",
+          "solution",
+          "computation",
+          "conjecture",
+          "counterexample",
+          "classification",
+          "optimization",
+          "construction",
+          "research_progress"
+        ],
+        "title": "TaskRequirement",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "confidence": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "difficulty": {
+        "$ref": "#/$defs/Difficulty"
+      },
+      "key_risks": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Key Risks",
+        "type": "array"
+      },
+      "likely_tools": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Likely Tools",
+        "type": "array"
+      },
+      "problem_kind": {
+        "$ref": "#/$defs/ProblemKind"
+      },
+      "proof_mode": {
+        "default": "hybrid",
+        "enum": [
+          "direct",
+          "decomposition",
+          "hybrid"
+        ],
+        "title": "Proof Mode",
+        "type": "string"
+      },
+      "rationale": {
+        "title": "Rationale",
+        "type": "string"
+      },
+      "semantic_view_candidate": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ProblemSemanticViewCandidate"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "suggested_paths": {
+        "default": 4,
+        "maximum": 16,
+        "minimum": 1,
+        "title": "Suggested Paths",
+        "type": "integer"
+      },
+      "suggested_rounds": {
+        "default": 3,
+        "maximum": 16,
+        "minimum": 1,
+        "title": "Suggested Rounds",
+        "type": "integer"
+      },
+      "task_requirements": {
+        "items": {
+          "$ref": "#/$defs/TaskRequirement"
+        },
+        "title": "Task Requirements",
+        "type": "array"
+      }
+    },
+    "required": [
+      "problem_kind",
+      "difficulty",
+      "rationale",
+      "confidence"
+    ],
+    "title": "TriageResult",
+    "type": "object"
+  }
+}

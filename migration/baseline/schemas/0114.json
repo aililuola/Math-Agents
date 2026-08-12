@@ -1,0 +1,113 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.RouteTargetBinding",
+  "schema": {
+    "$defs": {
+      "GoalRelation": {
+        "enum": [
+          "equivalent",
+          "sufficient",
+          "necessary_only",
+          "heuristic_only",
+          "unrelated",
+          "unknown"
+        ],
+        "title": "GoalRelation",
+        "type": "string"
+      },
+      "ScopeRelation": {
+        "enum": [
+          "same",
+          "claim_stronger",
+          "claim_weaker",
+          "incomparable",
+          "unknown"
+        ],
+        "title": "ScopeRelation",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "ancestor_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Ancestor Obligation Ids",
+        "type": "array"
+      },
+      "binding_confidence": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Binding Confidence",
+        "type": "number"
+      },
+      "binding_id": {
+        "title": "Binding Id",
+        "type": "string"
+      },
+      "blueprint_path_complete": {
+        "title": "Blueprint Path Complete",
+        "type": "boolean"
+      },
+      "bridge_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Bridge Obligation Ids",
+        "type": "array"
+      },
+      "direct_claim_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Direct Claim Ids",
+        "type": "array"
+      },
+      "direct_target_obligation_id": {
+        "title": "Direct Target Obligation Id",
+        "type": "string"
+      },
+      "main_goal_obligation_id": {
+        "title": "Main Goal Obligation Id",
+        "type": "string"
+      },
+      "relation_to_direct_target": {
+        "$ref": "#/$defs/GoalRelation"
+      },
+      "relation_to_main_goal": {
+        "$ref": "#/$defs/GoalRelation"
+      },
+      "route_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Route Id"
+      },
+      "scope_relation_to_direct_target": {
+        "$ref": "#/$defs/ScopeRelation"
+      },
+      "strategy_id": {
+        "title": "Strategy Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "strategy_id",
+      "direct_target_obligation_id",
+      "main_goal_obligation_id",
+      "relation_to_direct_target",
+      "relation_to_main_goal",
+      "scope_relation_to_direct_target",
+      "blueprint_path_complete",
+      "binding_confidence"
+    ],
+    "title": "RouteTargetBinding",
+    "type": "object"
+  }
+}

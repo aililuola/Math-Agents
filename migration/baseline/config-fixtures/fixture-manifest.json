@@ -1,0 +1,50 @@
+[
+  {
+    "fixture_path": "config-fixtures/source/.env.example",
+    "fixture_sha256": "66f1068ce43817a63fb453a2b4e12ef4de210d3e2732e801733b481edc1c0971",
+    "source_path": ".env.example",
+    "source_sha256": "66f1068ce43817a63fb453a2b4e12ef4de210d3e2732e801733b481edc1c0971"
+  },
+  {
+    "fixture_path": "config-fixtures/source/.github/workflows/ci.yml",
+    "fixture_sha256": "ab1d95cbe0fdb3efa58c3de181efa1b6975c947bc03e37a0482d5912f042527f",
+    "source_path": ".github/workflows/ci.yml",
+    "source_sha256": "ab1d95cbe0fdb3efa58c3de181efa1b6975c947bc03e37a0482d5912f042527f"
+  },
+  {
+    "fixture_path": "config-fixtures/source/config.deepseek-v4-pro.proof-control-active.yaml",
+    "fixture_sha256": "6173be9ac59aec5de64d3c4d2605283b5524a68447a44a6c2ebf284255aa9192",
+    "source_path": "config.deepseek-v4-pro.proof-control-active.yaml",
+    "source_sha256": "6173be9ac59aec5de64d3c4d2605283b5524a68447a44a6c2ebf284255aa9192"
+  },
+  {
+    "fixture_path": "config-fixtures/source/config.deepseek-v4-pro.proof-control-shadow.yaml",
+    "fixture_sha256": "83ad1623d0fa7bb657e411186d86188f9bc4f33b5984bcda7026f600a1bbd58a",
+    "source_path": "config.deepseek-v4-pro.proof-control-shadow.yaml",
+    "source_sha256": "83ad1623d0fa7bb657e411186d86188f9bc4f33b5984bcda7026f600a1bbd58a"
+  },
+  {
+    "fixture_path": "config-fixtures/source/config.deepseek-v4-pro.smoke.yaml",
+    "fixture_sha256": "5f6ce9b8e74ad733c50d4d8f21496ba893c987b6c56d446f2630a25faa1feacb",
+    "source_path": "config.deepseek-v4-pro.smoke.yaml",
+    "source_sha256": "5f6ce9b8e74ad733c50d4d8f21496ba893c987b6c56d446f2630a25faa1feacb"
+  },
+  {
+    "fixture_path": "config-fixtures/source/config.deepseek-v4-pro.topology-active.yaml",
+    "fixture_sha256": "351ab270aa1fb35f05bb5344564bdcc69cb3e5017953d5515b5878dc471df7f4",
+    "source_path": "config.deepseek-v4-pro.topology-active.yaml",
+    "source_sha256": "351ab270aa1fb35f05bb5344564bdcc69cb3e5017953d5515b5878dc471df7f4"
+  },
+  {
+    "fixture_path": "config-fixtures/source/config.deepseek-v4-pro.yaml",
+    "fixture_sha256": "c5fe586cc9b1cea4e76ce0aa47fbf74039443daf67d254774edd1ce116a1604a",
+    "source_path": "config.deepseek-v4-pro.yaml",
+    "source_sha256": "c5fe586cc9b1cea4e76ce0aa47fbf74039443daf67d254774edd1ce116a1604a"
+  },
+  {
+    "fixture_path": "config-fixtures/source/config.example.yaml",
+    "fixture_sha256": "9733bcbf4f8d87c9bbceb4b5f22f54bc8384c80a2eda922a934fc7dab4945a68",
+    "source_path": "config.example.yaml",
+    "source_sha256": "9733bcbf4f8d87c9bbceb4b5f22f54bc8384c80a2eda922a934fc7dab4945a68"
+  }
+]

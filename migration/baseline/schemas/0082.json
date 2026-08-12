@@ -1,0 +1,59 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.DependencyNormalizationTask",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "ambiguous_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Ambiguous Ids",
+        "type": "array"
+      },
+      "source_attempt_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Attempt Id"
+      },
+      "source_delta_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Delta Id"
+      },
+      "status": {
+        "default": "open",
+        "enum": [
+          "open",
+          "resolved",
+          "cancelled"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "task_id",
+      "ambiguous_ids"
+    ],
+    "title": "DependencyNormalizationTask",
+    "type": "object"
+  }
+}

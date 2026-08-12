@@ -1,0 +1,70 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ToolAuditReport",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "agent_id": {
+        "title": "Agent Id",
+        "type": "string"
+      },
+      "all_results_replayed_independently": {
+        "default": false,
+        "title": "All Results Replayed Independently",
+        "type": "boolean"
+      },
+      "confidence": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "experiment_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Experiment Ids",
+        "type": "array"
+      },
+      "issues": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Issues",
+        "type": "array"
+      },
+      "mathematical_mapping_checked": {
+        "default": false,
+        "title": "Mathematical Mapping Checked",
+        "type": "boolean"
+      },
+      "replay_artifact_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Replay Artifact Refs",
+        "type": "array"
+      },
+      "route_id": {
+        "title": "Route Id",
+        "type": "string"
+      },
+      "verdict": {
+        "default": "inconclusive",
+        "enum": [
+          "pass",
+          "fail",
+          "inconclusive"
+        ],
+        "title": "Verdict",
+        "type": "string"
+      }
+    },
+    "required": [
+      "agent_id",
+      "route_id"
+    ],
+    "title": "ToolAuditReport",
+    "type": "object"
+  }
+}

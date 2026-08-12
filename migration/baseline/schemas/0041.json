@@ -1,0 +1,66 @@
+{
+  "qualified_name": "mathproofmesh.deep_exploration.BottleneckPivotRecord",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "checkpoint_hash": {
+        "title": "Checkpoint Hash",
+        "type": "string"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "new_mechanism_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "New Mechanism Tags",
+        "type": "array"
+      },
+      "new_signature_hash": {
+        "title": "New Signature Hash",
+        "type": "string"
+      },
+      "old_mechanism_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Old Mechanism Tags",
+        "type": "array"
+      },
+      "parent_signature_hash": {
+        "title": "Parent Signature Hash",
+        "type": "string"
+      },
+      "pivot_id": {
+        "title": "Pivot Id",
+        "type": "string"
+      },
+      "referee_confirmed": {
+        "title": "Referee Confirmed",
+        "type": "boolean"
+      },
+      "route_id": {
+        "title": "Route Id",
+        "type": "string"
+      },
+      "target_statement": {
+        "title": "Target Statement",
+        "type": "string"
+      }
+    },
+    "required": [
+      "route_id",
+      "parent_signature_hash",
+      "new_signature_hash",
+      "checkpoint_hash",
+      "target_statement",
+      "old_mechanism_tags",
+      "new_mechanism_tags",
+      "referee_confirmed"
+    ],
+    "title": "BottleneckPivotRecord",
+    "type": "object"
+  }
+}

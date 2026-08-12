@@ -1,0 +1,35 @@
+{
+  "qualified_name": "mathproofmesh.desktop.app.OpenPathRequest",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "enum": [
+          "data",
+          "runs",
+          "logs",
+          "run"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "run_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Run Id"
+      }
+    },
+    "required": [
+      "kind"
+    ],
+    "title": "OpenPathRequest",
+    "type": "object"
+  }
+}

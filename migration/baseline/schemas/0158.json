@@ -1,0 +1,198 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ExperimentSpec",
+  "schema": {
+    "$defs": {
+      "ComputationMethod": {
+        "enum": [
+          "sympy_simplify",
+          "sympy_equivalent",
+          "polynomial_factor",
+          "modular_exhaustive",
+          "bounded_integer_search",
+          "graph_certificate",
+          "recurrence_check",
+          "bounded_greedy_sequence",
+          "candidate_period_check",
+          "exact_geometry",
+          "numeric_counterexample",
+          "real_inequality",
+          "number_theory_check",
+          "sandboxed_python",
+          "lean_check"
+        ],
+        "title": "ComputationMethod",
+        "type": "string"
+      },
+      "ComputationPurpose": {
+        "enum": [
+          "falsify_claim",
+          "check_derived_identity",
+          "test_boundary_cases",
+          "verify_finite_reduction",
+          "validate_constructed_example",
+          "discover_pattern"
+        ],
+        "title": "ComputationPurpose",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "description": "An auditable, decision-linked request for a bounded computation.",
+    "properties": {
+      "arguments": {
+        "additionalProperties": true,
+        "title": "Arguments",
+        "type": "object"
+      },
+      "assumptions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Assumptions",
+        "type": "array"
+      },
+      "broad_search": {
+        "default": false,
+        "title": "Broad Search",
+        "type": "boolean"
+      },
+      "decision_if_confirmed": {
+        "minLength": 1,
+        "title": "Decision If Confirmed",
+        "type": "string"
+      },
+      "decision_if_refuted": {
+        "minLength": 1,
+        "title": "Decision If Refuted",
+        "type": "string"
+      },
+      "domains": {
+        "additionalProperties": true,
+        "title": "Domains",
+        "type": "object"
+      },
+      "exact_arithmetic": {
+        "default": true,
+        "title": "Exact Arithmetic",
+        "type": "boolean"
+      },
+      "execution_hash": {
+        "default": "",
+        "title": "Execution Hash",
+        "type": "string"
+      },
+      "experiment_id": {
+        "title": "Experiment Id",
+        "type": "string"
+      },
+      "max_cases": {
+        "default": 100000,
+        "maximum": 100000000,
+        "minimum": 1,
+        "title": "Max Cases",
+        "type": "integer"
+      },
+      "method": {
+        "$ref": "#/$defs/ComputationMethod"
+      },
+      "noncomputational_alternative": {
+        "minLength": 1,
+        "title": "Noncomputational Alternative",
+        "type": "string"
+      },
+      "parent_checkpoint_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Parent Checkpoint Id"
+      },
+      "path_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Path Id"
+      },
+      "purpose": {
+        "$ref": "#/$defs/ComputationPurpose",
+        "default": "falsify_claim"
+      },
+      "reasoning_basis": {
+        "minLength": 1,
+        "title": "Reasoning Basis",
+        "type": "string"
+      },
+      "request_hash": {
+        "default": "",
+        "title": "Request Hash",
+        "type": "string"
+      },
+      "requested_by": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Requested By"
+      },
+      "runtime_fingerprint": {
+        "additionalProperties": true,
+        "title": "Runtime Fingerprint",
+        "type": "object"
+      },
+      "seed": {
+        "default": 20260719,
+        "title": "Seed",
+        "type": "integer"
+      },
+      "target_claim": {
+        "minLength": 1,
+        "title": "Target Claim",
+        "type": "string"
+      },
+      "typed_tool_gap": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Typed Tool Gap"
+      },
+      "why_computation_is_needed": {
+        "minLength": 1,
+        "title": "Why Computation Is Needed",
+        "type": "string"
+      }
+    },
+    "required": [
+      "target_claim",
+      "reasoning_basis",
+      "why_computation_is_needed",
+      "decision_if_confirmed",
+      "decision_if_refuted",
+      "noncomputational_alternative",
+      "method"
+    ],
+    "title": "ExperimentSpec",
+    "type": "object"
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "qualified_name": "mathproofmesh.schemas.InspirationReview",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "confidence": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "deferred_reason": {
+        "default": "",
+        "title": "Deferred Reason",
+        "type": "string"
+      },
+      "hidden_assumptions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Hidden Assumptions",
+        "type": "array"
+      },
+      "immediate_counterexamples": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Immediate Counterexamples",
+        "type": "array"
+      },
+      "internally_coherent": {
+        "title": "Internally Coherent",
+        "type": "boolean"
+      },
+      "proposal_id": {
+        "title": "Proposal Id",
+        "type": "string"
+      },
+      "recommendation": {
+        "enum": [
+          "reject",
+          "store_insight",
+          "attach_to_existing_route",
+          "create_new_route",
+          "request_computation",
+          "request_bridge_verification"
+        ],
+        "title": "Recommendation",
+        "type": "string"
+      },
+      "relevant_to_open_obligation": {
+        "title": "Relevant To Open Obligation",
+        "type": "boolean"
+      },
+      "review_action_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Review Action Id"
+      },
+      "review_status": {
+        "default": "completed",
+        "enum": [
+          "completed",
+          "deferred"
+        ],
+        "title": "Review Status",
+        "type": "string"
+      },
+      "reviewer_agent_id": {
+        "title": "Reviewer Agent Id",
+        "type": "string"
+      },
+      "semantically_distinct": {
+        "title": "Semantically Distinct",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "proposal_id",
+      "reviewer_agent_id",
+      "semantically_distinct",
+      "relevant_to_open_obligation",
+      "internally_coherent",
+      "recommendation",
+      "confidence"
+    ],
+    "title": "InspirationReview",
+    "type": "object"
+  }
+}

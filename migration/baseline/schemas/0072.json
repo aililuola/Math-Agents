@@ -1,0 +1,85 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.ClaimRefereeRecord",
+  "schema": {
+    "$defs": {
+      "ClaimRefereeDisposition": {
+        "enum": [
+          "accept",
+          "reject",
+          "defer",
+          "needs_additional_review"
+        ],
+        "title": "ClaimRefereeDisposition",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "claim_id": {
+        "title": "Claim Id",
+        "type": "string"
+      },
+      "dependencies_valid": {
+        "title": "Dependencies Valid",
+        "type": "boolean"
+      },
+      "disposition": {
+        "$ref": "#/$defs/ClaimRefereeDisposition"
+      },
+      "evidence_type_valid": {
+        "title": "Evidence Type Valid",
+        "type": "boolean"
+      },
+      "quantifiers_valid": {
+        "title": "Quantifiers Valid",
+        "type": "boolean"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "referee_agent_id": {
+        "title": "Referee Agent Id",
+        "type": "string"
+      },
+      "review_id": {
+        "title": "Review Id",
+        "type": "string"
+      },
+      "scope_valid": {
+        "title": "Scope Valid",
+        "type": "boolean"
+      },
+      "source_attempt_id": {
+        "title": "Source Attempt Id",
+        "type": "string"
+      },
+      "source_delta_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Source Delta Id"
+      }
+    },
+    "required": [
+      "review_id",
+      "referee_agent_id",
+      "source_attempt_id",
+      "source_delta_id",
+      "claim_id",
+      "disposition",
+      "dependencies_valid",
+      "scope_valid",
+      "quantifiers_valid",
+      "evidence_type_valid",
+      "reason"
+    ],
+    "title": "ClaimRefereeRecord",
+    "type": "object"
+  }
+}

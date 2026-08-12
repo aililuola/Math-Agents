@@ -1,0 +1,43 @@
+{
+  "qualified_name": "mathproofmesh.schemas.MechanismChainSignature",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "bridge_pattern": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Bridge Pattern",
+        "type": "array"
+      },
+      "chain_hash": {
+        "default": "",
+        "title": "Chain Hash",
+        "type": "string"
+      },
+      "representation": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Representation",
+        "type": "array"
+      },
+      "terminal_argument": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Terminal Argument",
+        "type": "array"
+      },
+      "transformations": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Transformations",
+        "type": "array"
+      }
+    },
+    "title": "MechanismChainSignature",
+    "type": "object"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.BroadcastDecisionRecord",
+  "schema": {
+    "$defs": {
+      "BroadcastDecision": {
+        "enum": [
+          "broadcast",
+          "keep_local",
+          "reject"
+        ],
+        "title": "BroadcastDecision",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "consumes_neighbor_quota": {
+        "default": false,
+        "title": "Consumes Neighbor Quota",
+        "type": "boolean"
+      },
+      "decision": {
+        "$ref": "#/$defs/BroadcastDecision"
+      },
+      "decision_id": {
+        "title": "Decision Id",
+        "type": "string"
+      },
+      "expected_core_debt_reduction": {
+        "default": 0.0,
+        "minimum": 0.0,
+        "title": "Expected Core Debt Reduction",
+        "type": "number"
+      },
+      "message_id": {
+        "title": "Message Id",
+        "type": "string"
+      },
+      "priority": {
+        "default": "normal",
+        "title": "Priority",
+        "type": "string"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "target_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Obligation Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "decision_id",
+      "message_id",
+      "decision",
+      "reason"
+    ],
+    "title": "BroadcastDecisionRecord",
+    "type": "object"
+  }
+}

@@ -1,0 +1,435 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.FalsificationTaskRecord",
+  "schema": {
+    "$defs": {
+      "ComputationMethod": {
+        "enum": [
+          "sympy_simplify",
+          "sympy_equivalent",
+          "polynomial_factor",
+          "modular_exhaustive",
+          "bounded_integer_search",
+          "graph_certificate",
+          "recurrence_check",
+          "bounded_greedy_sequence",
+          "candidate_period_check",
+          "exact_geometry",
+          "numeric_counterexample",
+          "real_inequality",
+          "number_theory_check",
+          "sandboxed_python",
+          "lean_check"
+        ],
+        "title": "ComputationMethod",
+        "type": "string"
+      },
+      "ComputationPlan": {
+        "additionalProperties": false,
+        "description": "Cross-route description of an approved experiment, never executable code.",
+        "properties": {
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "bounded_scope": {
+            "additionalProperties": true,
+            "title": "Bounded Scope",
+            "type": "object"
+          },
+          "decision_use": {
+            "title": "Decision Use",
+            "type": "string"
+          },
+          "exact_arithmetic": {
+            "default": true,
+            "title": "Exact Arithmetic",
+            "type": "boolean"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/$defs/ComputationMethod"
+          },
+          "plan_id": {
+            "title": "Plan Id",
+            "type": "string"
+          },
+          "request_hash": {
+            "title": "Request Hash",
+            "type": "string"
+          },
+          "source_artifact_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Artifact Ref"
+          },
+          "target_claim": {
+            "title": "Target Claim",
+            "type": "string"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "request_hash",
+          "target_claim",
+          "method",
+          "decision_use"
+        ],
+        "title": "ComputationPlan",
+        "type": "object"
+      },
+      "ComputationPurpose": {
+        "enum": [
+          "falsify_claim",
+          "check_derived_identity",
+          "test_boundary_cases",
+          "verify_finite_reduction",
+          "validate_constructed_example",
+          "discover_pattern"
+        ],
+        "title": "ComputationPurpose",
+        "type": "string"
+      },
+      "ExperimentSpec": {
+        "additionalProperties": false,
+        "description": "An auditable, decision-linked request for a bounded computation.",
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "broad_search": {
+            "default": false,
+            "title": "Broad Search",
+            "type": "boolean"
+          },
+          "decision_if_confirmed": {
+            "minLength": 1,
+            "title": "Decision If Confirmed",
+            "type": "string"
+          },
+          "decision_if_refuted": {
+            "minLength": 1,
+            "title": "Decision If Refuted",
+            "type": "string"
+          },
+          "domains": {
+            "additionalProperties": true,
+            "title": "Domains",
+            "type": "object"
+          },
+          "exact_arithmetic": {
+            "default": true,
+            "title": "Exact Arithmetic",
+            "type": "boolean"
+          },
+          "execution_hash": {
+            "default": "",
+            "title": "Execution Hash",
+            "type": "string"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "max_cases": {
+            "default": 100000,
+            "maximum": 100000000,
+            "minimum": 1,
+            "title": "Max Cases",
+            "type": "integer"
+          },
+          "method": {
+            "$ref": "#/$defs/ComputationMethod"
+          },
+          "noncomputational_alternative": {
+            "minLength": 1,
+            "title": "Noncomputational Alternative",
+            "type": "string"
+          },
+          "parent_checkpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent Checkpoint Id"
+          },
+          "path_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path Id"
+          },
+          "purpose": {
+            "$ref": "#/$defs/ComputationPurpose",
+            "default": "falsify_claim"
+          },
+          "reasoning_basis": {
+            "minLength": 1,
+            "title": "Reasoning Basis",
+            "type": "string"
+          },
+          "request_hash": {
+            "default": "",
+            "title": "Request Hash",
+            "type": "string"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requested By"
+          },
+          "runtime_fingerprint": {
+            "additionalProperties": true,
+            "title": "Runtime Fingerprint",
+            "type": "object"
+          },
+          "seed": {
+            "default": 20260719,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "target_claim": {
+            "minLength": 1,
+            "title": "Target Claim",
+            "type": "string"
+          },
+          "typed_tool_gap": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Typed Tool Gap"
+          },
+          "why_computation_is_needed": {
+            "minLength": 1,
+            "title": "Why Computation Is Needed",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_claim",
+          "reasoning_basis",
+          "why_computation_is_needed",
+          "decision_if_confirmed",
+          "decision_if_refuted",
+          "noncomputational_alternative",
+          "method"
+        ],
+        "title": "ExperimentSpec",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "action_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Action Id"
+      },
+      "computation_plan": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ComputationPlan"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "deferred_reason": {
+        "default": "",
+        "title": "Deferred Reason",
+        "type": "string"
+      },
+      "executable_task_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Executable Task Id"
+      },
+      "experiment_spec": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ExperimentSpec"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "request_text": {
+        "title": "Request Text",
+        "type": "string"
+      },
+      "result_experiment_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Result Experiment Id"
+      },
+      "route_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Route Id"
+      },
+      "source_kind": {
+        "enum": [
+          "strategy",
+          "goal_link",
+          "inference_risk"
+        ],
+        "title": "Source Kind",
+        "type": "string"
+      },
+      "source_record_id": {
+        "title": "Source Record Id",
+        "type": "string"
+      },
+      "status": {
+        "default": "proposed",
+        "enum": [
+          "proposed",
+          "admitted",
+          "deferred",
+          "running",
+          "counterexample_found",
+          "not_refuted",
+          "failed"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "strategy_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Strategy Id"
+      },
+      "target_claim_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Target Claim Id"
+      },
+      "target_obligation_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Target Obligation Id"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      },
+      "typed_contract_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Typed Contract Id"
+      }
+    },
+    "required": [
+      "source_kind",
+      "source_record_id",
+      "request_text"
+    ],
+    "title": "FalsificationTaskRecord",
+    "type": "object"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "qualified_name": "mathproofmesh.desktop.app.ResumeRunRequest",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "profile": {
+        "enum": [
+          "smoke",
+          "formal",
+          "active",
+          "proof_control_shadow",
+          "proof_control_active"
+        ],
+        "title": "Profile",
+        "type": "string"
+      },
+      "resume_mode": {
+        "default": "normal",
+        "maxLength": 40,
+        "title": "Resume Mode",
+        "type": "string"
+      }
+    },
+    "required": [
+      "profile"
+    ],
+    "title": "ResumeRunRequest",
+    "type": "object"
+  }
+}

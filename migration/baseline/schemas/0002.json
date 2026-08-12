@@ -1,0 +1,62 @@
+{
+  "qualified_name": "mathproofmesh.config.AgentCapabilityConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "first_error_accuracy_weight": {
+        "default": 0.25,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "First Error Accuracy Weight",
+        "type": "number"
+      },
+      "min_observations_before_trust_update": {
+        "default": 5,
+        "maximum": 10000,
+        "minimum": 1,
+        "title": "Min Observations Before Trust Update",
+        "type": "integer"
+      },
+      "mutation_benchmark_weight": {
+        "default": 0.3,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Mutation Benchmark Weight",
+        "type": "number"
+      },
+      "overturn_rate_penalty": {
+        "default": 0.2,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Overturn Rate Penalty",
+        "type": "number"
+      },
+      "recency_decay": {
+        "default": 0.98,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Recency Decay",
+        "type": "number"
+      },
+      "tool_agreement_weight": {
+        "default": 0.25,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Tool Agreement Weight",
+        "type": "number"
+      },
+      "use_self_reported_confidence": {
+        "default": false,
+        "title": "Use Self Reported Confidence",
+        "type": "boolean"
+      }
+    },
+    "title": "AgentCapabilityConfig",
+    "type": "object"
+  }
+}

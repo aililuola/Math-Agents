@@ -1,0 +1,736 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.RevisedStrategyResult",
+  "schema": {
+    "$defs": {
+      "ComputationHint": {
+        "additionalProperties": false,
+        "description": "A planner-authored possibility. It is deliberately not executable.",
+        "properties": {
+          "broad_search": {
+            "default": false,
+            "title": "Broad Search",
+            "type": "boolean"
+          },
+          "decision_use": {
+            "title": "Decision Use",
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/$defs/ComputationPurpose"
+          },
+          "suggested_method": {
+            "$ref": "#/$defs/ComputationMethod"
+          },
+          "target_claim": {
+            "title": "Target Claim",
+            "type": "string"
+          }
+        },
+        "required": [
+          "purpose",
+          "target_claim",
+          "suggested_method",
+          "decision_use"
+        ],
+        "title": "ComputationHint",
+        "type": "object"
+      },
+      "ComputationMethod": {
+        "enum": [
+          "sympy_simplify",
+          "sympy_equivalent",
+          "polynomial_factor",
+          "modular_exhaustive",
+          "bounded_integer_search",
+          "graph_certificate",
+          "recurrence_check",
+          "bounded_greedy_sequence",
+          "candidate_period_check",
+          "exact_geometry",
+          "numeric_counterexample",
+          "real_inequality",
+          "number_theory_check",
+          "sandboxed_python",
+          "lean_check"
+        ],
+        "title": "ComputationMethod",
+        "type": "string"
+      },
+      "ComputationPurpose": {
+        "enum": [
+          "falsify_claim",
+          "check_derived_identity",
+          "test_boundary_cases",
+          "verify_finite_reduction",
+          "validate_constructed_example",
+          "discover_pattern"
+        ],
+        "title": "ComputationPurpose",
+        "type": "string"
+      },
+      "CriticalClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "falsification_test": {
+            "minLength": 1,
+            "title": "Falsification Test",
+            "type": "string"
+          },
+          "necessity": {
+            "default": "required",
+            "enum": [
+              "required",
+              "supporting"
+            ],
+            "title": "Necessity",
+            "type": "string"
+          },
+          "preferred_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preferred Tool"
+          },
+          "statement": {
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          },
+          "status": {
+            "default": "needs_check",
+            "enum": [
+              "candidate",
+              "needs_check",
+              "verified",
+              "refuted",
+              "blocked"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "statement",
+          "falsification_test"
+        ],
+        "title": "CriticalClaim",
+        "type": "object"
+      },
+      "EvidenceRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_ref": {
+            "title": "Artifact Ref",
+            "type": "string"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Section"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_ref"
+        ],
+        "title": "EvidenceRef",
+        "type": "object"
+      },
+      "RewriteSemanticAssessment": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_bridge_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Candidate Bridge Node Ids",
+            "type": "array"
+          },
+          "candidate_strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Strategy Id"
+          },
+          "canonical_source_hash": {
+            "title": "Canonical Source Hash",
+            "type": "string"
+          },
+          "canonical_target_hash": {
+            "title": "Canonical Target Hash",
+            "type": "string"
+          },
+          "domain_mechanism_preserved": {
+            "title": "Domain Mechanism Preserved",
+            "type": "boolean"
+          },
+          "has_executable_first_step": {
+            "title": "Has Executable First Step",
+            "type": "boolean"
+          },
+          "has_nontrivial_graph_change": {
+            "title": "Has Nontrivial Graph Change",
+            "type": "boolean"
+          },
+          "is_self_implication": {
+            "title": "Is Self Implication",
+            "type": "boolean"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "rewrite_request_id": {
+            "title": "Rewrite Request Id",
+            "type": "string"
+          },
+          "verdict": {
+            "$ref": "#/$defs/RewriteSemanticVerdict"
+          }
+        },
+        "required": [
+          "rewrite_request_id",
+          "candidate_strategy_id",
+          "candidate_bridge_node_ids",
+          "verdict",
+          "canonical_source_hash",
+          "canonical_target_hash",
+          "is_self_implication",
+          "has_nontrivial_graph_change",
+          "has_executable_first_step",
+          "domain_mechanism_preserved",
+          "reasons"
+        ],
+        "title": "RewriteSemanticAssessment",
+        "type": "object"
+      },
+      "RewriteSemanticVerdict": {
+        "enum": [
+          "valid",
+          "tautological",
+          "placeholder",
+          "no_executable_step",
+          "no_target",
+          "lost_domain_mechanism",
+          "scope_invalid",
+          "duplicate"
+        ],
+        "title": "RewriteSemanticVerdict",
+        "type": "string"
+      },
+      "StrategyBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_id": {
+            "title": "Blueprint Id",
+            "type": "string"
+          },
+          "compilation_confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Compilation Confidence",
+            "type": "number"
+          },
+          "complete_path_to_main_goal": {
+            "title": "Complete Path To Main Goal",
+            "type": "boolean"
+          },
+          "direct_target_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Direct Target Node Ids",
+            "type": "array"
+          },
+          "edge_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Edge Ids",
+            "type": "array"
+          },
+          "main_goal_node_id": {
+            "title": "Main Goal Node Id",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "open_gap_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Open Gap Node Ids",
+            "type": "array"
+          },
+          "preserves_mechanism_signature": {
+            "title": "Preserves Mechanism Signature",
+            "type": "boolean"
+          },
+          "problem_hash": {
+            "title": "Problem Hash",
+            "type": "string"
+          },
+          "root_entry_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Root Entry Node Ids",
+            "type": "array"
+          },
+          "status": {
+            "default": "draft",
+            "enum": [
+              "draft",
+              "compiled",
+              "needs_review",
+              "accepted",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blueprint_id",
+          "strategy_id",
+          "problem_hash",
+          "node_ids",
+          "edge_ids",
+          "main_goal_node_id",
+          "direct_target_node_ids",
+          "root_entry_node_ids",
+          "open_gap_node_ids",
+          "preserves_mechanism_signature",
+          "complete_path_to_main_goal",
+          "compilation_confidence"
+        ],
+        "title": "StrategyBlueprint",
+        "type": "object"
+      },
+      "StrategyCard": {
+        "additionalProperties": false,
+        "properties": {
+          "assigned_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Assigned Agent Id"
+          },
+          "bottleneck": {
+            "title": "Bottleneck",
+            "type": "string"
+          },
+          "calculation_checks": {
+            "items": {
+              "$ref": "#/$defs/ToolRequest"
+            },
+            "title": "Calculation Checks",
+            "type": "array"
+          },
+          "calculation_evidence_refs": {
+            "items": {
+              "$ref": "#/$defs/EvidenceRef"
+            },
+            "title": "Calculation Evidence Refs",
+            "type": "array"
+          },
+          "computation_hints": {
+            "items": {
+              "$ref": "#/$defs/ComputationHint"
+            },
+            "title": "Computation Hints",
+            "type": "array"
+          },
+          "core_idea": {
+            "title": "Core Idea",
+            "type": "string"
+          },
+          "critical_claims": {
+            "items": {
+              "$ref": "#/$defs/CriticalClaim"
+            },
+            "title": "Critical Claims",
+            "type": "array"
+          },
+          "estimated_cost": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Estimated Cost",
+            "type": "number"
+          },
+          "estimated_success": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Estimated Success",
+            "type": "number"
+          },
+          "expected_lemmas": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Expected Lemmas",
+            "type": "array"
+          },
+          "falsification_test": {
+            "title": "Falsification Test",
+            "type": "string"
+          },
+          "independence_basis": {
+            "title": "Independence Basis",
+            "type": "string"
+          },
+          "inspiration_proposal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inspiration Proposal Id"
+          },
+          "key_original_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Key Original Step"
+          },
+          "parent_strategy_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Strategy Ids",
+            "type": "array"
+          },
+          "prerequisites": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Prerequisites",
+            "type": "array"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "core_idea",
+          "independence_basis",
+          "bottleneck",
+          "falsification_test",
+          "estimated_success"
+        ],
+        "title": "StrategyCard",
+        "type": "object"
+      },
+      "StrategyLineageRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "added_claim_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added Claim Ids",
+            "type": "array"
+          },
+          "parent_strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Strategy Id"
+          },
+          "preserved_domain_objects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Preserved Domain Objects",
+            "type": "array"
+          },
+          "preserved_mechanism_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Preserved Mechanism Tags",
+            "type": "array"
+          },
+          "removed_claim_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed Claim Ids",
+            "type": "array"
+          },
+          "revision_number": {
+            "minimum": 0,
+            "title": "Revision Number",
+            "type": "integer"
+          },
+          "revision_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/StrategyRevisionReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "root_strategy_id": {
+            "title": "Root Strategy Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "original",
+              "active",
+              "needs_rewrite",
+              "superseded",
+              "rejected_with_evidence",
+              "archived"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "superseded_by_strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Superseded By Strategy Id"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "parent_strategy_id",
+          "root_strategy_id",
+          "revision_number",
+          "revision_reason",
+          "preserved_mechanism_tags",
+          "preserved_domain_objects",
+          "removed_claim_ids",
+          "added_claim_ids",
+          "status"
+        ],
+        "title": "StrategyLineageRecord",
+        "type": "object"
+      },
+      "StrategyRevisionReason": {
+        "enum": [
+          "admission_rewrite",
+          "plan_failure",
+          "scope_repair",
+          "bridge_insertion",
+          "countermodel_feedback",
+          "user_intervention"
+        ],
+        "title": "StrategyRevisionReason",
+        "type": "string"
+      },
+      "ToolRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "domains": {
+            "additionalProperties": true,
+            "title": "Domains",
+            "type": "object"
+          },
+          "kind": {
+            "enum": [
+              "sympy_simplify",
+              "sympy_equivalent",
+              "numeric_counterexample",
+              "polynomial_factor",
+              "modular_exhaustive",
+              "bounded_integer_search",
+              "graph_certificate",
+              "recurrence_check",
+              "bounded_greedy_sequence",
+              "candidate_period_check",
+              "exact_geometry",
+              "lean_check"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "max_cases": {
+            "default": 100000,
+            "maximum": 100000000,
+            "minimum": 1,
+            "title": "Max Cases",
+            "type": "integer"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "purpose"
+        ],
+        "title": "ToolRequest",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "added_claim_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Added Claim Ids",
+        "type": "array"
+      },
+      "first_executable_obligation_id": {
+        "title": "First Executable Obligation Id",
+        "type": "string"
+      },
+      "lineage": {
+        "$ref": "#/$defs/StrategyLineageRecord"
+      },
+      "removed_claim_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Removed Claim Ids",
+        "type": "array"
+      },
+      "retained_claim_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Retained Claim Ids",
+        "type": "array"
+      },
+      "revised_blueprint": {
+        "$ref": "#/$defs/StrategyBlueprint"
+      },
+      "revised_strategy": {
+        "$ref": "#/$defs/StrategyCard"
+      },
+      "semantic_assessment": {
+        "$ref": "#/$defs/RewriteSemanticAssessment"
+      }
+    },
+    "required": [
+      "revised_strategy",
+      "revised_blueprint",
+      "lineage",
+      "semantic_assessment",
+      "retained_claim_ids",
+      "removed_claim_ids",
+      "added_claim_ids",
+      "first_executable_obligation_id"
+    ],
+    "title": "RevisedStrategyResult",
+    "type": "object"
+  }
+}

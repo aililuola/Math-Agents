@@ -1,0 +1,39 @@
+server:
+  address: ${MATHPROOFMESH_HOST:127.0.0.1}
+  port: ${MATHPROOFMESH_PORT:8080}
+  max-http-request-header-size: 16KB
+  tomcat:
+    max-swallow-size: 1MB
+    threads:
+      max: 32
+spring:
+  application:
+    name: mathproofmesh
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    deserialization:
+      fail-on-unknown-properties: true
+    mapper:
+      allow-coercion-of-scalars: false
+management:
+  server:
+    address: 127.0.0.1
+    port: ${MATHPROOFMESH_MANAGEMENT_PORT:0}
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
+  endpoint:
+    env:
+      access: none
+    configprops:
+      access: none
+    heapdump:
+      access: none
+    shutdown:
+      access: none
+mathproofmesh:
+  api:
+    token: ${MATHPROOFMESH_BEARER_TOKEN:}
+    max-body-bytes: 1048576
+    max-concurrent-requests: 8

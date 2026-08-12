@@ -1,0 +1,97 @@
+{
+  "qualified_name": "mathproofmesh.schemas.InspirationCallReservation",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "consumed_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Consumed Calls",
+        "type": "integer"
+      },
+      "overrun_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Overrun Calls",
+        "type": "integer"
+      },
+      "phase_calls": {
+        "additionalProperties": {
+          "type": "integer"
+        },
+        "title": "Phase Calls",
+        "type": "object"
+      },
+      "proposer_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Proposer Calls",
+        "type": "integer"
+      },
+      "referee_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Referee Calls",
+        "type": "integer"
+      },
+      "released_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Released Calls",
+        "type": "integer"
+      },
+      "reservation_id": {
+        "title": "Reservation Id",
+        "type": "string"
+      },
+      "reserved_calls": {
+        "minimum": 0,
+        "title": "Reserved Calls",
+        "type": "integer"
+      },
+      "round_index": {
+        "minimum": 0,
+        "title": "Round Index",
+        "type": "integer"
+      },
+      "route_attempt_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Route Attempt Calls",
+        "type": "integer"
+      },
+      "skeptic_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Skeptic Calls",
+        "type": "integer"
+      },
+      "status": {
+        "default": "active",
+        "enum": [
+          "active",
+          "completed",
+          "interrupted"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      },
+      "trigger_id": {
+        "title": "Trigger Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "task_id",
+      "trigger_id",
+      "round_index",
+      "reserved_calls"
+    ],
+    "title": "InspirationCallReservation",
+    "type": "object"
+  }
+}

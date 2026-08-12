@@ -1,0 +1,48 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ExperimentProgram",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "code_hash": {
+        "default": "",
+        "title": "Code Hash",
+        "type": "string"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "dependencies": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Dependencies",
+        "type": "array"
+      },
+      "experiment_id": {
+        "title": "Experiment Id",
+        "type": "string"
+      },
+      "input_schema": {
+        "additionalProperties": true,
+        "title": "Input Schema",
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "Output Schema",
+        "type": "object"
+      },
+      "source": {
+        "title": "Source",
+        "type": "string"
+      }
+    },
+    "required": [
+      "experiment_id",
+      "source"
+    ],
+    "title": "ExperimentProgram",
+    "type": "object"
+  }
+}

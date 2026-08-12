@@ -1,0 +1,59 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.ProcessFailureDiagnostic",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "diagnostic_id": {
+        "title": "Diagnostic Id",
+        "type": "string"
+      },
+      "domain": {
+        "enum": [
+          "process",
+          "execution"
+        ],
+        "title": "Domain",
+        "type": "string"
+      },
+      "evidence": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Evidence",
+        "type": "array"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "route_id": {
+        "title": "Route Id",
+        "type": "string"
+      },
+      "source_report_id": {
+        "title": "Source Report Id",
+        "type": "string"
+      },
+      "target_obligation_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Target Obligation Id"
+      }
+    },
+    "required": [
+      "source_report_id",
+      "route_id",
+      "domain",
+      "reason"
+    ],
+    "title": "ProcessFailureDiagnostic",
+    "type": "object"
+  }
+}

@@ -1,0 +1,899 @@
+{
+  "qualified_name": "mathproofmesh.config.ProofControlConfig",
+  "schema": {
+    "$defs": {
+      "BlueprintReviewControlConfig": {
+        "additionalProperties": false,
+        "description": "Hard bounds for route-admission review and repair work.",
+        "properties": {
+          "max_batch_repair_items": {
+            "default": 12,
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Max Batch Repair Items",
+            "type": "integer"
+          },
+          "max_nodes_per_batch": {
+            "default": 12,
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Max Nodes Per Batch",
+            "type": "integer"
+          },
+          "max_repair_rounds": {
+            "default": 2,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Max Repair Rounds",
+            "type": "integer"
+          },
+          "max_review_calls_per_round": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Max Review Calls Per Round",
+            "type": "integer"
+          }
+        },
+        "title": "BlueprintReviewControlConfig",
+        "type": "object"
+      },
+      "BottleneckControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "compression_interval_rounds": {
+            "default": 1,
+            "maximum": 16,
+            "minimum": 1,
+            "title": "Compression Interval Rounds",
+            "type": "integer"
+          },
+          "dominance_threshold": {
+            "default": 0.9,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Dominance Threshold",
+            "type": "number"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "equivalence_threshold": {
+            "default": 0.84,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Equivalence Threshold",
+            "type": "number"
+          },
+          "max_cluster_members": {
+            "default": 64,
+            "maximum": 1000,
+            "minimum": 2,
+            "title": "Max Cluster Members",
+            "type": "integer"
+          },
+          "min_open_growth_for_forced_compression": {
+            "default": 8,
+            "maximum": 1000,
+            "minimum": 1,
+            "title": "Min Open Growth For Forced Compression",
+            "type": "integer"
+          },
+          "mode": {
+            "default": "shadow",
+            "enum": [
+              "off",
+              "shadow",
+              "active"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "preserve_original_nodes": {
+            "default": true,
+            "title": "Preserve Original Nodes",
+            "type": "boolean"
+          }
+        },
+        "title": "BottleneckControlConfig",
+        "type": "object"
+      },
+      "CommonModeControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "include_critical_claims": {
+            "default": true,
+            "title": "Include Critical Claims",
+            "type": "boolean"
+          },
+          "include_strategy_prerequisites": {
+            "default": true,
+            "title": "Include Strategy Prerequisites",
+            "type": "boolean"
+          },
+          "include_unverified_dependencies": {
+            "default": true,
+            "title": "Include Unverified Dependencies",
+            "type": "boolean"
+          },
+          "max_challengers_per_round": {
+            "default": 1,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Max Challengers Per Round",
+            "type": "integer"
+          },
+          "min_routes": {
+            "default": 3,
+            "maximum": 32,
+            "minimum": 2,
+            "title": "Min Routes",
+            "type": "integer"
+          },
+          "risk_threshold": {
+            "default": 0.6,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Risk Threshold",
+            "type": "number"
+          }
+        },
+        "title": "CommonModeControlConfig",
+        "type": "object"
+      },
+      "ComputationPurpose": {
+        "enum": [
+          "falsify_claim",
+          "check_derived_identity",
+          "test_boundary_cases",
+          "verify_finite_reduction",
+          "validate_constructed_example",
+          "discover_pattern"
+        ],
+        "title": "ComputationPurpose",
+        "type": "string"
+      },
+      "ContinueGateControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_on_core_debt_reduced": {
+            "default": true,
+            "title": "Allow On Core Debt Reduced",
+            "type": "boolean"
+          },
+          "allow_on_core_obligation_closed": {
+            "default": true,
+            "title": "Allow On Core Obligation Closed",
+            "type": "boolean"
+          },
+          "allow_on_first_error_changed": {
+            "default": true,
+            "title": "Allow On First Error Changed",
+            "type": "boolean"
+          },
+          "allow_on_verified_bridge_gain": {
+            "default": true,
+            "title": "Allow On Verified Bridge Gain",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "force_blueprint_rewrite_after_block": {
+            "default": true,
+            "title": "Force Blueprint Rewrite After Block",
+            "type": "boolean"
+          },
+          "mode": {
+            "default": "shadow",
+            "enum": [
+              "off",
+              "shadow",
+              "active"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "no_core_progress_segments": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 1,
+            "title": "No Core Progress Segments",
+            "type": "integer"
+          },
+          "require_any_core_signal": {
+            "default": true,
+            "title": "Require Any Core Signal",
+            "type": "boolean"
+          }
+        },
+        "title": "ContinueGateControlConfig",
+        "type": "object"
+      },
+      "CoreDebtControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "auxiliary_weight": {
+            "default": 0.35,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Auxiliary Weight",
+            "type": "number"
+          },
+          "common_mode_weight": {
+            "default": 1.5,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Common Mode Weight",
+            "type": "number"
+          },
+          "core_bridge_weight": {
+            "default": 2.5,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Core Bridge Weight",
+            "type": "number"
+          },
+          "core_stagnation_rounds": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Core Stagnation Rounds",
+            "type": "integer"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "main_goal_weight": {
+            "default": 4.0,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Main Goal Weight",
+            "type": "number"
+          },
+          "necessary_only_weight": {
+            "default": 0.15,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Necessary Only Weight",
+            "type": "number"
+          },
+          "unresolved_scope_risk_weight": {
+            "default": 1.5,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Unresolved Scope Risk Weight",
+            "type": "number"
+          }
+        },
+        "title": "CoreDebtControlConfig",
+        "type": "object"
+      },
+      "FailureControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "ambiguous_model_review": {
+            "default": true,
+            "title": "Ambiguous Model Review",
+            "type": "boolean"
+          },
+          "bridge_failure_prefers_bridge_action": {
+            "default": true,
+            "title": "Bridge Failure Prefers Bridge Action",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "framing_failure_forces_reanchor": {
+            "default": true,
+            "title": "Framing Failure Forces Reanchor",
+            "type": "boolean"
+          },
+          "max_blueprint_rewrites_per_route": {
+            "default": 1,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Max Blueprint Rewrites Per Route",
+            "type": "integer"
+          },
+          "min_classification_confidence": {
+            "default": 0.7,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Min Classification Confidence",
+            "type": "number"
+          },
+          "plan_failure_blocks_local_deepen": {
+            "default": true,
+            "title": "Plan Failure Blocks Local Deepen",
+            "type": "boolean"
+          }
+        },
+        "title": "FailureControlConfig",
+        "type": "object"
+      },
+      "FalsificationFastLaneControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_sandboxed_python": {
+            "default": false,
+            "title": "Allow Sandboxed Python",
+            "type": "boolean"
+          },
+          "allowed_purposes": {
+            "items": {
+              "$ref": "#/$defs/ComputationPurpose"
+            },
+            "title": "Allowed Purposes",
+            "type": "array"
+          },
+          "auto_fact_promotion": {
+            "default": false,
+            "title": "Auto Fact Promotion",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "exact_arithmetic_only": {
+            "default": true,
+            "title": "Exact Arithmetic Only",
+            "type": "boolean"
+          },
+          "max_cases": {
+            "default": 100000,
+            "maximum": 10000000,
+            "minimum": 1,
+            "title": "Max Cases",
+            "type": "integer"
+          },
+          "max_memory_mb": {
+            "default": 256,
+            "maximum": 4096,
+            "minimum": 32,
+            "title": "Max Memory Mb",
+            "type": "integer"
+          },
+          "max_runtime_seconds": {
+            "default": 10.0,
+            "maximum": 120.0,
+            "minimum": 0.1,
+            "title": "Max Runtime Seconds",
+            "type": "number"
+          },
+          "max_tasks_per_round": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Max Tasks Per Round",
+            "type": "integer"
+          }
+        },
+        "title": "FalsificationFastLaneControlConfig",
+        "type": "object"
+      },
+      "GoalAlignmentControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_strategy_rewrite_attempts": {
+            "default": 1,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Max Strategy Rewrite Attempts",
+            "type": "integer"
+          },
+          "min_alignment_confidence": {
+            "default": 0.72,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Min Alignment Confidence",
+            "type": "number"
+          },
+          "overstrength_penalty": {
+            "default": 0.25,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Overstrength Penalty",
+            "type": "number"
+          },
+          "require_implication_outline": {
+            "default": true,
+            "title": "Require Implication Outline",
+            "type": "boolean"
+          },
+          "require_target_obligation": {
+            "default": true,
+            "title": "Require Target Obligation",
+            "type": "boolean"
+          },
+          "run_countermodel_on_unknown_relation": {
+            "default": true,
+            "title": "Run Countermodel On Unknown Relation",
+            "type": "boolean"
+          }
+        },
+        "title": "GoalAlignmentControlConfig",
+        "type": "object"
+      },
+      "InductionControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_candidates_per_trigger": {
+            "default": 3,
+            "maximum": 16,
+            "minimum": 1,
+            "title": "Max Candidates Per Trigger",
+            "type": "integer"
+          },
+          "require_well_foundedness_statement": {
+            "default": true,
+            "title": "Require Well Foundedness Statement",
+            "type": "boolean"
+          },
+          "trigger_on_first_occurrence_barrier": {
+            "default": true,
+            "title": "Trigger On First Occurrence Barrier",
+            "type": "boolean"
+          },
+          "trigger_on_recursive_same_type_dependency": {
+            "default": true,
+            "title": "Trigger On Recursive Same Type Dependency",
+            "type": "boolean"
+          },
+          "trigger_on_repeated_feature": {
+            "default": true,
+            "title": "Trigger On Repeated Feature",
+            "type": "boolean"
+          }
+        },
+        "title": "InductionControlConfig",
+        "type": "object"
+      },
+      "MessageUtilityControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_rewrite_credit": {
+            "default": 0.4,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Blueprint Rewrite Credit",
+            "type": "number"
+          },
+          "broadcast_min_expected_core_debt_reduction": {
+            "default": 0.0,
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Broadcast Min Expected Core Debt Reduction",
+            "type": "number"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "final_citation_credit": {
+            "default": 1.0,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Final Citation Credit",
+            "type": "number"
+          },
+          "max_target_obligations": {
+            "default": 8,
+            "maximum": 64,
+            "minimum": 1,
+            "title": "Max Target Obligations",
+            "type": "integer"
+          },
+          "no_use_cooldown_threshold": {
+            "default": 3,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "No Use Cooldown Threshold",
+            "type": "integer"
+          },
+          "obligation_close_credit": {
+            "default": 0.8,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Obligation Close Credit",
+            "type": "number"
+          },
+          "refutation_credit": {
+            "default": 0.8,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Refutation Credit",
+            "type": "number"
+          },
+          "require_utility_contract_for_cross_route": {
+            "default": true,
+            "title": "Require Utility Contract For Cross Route",
+            "type": "boolean"
+          },
+          "utility_credit_horizon_rounds": {
+            "default": 3,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Utility Credit Horizon Rounds",
+            "type": "integer"
+          },
+          "verified_step_credit": {
+            "default": 0.5,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Verified Step Credit",
+            "type": "number"
+          }
+        },
+        "title": "MessageUtilityControlConfig",
+        "type": "object"
+      },
+      "NearMissControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_model_extraction_on_ambiguous": {
+            "default": true,
+            "title": "Allow Model Extraction On Ambiguous",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "extraction_requires_salvageable_component": {
+            "default": true,
+            "title": "Extraction Requires Salvageable Component",
+            "type": "boolean"
+          },
+          "max_records": {
+            "default": 512,
+            "maximum": 10000,
+            "minimum": 0,
+            "title": "Max Records",
+            "type": "integer"
+          },
+          "max_route_context_items": {
+            "default": 6,
+            "maximum": 64,
+            "minimum": 0,
+            "title": "Max Route Context Items",
+            "type": "integer"
+          },
+          "min_verifier_confidence": {
+            "default": 0.65,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Min Verifier Confidence",
+            "type": "number"
+          }
+        },
+        "title": "NearMissControlConfig",
+        "type": "object"
+      },
+      "RealizerControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_realizer_repairs_per_structure": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Max Realizer Repairs Per Structure",
+            "type": "integer"
+          },
+          "preserve_abstract_proposal_after_candidate_failure": {
+            "default": true,
+            "title": "Preserve Abstract Proposal After Candidate Failure",
+            "type": "boolean"
+          },
+          "require_explicit_admissibility": {
+            "default": true,
+            "title": "Require Explicit Admissibility",
+            "type": "boolean"
+          },
+          "require_falsification_test": {
+            "default": true,
+            "title": "Require Falsification Test",
+            "type": "boolean"
+          },
+          "require_well_founded_descent": {
+            "default": true,
+            "title": "Require Well Founded Descent",
+            "type": "boolean"
+          }
+        },
+        "title": "RealizerControlConfig",
+        "type": "object"
+      },
+      "RouteAdmissionControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_review": {
+            "$ref": "#/$defs/BlueprintReviewControlConfig"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "fail_closed_if_all_rejected": {
+            "default": true,
+            "title": "Fail Closed If All Rejected",
+            "type": "boolean"
+          },
+          "max_regeneration_attempts": {
+            "default": 1,
+            "maximum": 4,
+            "minimum": 0,
+            "title": "Max Regeneration Attempts",
+            "type": "integer"
+          },
+          "max_semantic_repair_calls": {
+            "default": 2,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Max Semantic Repair Calls",
+            "type": "integer"
+          },
+          "min_goal_alignment": {
+            "default": 0.65,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Min Goal Alignment",
+            "type": "number"
+          },
+          "mode": {
+            "default": "shadow",
+            "enum": [
+              "off",
+              "shadow",
+              "active"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "reject_heuristic_only_as_main_route": {
+            "default": true,
+            "title": "Reject Heuristic Only As Main Route",
+            "type": "boolean"
+          },
+          "reject_necessary_only_as_main_route": {
+            "default": true,
+            "title": "Reject Necessary Only As Main Route",
+            "type": "boolean"
+          },
+          "require_falsification_test": {
+            "default": true,
+            "title": "Require Falsification Test",
+            "type": "boolean"
+          },
+          "require_mechanism_novelty": {
+            "default": true,
+            "title": "Require Mechanism Novelty",
+            "type": "boolean"
+          },
+          "semantic_repair_budget_fraction": {
+            "default": 0.1,
+            "maximum": 0.5,
+            "minimum": 0.0,
+            "title": "Semantic Repair Budget Fraction",
+            "type": "number"
+          },
+          "semantic_repair_enabled": {
+            "default": true,
+            "title": "Semantic Repair Enabled",
+            "type": "boolean"
+          }
+        },
+        "title": "RouteAdmissionControlConfig",
+        "type": "object"
+      },
+      "ScopeGuardControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "ambiguous_model_review": {
+            "default": true,
+            "title": "Ambiguous Model Review",
+            "type": "boolean"
+          },
+          "block_fact_promotion_on_open_scope_risk": {
+            "default": true,
+            "title": "Block Fact Promotion On Open Scope Risk",
+            "type": "boolean"
+          },
+          "block_obligation_close_on_scope_mismatch": {
+            "default": true,
+            "title": "Block Obligation Close On Scope Mismatch",
+            "type": "boolean"
+          },
+          "deterministic_first": {
+            "default": true,
+            "title": "Deterministic First",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_countermodel_tasks_per_round": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Max Countermodel Tasks Per Round",
+            "type": "integer"
+          },
+          "risk_confidence_threshold": {
+            "default": 0.7,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Risk Confidence Threshold",
+            "type": "number"
+          }
+        },
+        "title": "ScopeGuardControlConfig",
+        "type": "object"
+      },
+      "SynthesisReadinessControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "high_centrality_threshold": {
+            "default": 0.7,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "High Centrality Threshold",
+            "type": "number"
+          },
+          "max_open_auxiliary_obligations": {
+            "default": 16,
+            "maximum": 10000,
+            "minimum": 0,
+            "title": "Max Open Auxiliary Obligations",
+            "type": "integer"
+          },
+          "mode": {
+            "default": "shadow",
+            "enum": [
+              "off",
+              "shadow",
+              "active"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "produce_progress_report_when_blocked": {
+            "default": true,
+            "title": "Produce Progress Report When Blocked",
+            "type": "boolean"
+          },
+          "require_core_dependency_closure": {
+            "default": true,
+            "title": "Require Core Dependency Closure",
+            "type": "boolean"
+          },
+          "require_no_necessary_only_bridge_as_sufficient": {
+            "default": true,
+            "title": "Require No Necessary Only Bridge As Sufficient",
+            "type": "boolean"
+          },
+          "require_no_open_scope_risks": {
+            "default": true,
+            "title": "Require No Open Scope Risks",
+            "type": "boolean"
+          },
+          "require_no_unresolved_high_centrality_conflicts": {
+            "default": true,
+            "title": "Require No Unresolved High Centrality Conflicts",
+            "type": "boolean"
+          }
+        },
+        "title": "SynthesisReadinessControlConfig",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "bottleneck": {
+        "$ref": "#/$defs/BottleneckControlConfig"
+      },
+      "common_mode": {
+        "$ref": "#/$defs/CommonModeControlConfig"
+      },
+      "continue_gate": {
+        "$ref": "#/$defs/ContinueGateControlConfig"
+      },
+      "core_debt": {
+        "$ref": "#/$defs/CoreDebtControlConfig"
+      },
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "failure": {
+        "$ref": "#/$defs/FailureControlConfig"
+      },
+      "falsification_fast_lane": {
+        "$ref": "#/$defs/FalsificationFastLaneControlConfig"
+      },
+      "goal_alignment": {
+        "$ref": "#/$defs/GoalAlignmentControlConfig"
+      },
+      "induction": {
+        "$ref": "#/$defs/InductionControlConfig"
+      },
+      "message_utility": {
+        "$ref": "#/$defs/MessageUtilityControlConfig"
+      },
+      "mode": {
+        "default": "off",
+        "enum": [
+          "off",
+          "shadow",
+          "active"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "near_miss": {
+        "$ref": "#/$defs/NearMissControlConfig"
+      },
+      "realizer": {
+        "$ref": "#/$defs/RealizerControlConfig"
+      },
+      "route_admission": {
+        "$ref": "#/$defs/RouteAdmissionControlConfig"
+      },
+      "scope_guard": {
+        "$ref": "#/$defs/ScopeGuardControlConfig"
+      },
+      "strict_fail_closed": {
+        "default": true,
+        "title": "Strict Fail Closed",
+        "type": "boolean"
+      },
+      "synthesis_readiness": {
+        "$ref": "#/$defs/SynthesisReadinessControlConfig"
+      }
+    },
+    "title": "ProofControlConfig",
+    "type": "object"
+  }
+}

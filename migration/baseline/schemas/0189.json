@@ -1,0 +1,156 @@
+{
+  "qualified_name": "mathproofmesh.schemas.MetaReview",
+  "schema": {
+    "$defs": {
+      "ActionKind": {
+        "enum": [
+          "widen",
+          "deepen",
+          "verify",
+          "synthesize",
+          "revise",
+          "bridge",
+          "resolve_conflict",
+          "search_counterexample",
+          "merge_route",
+          "cooldown_route",
+          "switch_representation",
+          "trigger_inspiration",
+          "search_analogy",
+          "invent_construction",
+          "generate_invariant",
+          "reverse_goal",
+          "meta_replan",
+          "surprise_widen",
+          "stop"
+        ],
+        "title": "ActionKind",
+        "type": "string"
+      },
+      "CandidateAssessment": {
+        "additionalProperties": false,
+        "properties": {
+          "recommended_action": {
+            "$ref": "#/$defs/ActionKind"
+          },
+          "score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Score",
+            "type": "number"
+          },
+          "strengths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Strengths",
+            "type": "array"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          },
+          "weaknesses": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Weaknesses",
+            "type": "array"
+          }
+        },
+        "required": [
+          "target_id",
+          "score",
+          "recommended_action"
+        ],
+        "title": "CandidateAssessment",
+        "type": "object"
+      },
+      "FailureLevel": {
+        "enum": [
+          "none",
+          "execution",
+          "plan",
+          "strategy"
+        ],
+        "title": "FailureLevel",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "assessments": {
+        "items": {
+          "$ref": "#/$defs/CandidateAssessment"
+        },
+        "title": "Assessments",
+        "type": "array"
+      },
+      "broad_computation_approved_strategy_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Broad Computation Approved Strategy Ids",
+        "type": "array"
+      },
+      "can_synthesize": {
+        "default": false,
+        "title": "Can Synthesize",
+        "type": "boolean"
+      },
+      "confidence": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "failure_level": {
+        "$ref": "#/$defs/FailureLevel",
+        "default": "none"
+      },
+      "required_actions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Required Actions",
+        "type": "array"
+      },
+      "selected_target_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Selected Target Id"
+      },
+      "shared_agreements": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Shared Agreements",
+        "type": "array"
+      },
+      "summary": {
+        "title": "Summary",
+        "type": "string"
+      },
+      "unresolved_conflicts": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Unresolved Conflicts",
+        "type": "array"
+      }
+    },
+    "required": [
+      "confidence",
+      "summary"
+    ],
+    "title": "MetaReview",
+    "type": "object"
+  }
+}

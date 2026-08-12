@@ -1,0 +1,29 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.BlueprintSemanticAssessment",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "accepted": {
+        "title": "Accepted",
+        "type": "boolean"
+      },
+      "blueprint_id": {
+        "title": "Blueprint Id",
+        "type": "string"
+      },
+      "reasons": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Reasons",
+        "type": "array"
+      }
+    },
+    "required": [
+      "blueprint_id",
+      "accepted"
+    ],
+    "title": "BlueprintSemanticAssessment",
+    "type": "object"
+  }
+}

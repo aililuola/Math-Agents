@@ -1,0 +1,28 @@
+status=PASS
+dependency_tree_lines=192
+snapshot_matches=0
+omitted_for_conflict=0
+omitted_for_duplicate=84
+legacy_jna_selected=0
+jna_jpms_5_19_1_selected=2
+
+The 84 "omitted for duplicate" entries are normal Maven graph convergence
+markers. They are not version conflicts or duplicate-class findings.
+
+Spring Boot 4.1.0 manages Spring Framework 7.0.8, PostgreSQL JDBC 42.7.11,
+Flyway 12.4.0, and Testcontainers 2.0.5. Spring Modulith 2.1.0 and Temporal
+1.37.0 resolve alongside that BOM. Guava 33.5.0-jre and
+error_prone_annotations 2.45.0 are explicitly aligned to reconcile overlapping
+Temporal/gRPC requirements. Testcontainers' legacy jna and jna-platform
+artifacts are excluded and replaced by jna-jpms and jna-platform-jpms 5.19.1.
+
+Maven Enforcer results:
+- RequireJavaVersion: PASS
+- RequireMavenVersion: PASS
+- RequireReleaseDeps: PASS
+- DependencyConvergence: PASS
+- BanDuplicatePomDependencyVersions: PASS
+- BanDuplicateClasses: PASS
+
+Online dependency:go-offline: PASS
+Offline dependency:go-offline: PASS

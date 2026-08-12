@@ -1,0 +1,201 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.DependencyMigrationResult",
+  "schema": {
+    "$defs": {
+      "DependencyKind": {
+        "enum": [
+          "local_step",
+          "local_claim",
+          "global_fact",
+          "message",
+          "obligation",
+          "tool_certificate",
+          "formal_certificate",
+          "external_result"
+        ],
+        "title": "DependencyKind",
+        "type": "string"
+      },
+      "DependencyNormalizationTask": {
+        "additionalProperties": false,
+        "properties": {
+          "ambiguous_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ambiguous Ids",
+            "type": "array"
+          },
+          "source_attempt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Attempt Id"
+          },
+          "source_delta_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Delta Id"
+          },
+          "status": {
+            "default": "open",
+            "enum": [
+              "open",
+              "resolved",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "ambiguous_ids"
+        ],
+        "title": "DependencyNormalizationTask",
+        "type": "object"
+      },
+      "DependencyRef": {
+        "additionalProperties": false,
+        "properties": {
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "kind": {
+            "$ref": "#/$defs/DependencyKind"
+          },
+          "kind_migration": {
+            "anyOf": [
+              {
+                "enum": [
+                  "legacy_external_to_local_step",
+                  "legacy_external_to_local_claim",
+                  "legacy_external_to_external_result"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Kind Migration"
+          },
+          "source_attempt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Attempt Id"
+          },
+          "source_delta_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Delta Id"
+          },
+          "source_route_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Route Id"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "target_id"
+        ],
+        "title": "DependencyRef",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "dependency_refs": {
+        "items": {
+          "$ref": "#/$defs/DependencyRef"
+        },
+        "title": "Dependency Refs",
+        "type": "array"
+      },
+      "invalidates_claim": {
+        "const": false,
+        "default": false,
+        "title": "Invalidates Claim",
+        "type": "boolean"
+      },
+      "migration_status": {
+        "enum": [
+          "complete",
+          "ambiguous"
+        ],
+        "title": "Migration Status",
+        "type": "string"
+      },
+      "normalization_task": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/DependencyNormalizationTask"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "dependency_refs",
+      "migration_status"
+    ],
+    "title": "DependencyMigrationResult",
+    "type": "object"
+  }
+}

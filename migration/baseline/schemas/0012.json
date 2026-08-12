@@ -1,0 +1,62 @@
+{
+  "qualified_name": "mathproofmesh.config.ContinueGateControlConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "allow_on_core_debt_reduced": {
+        "default": true,
+        "title": "Allow On Core Debt Reduced",
+        "type": "boolean"
+      },
+      "allow_on_core_obligation_closed": {
+        "default": true,
+        "title": "Allow On Core Obligation Closed",
+        "type": "boolean"
+      },
+      "allow_on_first_error_changed": {
+        "default": true,
+        "title": "Allow On First Error Changed",
+        "type": "boolean"
+      },
+      "allow_on_verified_bridge_gain": {
+        "default": true,
+        "title": "Allow On Verified Bridge Gain",
+        "type": "boolean"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "force_blueprint_rewrite_after_block": {
+        "default": true,
+        "title": "Force Blueprint Rewrite After Block",
+        "type": "boolean"
+      },
+      "mode": {
+        "default": "shadow",
+        "enum": [
+          "off",
+          "shadow",
+          "active"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "no_core_progress_segments": {
+        "default": 2,
+        "maximum": 16,
+        "minimum": 1,
+        "title": "No Core Progress Segments",
+        "type": "integer"
+      },
+      "require_any_core_signal": {
+        "default": true,
+        "title": "Require Any Core Signal",
+        "type": "boolean"
+      }
+    },
+    "title": "ContinueGateControlConfig",
+    "type": "object"
+  }
+}

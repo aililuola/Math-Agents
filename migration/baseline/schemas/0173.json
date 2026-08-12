@@ -1,0 +1,44 @@
+{
+  "qualified_name": "mathproofmesh.schemas.InspirationCreditTarget",
+  "schema": {
+    "additionalProperties": false,
+    "description": "Stable IDs through which downstream proof value is attributed.",
+    "properties": {
+      "materialization_action": {
+        "title": "Materialization Action",
+        "type": "string"
+      },
+      "message_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Message Ids",
+        "type": "array"
+      },
+      "obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Obligation Ids",
+        "type": "array"
+      },
+      "proposal_id": {
+        "title": "Proposal Id",
+        "type": "string"
+      },
+      "route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Route Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "proposal_id",
+      "materialization_action"
+    ],
+    "title": "InspirationCreditTarget",
+    "type": "object"
+  }
+}

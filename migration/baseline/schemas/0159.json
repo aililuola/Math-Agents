@@ -1,0 +1,328 @@
+{
+  "qualified_name": "mathproofmesh.schemas.FinalProof",
+  "schema": {
+    "$defs": {
+      "CitationRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "applicability_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Applicability Conditions",
+            "type": "array"
+          },
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Authors",
+            "type": "array"
+          },
+          "exact_statement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Exact Statement"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Location"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Url"
+          },
+          "verified": {
+            "default": false,
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "CitationRecord",
+        "type": "object"
+      },
+      "EvidenceRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_ref": {
+            "title": "Artifact Ref",
+            "type": "string"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Section"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_ref"
+        ],
+        "title": "EvidenceRef",
+        "type": "object"
+      },
+      "ProofStep": {
+        "additionalProperties": false,
+        "properties": {
+          "branch_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branch Label"
+          },
+          "calculation_checks": {
+            "items": {
+              "$ref": "#/$defs/ToolRequest"
+            },
+            "title": "Calculation Checks",
+            "type": "array"
+          },
+          "calculation_evidence_refs": {
+            "items": {
+              "$ref": "#/$defs/EvidenceRef"
+            },
+            "title": "Calculation Evidence Refs",
+            "type": "array"
+          },
+          "calculations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Calculations",
+            "type": "array"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/$defs/CitationRecord"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "confidence": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "dependencies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dependencies",
+            "type": "array"
+          },
+          "dependency_refs": {
+            "items": {},
+            "title": "Dependency Refs",
+            "type": "array"
+          },
+          "is_key_step": {
+            "default": false,
+            "title": "Is Key Step",
+            "type": "boolean"
+          },
+          "justification": {
+            "title": "Justification",
+            "type": "string"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          },
+          "step_type": {
+            "default": "derivation",
+            "enum": [
+              "derivation",
+              "assumption_intro",
+              "assumption_discharge",
+              "case_split",
+              "case_close",
+              "definition",
+              "construction"
+            ],
+            "title": "Step Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id",
+          "statement",
+          "justification"
+        ],
+        "title": "ProofStep",
+        "type": "object"
+      },
+      "ToolRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "domains": {
+            "additionalProperties": true,
+            "title": "Domains",
+            "type": "object"
+          },
+          "kind": {
+            "enum": [
+              "sympy_simplify",
+              "sympy_equivalent",
+              "numeric_counterexample",
+              "polynomial_factor",
+              "modular_exhaustive",
+              "bounded_integer_search",
+              "graph_certificate",
+              "recurrence_check",
+              "bounded_greedy_sequence",
+              "candidate_period_check",
+              "exact_geometry",
+              "lean_check"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "max_cases": {
+            "default": 100000,
+            "maximum": 100000000,
+            "minimum": 1,
+            "title": "Max Cases",
+            "type": "integer"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "purpose"
+        ],
+        "title": "ToolRequest",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "answer": {
+        "title": "Answer",
+        "type": "string"
+      },
+      "caveats": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Caveats",
+        "type": "array"
+      },
+      "confidence": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "dependencies": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Dependencies",
+        "type": "array"
+      },
+      "problem_hash": {
+        "title": "Problem Hash",
+        "type": "string"
+      },
+      "proof_steps": {
+        "items": {
+          "$ref": "#/$defs/ProofStep"
+        },
+        "title": "Proof Steps",
+        "type": "array"
+      },
+      "source_attempt_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Source Attempt Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "problem_hash",
+      "answer",
+      "proof_steps",
+      "confidence"
+    ],
+    "title": "FinalProof",
+    "type": "object"
+  }
+}

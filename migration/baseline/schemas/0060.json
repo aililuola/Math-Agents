@@ -1,0 +1,71 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.AssumptionChallengeReview",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "action_supported": {
+        "default": false,
+        "title": "Action Supported",
+        "type": "boolean"
+      },
+      "checked_step_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Checked Step Ids",
+        "type": "array"
+      },
+      "concise_feedback": {
+        "title": "Concise Feedback",
+        "type": "string"
+      },
+      "exact_counterexample_confirmed": {
+        "default": false,
+        "title": "Exact Counterexample Confirmed",
+        "type": "boolean"
+      },
+      "independence_confirmed": {
+        "default": false,
+        "title": "Independence Confirmed",
+        "type": "boolean"
+      },
+      "issues": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Issues",
+        "type": "array"
+      },
+      "proof_complete": {
+        "default": false,
+        "title": "Proof Complete",
+        "type": "boolean"
+      },
+      "proposal_id": {
+        "title": "Proposal Id",
+        "type": "string"
+      },
+      "verdict": {
+        "enum": [
+          "pass",
+          "fail",
+          "inconclusive"
+        ],
+        "title": "Verdict",
+        "type": "string"
+      },
+      "weaker_sufficient_confirmed": {
+        "default": false,
+        "title": "Weaker Sufficient Confirmed",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "proposal_id",
+      "verdict",
+      "concise_feedback"
+    ],
+    "title": "AssumptionChallengeReview",
+    "type": "object"
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "qualified_name": "mathproofmesh.schemas.NegativeAnalogyRecord",
+  "schema": {
+    "$defs": {
+      "InspirationMechanism": {
+        "enum": [
+          "representation_switch",
+          "structural_analogy",
+          "auxiliary_construction",
+          "invariant_hypothesis",
+          "reverse_goal_analysis",
+          "bridge_lemma",
+          "surprise_exploration",
+          "meta_replan",
+          "inspiration_composition"
+        ],
+        "title": "InspirationMechanism",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "distinguishing_conditions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Distinguishing Conditions",
+        "type": "array"
+      },
+      "failure_reason": {
+        "title": "Failure Reason",
+        "type": "string"
+      },
+      "mechanism": {
+        "$ref": "#/$defs/InspirationMechanism"
+      },
+      "negative": {
+        "const": true,
+        "default": true,
+        "title": "Negative",
+        "type": "boolean"
+      },
+      "problem_hash": {
+        "title": "Problem Hash",
+        "type": "string"
+      },
+      "proposal_id": {
+        "title": "Proposal Id",
+        "type": "string"
+      },
+      "record_id": {
+        "title": "Record Id",
+        "type": "string"
+      },
+      "round_index": {
+        "minimum": 0,
+        "title": "Round Index",
+        "type": "integer"
+      },
+      "source_record_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Record Id"
+      }
+    },
+    "required": [
+      "record_id",
+      "proposal_id",
+      "problem_hash",
+      "mechanism",
+      "failure_reason",
+      "round_index"
+    ],
+    "title": "NegativeAnalogyRecord",
+    "type": "object"
+  }
+}

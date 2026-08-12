@@ -1,0 +1,95 @@
+{
+  "qualified_name": "mathproofmesh.schemas.SurpriseMutationDirective",
+  "schema": {
+    "additionalProperties": false,
+    "description": "A deterministic, replayable creative mutation contract.",
+    "properties": {
+      "deterministic": {
+        "const": true,
+        "default": true,
+        "title": "Deterministic",
+        "type": "boolean"
+      },
+      "directive_id": {
+        "title": "Directive Id",
+        "type": "string"
+      },
+      "fast_failure_tests": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Fast Failure Tests",
+        "type": "array"
+      },
+      "generated_obligations": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Generated Obligations",
+        "type": "array"
+      },
+      "known_failure_modes": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Known Failure Modes",
+        "type": "array"
+      },
+      "operator_id": {
+        "title": "Operator Id",
+        "type": "string"
+      },
+      "preconditions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Preconditions",
+        "type": "array"
+      },
+      "reversibility_requirements": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Reversibility Requirements",
+        "type": "array"
+      },
+      "seed": {
+        "minimum": 0,
+        "title": "Seed",
+        "type": "integer"
+      },
+      "suggested_tools": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Suggested Tools",
+        "type": "array"
+      },
+      "target_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Obligation Ids",
+        "type": "array"
+      },
+      "transformation": {
+        "title": "Transformation",
+        "type": "string"
+      }
+    },
+    "required": [
+      "directive_id",
+      "operator_id",
+      "seed",
+      "target_obligation_ids",
+      "transformation",
+      "preconditions",
+      "generated_obligations",
+      "reversibility_requirements",
+      "fast_failure_tests",
+      "known_failure_modes"
+    ],
+    "title": "SurpriseMutationDirective",
+    "type": "object"
+  }
+}

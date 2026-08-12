@@ -1,0 +1,158 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.MetaPivotState",
+  "schema": {
+    "$defs": {
+      "MetaPivotStatus": {
+        "enum": [
+          "none",
+          "requested",
+          "admitted",
+          "executing",
+          "executed",
+          "evaluated",
+          "failed"
+        ],
+        "title": "MetaPivotStatus",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "action_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Action Id"
+      },
+      "changed_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Changed Route Ids",
+        "type": "array"
+      },
+      "created_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Created Route Ids",
+        "type": "array"
+      },
+      "evaluated_round": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Evaluated Round"
+      },
+      "executed_round": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Executed Round"
+      },
+      "failure_reason": {
+        "default": "",
+        "title": "Failure Reason",
+        "type": "string"
+      },
+      "new_counterexample_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "New Counterexample Ids",
+        "type": "array"
+      },
+      "new_task_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "New Task Ids",
+        "type": "array"
+      },
+      "no_progress_after_pivot": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "No Progress After Pivot"
+      },
+      "pivot_id": {
+        "title": "Pivot Id",
+        "type": "string"
+      },
+      "requested_mechanisms": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Requested Mechanisms",
+        "type": "array"
+      },
+      "result_fact_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Result Fact Ids",
+        "type": "array"
+      },
+      "result_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Result Obligation Ids",
+        "type": "array"
+      },
+      "revised_strategy_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Revised Strategy Ids",
+        "type": "array"
+      },
+      "source_stagnation_signature": {
+        "title": "Source Stagnation Signature",
+        "type": "string"
+      },
+      "status": {
+        "$ref": "#/$defs/MetaPivotStatus",
+        "default": "none"
+      },
+      "trigger_round": {
+        "minimum": 0,
+        "title": "Trigger Round",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "trigger_round",
+      "source_stagnation_signature",
+      "requested_mechanisms"
+    ],
+    "title": "MetaPivotState",
+    "type": "object"
+  }
+}

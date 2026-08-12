@@ -1,0 +1,89 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ComputationCertificate",
+  "schema": {
+    "$defs": {
+      "EvidenceType": {
+        "enum": [
+          "unverified_idea",
+          "numerical_heuristic",
+          "bounded_experiment",
+          "exact_symbolic_identity",
+          "complete_finite_enumeration",
+          "sat_smt_certificate",
+          "counterexample",
+          "natural_proof_audited",
+          "formal_kernel_certificate"
+        ],
+        "title": "EvidenceType",
+        "type": "string"
+      },
+      "ExperimentOutcome": {
+        "enum": [
+          "not_refuted",
+          "counterexample_found",
+          "certified",
+          "inconclusive",
+          "error"
+        ],
+        "title": "ExperimentOutcome",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "artifact_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Artifact Refs",
+        "type": "array"
+      },
+      "certificate_id": {
+        "title": "Certificate Id",
+        "type": "string"
+      },
+      "evidence_type": {
+        "$ref": "#/$defs/EvidenceType"
+      },
+      "experiment_id": {
+        "title": "Experiment Id",
+        "type": "string"
+      },
+      "independently_verified": {
+        "default": false,
+        "title": "Independently Verified",
+        "type": "boolean"
+      },
+      "outcome": {
+        "$ref": "#/$defs/ExperimentOutcome"
+      },
+      "request_hash": {
+        "title": "Request Hash",
+        "type": "string"
+      },
+      "result_hash": {
+        "title": "Result Hash",
+        "type": "string"
+      },
+      "scope": {
+        "additionalProperties": true,
+        "title": "Scope",
+        "type": "object"
+      },
+      "target_claim": {
+        "title": "Target Claim",
+        "type": "string"
+      }
+    },
+    "required": [
+      "experiment_id",
+      "request_hash",
+      "result_hash",
+      "target_claim",
+      "outcome",
+      "evidence_type"
+    ],
+    "title": "ComputationCertificate",
+    "type": "object"
+  }
+}

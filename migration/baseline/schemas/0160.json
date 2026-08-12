@@ -1,0 +1,73 @@
+{
+  "qualified_name": "mathproofmesh.schemas.FormalCertificateRef",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "artifact_ref": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Artifact Ref"
+      },
+      "backend": {
+        "title": "Backend",
+        "type": "string"
+      },
+      "certificate_id": {
+        "title": "Certificate Id",
+        "type": "string"
+      },
+      "compiler_output_hash": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Compiler Output Hash"
+      },
+      "diagnostics": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Diagnostics",
+        "type": "array"
+      },
+      "packet_id": {
+        "title": "Packet Id",
+        "type": "string"
+      },
+      "statement_hash": {
+        "title": "Statement Hash",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "verified",
+          "failed",
+          "pending",
+          "unavailable"
+        ],
+        "title": "Status",
+        "type": "string"
+      }
+    },
+    "required": [
+      "packet_id",
+      "backend",
+      "status",
+      "statement_hash"
+    ],
+    "title": "FormalCertificateRef",
+    "type": "object"
+  }
+}

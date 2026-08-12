@@ -1,0 +1,34 @@
+﻿{
+    "schema_version":  "1.0",
+    "phase":  "17",
+    "generated_at_utc":  "2026-07-31T09:17:33.8412602Z",
+    "result":  "PASS",
+    "packaged_mock_solve":  {
+                                "launcher":  "target/release/JavaMathProofMesh-0.8.0/bin/mathproofmesh.cmd",
+                                "run_id":  "phase17-release-demo",
+                                "status":  "completed",
+                                "latest_event_id":  10,
+                                "completed_route_ids":  [
+                                                            "route-1"
+                                                        ],
+                                "verified_local_claim_ids":  [
+                                                                 "claim-induction"
+                                                             ],
+                                "provider":  "Mock",
+                                "live_provider_calls":  0,
+                                "result":  "PASS"
+                            },
+    "old_run_resume":  {
+                           "scenario":  "old-run-import-and-resume",
+                           "terminal_action":  "RETURN_TERMINAL",
+                           "terminal_provider_calls_before_resume":  0,
+                           "active_action":  "RESUME_COMMITTED_CHECKPOINT",
+                           "active_checkpoint_id":  "checkpoint-1",
+                           "active_provider_calls_before_resume":  0,
+                           "legacy_only_claims_quarantined":  1,
+                           "source_writes":  0,
+                           "terminal_manifest_sha256":  "a5c1ab3884a78b4aa8d9fff0f49c96cabd45ec3085030286be21a8167803b1db",
+                           "active_manifest_sha256":  "f75dec90f3c4bd328c41ee7a0c2a62cba20f818e3cb4e42948a86d2df1b72390",
+                           "result":  "PASS"
+                       }
+}

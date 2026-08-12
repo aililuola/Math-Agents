@@ -1,0 +1,96 @@
+{
+  "qualified_name": "mathproofmesh.schemas.GoalNormalizationAssessment",
+  "schema": {
+    "$defs": {
+      "GoalInterpretationCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "statement": {
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "statement",
+          "confidence",
+          "rationale"
+        ],
+        "title": "GoalInterpretationCandidate",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "alternative_interpretations": {
+        "items": {
+          "$ref": "#/$defs/GoalInterpretationCandidate"
+        },
+        "title": "Alternative Interpretations",
+        "type": "array"
+      },
+      "ambiguity_reasons": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Ambiguity Reasons",
+        "type": "array"
+      },
+      "changes_mathematical_meaning": {
+        "title": "Changes Mathematical Meaning",
+        "type": "boolean"
+      },
+      "clarification_question": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Clarification Question"
+      },
+      "has_ambiguity": {
+        "title": "Has Ambiguity",
+        "type": "boolean"
+      },
+      "is_well_formed": {
+        "title": "Is Well Formed",
+        "type": "boolean"
+      },
+      "recommendation_confidence": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Recommendation Confidence",
+        "type": "number"
+      },
+      "recommended_statement": {
+        "minLength": 1,
+        "title": "Recommended Statement",
+        "type": "string"
+      }
+    },
+    "required": [
+      "has_ambiguity",
+      "is_well_formed",
+      "recommended_statement",
+      "recommendation_confidence",
+      "changes_mathematical_meaning"
+    ],
+    "title": "GoalNormalizationAssessment",
+    "type": "object"
+  }
+}

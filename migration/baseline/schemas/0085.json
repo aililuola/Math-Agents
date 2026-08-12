@@ -1,0 +1,280 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.ExecutableTaskRecord",
+  "schema": {
+    "$defs": {
+      "TaskStatus": {
+        "enum": [
+          "created",
+          "needs_rewrite",
+          "assigned",
+          "ready",
+          "running",
+          "completed",
+          "inconclusive",
+          "deferred",
+          "blocked",
+          "failed",
+          "expired"
+        ],
+        "title": "TaskStatus",
+        "type": "string"
+      },
+      "WakeCondition": {
+        "additionalProperties": false,
+        "properties": {
+          "condition_id": {
+            "title": "Condition Id",
+            "type": "string"
+          },
+          "earliest_round": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Earliest Round"
+          },
+          "earliest_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Earliest Time"
+          },
+          "kind": {
+            "$ref": "#/$defs/WakeConditionKind"
+          },
+          "satisfied": {
+            "default": false,
+            "title": "Satisfied",
+            "type": "boolean"
+          },
+          "satisfied_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Satisfied At"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Id"
+          }
+        },
+        "required": [
+          "condition_id",
+          "kind"
+        ],
+        "title": "WakeCondition",
+        "type": "object"
+      },
+      "WakeConditionKind": {
+        "enum": [
+          "provider_available",
+          "budget_available",
+          "dependency_fact_available",
+          "obligation_state_changed",
+          "reviewer_available",
+          "task_recompiled",
+          "user_intervention",
+          "config_changed",
+          "round_advanced"
+        ],
+        "title": "WakeConditionKind",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "assigned_agent_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Assigned Agent Id"
+      },
+      "created_round": {
+        "minimum": 0,
+        "title": "Created Round",
+        "type": "integer"
+      },
+      "expires_round": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expires Round"
+      },
+      "explicit_prompt_ref": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Explicit Prompt Ref"
+      },
+      "last_transition_round": {
+        "minimum": 0,
+        "title": "Last Transition Round",
+        "type": "integer"
+      },
+      "registered_handler": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Registered Handler"
+      },
+      "result_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Result Refs",
+        "type": "array"
+      },
+      "route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Route Ids",
+        "type": "array"
+      },
+      "status": {
+        "$ref": "#/$defs/TaskStatus"
+      },
+      "target_claim_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Claim Ids",
+        "type": "array"
+      },
+      "target_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Obligation Ids",
+        "type": "array"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      },
+      "task_kind": {
+        "enum": [
+          "countermodel",
+          "falsification",
+          "route_update",
+          "inspiration_review",
+          "meta_pivot_step",
+          "normalize_nodes",
+          "blueprint_review",
+          "repair_direct_target",
+          "edge_review",
+          "generate_plan",
+          "batch_repair",
+          "assumption_challenger"
+        ],
+        "title": "Task Kind",
+        "type": "string"
+      },
+      "terminal_reason": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Terminal Reason"
+      },
+      "transition_history": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Transition History",
+        "type": "array"
+      },
+      "typed_contract_ref": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Typed Contract Ref"
+      },
+      "verifies_target_claim": {
+        "const": false,
+        "default": false,
+        "title": "Verifies Target Claim",
+        "type": "boolean"
+      },
+      "wake_conditions": {
+        "items": {
+          "$ref": "#/$defs/WakeCondition"
+        },
+        "title": "Wake Conditions",
+        "type": "array"
+      }
+    },
+    "required": [
+      "task_id",
+      "task_kind",
+      "status",
+      "created_round",
+      "last_transition_round"
+    ],
+    "title": "ExecutableTaskRecord",
+    "type": "object"
+  }
+}

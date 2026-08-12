@@ -1,0 +1,57 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.BottleneckBridgeTask",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "cluster_id": {
+        "title": "Cluster Id",
+        "type": "string"
+      },
+      "member_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Member Obligation Ids",
+        "type": "array"
+      },
+      "required_action": {
+        "title": "Required Action",
+        "type": "string"
+      },
+      "route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Route Ids",
+        "type": "array"
+      },
+      "status": {
+        "default": "open",
+        "enum": [
+          "open",
+          "resolved",
+          "cancelled"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "target_obligation_id": {
+        "title": "Target Obligation Id",
+        "type": "string"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "cluster_id",
+      "target_obligation_id",
+      "member_obligation_ids",
+      "route_ids",
+      "required_action"
+    ],
+    "title": "BottleneckBridgeTask",
+    "type": "object"
+  }
+}

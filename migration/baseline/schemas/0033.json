@@ -1,0 +1,49 @@
+{
+  "qualified_name": "mathproofmesh.config.ScopeGuardControlConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "ambiguous_model_review": {
+        "default": true,
+        "title": "Ambiguous Model Review",
+        "type": "boolean"
+      },
+      "block_fact_promotion_on_open_scope_risk": {
+        "default": true,
+        "title": "Block Fact Promotion On Open Scope Risk",
+        "type": "boolean"
+      },
+      "block_obligation_close_on_scope_mismatch": {
+        "default": true,
+        "title": "Block Obligation Close On Scope Mismatch",
+        "type": "boolean"
+      },
+      "deterministic_first": {
+        "default": true,
+        "title": "Deterministic First",
+        "type": "boolean"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "max_countermodel_tasks_per_round": {
+        "default": 2,
+        "maximum": 16,
+        "minimum": 0,
+        "title": "Max Countermodel Tasks Per Round",
+        "type": "integer"
+      },
+      "risk_confidence_threshold": {
+        "default": 0.7,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Risk Confidence Threshold",
+        "type": "number"
+      }
+    },
+    "title": "ScopeGuardControlConfig",
+    "type": "object"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "qualified_name": "mathproofmesh.config.ConfigModel",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "ConfigModel",
+    "type": "object"
+  }
+}

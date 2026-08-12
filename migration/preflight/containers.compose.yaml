@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:?POSTGRES_IMAGE must be an immutable digest}
+    platform: linux/amd64
+    user: "999:999"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: 1.0
+    environment:
+      POSTGRES_USER: phase00
+      POSTGRES_PASSWORD: ${POSTGRES_PREFLIGHT_PASSWORD:?ephemeral password required}
+      POSTGRES_DB: phase00_preflight
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /run/postgresql:rw,nosuid,nodev,size=16m,uid=999,gid=999,mode=0770
+    volumes:
+      - type: bind
+        source: ${POSTGRES_PREFLIGHT_DATA:?target-local data path required}
+        target: /var/lib/postgresql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U phase00 -d phase00_preflight
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    stop_grace_period: 20s
+
+  temporal:
+    image: ${TEMPORAL_DEV_IMAGE:?TEMPORAL_DEV_IMAGE must be an immutable digest}
+    platform: linux/amd64
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 1.0
+    ports:
+      - "127.0.0.1:7233:7233"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    volumes:
+      - type: bind
+        source: ${TEMPORAL_PREFLIGHT_DATA:?target-local data path required}
+        target: /var/lib/temporal
+    command:
+      - server
+      - start-dev
+      - --ip
+      - 0.0.0.0
+      - --port
+      - "7233"
+      - --headless
+      - --db-filename
+      - /var/lib/temporal/temporal.db
+      - --namespace
+      - mathproofmesh
+      - --disable-config-file
+      - --disable-config-env
+      - --log-format
+      - json
+      - --log-level
+      - warn
+    healthcheck:
+      test:
+        - CMD
+        - temporal
+        - --disable-config-file
+        - --disable-config-env
+        - --address
+        - 127.0.0.1:7233
+        - operator
+        - cluster
+        - health
+      interval: 2s
+      timeout: 5s
+      retries: 45
+      start_period: 5s
+    stop_grace_period: 20s

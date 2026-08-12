@@ -1,0 +1,22 @@
+{
+  "qualified_name": "mathproofmesh.server.ResumeRequest",
+  "schema": {
+    "properties": {
+      "resume_mode": {
+        "default": "normal",
+        "title": "Resume Mode",
+        "type": "string"
+      },
+      "run_id": {
+        "minLength": 1,
+        "title": "Run Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "run_id"
+    ],
+    "title": "ResumeRequest",
+    "type": "object"
+  }
+}

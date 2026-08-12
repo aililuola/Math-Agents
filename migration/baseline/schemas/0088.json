@@ -1,0 +1,98 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.GoalAlignmentContractResult",
+  "schema": {
+    "$defs": {
+      "AlignmentExceptionCode": {
+        "enum": [
+          "direct_premise_closure",
+          "verified_graph_edge",
+          "exact_equivalence"
+        ],
+        "title": "AlignmentExceptionCode",
+        "type": "string"
+      },
+      "GateVerdict": {
+        "enum": [
+          "pass",
+          "block",
+          "rewrite",
+          "shadow_block"
+        ],
+        "title": "GateVerdict",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "contract_id": {
+        "title": "Contract Id",
+        "type": "string"
+      },
+      "countermodel_action_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Countermodel Action Id"
+      },
+      "exception_code": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AlignmentExceptionCode"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "exception_evidence_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Exception Evidence Ids",
+        "type": "array"
+      },
+      "final_verdict": {
+        "$ref": "#/$defs/GateVerdict"
+      },
+      "has_required_outline": {
+        "title": "Has Required Outline",
+        "type": "boolean"
+      },
+      "passed_min_confidence": {
+        "title": "Passed Min Confidence",
+        "type": "boolean"
+      },
+      "reasons": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Reasons",
+        "type": "array"
+      },
+      "subject_id": {
+        "title": "Subject Id",
+        "type": "string"
+      },
+      "unknown_relation_resolved": {
+        "title": "Unknown Relation Resolved",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "subject_id",
+      "passed_min_confidence",
+      "has_required_outline",
+      "unknown_relation_resolved",
+      "final_verdict"
+    ],
+    "title": "GoalAlignmentContractResult",
+    "type": "object"
+  }
+}

@@ -1,0 +1,3796 @@
+{
+  "qualified_name": "mathproofmesh.config.SystemConfig",
+  "schema": {
+    "$defs": {
+      "AgentCapabilityConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "first_error_accuracy_weight": {
+            "default": 0.25,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "First Error Accuracy Weight",
+            "type": "number"
+          },
+          "min_observations_before_trust_update": {
+            "default": 5,
+            "maximum": 10000,
+            "minimum": 1,
+            "title": "Min Observations Before Trust Update",
+            "type": "integer"
+          },
+          "mutation_benchmark_weight": {
+            "default": 0.3,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Mutation Benchmark Weight",
+            "type": "number"
+          },
+          "overturn_rate_penalty": {
+            "default": 0.2,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Overturn Rate Penalty",
+            "type": "number"
+          },
+          "recency_decay": {
+            "default": 0.98,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Recency Decay",
+            "type": "number"
+          },
+          "tool_agreement_weight": {
+            "default": 0.25,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Tool Agreement Weight",
+            "type": "number"
+          },
+          "use_self_reported_confidence": {
+            "default": false,
+            "title": "Use Self Reported Confidence",
+            "type": "boolean"
+          }
+        },
+        "title": "AgentCapabilityConfig",
+        "type": "object"
+      },
+      "AgentConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Api Key"
+          },
+          "api_key_env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Api Key Env"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Base Url"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "extra_headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Extra Headers",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "max_concurrency": {
+            "default": 1,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Max Concurrency",
+            "type": "integer"
+          },
+          "max_output_tokens": {
+            "default": 8192,
+            "maximum": 384000,
+            "minimum": 256,
+            "title": "Max Output Tokens",
+            "type": "integer"
+          },
+          "mock_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Mock Profile"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "pricing": {
+            "$ref": "#/$defs/PricingConfig"
+          },
+          "provider": {
+            "enum": [
+              "openai_compatible",
+              "deepseek",
+              "anthropic",
+              "gemini",
+              "mock"
+            ],
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_max_output_tokens": {
+            "default": 384000,
+            "maximum": 384000,
+            "minimum": 256,
+            "title": "Provider Max Output Tokens",
+            "type": "integer"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "enum": [
+                  "high",
+                  "max"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reasoning Effort"
+          },
+          "requests_per_minute": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requests Per Minute"
+          },
+          "roles": {
+            "items": {
+              "enum": [
+                "planner",
+                "explorer",
+                "summarizer",
+                "structural_verifier",
+                "detailed_verifier",
+                "meta_reviewer",
+                "synthesizer",
+                "final_verifier",
+                "experimenter",
+                "route_prover",
+                "route_skeptic",
+                "tool_specialist",
+                "route_referee",
+                "bridge_prover",
+                "conflict_resolver",
+                "counterexample_hunter",
+                "representation_switchboard",
+                "analogy_agent",
+                "construction_inventor",
+                "invariant_hypothesis_agent",
+                "reverse_goal_analyzer",
+                "meta_strategist",
+                "inspiration_referee",
+                "general"
+              ],
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "specialties": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Specialties",
+            "type": "array"
+          },
+          "streaming": {
+            "default": false,
+            "title": "Streaming",
+            "type": "boolean"
+          },
+          "temperature": {
+            "default": 0.2,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Temperature",
+            "type": "number"
+          },
+          "thinking_enabled": {
+            "default": false,
+            "title": "Thinking Enabled",
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "default": 180.0,
+            "maximum": 3600.0,
+            "minimum": 5.0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          },
+          "trust_prior": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Trust Prior",
+            "type": "number"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "model"
+        ],
+        "title": "AgentConfig",
+        "type": "object"
+      },
+      "BlueprintReviewControlConfig": {
+        "additionalProperties": false,
+        "description": "Hard bounds for route-admission review and repair work.",
+        "properties": {
+          "max_batch_repair_items": {
+            "default": 12,
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Max Batch Repair Items",
+            "type": "integer"
+          },
+          "max_nodes_per_batch": {
+            "default": 12,
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Max Nodes Per Batch",
+            "type": "integer"
+          },
+          "max_repair_rounds": {
+            "default": 2,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Max Repair Rounds",
+            "type": "integer"
+          },
+          "max_review_calls_per_round": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Max Review Calls Per Round",
+            "type": "integer"
+          }
+        },
+        "title": "BlueprintReviewControlConfig",
+        "type": "object"
+      },
+      "BottleneckControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "compression_interval_rounds": {
+            "default": 1,
+            "maximum": 16,
+            "minimum": 1,
+            "title": "Compression Interval Rounds",
+            "type": "integer"
+          },
+          "dominance_threshold": {
+            "default": 0.9,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Dominance Threshold",
+            "type": "number"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "equivalence_threshold": {
+            "default": 0.84,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Equivalence Threshold",
+            "type": "number"
+          },
+          "max_cluster_members": {
+            "default": 64,
+            "maximum": 1000,
+            "minimum": 2,
+            "title": "Max Cluster Members",
+            "type": "integer"
+          },
+          "min_open_growth_for_forced_compression": {
+            "default": 8,
+            "maximum": 1000,
+            "minimum": 1,
+            "title": "Min Open Growth For Forced Compression",
+            "type": "integer"
+          },
+          "mode": {
+            "default": "shadow",
+            "enum": [
+              "off",
+              "shadow",
+              "active"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "preserve_original_nodes": {
+            "default": true,
+            "title": "Preserve Original Nodes",
+            "type": "boolean"
+          }
+        },
+        "title": "BottleneckControlConfig",
+        "type": "object"
+      },
+      "BrokerConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "ambiguous_match_high": {
+            "default": 0.82,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Ambiguous Match High",
+            "type": "number"
+          },
+          "ambiguous_match_low": {
+            "default": 0.55,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Ambiguous Match Low",
+            "type": "number"
+          },
+          "bridge_detection": {
+            "default": true,
+            "title": "Bridge Detection",
+            "type": "boolean"
+          },
+          "bridge_similarity_threshold": {
+            "default": 0.78,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Bridge Similarity Threshold",
+            "type": "number"
+          },
+          "contradiction_detection": {
+            "default": true,
+            "title": "Contradiction Detection",
+            "type": "boolean"
+          },
+          "contradiction_similarity_threshold": {
+            "default": 0.82,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Contradiction Similarity Threshold",
+            "type": "number"
+          },
+          "deterministic_matching_first": {
+            "default": true,
+            "title": "Deterministic Matching First",
+            "type": "boolean"
+          },
+          "duplicate_route_detection": {
+            "default": true,
+            "title": "Duplicate Route Detection",
+            "type": "boolean"
+          },
+          "duplicate_strategy_threshold": {
+            "default": 0.84,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Duplicate Strategy Threshold",
+            "type": "number"
+          },
+          "max_bridge_tasks_per_round": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Max Bridge Tasks Per Round",
+            "type": "integer"
+          },
+          "max_conflict_tasks_per_round": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Max Conflict Tasks Per Round",
+            "type": "integer"
+          },
+          "min_routes_for_bridge": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 2,
+            "title": "Min Routes For Bridge",
+            "type": "integer"
+          },
+          "use_llm_matching_on_ambiguous": {
+            "default": true,
+            "title": "Use Llm Matching On Ambiguous",
+            "type": "boolean"
+          }
+        },
+        "title": "BrokerConfig",
+        "type": "object"
+      },
+      "BudgetConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "base_verifier_replicas": {
+            "default": 1,
+            "maximum": 8,
+            "minimum": 1,
+            "title": "Base Verifier Replicas",
+            "type": "integer"
+          },
+          "breadth_share": {
+            "default": 0.3,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Breadth Share",
+            "type": "number"
+          },
+          "candidates_to_verify": {
+            "default": 3,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Candidates To Verify",
+            "type": "integer"
+          },
+          "depth_share": {
+            "default": 0.35,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Depth Share",
+            "type": "number"
+          },
+          "hard_problem_call_multiplier": {
+            "default": 2.0,
+            "maximum": 8.0,
+            "minimum": 1.0,
+            "title": "Hard Problem Call Multiplier",
+            "type": "number"
+          },
+          "hard_problem_extra_rounds": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Hard Problem Extra Rounds",
+            "type": "integer"
+          },
+          "high_risk_threshold": {
+            "default": 0.45,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "High Risk Threshold",
+            "type": "number"
+          },
+          "high_risk_verifier_replicas": {
+            "default": 2,
+            "maximum": 8,
+            "minimum": 1,
+            "title": "High Risk Verifier Replicas",
+            "type": "integer"
+          },
+          "initial_paths": {
+            "default": 4,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Initial Paths",
+            "type": "integer"
+          },
+          "max_cost_usd": {
+            "anyOf": [
+              {
+                "minimum": 0.01,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Cost Usd"
+          },
+          "max_paths": {
+            "default": 8,
+            "maximum": 64,
+            "minimum": 1,
+            "title": "Max Paths",
+            "type": "integer"
+          },
+          "max_revisions": {
+            "default": 3,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Max Revisions",
+            "type": "integer"
+          },
+          "max_rounds": {
+            "default": 4,
+            "maximum": 64,
+            "minimum": 1,
+            "title": "Max Rounds",
+            "type": "integer"
+          },
+          "max_total_calls": {
+            "default": 48,
+            "maximum": 10000,
+            "minimum": 4,
+            "title": "Max Total Calls",
+            "type": "integer"
+          },
+          "max_total_tokens": {
+            "anyOf": [
+              {
+                "minimum": 1000,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Total Tokens"
+          },
+          "scale_budget_with_difficulty": {
+            "default": false,
+            "title": "Scale Budget With Difficulty",
+            "type": "boolean"
+          },
+          "strategies_to_generate": {
+            "default": 7,
+            "maximum": 64,
+            "minimum": 1,
+            "title": "Strategies To Generate",
+            "type": "integer"
+          },
+          "synthesis_share": {
+            "default": 0.1,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Synthesis Share",
+            "type": "number"
+          },
+          "synthesis_threshold": {
+            "default": 0.72,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Synthesis Threshold",
+            "type": "number"
+          },
+          "verification_pass_threshold": {
+            "default": 0.78,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Verification Pass Threshold",
+            "type": "number"
+          },
+          "verification_share": {
+            "default": 0.25,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Verification Share",
+            "type": "number"
+          }
+        },
+        "title": "BudgetConfig",
+        "type": "object"
+      },
+      "CommonModeControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "include_critical_claims": {
+            "default": true,
+            "title": "Include Critical Claims",
+            "type": "boolean"
+          },
+          "include_strategy_prerequisites": {
+            "default": true,
+            "title": "Include Strategy Prerequisites",
+            "type": "boolean"
+          },
+          "include_unverified_dependencies": {
+            "default": true,
+            "title": "Include Unverified Dependencies",
+            "type": "boolean"
+          },
+          "max_challengers_per_round": {
+            "default": 1,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Max Challengers Per Round",
+            "type": "integer"
+          },
+          "min_routes": {
+            "default": 3,
+            "maximum": 32,
+            "minimum": 2,
+            "title": "Min Routes",
+            "type": "integer"
+          },
+          "risk_threshold": {
+            "default": 0.6,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Risk Threshold",
+            "type": "number"
+          }
+        },
+        "title": "CommonModeControlConfig",
+        "type": "object"
+      },
+      "ComputationConfig": {
+        "additionalProperties": false,
+        "description": "Reasoning-first experiment policy, budgets, and sandbox controls.",
+        "properties": {
+          "bounded_typed_probe_fast_path": {
+            "default": true,
+            "title": "Bounded Typed Probe Fast Path",
+            "type": "boolean"
+          },
+          "bounded_typed_probe_max_cases": {
+            "default": 25000,
+            "maximum": 1000000,
+            "minimum": 1,
+            "title": "Bounded Typed Probe Max Cases",
+            "type": "integer"
+          },
+          "broad_search_after_stalled_rounds": {
+            "default": 1,
+            "maximum": 64,
+            "minimum": 0,
+            "title": "Broad Search After Stalled Rounds",
+            "type": "integer"
+          },
+          "broad_search_requires_meta_review": {
+            "default": true,
+            "title": "Broad Search Requires Meta Review",
+            "type": "boolean"
+          },
+          "cache_results": {
+            "default": true,
+            "title": "Cache Results",
+            "type": "boolean"
+          },
+          "contract_repair_max_output_tokens": {
+            "default": 8192,
+            "maximum": 32000,
+            "minimum": 256,
+            "title": "Contract Repair Max Output Tokens",
+            "type": "integer"
+          },
+          "critical_calculation_gate_enabled": {
+            "default": true,
+            "title": "Critical Calculation Gate Enabled",
+            "type": "boolean"
+          },
+          "critical_calculation_max_checks_per_artifact": {
+            "default": 8,
+            "maximum": 64,
+            "minimum": 1,
+            "title": "Critical Calculation Max Checks Per Artifact",
+            "type": "integer"
+          },
+          "critical_calculation_require_declarations": {
+            "default": true,
+            "title": "Critical Calculation Require Declarations",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "execute_planner_hints_immediately": {
+            "default": false,
+            "title": "Execute Planner Hints Immediately",
+            "type": "boolean"
+          },
+          "hard_experiments_per_path": {
+            "default": 6,
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Hard Experiments Per Path",
+            "type": "integer"
+          },
+          "max_cases_per_experiment": {
+            "default": 1000000,
+            "maximum": 100000000,
+            "minimum": 1,
+            "title": "Max Cases Per Experiment",
+            "type": "integer"
+          },
+          "max_compute_cycles_per_segment": {
+            "default": 1,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Max Compute Cycles Per Segment",
+            "type": "integer"
+          },
+          "max_contract_repairs_per_segment": {
+            "default": 1,
+            "maximum": 2,
+            "minimum": 0,
+            "title": "Max Contract Repairs Per Segment",
+            "type": "integer"
+          },
+          "max_output_chars": {
+            "default": 20000,
+            "maximum": 2000000,
+            "minimum": 256,
+            "title": "Max Output Chars",
+            "type": "integer"
+          },
+          "max_total_cpu_seconds": {
+            "default": 120.0,
+            "maximum": 86400.0,
+            "minimum": 0.1,
+            "title": "Max Total Cpu Seconds",
+            "type": "number"
+          },
+          "policy": {
+            "const": "reasoning_first",
+            "default": "reasoning_first",
+            "title": "Policy",
+            "type": "string"
+          },
+          "sandbox_cpus": {
+            "default": 1.0,
+            "maximum": 16.0,
+            "minimum": 0.1,
+            "title": "Sandbox Cpus",
+            "type": "number"
+          },
+          "sandbox_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sandbox Image"
+          },
+          "sandbox_memory_mb": {
+            "default": 256,
+            "maximum": 8192,
+            "minimum": 32,
+            "title": "Sandbox Memory Mb",
+            "type": "integer"
+          },
+          "sandbox_pids_limit": {
+            "default": 32,
+            "maximum": 1024,
+            "minimum": 4,
+            "title": "Sandbox Pids Limit",
+            "type": "integer"
+          },
+          "sandbox_timeout_seconds": {
+            "default": 20.0,
+            "maximum": 600.0,
+            "minimum": 0.1,
+            "title": "Sandbox Timeout Seconds",
+            "type": "number"
+          },
+          "sandboxed_python_enabled": {
+            "default": false,
+            "title": "Sandboxed Python Enabled",
+            "type": "boolean"
+          },
+          "soft_experiments_per_path": {
+            "default": 2,
+            "maximum": 100,
+            "minimum": 0,
+            "title": "Soft Experiments Per Path",
+            "type": "integer"
+          },
+          "targeted_falsification_fast_path": {
+            "default": true,
+            "title": "Targeted Falsification Fast Path",
+            "type": "boolean"
+          },
+          "typed_tools_enabled": {
+            "default": true,
+            "title": "Typed Tools Enabled",
+            "type": "boolean"
+          }
+        },
+        "title": "ComputationConfig",
+        "type": "object"
+      },
+      "ComputationPurpose": {
+        "enum": [
+          "falsify_claim",
+          "check_derived_identity",
+          "test_boundary_cases",
+          "verify_finite_reduction",
+          "validate_constructed_example",
+          "discover_pattern"
+        ],
+        "title": "ComputationPurpose",
+        "type": "string"
+      },
+      "ContinuationConfig": {
+        "additionalProperties": false,
+        "description": "Proof-step checkpointing, reconnect, and cross-agent failover controls.",
+        "properties": {
+          "allow_checkpoint_rollback": {
+            "default": true,
+            "title": "Allow Checkpoint Rollback",
+            "type": "boolean"
+          },
+          "allow_cross_agent_failover": {
+            "default": true,
+            "title": "Allow Cross Agent Failover",
+            "type": "boolean"
+          },
+          "checkpoint_pass_threshold": {
+            "default": 0.78,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Checkpoint Pass Threshold",
+            "type": "number"
+          },
+          "checkpoint_policy": {
+            "default": "verified_subgoal",
+            "enum": [
+              "verified_subgoal",
+              "verified_delta"
+            ],
+            "title": "Checkpoint Policy",
+            "type": "string"
+          },
+          "delta_verifier_replicas": {
+            "default": 1,
+            "maximum": 4,
+            "minimum": 1,
+            "title": "Delta Verifier Replicas",
+            "type": "integer"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_failover_agents": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Max Failover Agents",
+            "type": "integer"
+          },
+          "max_new_claims_per_call": {
+            "default": 3,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Max New Claims Per Call",
+            "type": "integer"
+          },
+          "max_new_steps_per_call": {
+            "default": 3,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Max New Steps Per Call",
+            "type": "integer"
+          },
+          "max_output_tokens_per_segment": {
+            "default": 12000,
+            "maximum": 384000,
+            "minimum": 512,
+            "title": "Max Output Tokens Per Segment",
+            "type": "integer"
+          },
+          "max_segments_per_path": {
+            "default": 12,
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Max Segments Per Path",
+            "type": "integer"
+          },
+          "post_failure_bottleneck_enabled": {
+            "default": true,
+            "title": "Post Failure Bottleneck Enabled",
+            "type": "boolean"
+          },
+          "post_failure_bottleneck_max_output_tokens": {
+            "default": 16000,
+            "maximum": 32000,
+            "minimum": 512,
+            "title": "Post Failure Bottleneck Max Output Tokens",
+            "type": "integer"
+          },
+          "post_failure_bottleneck_once_per_checkpoint": {
+            "default": true,
+            "title": "Post Failure Bottleneck Once Per Checkpoint",
+            "type": "boolean"
+          },
+          "post_failure_trigger_inspiration": {
+            "default": true,
+            "title": "Post Failure Trigger Inspiration",
+            "type": "boolean"
+          },
+          "process_resume_enabled": {
+            "default": true,
+            "title": "Process Resume Enabled",
+            "type": "boolean"
+          },
+          "resume_on_disconnect": {
+            "default": true,
+            "title": "Resume On Disconnect",
+            "type": "boolean"
+          },
+          "retain_rejected_deltas": {
+            "default": true,
+            "title": "Retain Rejected Deltas",
+            "type": "boolean"
+          },
+          "segments_per_explore_call": {
+            "default": 1,
+            "maximum": 8,
+            "minimum": 1,
+            "title": "Segments Per Explore Call",
+            "type": "integer"
+          },
+          "verify_each_delta": {
+            "default": true,
+            "title": "Verify Each Delta",
+            "type": "boolean"
+          }
+        },
+        "title": "ContinuationConfig",
+        "type": "object"
+      },
+      "ContinueGateControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_on_core_debt_reduced": {
+            "default": true,
+            "title": "Allow On Core Debt Reduced",
+            "type": "boolean"
+          },
+          "allow_on_core_obligation_closed": {
+            "default": true,
+            "title": "Allow On Core Obligation Closed",
+            "type": "boolean"
+          },
+          "allow_on_first_error_changed": {
+            "default": true,
+            "title": "Allow On First Error Changed",
+            "type": "boolean"
+          },
+          "allow_on_verified_bridge_gain": {
+            "default": true,
+            "title": "Allow On Verified Bridge Gain",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "force_blueprint_rewrite_after_block": {
+            "default": true,
+            "title": "Force Blueprint Rewrite After Block",
+            "type": "boolean"
+          },
+          "mode": {
+            "default": "shadow",
+            "enum": [
+              "off",
+              "shadow",
+              "active"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "no_core_progress_segments": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 1,
+            "title": "No Core Progress Segments",
+            "type": "integer"
+          },
+          "require_any_core_signal": {
+            "default": true,
+            "title": "Require Any Core Signal",
+            "type": "boolean"
+          }
+        },
+        "title": "ContinueGateControlConfig",
+        "type": "object"
+      },
+      "CoreDebtControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "auxiliary_weight": {
+            "default": 0.35,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Auxiliary Weight",
+            "type": "number"
+          },
+          "common_mode_weight": {
+            "default": 1.5,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Common Mode Weight",
+            "type": "number"
+          },
+          "core_bridge_weight": {
+            "default": 2.5,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Core Bridge Weight",
+            "type": "number"
+          },
+          "core_stagnation_rounds": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Core Stagnation Rounds",
+            "type": "integer"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "main_goal_weight": {
+            "default": 4.0,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Main Goal Weight",
+            "type": "number"
+          },
+          "necessary_only_weight": {
+            "default": 0.15,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Necessary Only Weight",
+            "type": "number"
+          },
+          "unresolved_scope_risk_weight": {
+            "default": 1.5,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Unresolved Scope Risk Weight",
+            "type": "number"
+          }
+        },
+        "title": "CoreDebtControlConfig",
+        "type": "object"
+      },
+      "CrossRouteConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "initial_isolation_rounds": {
+            "default": 1,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Initial Isolation Rounds",
+            "type": "integer"
+          },
+          "max_global_messages_per_round": {
+            "default": 24,
+            "maximum": 1024,
+            "minimum": 1,
+            "title": "Max Global Messages Per Round",
+            "type": "integer"
+          },
+          "max_messages_per_route_per_round": {
+            "default": 6,
+            "maximum": 128,
+            "minimum": 0,
+            "title": "Max Messages Per Route Per Round",
+            "type": "integer"
+          },
+          "max_neighbors_per_route": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Max Neighbors Per Route",
+            "type": "integer"
+          },
+          "message_ttl_rounds": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Message Ttl Rounds",
+            "type": "integer"
+          },
+          "share_counterexamples": {
+            "default": true,
+            "title": "Share Counterexamples",
+            "type": "boolean"
+          },
+          "share_failure_records": {
+            "default": true,
+            "title": "Share Failure Records",
+            "type": "boolean"
+          },
+          "share_open_obligations": {
+            "default": true,
+            "title": "Share Open Obligations",
+            "type": "boolean"
+          },
+          "share_unverified_insights": {
+            "default": false,
+            "title": "Share Unverified Insights",
+            "type": "boolean"
+          },
+          "share_verified_facts": {
+            "default": true,
+            "title": "Share Verified Facts",
+            "type": "boolean"
+          }
+        },
+        "title": "CrossRouteConfig",
+        "type": "object"
+      },
+      "DeepExplorationPolicyConfig": {
+        "additionalProperties": false,
+        "description": "Evidence-gated long reasoning without a global high-tier concurrency cap.",
+        "properties": {
+          "allow_local_bottleneck_pivot": {
+            "default": true,
+            "title": "Allow Local Bottleneck Pivot",
+            "type": "boolean"
+          },
+          "allow_parallel_distinct_signatures": {
+            "default": true,
+            "title": "Allow Parallel Distinct Signatures",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "high_tier_threshold_tokens": {
+            "default": 96000,
+            "maximum": 384000,
+            "minimum": 512,
+            "title": "High Tier Threshold Tokens",
+            "type": "integer"
+          },
+          "max_partial_repairs_per_signature": {
+            "default": 1,
+            "maximum": 4,
+            "minimum": 0,
+            "title": "Max Partial Repairs Per Signature",
+            "type": "integer"
+          },
+          "max_running_per_signature": {
+            "default": 1,
+            "maximum": 4,
+            "minimum": 1,
+            "title": "Max Running Per Signature",
+            "type": "integer"
+          },
+          "min_remaining_calls_for_128k": {
+            "default": 8,
+            "maximum": 1000,
+            "minimum": 1,
+            "title": "Min Remaining Calls For 128K",
+            "type": "integer"
+          },
+          "min_remaining_tokens_for_128k": {
+            "default": 256000,
+            "maximum": 1000000000,
+            "minimum": 128000,
+            "title": "Min Remaining Tokens For 128K",
+            "type": "integer"
+          },
+          "no_progress_high_tier_limit_per_signature": {
+            "default": 1,
+            "maximum": 8,
+            "minimum": 1,
+            "title": "No Progress High Tier Limit Per Signature",
+            "type": "integer"
+          },
+          "partial_repair_max_output_tokens": {
+            "default": 64000,
+            "maximum": 384000,
+            "minimum": 512,
+            "title": "Partial Repair Max Output Tokens",
+            "type": "integer"
+          },
+          "persist_across_resume": {
+            "default": true,
+            "title": "Persist Across Resume",
+            "type": "boolean"
+          },
+          "preserve_parent_verified_checkpoint": {
+            "default": true,
+            "title": "Preserve Parent Verified Checkpoint",
+            "type": "boolean"
+          },
+          "require_meta_approval_for_128k": {
+            "default": true,
+            "title": "Require Meta Approval For 128K",
+            "type": "boolean"
+          },
+          "require_novelty_review_for_pivot": {
+            "default": true,
+            "title": "Require Novelty Review For Pivot",
+            "type": "boolean"
+          },
+          "reset_on_referee_confirmed_mechanism_change": {
+            "default": true,
+            "title": "Reset On Referee Confirmed Mechanism Change",
+            "type": "boolean"
+          },
+          "reset_on_verified_checkpoint": {
+            "default": true,
+            "title": "Reset On Verified Checkpoint",
+            "type": "boolean"
+          },
+          "semantic_duplicate_threshold": {
+            "default": 0.86,
+            "maximum": 1.0,
+            "minimum": 0.5,
+            "title": "Semantic Duplicate Threshold",
+            "type": "number"
+          },
+          "tiers": {
+            "items": {
+              "$ref": "#/$defs/ExplorationTierPolicyConfig"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Tiers",
+            "type": "array"
+          }
+        },
+        "title": "DeepExplorationPolicyConfig",
+        "type": "object"
+      },
+      "ExplorationTierPolicyConfig": {
+        "additionalProperties": false,
+        "description": "One server-owned deep-exploration operating tier.",
+        "properties": {
+          "artifact_recovery_tokens": {
+            "maximum": 128000,
+            "minimum": 256,
+            "title": "Artifact Recovery Tokens",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "maximum": 384000,
+            "minimum": 512,
+            "title": "Output Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "output_tokens",
+          "artifact_recovery_tokens"
+        ],
+        "title": "ExplorationTierPolicyConfig",
+        "type": "object"
+      },
+      "FailureControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "ambiguous_model_review": {
+            "default": true,
+            "title": "Ambiguous Model Review",
+            "type": "boolean"
+          },
+          "bridge_failure_prefers_bridge_action": {
+            "default": true,
+            "title": "Bridge Failure Prefers Bridge Action",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "framing_failure_forces_reanchor": {
+            "default": true,
+            "title": "Framing Failure Forces Reanchor",
+            "type": "boolean"
+          },
+          "max_blueprint_rewrites_per_route": {
+            "default": 1,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Max Blueprint Rewrites Per Route",
+            "type": "integer"
+          },
+          "min_classification_confidence": {
+            "default": 0.7,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Min Classification Confidence",
+            "type": "number"
+          },
+          "plan_failure_blocks_local_deepen": {
+            "default": true,
+            "title": "Plan Failure Blocks Local Deepen",
+            "type": "boolean"
+          }
+        },
+        "title": "FailureControlConfig",
+        "type": "object"
+      },
+      "FalsificationFastLaneControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_sandboxed_python": {
+            "default": false,
+            "title": "Allow Sandboxed Python",
+            "type": "boolean"
+          },
+          "allowed_purposes": {
+            "items": {
+              "$ref": "#/$defs/ComputationPurpose"
+            },
+            "title": "Allowed Purposes",
+            "type": "array"
+          },
+          "auto_fact_promotion": {
+            "default": false,
+            "title": "Auto Fact Promotion",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "exact_arithmetic_only": {
+            "default": true,
+            "title": "Exact Arithmetic Only",
+            "type": "boolean"
+          },
+          "max_cases": {
+            "default": 100000,
+            "maximum": 10000000,
+            "minimum": 1,
+            "title": "Max Cases",
+            "type": "integer"
+          },
+          "max_memory_mb": {
+            "default": 256,
+            "maximum": 4096,
+            "minimum": 32,
+            "title": "Max Memory Mb",
+            "type": "integer"
+          },
+          "max_runtime_seconds": {
+            "default": 10.0,
+            "maximum": 120.0,
+            "minimum": 0.1,
+            "title": "Max Runtime Seconds",
+            "type": "number"
+          },
+          "max_tasks_per_round": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Max Tasks Per Round",
+            "type": "integer"
+          }
+        },
+        "title": "FalsificationFastLaneControlConfig",
+        "type": "object"
+      },
+      "FinalTopologyConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "blind_detailed_review": {
+            "default": true,
+            "title": "Blind Detailed Review",
+            "type": "boolean"
+          },
+          "blind_structural_review": {
+            "default": true,
+            "title": "Blind Structural Review",
+            "type": "boolean"
+          },
+          "freeze_graph_before_synthesis": {
+            "default": true,
+            "title": "Freeze Graph Before Synthesis",
+            "type": "boolean"
+          },
+          "remove_agent_identity": {
+            "default": true,
+            "title": "Remove Agent Identity",
+            "type": "boolean"
+          },
+          "remove_route_ranking": {
+            "default": true,
+            "title": "Remove Route Ranking",
+            "type": "boolean"
+          },
+          "remove_self_confidence": {
+            "default": true,
+            "title": "Remove Self Confidence",
+            "type": "boolean"
+          }
+        },
+        "title": "FinalTopologyConfig",
+        "type": "object"
+      },
+      "GoalAlignmentControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_strategy_rewrite_attempts": {
+            "default": 1,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Max Strategy Rewrite Attempts",
+            "type": "integer"
+          },
+          "min_alignment_confidence": {
+            "default": 0.72,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Min Alignment Confidence",
+            "type": "number"
+          },
+          "overstrength_penalty": {
+            "default": 0.25,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Overstrength Penalty",
+            "type": "number"
+          },
+          "require_implication_outline": {
+            "default": true,
+            "title": "Require Implication Outline",
+            "type": "boolean"
+          },
+          "require_target_obligation": {
+            "default": true,
+            "title": "Require Target Obligation",
+            "type": "boolean"
+          },
+          "run_countermodel_on_unknown_relation": {
+            "default": true,
+            "title": "Run Countermodel On Unknown Relation",
+            "type": "boolean"
+          }
+        },
+        "title": "GoalAlignmentControlConfig",
+        "type": "object"
+      },
+      "InductionControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_candidates_per_trigger": {
+            "default": 3,
+            "maximum": 16,
+            "minimum": 1,
+            "title": "Max Candidates Per Trigger",
+            "type": "integer"
+          },
+          "require_well_foundedness_statement": {
+            "default": true,
+            "title": "Require Well Foundedness Statement",
+            "type": "boolean"
+          },
+          "trigger_on_first_occurrence_barrier": {
+            "default": true,
+            "title": "Trigger On First Occurrence Barrier",
+            "type": "boolean"
+          },
+          "trigger_on_recursive_same_type_dependency": {
+            "default": true,
+            "title": "Trigger On Recursive Same Type Dependency",
+            "type": "boolean"
+          },
+          "trigger_on_repeated_feature": {
+            "default": true,
+            "title": "Trigger On Repeated Feature",
+            "type": "boolean"
+          }
+        },
+        "title": "InductionControlConfig",
+        "type": "object"
+      },
+      "InspirationConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "active_proposals_per_task": {
+            "default": 3,
+            "maximum": 16,
+            "minimum": 1,
+            "title": "Active Proposals Per Task",
+            "type": "integer"
+          },
+          "adaptive_mechanism_selection": {
+            "default": true,
+            "title": "Adaptive Mechanism Selection",
+            "type": "boolean"
+          },
+          "adaptive_min_exploration_rate": {
+            "default": 0.15,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Adaptive Min Exploration Rate",
+            "type": "number"
+          },
+          "adaptive_min_observations": {
+            "default": 1,
+            "maximum": 64,
+            "minimum": 0,
+            "title": "Adaptive Min Observations",
+            "type": "integer"
+          },
+          "adaptive_reward_call_cost": {
+            "default": 0.1,
+            "maximum": 8.0,
+            "minimum": 0.0,
+            "title": "Adaptive Reward Call Cost",
+            "type": "number"
+          },
+          "adaptive_reward_debt_weight": {
+            "default": 1.0,
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Adaptive Reward Debt Weight",
+            "type": "number"
+          },
+          "adaptive_reward_fact_weight": {
+            "default": 4.0,
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Adaptive Reward Fact Weight",
+            "type": "number"
+          },
+          "adaptive_reward_final_citation_weight": {
+            "default": 3.0,
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Adaptive Reward Final Citation Weight",
+            "type": "number"
+          },
+          "adaptive_reward_obligation_weight": {
+            "default": 1.0,
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Adaptive Reward Obligation Weight",
+            "type": "number"
+          },
+          "adaptive_reward_refutation_cost": {
+            "default": 1.0,
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Adaptive Reward Refutation Cost",
+            "type": "number"
+          },
+          "adaptive_reward_token_cost_per_100k": {
+            "default": 0.1,
+            "maximum": 8.0,
+            "minimum": 0.0,
+            "title": "Adaptive Reward Token Cost Per 100K",
+            "type": "number"
+          },
+          "adaptive_ucb_weight": {
+            "default": 0.75,
+            "maximum": 8.0,
+            "minimum": 0.0,
+            "title": "Adaptive Ucb Weight",
+            "type": "number"
+          },
+          "all_routes_failed_trigger": {
+            "default": true,
+            "title": "All Routes Failed Trigger",
+            "type": "boolean"
+          },
+          "allow_external_retrieval": {
+            "default": false,
+            "title": "Allow External Retrieval",
+            "type": "boolean"
+          },
+          "analogy_agent": {
+            "default": true,
+            "title": "Analogy Agent",
+            "type": "boolean"
+          },
+          "analogy_library_enabled": {
+            "default": true,
+            "title": "Analogy Library Enabled",
+            "type": "boolean"
+          },
+          "analogy_library_path": {
+            "default": "benchmarks/analogy_library.jsonl",
+            "title": "Analogy Library Path",
+            "type": "string"
+          },
+          "analogy_top_k": {
+            "default": 6,
+            "maximum": 64,
+            "minimum": 1,
+            "title": "Analogy Top K",
+            "type": "integer"
+          },
+          "auxiliary_construction_inventor": {
+            "default": true,
+            "title": "Auxiliary Construction Inventor",
+            "type": "boolean"
+          },
+          "bidirectional_frontier_enabled": {
+            "default": true,
+            "title": "Bidirectional Frontier Enabled",
+            "type": "boolean"
+          },
+          "bridge_lemma_generator": {
+            "default": true,
+            "title": "Bridge Lemma Generator",
+            "type": "boolean"
+          },
+          "cold_context_proposals_per_task": {
+            "default": 1,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Cold Context Proposals Per Task",
+            "type": "integer"
+          },
+          "composer_max_candidates_per_round": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Composer Max Candidates Per Round",
+            "type": "integer"
+          },
+          "composer_max_combined_cost": {
+            "default": 4,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Composer Max Combined Cost",
+            "type": "integer"
+          },
+          "composer_max_sources": {
+            "default": 2,
+            "maximum": 4,
+            "minimum": 2,
+            "title": "Composer Max Sources",
+            "type": "integer"
+          },
+          "composer_require_quick_falsification": {
+            "default": true,
+            "title": "Composer Require Quick Falsification",
+            "type": "boolean"
+          },
+          "controlled_surprise_mutation_enabled": {
+            "default": true,
+            "title": "Controlled Surprise Mutation Enabled",
+            "type": "boolean"
+          },
+          "cross_run_learning_enabled": {
+            "default": false,
+            "title": "Cross Run Learning Enabled",
+            "type": "boolean"
+          },
+          "cross_run_learning_path": {
+            "default": ".mathproofmesh/learning",
+            "title": "Cross Run Learning Path",
+            "type": "string"
+          },
+          "cross_run_max_experiences": {
+            "default": 2000,
+            "maximum": 100000,
+            "minimum": 0,
+            "title": "Cross Run Max Experiences",
+            "type": "integer"
+          },
+          "cross_run_max_negative_analogies": {
+            "default": 2000,
+            "maximum": 100000,
+            "minimum": 0,
+            "title": "Cross Run Max Negative Analogies",
+            "type": "integer"
+          },
+          "cross_run_max_outcomes": {
+            "default": 10000,
+            "maximum": 500000,
+            "minimum": 0,
+            "title": "Cross Run Max Outcomes",
+            "type": "integer"
+          },
+          "cross_run_require_final_citation": {
+            "default": true,
+            "title": "Cross Run Require Final Citation",
+            "type": "boolean"
+          },
+          "domain_operator_max_prompt_items": {
+            "default": 8,
+            "maximum": 64,
+            "minimum": 1,
+            "title": "Domain Operator Max Prompt Items",
+            "type": "integer"
+          },
+          "domain_operator_plugins_enabled": {
+            "default": true,
+            "title": "Domain Operator Plugins Enabled",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "experience_distillation_enabled": {
+            "default": true,
+            "title": "Experience Distillation Enabled",
+            "type": "boolean"
+          },
+          "final_repair_failure_trigger": {
+            "default": true,
+            "title": "Final Repair Failure Trigger",
+            "type": "boolean"
+          },
+          "frontier_max_backward_claims": {
+            "default": 8,
+            "maximum": 64,
+            "minimum": 1,
+            "title": "Frontier Max Backward Claims",
+            "type": "integer"
+          },
+          "frontier_max_bridge_candidates": {
+            "default": 3,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Frontier Max Bridge Candidates",
+            "type": "integer"
+          },
+          "frontier_max_forward_claims": {
+            "default": 8,
+            "maximum": 64,
+            "minimum": 1,
+            "title": "Frontier Max Forward Claims",
+            "type": "integer"
+          },
+          "frontier_min_candidate_overlap": {
+            "default": 0.35,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Frontier Min Candidate Overlap",
+            "type": "number"
+          },
+          "inspiration_composer_enabled": {
+            "default": true,
+            "title": "Inspiration Composer Enabled",
+            "type": "boolean"
+          },
+          "inspiration_context_max_chars": {
+            "default": 24000,
+            "maximum": 500000,
+            "minimum": 1000,
+            "title": "Inspiration Context Max Chars",
+            "type": "integer"
+          },
+          "invariant_hypothesis_agent": {
+            "default": true,
+            "title": "Invariant Hypothesis Agent",
+            "type": "boolean"
+          },
+          "max_consecutive_surprise_rejections": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Max Consecutive Surprise Rejections",
+            "type": "integer"
+          },
+          "max_distilled_experiences": {
+            "default": 256,
+            "maximum": 10000,
+            "minimum": 0,
+            "title": "Max Distilled Experiences",
+            "type": "integer"
+          },
+          "max_inspiration_tasks_per_round": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Max Inspiration Tasks Per Round",
+            "type": "integer"
+          },
+          "max_materialized_proposals_per_trigger": {
+            "default": 1,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Max Materialized Proposals Per Trigger",
+            "type": "integer"
+          },
+          "max_negative_analogy_records": {
+            "default": 256,
+            "maximum": 10000,
+            "minimum": 0,
+            "title": "Max Negative Analogy Records",
+            "type": "integer"
+          },
+          "max_new_routes_per_trigger": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Max New Routes Per Trigger",
+            "type": "integer"
+          },
+          "max_proposals_per_task": {
+            "default": 3,
+            "maximum": 16,
+            "minimum": 1,
+            "title": "Max Proposals Per Task",
+            "type": "integer"
+          },
+          "max_reviewed_proposals_per_task": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 1,
+            "title": "Max Reviewed Proposals Per Task",
+            "type": "integer"
+          },
+          "max_single_agent_proposals_per_task": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 1,
+            "title": "Max Single Agent Proposals Per Task",
+            "type": "integer"
+          },
+          "mechanism_duplicate_threshold": {
+            "default": 0.86,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Mechanism Duplicate Threshold",
+            "type": "number"
+          },
+          "meta_allow_route_abandon": {
+            "default": true,
+            "title": "Meta Allow Route Abandon",
+            "type": "boolean"
+          },
+          "meta_directive_cooldown_rounds": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Meta Directive Cooldown Rounds",
+            "type": "integer"
+          },
+          "meta_directive_expiry_rounds": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Meta Directive Expiry Rounds",
+            "type": "integer"
+          },
+          "meta_directive_max_estimated_calls": {
+            "default": 8,
+            "maximum": 64,
+            "minimum": 0,
+            "title": "Meta Directive Max Estimated Calls",
+            "type": "integer"
+          },
+          "meta_directives_enabled": {
+            "default": true,
+            "title": "Meta Directives Enabled",
+            "type": "boolean"
+          },
+          "minimum_verified_gain": {
+            "default": 1,
+            "maximum": 128,
+            "minimum": 0,
+            "title": "Minimum Verified Gain",
+            "type": "integer"
+          },
+          "mode": {
+            "default": "shadow",
+            "enum": [
+              "off",
+              "shadow",
+              "active"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "negative_analogy_library_enabled": {
+            "default": true,
+            "title": "Negative Analogy Library Enabled",
+            "type": "boolean"
+          },
+          "novelty_mechanism_weight": {
+            "default": 0.24,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Novelty Mechanism Weight",
+            "type": "number"
+          },
+          "novelty_object_weight": {
+            "default": 0.16,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Novelty Object Weight",
+            "type": "number"
+          },
+          "novelty_obligation_weight": {
+            "default": 0.1,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Novelty Obligation Weight",
+            "type": "number"
+          },
+          "novelty_principle_weight": {
+            "default": 0.1,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Novelty Principle Weight",
+            "type": "number"
+          },
+          "novelty_representation_weight": {
+            "default": 0.24,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Novelty Representation Weight",
+            "type": "number"
+          },
+          "novelty_threshold": {
+            "default": 0.65,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Novelty Threshold",
+            "type": "number"
+          },
+          "novelty_transformation_weight": {
+            "default": 0.16,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Novelty Transformation Weight",
+            "type": "number"
+          },
+          "persistent_meta_strategist": {
+            "default": true,
+            "title": "Persistent Meta Strategist",
+            "type": "boolean"
+          },
+          "proof_debt_min_reduction": {
+            "default": 0.03,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Proof Debt Min Reduction",
+            "type": "number"
+          },
+          "proposals_enter_fact_memory": {
+            "default": false,
+            "title": "Proposals Enter Fact Memory",
+            "type": "boolean"
+          },
+          "proposer_generalist_roles": {
+            "items": {
+              "enum": [
+                "planner",
+                "explorer",
+                "summarizer",
+                "structural_verifier",
+                "detailed_verifier",
+                "meta_reviewer",
+                "synthesizer",
+                "final_verifier",
+                "experimenter",
+                "route_prover",
+                "route_skeptic",
+                "tool_specialist",
+                "route_referee",
+                "bridge_prover",
+                "conflict_resolver",
+                "counterexample_hunter",
+                "representation_switchboard",
+                "analogy_agent",
+                "construction_inventor",
+                "invariant_hypothesis_agent",
+                "reverse_goal_analyzer",
+                "meta_strategist",
+                "inspiration_referee",
+                "general"
+              ],
+              "type": "string"
+            },
+            "title": "Proposer Generalist Roles",
+            "type": "array"
+          },
+          "protect_finalization_reserve": {
+            "default": true,
+            "title": "Protect Finalization Reserve",
+            "type": "boolean"
+          },
+          "repeated_error_threshold": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Repeated Error Threshold",
+            "type": "integer"
+          },
+          "representation_switchboard": {
+            "default": true,
+            "title": "Representation Switchboard",
+            "type": "boolean"
+          },
+          "require_inspiration_referee": {
+            "default": true,
+            "title": "Require Inspiration Referee",
+            "type": "boolean"
+          },
+          "reverse_goal_analysis": {
+            "default": true,
+            "title": "Reverse Goal Analysis",
+            "type": "boolean"
+          },
+          "route_budget_share_trigger": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Route Budget Share Trigger",
+            "type": "number"
+          },
+          "route_redundancy_trigger": {
+            "default": 0.8,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Route Redundancy Trigger",
+            "type": "number"
+          },
+          "shared_bottleneck_trigger": {
+            "default": true,
+            "title": "Shared Bottleneck Trigger",
+            "type": "boolean"
+          },
+          "stagnation_rounds": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Stagnation Rounds",
+            "type": "integer"
+          },
+          "surprise_budget_fraction": {
+            "default": 0.08,
+            "maximum": 0.5,
+            "minimum": 0.0,
+            "title": "Surprise Budget Fraction",
+            "type": "number"
+          },
+          "surprise_budget_max_calls": {
+            "default": 32,
+            "maximum": 128,
+            "minimum": 0,
+            "title": "Surprise Budget Max Calls",
+            "type": "integer"
+          },
+          "surprise_budget_min_calls": {
+            "default": 10,
+            "maximum": 64,
+            "minimum": 0,
+            "title": "Surprise Budget Min Calls",
+            "type": "integer"
+          },
+          "surprise_cooldown_rounds": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Surprise Cooldown Rounds",
+            "type": "integer"
+          },
+          "surprise_exploration": {
+            "default": true,
+            "title": "Surprise Exploration",
+            "type": "boolean"
+          },
+          "warm_context_max_facts": {
+            "default": 5,
+            "maximum": 64,
+            "minimum": 0,
+            "title": "Warm Context Max Facts",
+            "type": "integer"
+          },
+          "warm_context_max_negatives": {
+            "default": 5,
+            "maximum": 64,
+            "minimum": 0,
+            "title": "Warm Context Max Negatives",
+            "type": "integer"
+          }
+        },
+        "title": "InspirationConfig",
+        "type": "object"
+      },
+      "MessageUtilityControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_rewrite_credit": {
+            "default": 0.4,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Blueprint Rewrite Credit",
+            "type": "number"
+          },
+          "broadcast_min_expected_core_debt_reduction": {
+            "default": 0.0,
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Broadcast Min Expected Core Debt Reduction",
+            "type": "number"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "final_citation_credit": {
+            "default": 1.0,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Final Citation Credit",
+            "type": "number"
+          },
+          "max_target_obligations": {
+            "default": 8,
+            "maximum": 64,
+            "minimum": 1,
+            "title": "Max Target Obligations",
+            "type": "integer"
+          },
+          "no_use_cooldown_threshold": {
+            "default": 3,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "No Use Cooldown Threshold",
+            "type": "integer"
+          },
+          "obligation_close_credit": {
+            "default": 0.8,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Obligation Close Credit",
+            "type": "number"
+          },
+          "refutation_credit": {
+            "default": 0.8,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Refutation Credit",
+            "type": "number"
+          },
+          "require_utility_contract_for_cross_route": {
+            "default": true,
+            "title": "Require Utility Contract For Cross Route",
+            "type": "boolean"
+          },
+          "utility_credit_horizon_rounds": {
+            "default": 3,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Utility Credit Horizon Rounds",
+            "type": "integer"
+          },
+          "verified_step_credit": {
+            "default": 0.5,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Verified Step Credit",
+            "type": "number"
+          }
+        },
+        "title": "MessageUtilityControlConfig",
+        "type": "object"
+      },
+      "NearMissControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_model_extraction_on_ambiguous": {
+            "default": true,
+            "title": "Allow Model Extraction On Ambiguous",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "extraction_requires_salvageable_component": {
+            "default": true,
+            "title": "Extraction Requires Salvageable Component",
+            "type": "boolean"
+          },
+          "max_records": {
+            "default": 512,
+            "maximum": 10000,
+            "minimum": 0,
+            "title": "Max Records",
+            "type": "integer"
+          },
+          "max_route_context_items": {
+            "default": 6,
+            "maximum": 64,
+            "minimum": 0,
+            "title": "Max Route Context Items",
+            "type": "integer"
+          },
+          "min_verifier_confidence": {
+            "default": 0.65,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Min Verifier Confidence",
+            "type": "number"
+          }
+        },
+        "title": "NearMissControlConfig",
+        "type": "object"
+      },
+      "PricingConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "input_per_million": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Input Per Million",
+            "type": "number"
+          },
+          "output_per_million": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Output Per Million",
+            "type": "number"
+          }
+        },
+        "title": "PricingConfig",
+        "type": "object"
+      },
+      "ProofControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "bottleneck": {
+            "$ref": "#/$defs/BottleneckControlConfig"
+          },
+          "common_mode": {
+            "$ref": "#/$defs/CommonModeControlConfig"
+          },
+          "continue_gate": {
+            "$ref": "#/$defs/ContinueGateControlConfig"
+          },
+          "core_debt": {
+            "$ref": "#/$defs/CoreDebtControlConfig"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "failure": {
+            "$ref": "#/$defs/FailureControlConfig"
+          },
+          "falsification_fast_lane": {
+            "$ref": "#/$defs/FalsificationFastLaneControlConfig"
+          },
+          "goal_alignment": {
+            "$ref": "#/$defs/GoalAlignmentControlConfig"
+          },
+          "induction": {
+            "$ref": "#/$defs/InductionControlConfig"
+          },
+          "message_utility": {
+            "$ref": "#/$defs/MessageUtilityControlConfig"
+          },
+          "mode": {
+            "default": "off",
+            "enum": [
+              "off",
+              "shadow",
+              "active"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "near_miss": {
+            "$ref": "#/$defs/NearMissControlConfig"
+          },
+          "realizer": {
+            "$ref": "#/$defs/RealizerControlConfig"
+          },
+          "route_admission": {
+            "$ref": "#/$defs/RouteAdmissionControlConfig"
+          },
+          "scope_guard": {
+            "$ref": "#/$defs/ScopeGuardControlConfig"
+          },
+          "strict_fail_closed": {
+            "default": true,
+            "title": "Strict Fail Closed",
+            "type": "boolean"
+          },
+          "synthesis_readiness": {
+            "$ref": "#/$defs/SynthesisReadinessControlConfig"
+          }
+        },
+        "title": "ProofControlConfig",
+        "type": "object"
+      },
+      "ProofGraphConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_cycles": {
+            "default": false,
+            "title": "Allow Cycles",
+            "type": "boolean"
+          },
+          "close_obligation_threshold": {
+            "default": 0.8,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Close Obligation Threshold",
+            "type": "number"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "freeze_before_synthesis": {
+            "default": true,
+            "title": "Freeze Before Synthesis",
+            "type": "boolean"
+          },
+          "max_edges": {
+            "default": 20000,
+            "maximum": 500000,
+            "minimum": 100,
+            "title": "Max Edges",
+            "type": "integer"
+          },
+          "max_nodes": {
+            "default": 5000,
+            "maximum": 100000,
+            "minimum": 100,
+            "title": "Max Nodes",
+            "type": "integer"
+          },
+          "mode": {
+            "default": "shadow",
+            "enum": [
+              "off",
+              "shadow",
+              "active"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "shared_bottleneck_min_routes": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 2,
+            "title": "Shared Bottleneck Min Routes",
+            "type": "integer"
+          }
+        },
+        "title": "ProofGraphConfig",
+        "type": "object"
+      },
+      "RealizerControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_realizer_repairs_per_structure": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Max Realizer Repairs Per Structure",
+            "type": "integer"
+          },
+          "preserve_abstract_proposal_after_candidate_failure": {
+            "default": true,
+            "title": "Preserve Abstract Proposal After Candidate Failure",
+            "type": "boolean"
+          },
+          "require_explicit_admissibility": {
+            "default": true,
+            "title": "Require Explicit Admissibility",
+            "type": "boolean"
+          },
+          "require_falsification_test": {
+            "default": true,
+            "title": "Require Falsification Test",
+            "type": "boolean"
+          },
+          "require_well_founded_descent": {
+            "default": true,
+            "title": "Require Well Founded Descent",
+            "type": "boolean"
+          }
+        },
+        "title": "RealizerControlConfig",
+        "type": "object"
+      },
+      "RouteAdmissionControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_review": {
+            "$ref": "#/$defs/BlueprintReviewControlConfig"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "fail_closed_if_all_rejected": {
+            "default": true,
+            "title": "Fail Closed If All Rejected",
+            "type": "boolean"
+          },
+          "max_regeneration_attempts": {
+            "default": 1,
+            "maximum": 4,
+            "minimum": 0,
+            "title": "Max Regeneration Attempts",
+            "type": "integer"
+          },
+          "max_semantic_repair_calls": {
+            "default": 2,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Max Semantic Repair Calls",
+            "type": "integer"
+          },
+          "min_goal_alignment": {
+            "default": 0.65,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Min Goal Alignment",
+            "type": "number"
+          },
+          "mode": {
+            "default": "shadow",
+            "enum": [
+              "off",
+              "shadow",
+              "active"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "reject_heuristic_only_as_main_route": {
+            "default": true,
+            "title": "Reject Heuristic Only As Main Route",
+            "type": "boolean"
+          },
+          "reject_necessary_only_as_main_route": {
+            "default": true,
+            "title": "Reject Necessary Only As Main Route",
+            "type": "boolean"
+          },
+          "require_falsification_test": {
+            "default": true,
+            "title": "Require Falsification Test",
+            "type": "boolean"
+          },
+          "require_mechanism_novelty": {
+            "default": true,
+            "title": "Require Mechanism Novelty",
+            "type": "boolean"
+          },
+          "semantic_repair_budget_fraction": {
+            "default": 0.1,
+            "maximum": 0.5,
+            "minimum": 0.0,
+            "title": "Semantic Repair Budget Fraction",
+            "type": "number"
+          },
+          "semantic_repair_enabled": {
+            "default": true,
+            "title": "Semantic Repair Enabled",
+            "type": "boolean"
+          }
+        },
+        "title": "RouteAdmissionControlConfig",
+        "type": "object"
+      },
+      "RouteTeamConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_role_reuse_after_stage": {
+            "default": true,
+            "title": "Allow Role Reuse After Stage",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "local_review_rounds": {
+            "default": 1,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Local Review Rounds",
+            "type": "integer"
+          },
+          "max_members_per_route": {
+            "default": 3,
+            "maximum": 8,
+            "minimum": 1,
+            "title": "Max Members Per Route",
+            "type": "integer"
+          },
+          "referee_must_differ_from_author": {
+            "default": true,
+            "title": "Referee Must Differ From Author",
+            "type": "boolean"
+          },
+          "referee_required_before_global_share": {
+            "default": true,
+            "title": "Referee Required Before Global Share",
+            "type": "boolean"
+          },
+          "skeptic_on_high_risk_only": {
+            "default": true,
+            "title": "Skeptic On High Risk Only",
+            "type": "boolean"
+          },
+          "skeptic_risk_threshold": {
+            "default": 0.55,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Skeptic Risk Threshold",
+            "type": "number"
+          },
+          "tool_agent_on_demand": {
+            "default": true,
+            "title": "Tool Agent On Demand",
+            "type": "boolean"
+          }
+        },
+        "title": "RouteTeamConfig",
+        "type": "object"
+      },
+      "RuntimeConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_heartbeat_seconds": {
+            "default": 20.0,
+            "maximum": 600.0,
+            "minimum": 0.0,
+            "title": "Activity Heartbeat Seconds",
+            "type": "number"
+          },
+          "activity_include_agent_calls": {
+            "default": true,
+            "title": "Activity Include Agent Calls",
+            "type": "boolean"
+          },
+          "activity_max_visible": {
+            "default": 18,
+            "maximum": 200,
+            "minimum": 4,
+            "title": "Activity Max Visible",
+            "type": "integer"
+          },
+          "activity_mode": {
+            "default": "compact",
+            "enum": [
+              "off",
+              "compact",
+              "detailed"
+            ],
+            "title": "Activity Mode",
+            "type": "string"
+          },
+          "activity_persist": {
+            "default": true,
+            "title": "Activity Persist",
+            "type": "boolean"
+          },
+          "agent_call_wall_timeout_seconds": {
+            "default": 7200.0,
+            "maximum": 7200.0,
+            "minimum": 5.0,
+            "title": "Agent Call Wall Timeout Seconds",
+            "type": "number"
+          },
+          "checkpoint_every_stage": {
+            "default": true,
+            "title": "Checkpoint Every Stage",
+            "type": "boolean"
+          },
+          "exploration_output_token_tiers": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Exploration Output Token Tiers",
+            "type": "array"
+          },
+          "json_repair_max_output_tokens": {
+            "default": 8192,
+            "maximum": 384000,
+            "minimum": 256,
+            "title": "Json Repair Max Output Tokens",
+            "type": "integer"
+          },
+          "log_level": {
+            "default": "INFO",
+            "enum": [
+              "DEBUG",
+              "INFO",
+              "WARNING",
+              "ERROR"
+            ],
+            "title": "Log Level",
+            "type": "string"
+          },
+          "max_parallel_calls": {
+            "default": 8,
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Max Parallel Calls",
+            "type": "integer"
+          },
+          "output_language": {
+            "default": "zh-CN",
+            "title": "Output Language",
+            "type": "string"
+          },
+          "parse_retries": {
+            "default": 1,
+            "maximum": 5,
+            "minimum": 0,
+            "title": "Parse Retries",
+            "type": "integer"
+          },
+          "project_root": {
+            "default": ".",
+            "title": "Project Root",
+            "type": "string"
+          },
+          "provider_circuit_breaker_enabled": {
+            "default": true,
+            "title": "Provider Circuit Breaker Enabled",
+            "type": "boolean"
+          },
+          "provider_circuit_cooldown_seconds": {
+            "default": 300.0,
+            "maximum": 86400.0,
+            "minimum": 1.0,
+            "title": "Provider Circuit Cooldown Seconds",
+            "type": "number"
+          },
+          "provider_circuit_failure_threshold": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 2,
+            "title": "Provider Circuit Failure Threshold",
+            "type": "integer"
+          },
+          "provider_circuit_window_seconds": {
+            "default": 90.0,
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Provider Circuit Window Seconds",
+            "type": "number"
+          },
+          "provider_shared_auth_http_statuses": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Provider Shared Auth Http Statuses",
+            "type": "array"
+          },
+          "provider_terminal_http_statuses": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Provider Terminal Http Statuses",
+            "type": "array"
+          },
+          "random_seed": {
+            "default": 20260719,
+            "title": "Random Seed",
+            "type": "integer"
+          },
+          "redact_prompts_in_console": {
+            "default": true,
+            "title": "Redact Prompts In Console",
+            "type": "boolean"
+          },
+          "request_retries": {
+            "default": 3,
+            "maximum": 10,
+            "minimum": 0,
+            "title": "Request Retries",
+            "type": "integer"
+          },
+          "run_root": {
+            "default": "runs",
+            "title": "Run Root",
+            "type": "string"
+          },
+          "save_raw_provider_responses": {
+            "default": true,
+            "title": "Save Raw Provider Responses",
+            "type": "boolean"
+          },
+          "stage_output_token_limits": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Stage Output Token Limits",
+            "type": "object"
+          },
+          "stage_thinking_modes": {
+            "additionalProperties": {
+              "enum": [
+                "agent_default",
+                "disabled",
+                "high",
+                "max",
+                "tiered"
+              ],
+              "type": "string"
+            },
+            "title": "Stage Thinking Modes",
+            "type": "object"
+          },
+          "stream_first_chunk_timeout_seconds": {
+            "default": 90.0,
+            "maximum": 3600.0,
+            "minimum": 5.0,
+            "title": "Stream First Chunk Timeout Seconds",
+            "type": "number"
+          },
+          "stream_idle_timeout_seconds": {
+            "default": 300.0,
+            "maximum": 3600.0,
+            "minimum": 5.0,
+            "title": "Stream Idle Timeout Seconds",
+            "type": "number"
+          },
+          "two_phase_output": {
+            "default": false,
+            "title": "Two Phase Output",
+            "type": "boolean"
+          },
+          "two_phase_stages": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Two Phase Stages",
+            "type": "array"
+          }
+        },
+        "title": "RuntimeConfig",
+        "type": "object"
+      },
+      "SchedulerConfig": {
+        "additionalProperties": false,
+        "description": "Adaptive breadth/depth policy and its budget-aware admission controls.",
+        "properties": {
+          "allow_strategy_failure_repair": {
+            "default": false,
+            "title": "Allow Strategy Failure Repair",
+            "type": "boolean"
+          },
+          "analogy_relevance_weight": {
+            "default": 0.12,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Analogy Relevance Weight",
+            "type": "number"
+          },
+          "auxiliary_fact_gain_weight": {
+            "default": 0.08,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Auxiliary Fact Gain Weight",
+            "type": "number"
+          },
+          "bridge_priority_weight": {
+            "default": 0.28,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Bridge Priority Weight",
+            "type": "number"
+          },
+          "common_mode_risk_penalty": {
+            "default": 0.3,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Common Mode Risk Penalty",
+            "type": "number"
+          },
+          "construction_relevance_weight": {
+            "default": 0.14,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Construction Relevance Weight",
+            "type": "number"
+          },
+          "contradiction_priority_weight": {
+            "default": 0.36,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Contradiction Priority Weight",
+            "type": "number"
+          },
+          "core_proof_debt_reduction_weight": {
+            "default": 0.32,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Core Proof Debt Reduction Weight",
+            "type": "number"
+          },
+          "core_verified_bridge_gain_weight": {
+            "default": 0.25,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Core Verified Bridge Gain Weight",
+            "type": "number"
+          },
+          "counterexample_priority_weight": {
+            "default": 0.42,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Counterexample Priority Weight",
+            "type": "number"
+          },
+          "diagnostic_candidate_limit": {
+            "default": 12,
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Diagnostic Candidate Limit",
+            "type": "integer"
+          },
+          "diagnostics_enabled": {
+            "default": true,
+            "title": "Diagnostics Enabled",
+            "type": "boolean"
+          },
+          "execution_failure_penalty": {
+            "default": 0.12,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Execution Failure Penalty",
+            "type": "number"
+          },
+          "execution_failure_progress_cap": {
+            "default": 0.45,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Execution Failure Progress Cap",
+            "type": "number"
+          },
+          "failed_path_cooldown_rounds": {
+            "default": 1,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Failed Path Cooldown Rounds",
+            "type": "integer"
+          },
+          "failed_progress_discount": {
+            "default": 0.1,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Failed Progress Discount",
+            "type": "number"
+          },
+          "finish_transition_buffer_calls": {
+            "default": 1,
+            "maximum": 64,
+            "minimum": 0,
+            "title": "Finish Transition Buffer Calls",
+            "type": "integer"
+          },
+          "force_widen_when_all_failed": {
+            "default": true,
+            "title": "Force Widen When All Failed",
+            "type": "boolean"
+          },
+          "global_no_progress_rounds_before_meta_pivot": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Global No Progress Rounds Before Meta Pivot",
+            "type": "integer"
+          },
+          "global_no_progress_rounds_before_stop": {
+            "default": 3,
+            "maximum": 64,
+            "minimum": 2,
+            "title": "Global No Progress Rounds Before Stop",
+            "type": "integer"
+          },
+          "goal_alignment_weight": {
+            "default": 0.18,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Goal Alignment Weight",
+            "type": "number"
+          },
+          "hard_stagnation_enabled": {
+            "default": true,
+            "title": "Hard Stagnation Enabled",
+            "type": "boolean"
+          },
+          "include_meta_review_in_cost": {
+            "default": true,
+            "title": "Include Meta Review In Cost",
+            "type": "boolean"
+          },
+          "include_post_action_verification_in_cost": {
+            "default": true,
+            "title": "Include Post Action Verification In Cost",
+            "type": "boolean"
+          },
+          "inspiration_novelty_weight": {
+            "default": 0.2,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Inspiration Novelty Weight",
+            "type": "number"
+          },
+          "max_actions_per_round": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 1,
+            "title": "Max Actions Per Round",
+            "type": "integer"
+          },
+          "max_execution_repairs_per_path": {
+            "default": 1,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Max Execution Repairs Per Path",
+            "type": "integer"
+          },
+          "max_normal_attempts_per_signature": {
+            "default": 1,
+            "maximum": 4,
+            "minimum": 1,
+            "title": "Max Normal Attempts Per Signature",
+            "type": "integer"
+          },
+          "max_plan_repairs_per_path": {
+            "default": 1,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Max Plan Repairs Per Path",
+            "type": "integer"
+          },
+          "max_repair_attempts_per_signature": {
+            "default": 1,
+            "maximum": 4,
+            "minimum": 0,
+            "title": "Max Repair Attempts Per Signature",
+            "type": "integer"
+          },
+          "max_unknown_failure_repairs_per_path": {
+            "default": 1,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Max Unknown Failure Repairs Per Path",
+            "type": "integer"
+          },
+          "meaningful_progress_threshold": {
+            "default": 0.04,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Meaningful Progress Threshold",
+            "type": "number"
+          },
+          "message_utility_weight": {
+            "default": 0.1,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Message Utility Weight",
+            "type": "number"
+          },
+          "meta_replan_weight": {
+            "default": 0.15,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Meta Replan Weight",
+            "type": "number"
+          },
+          "obligation_base_weight": {
+            "default": 1.0,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Obligation Base Weight",
+            "type": "number"
+          },
+          "obligation_centrality_weight": {
+            "default": 1.0,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Obligation Centrality Weight",
+            "type": "number"
+          },
+          "obligation_conflict_weight": {
+            "default": 0.75,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Obligation Conflict Weight",
+            "type": "number"
+          },
+          "obligation_dependency_weight": {
+            "default": 0.25,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Obligation Dependency Weight",
+            "type": "number"
+          },
+          "obligation_failure_weight": {
+            "default": 0.3,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Obligation Failure Weight",
+            "type": "number"
+          },
+          "obligation_main_goal_weight": {
+            "default": 2.0,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Obligation Main Goal Weight",
+            "type": "number"
+          },
+          "obligation_shared_route_weight": {
+            "default": 0.4,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Obligation Shared Route Weight",
+            "type": "number"
+          },
+          "plan_failure_penalty": {
+            "default": 0.3,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Plan Failure Penalty",
+            "type": "number"
+          },
+          "plan_failure_progress_cap": {
+            "default": 0.18,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Plan Failure Progress Cap",
+            "type": "number"
+          },
+          "proof_debt_reduction_weight": {
+            "default": 0.22,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Proof Debt Reduction Weight",
+            "type": "number"
+          },
+          "repeated_failure_penalty": {
+            "default": 0.15,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Repeated Failure Penalty",
+            "type": "number"
+          },
+          "representation_switch_weight": {
+            "default": 0.16,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Representation Switch Weight",
+            "type": "number"
+          },
+          "reserve_revision_cycles": {
+            "default": 1,
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Reserve Revision Cycles",
+            "type": "integer"
+          },
+          "route_redundancy_penalty": {
+            "default": 0.24,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Route Redundancy Penalty",
+            "type": "number"
+          },
+          "shared_bottleneck_weight": {
+            "default": 0.18,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Shared Bottleneck Weight",
+            "type": "number"
+          },
+          "strategy_failure_penalty": {
+            "default": 0.5,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Strategy Failure Penalty",
+            "type": "number"
+          },
+          "strategy_failure_progress_cap": {
+            "default": 0.05,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Strategy Failure Progress Cap",
+            "type": "number"
+          },
+          "structural_failure_penalty": {
+            "default": 0.3,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Structural Failure Penalty",
+            "type": "number"
+          },
+          "structural_failure_progress_cap": {
+            "default": 0.1,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Structural Failure Progress Cap",
+            "type": "number"
+          },
+          "surprise_exploration_weight": {
+            "default": 0.1,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Surprise Exploration Weight",
+            "type": "number"
+          },
+          "uncertain_progress_discount": {
+            "default": 0.4,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Uncertain Progress Discount",
+            "type": "number"
+          },
+          "unverified_progress_discount": {
+            "default": 0.55,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Unverified Progress Discount",
+            "type": "number"
+          },
+          "verification_call_safety_margin": {
+            "default": 0,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Verification Call Safety Margin",
+            "type": "integer"
+          },
+          "verified_fact_gain_weight": {
+            "default": 0.24,
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Verified Fact Gain Weight",
+            "type": "number"
+          },
+          "widen_paths_per_action": {
+            "default": 2,
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Widen Paths Per Action",
+            "type": "integer"
+          }
+        },
+        "title": "SchedulerConfig",
+        "type": "object"
+      },
+      "ScopeGuardControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "ambiguous_model_review": {
+            "default": true,
+            "title": "Ambiguous Model Review",
+            "type": "boolean"
+          },
+          "block_fact_promotion_on_open_scope_risk": {
+            "default": true,
+            "title": "Block Fact Promotion On Open Scope Risk",
+            "type": "boolean"
+          },
+          "block_obligation_close_on_scope_mismatch": {
+            "default": true,
+            "title": "Block Obligation Close On Scope Mismatch",
+            "type": "boolean"
+          },
+          "deterministic_first": {
+            "default": true,
+            "title": "Deterministic First",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_countermodel_tasks_per_round": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Max Countermodel Tasks Per Round",
+            "type": "integer"
+          },
+          "risk_confidence_threshold": {
+            "default": 0.7,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Risk Confidence Threshold",
+            "type": "number"
+          }
+        },
+        "title": "ScopeGuardControlConfig",
+        "type": "object"
+      },
+      "SynthesisReadinessControlConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "high_centrality_threshold": {
+            "default": 0.7,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "High Centrality Threshold",
+            "type": "number"
+          },
+          "max_open_auxiliary_obligations": {
+            "default": 16,
+            "maximum": 10000,
+            "minimum": 0,
+            "title": "Max Open Auxiliary Obligations",
+            "type": "integer"
+          },
+          "mode": {
+            "default": "shadow",
+            "enum": [
+              "off",
+              "shadow",
+              "active"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "produce_progress_report_when_blocked": {
+            "default": true,
+            "title": "Produce Progress Report When Blocked",
+            "type": "boolean"
+          },
+          "require_core_dependency_closure": {
+            "default": true,
+            "title": "Require Core Dependency Closure",
+            "type": "boolean"
+          },
+          "require_no_necessary_only_bridge_as_sufficient": {
+            "default": true,
+            "title": "Require No Necessary Only Bridge As Sufficient",
+            "type": "boolean"
+          },
+          "require_no_open_scope_risks": {
+            "default": true,
+            "title": "Require No Open Scope Risks",
+            "type": "boolean"
+          },
+          "require_no_unresolved_high_centrality_conflicts": {
+            "default": true,
+            "title": "Require No Unresolved High Centrality Conflicts",
+            "type": "boolean"
+          }
+        },
+        "title": "SynthesisReadinessControlConfig",
+        "type": "object"
+      },
+      "TopologyConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_capability": {
+            "$ref": "#/$defs/AgentCapabilityConfig"
+          },
+          "broker": {
+            "$ref": "#/$defs/BrokerConfig"
+          },
+          "conditional_cross_review": {
+            "default": true,
+            "title": "Conditional Cross Review",
+            "type": "boolean"
+          },
+          "cross_route": {
+            "$ref": "#/$defs/CrossRouteConfig"
+          },
+          "disagreement_threshold": {
+            "default": 0.35,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Disagreement Threshold",
+            "type": "number"
+          },
+          "final_stage": {
+            "$ref": "#/$defs/FinalTopologyConfig"
+          },
+          "inspiration": {
+            "$ref": "#/$defs/InspirationConfig"
+          },
+          "isolate_initial_exploration": {
+            "default": true,
+            "title": "Isolate Initial Exploration",
+            "type": "boolean"
+          },
+          "max_context_chars": {
+            "default": 90000,
+            "maximum": 2000000,
+            "minimum": 4000,
+            "title": "Max Context Chars",
+            "type": "integer"
+          },
+          "max_verified_claims_per_context": {
+            "default": 24,
+            "maximum": 500,
+            "minimum": 1,
+            "title": "Max Verified Claims Per Context",
+            "type": "integer"
+          },
+          "mode": {
+            "default": "legacy_sparse",
+            "enum": [
+              "legacy_sparse",
+              "hierarchical_sparse"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "neighbor_k": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 1,
+            "title": "Neighbor K",
+            "type": "integer"
+          },
+          "prefer_cross_provider_review": {
+            "default": true,
+            "title": "Prefer Cross Provider Review",
+            "type": "boolean"
+          },
+          "preserve_raw_evidence": {
+            "default": true,
+            "title": "Preserve Raw Evidence",
+            "type": "boolean"
+          },
+          "proof_control": {
+            "$ref": "#/$defs/ProofControlConfig"
+          },
+          "proof_graph": {
+            "$ref": "#/$defs/ProofGraphConfig"
+          },
+          "route_teams": {
+            "$ref": "#/$defs/RouteTeamConfig"
+          },
+          "strategy_similarity_threshold": {
+            "default": 0.72,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Strategy Similarity Threshold",
+            "type": "number"
+          },
+          "typed_communication": {
+            "$ref": "#/$defs/TypedCommunicationConfig"
+          },
+          "typed_memory": {
+            "$ref": "#/$defs/TypedMemoryConfig"
+          },
+          "validation_escalation": {
+            "$ref": "#/$defs/ValidationEscalationConfig"
+          }
+        },
+        "title": "TopologyConfig",
+        "type": "object"
+      },
+      "TypedCommunicationConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "exactly_once_delivery": {
+            "default": true,
+            "title": "Exactly Once Delivery",
+            "type": "boolean"
+          },
+          "max_assumptions": {
+            "default": 24,
+            "maximum": 256,
+            "minimum": 0,
+            "title": "Max Assumptions",
+            "type": "integer"
+          },
+          "max_dependencies": {
+            "default": 64,
+            "maximum": 1024,
+            "minimum": 0,
+            "title": "Max Dependencies",
+            "type": "integer"
+          },
+          "max_message_chars": {
+            "default": 24000,
+            "maximum": 500000,
+            "minimum": 1000,
+            "title": "Max Message Chars",
+            "type": "integer"
+          },
+          "require_content_hash": {
+            "default": true,
+            "title": "Require Content Hash",
+            "type": "boolean"
+          },
+          "require_problem_hash": {
+            "default": true,
+            "title": "Require Problem Hash",
+            "type": "boolean"
+          },
+          "require_receipt": {
+            "default": true,
+            "title": "Require Receipt",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "title": "TypedCommunicationConfig",
+        "type": "object"
+      },
+      "TypedMemoryConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "counterexample_is_global_negative": {
+            "default": true,
+            "title": "Counterexample Is Global Negative",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "fact_pass_threshold": {
+            "default": 0.8,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Fact Pass Threshold",
+            "type": "number"
+          },
+          "max_fact_context": {
+            "default": 32,
+            "maximum": 512,
+            "minimum": 1,
+            "title": "Max Fact Context",
+            "type": "integer"
+          },
+          "max_insight_context": {
+            "default": 16,
+            "maximum": 512,
+            "minimum": 0,
+            "title": "Max Insight Context",
+            "type": "integer"
+          },
+          "max_negative_context": {
+            "default": 16,
+            "maximum": 512,
+            "minimum": 0,
+            "title": "Max Negative Context",
+            "type": "integer"
+          },
+          "retain_expired_insights": {
+            "default": true,
+            "title": "Retain Expired Insights",
+            "type": "boolean"
+          },
+          "retain_rejected_claims": {
+            "default": true,
+            "title": "Retain Rejected Claims",
+            "type": "boolean"
+          },
+          "strict_fact_gate": {
+            "default": true,
+            "title": "Strict Fact Gate",
+            "type": "boolean"
+          }
+        },
+        "title": "TypedMemoryConfig",
+        "type": "object"
+      },
+      "ValidationEscalationConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "adversarial_prompt_review": {
+            "default": true,
+            "title": "Adversarial Prompt Review",
+            "type": "boolean"
+          },
+          "blind_same_model_review": {
+            "default": true,
+            "title": "Blind Same Model Review",
+            "type": "boolean"
+          },
+          "cross_provider_review": {
+            "default": false,
+            "title": "Cross Provider Review",
+            "type": "boolean"
+          },
+          "deterministic_checks_first": {
+            "default": true,
+            "title": "Deterministic Checks First",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "escalate_before_fact_promotion": {
+            "default": true,
+            "title": "Escalate Before Fact Promotion",
+            "type": "boolean"
+          },
+          "escalate_final_proof": {
+            "default": true,
+            "title": "Escalate Final Proof",
+            "type": "boolean"
+          },
+          "escalate_on_reviewer_disagreement": {
+            "default": true,
+            "title": "Escalate On Reviewer Disagreement",
+            "type": "boolean"
+          },
+          "high_risk_threshold": {
+            "default": 0.75,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "High Risk Threshold",
+            "type": "number"
+          },
+          "tool_or_formal_check_on_high_risk": {
+            "default": true,
+            "title": "Tool Or Formal Check On High Risk",
+            "type": "boolean"
+          }
+        },
+        "title": "ValidationEscalationConfig",
+        "type": "object"
+      },
+      "VerificationConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "detailed_only_after_structural_pass": {
+            "default": true,
+            "title": "Detailed Only After Structural Pass",
+            "type": "boolean"
+          },
+          "enable_lean": {
+            "default": false,
+            "title": "Enable Lean",
+            "type": "boolean"
+          },
+          "enable_numeric_counterexamples": {
+            "default": true,
+            "title": "Enable Numeric Counterexamples",
+            "type": "boolean"
+          },
+          "enable_sympy_tools": {
+            "default": true,
+            "title": "Enable Sympy Tools",
+            "type": "boolean"
+          },
+          "external_tool_timeout_seconds": {
+            "default": 20.0,
+            "maximum": 600.0,
+            "minimum": 1.0,
+            "title": "External Tool Timeout Seconds",
+            "type": "number"
+          },
+          "lean_command": {
+            "default": "lake env lean",
+            "title": "Lean Command",
+            "type": "string"
+          },
+          "lean_sandbox_cpus": {
+            "default": 1.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 8.0,
+            "title": "Lean Sandbox Cpus",
+            "type": "number"
+          },
+          "lean_sandbox_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Lean Sandbox Image"
+          },
+          "lean_sandbox_memory_mb": {
+            "default": 1024,
+            "maximum": 8192,
+            "minimum": 128,
+            "title": "Lean Sandbox Memory Mb",
+            "type": "integer"
+          },
+          "lean_sandbox_pids_limit": {
+            "default": 128,
+            "maximum": 1024,
+            "minimum": 16,
+            "title": "Lean Sandbox Pids Limit",
+            "type": "integer"
+          },
+          "lean_sandbox_required": {
+            "const": true,
+            "default": true,
+            "title": "Lean Sandbox Required",
+            "type": "boolean"
+          },
+          "require_first_error_step": {
+            "default": true,
+            "title": "Require First Error Step",
+            "type": "boolean"
+          },
+          "require_key_step_tagging": {
+            "default": true,
+            "title": "Require Key Step Tagging",
+            "type": "boolean"
+          },
+          "structural_first": {
+            "default": true,
+            "title": "Structural First",
+            "type": "boolean"
+          },
+          "verify_problem_integrity": {
+            "default": true,
+            "title": "Verify Problem Integrity",
+            "type": "boolean"
+          }
+        },
+        "title": "VerificationConfig",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "agents": {
+        "items": {
+          "$ref": "#/$defs/AgentConfig"
+        },
+        "title": "Agents",
+        "type": "array"
+      },
+      "budget": {
+        "$ref": "#/$defs/BudgetConfig"
+      },
+      "computation": {
+        "$ref": "#/$defs/ComputationConfig"
+      },
+      "continuation": {
+        "$ref": "#/$defs/ContinuationConfig"
+      },
+      "deep_exploration_policy": {
+        "$ref": "#/$defs/DeepExplorationPolicyConfig"
+      },
+      "runtime": {
+        "$ref": "#/$defs/RuntimeConfig"
+      },
+      "scheduler": {
+        "$ref": "#/$defs/SchedulerConfig"
+      },
+      "system_name": {
+        "default": "MathProofMesh",
+        "title": "System Name",
+        "type": "string"
+      },
+      "topology": {
+        "$ref": "#/$defs/TopologyConfig"
+      },
+      "verification": {
+        "$ref": "#/$defs/VerificationConfig"
+      }
+    },
+    "required": [
+      "agents"
+    ],
+    "title": "SystemConfig",
+    "type": "object"
+  }
+}

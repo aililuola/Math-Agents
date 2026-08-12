@@ -1,0 +1,44 @@
+{
+  "qualified_name": "mathproofmesh.desktop.app.StartRunRequest",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "problem": {
+        "maxLength": 2000000,
+        "minLength": 1,
+        "title": "Problem",
+        "type": "string"
+      },
+      "profile": {
+        "enum": [
+          "smoke",
+          "formal",
+          "active",
+          "proof_control_shadow",
+          "proof_control_active"
+        ],
+        "title": "Profile",
+        "type": "string"
+      },
+      "run_id": {
+        "anyOf": [
+          {
+            "maxLength": 160,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Run Id"
+      }
+    },
+    "required": [
+      "problem",
+      "profile"
+    ],
+    "title": "StartRunRequest",
+    "type": "object"
+  }
+}

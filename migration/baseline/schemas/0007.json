@@ -1,0 +1,167 @@
+{
+  "qualified_name": "mathproofmesh.config.BudgetConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "base_verifier_replicas": {
+        "default": 1,
+        "maximum": 8,
+        "minimum": 1,
+        "title": "Base Verifier Replicas",
+        "type": "integer"
+      },
+      "breadth_share": {
+        "default": 0.3,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Breadth Share",
+        "type": "number"
+      },
+      "candidates_to_verify": {
+        "default": 3,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Candidates To Verify",
+        "type": "integer"
+      },
+      "depth_share": {
+        "default": 0.35,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Depth Share",
+        "type": "number"
+      },
+      "hard_problem_call_multiplier": {
+        "default": 2.0,
+        "maximum": 8.0,
+        "minimum": 1.0,
+        "title": "Hard Problem Call Multiplier",
+        "type": "number"
+      },
+      "hard_problem_extra_rounds": {
+        "default": 2,
+        "maximum": 16,
+        "minimum": 0,
+        "title": "Hard Problem Extra Rounds",
+        "type": "integer"
+      },
+      "high_risk_threshold": {
+        "default": 0.45,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "High Risk Threshold",
+        "type": "number"
+      },
+      "high_risk_verifier_replicas": {
+        "default": 2,
+        "maximum": 8,
+        "minimum": 1,
+        "title": "High Risk Verifier Replicas",
+        "type": "integer"
+      },
+      "initial_paths": {
+        "default": 4,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Initial Paths",
+        "type": "integer"
+      },
+      "max_cost_usd": {
+        "anyOf": [
+          {
+            "minimum": 0.01,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Max Cost Usd"
+      },
+      "max_paths": {
+        "default": 8,
+        "maximum": 64,
+        "minimum": 1,
+        "title": "Max Paths",
+        "type": "integer"
+      },
+      "max_revisions": {
+        "default": 3,
+        "maximum": 32,
+        "minimum": 0,
+        "title": "Max Revisions",
+        "type": "integer"
+      },
+      "max_rounds": {
+        "default": 4,
+        "maximum": 64,
+        "minimum": 1,
+        "title": "Max Rounds",
+        "type": "integer"
+      },
+      "max_total_calls": {
+        "default": 48,
+        "maximum": 10000,
+        "minimum": 4,
+        "title": "Max Total Calls",
+        "type": "integer"
+      },
+      "max_total_tokens": {
+        "anyOf": [
+          {
+            "minimum": 1000,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Max Total Tokens"
+      },
+      "scale_budget_with_difficulty": {
+        "default": false,
+        "title": "Scale Budget With Difficulty",
+        "type": "boolean"
+      },
+      "strategies_to_generate": {
+        "default": 7,
+        "maximum": 64,
+        "minimum": 1,
+        "title": "Strategies To Generate",
+        "type": "integer"
+      },
+      "synthesis_share": {
+        "default": 0.1,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Synthesis Share",
+        "type": "number"
+      },
+      "synthesis_threshold": {
+        "default": 0.72,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Synthesis Threshold",
+        "type": "number"
+      },
+      "verification_pass_threshold": {
+        "default": 0.78,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Verification Pass Threshold",
+        "type": "number"
+      },
+      "verification_share": {
+        "default": 0.25,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Verification Share",
+        "type": "number"
+      }
+    },
+    "title": "BudgetConfig",
+    "type": "object"
+  }
+}

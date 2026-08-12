@@ -1,0 +1,96 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.RouteAdmissionRecord",
+  "schema": {
+    "$defs": {
+      "GateVerdict": {
+        "enum": [
+          "pass",
+          "block",
+          "rewrite",
+          "shadow_block"
+        ],
+        "title": "GateVerdict",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "alignment_contract_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Alignment Contract Id"
+      },
+      "alignment_score": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Alignment Score",
+        "type": "number"
+      },
+      "reasons": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Reasons",
+        "type": "array"
+      },
+      "record_id": {
+        "title": "Record Id",
+        "type": "string"
+      },
+      "rewrite_request_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rewrite Request Id"
+      },
+      "strategy_id": {
+        "title": "Strategy Id",
+        "type": "string"
+      },
+      "target_binding_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Target Binding Id"
+      },
+      "target_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Obligation Ids",
+        "type": "array"
+      },
+      "verdict": {
+        "$ref": "#/$defs/GateVerdict"
+      }
+    },
+    "required": [
+      "strategy_id",
+      "verdict",
+      "alignment_score",
+      "target_obligation_ids",
+      "reasons"
+    ],
+    "title": "RouteAdmissionRecord",
+    "type": "object"
+  }
+}

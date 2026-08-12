@@ -1,0 +1,255 @@
+{
+  "qualified_name": "mathproofmesh.config.AgentConfig",
+  "schema": {
+    "$defs": {
+      "PricingConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "input_per_million": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Input Per Million",
+            "type": "number"
+          },
+          "output_per_million": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Output Per Million",
+            "type": "number"
+          }
+        },
+        "title": "PricingConfig",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "api_key": {
+        "anyOf": [
+          {
+            "format": "password",
+            "type": "string",
+            "writeOnly": true
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Api Key"
+      },
+      "api_key_env": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Api Key Env"
+      },
+      "base_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Base Url"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "extra_headers": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Extra Headers",
+        "type": "object"
+      },
+      "id": {
+        "title": "Id",
+        "type": "string"
+      },
+      "max_concurrency": {
+        "default": 1,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Max Concurrency",
+        "type": "integer"
+      },
+      "max_output_tokens": {
+        "default": 8192,
+        "maximum": 384000,
+        "minimum": 256,
+        "title": "Max Output Tokens",
+        "type": "integer"
+      },
+      "mock_profile": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Mock Profile"
+      },
+      "model": {
+        "title": "Model",
+        "type": "string"
+      },
+      "pricing": {
+        "$ref": "#/$defs/PricingConfig"
+      },
+      "provider": {
+        "enum": [
+          "openai_compatible",
+          "deepseek",
+          "anthropic",
+          "gemini",
+          "mock"
+        ],
+        "title": "Provider",
+        "type": "string"
+      },
+      "provider_max_output_tokens": {
+        "default": 384000,
+        "maximum": 384000,
+        "minimum": 256,
+        "title": "Provider Max Output Tokens",
+        "type": "integer"
+      },
+      "reasoning_effort": {
+        "anyOf": [
+          {
+            "enum": [
+              "high",
+              "max"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Reasoning Effort"
+      },
+      "requests_per_minute": {
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Requests Per Minute"
+      },
+      "roles": {
+        "items": {
+          "enum": [
+            "planner",
+            "explorer",
+            "summarizer",
+            "structural_verifier",
+            "detailed_verifier",
+            "meta_reviewer",
+            "synthesizer",
+            "final_verifier",
+            "experimenter",
+            "route_prover",
+            "route_skeptic",
+            "tool_specialist",
+            "route_referee",
+            "bridge_prover",
+            "conflict_resolver",
+            "counterexample_hunter",
+            "representation_switchboard",
+            "analogy_agent",
+            "construction_inventor",
+            "invariant_hypothesis_agent",
+            "reverse_goal_analyzer",
+            "meta_strategist",
+            "inspiration_referee",
+            "general"
+          ],
+          "type": "string"
+        },
+        "title": "Roles",
+        "type": "array"
+      },
+      "specialties": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Specialties",
+        "type": "array"
+      },
+      "streaming": {
+        "default": false,
+        "title": "Streaming",
+        "type": "boolean"
+      },
+      "temperature": {
+        "default": 0.2,
+        "maximum": 2.0,
+        "minimum": 0.0,
+        "title": "Temperature",
+        "type": "number"
+      },
+      "thinking_enabled": {
+        "default": false,
+        "title": "Thinking Enabled",
+        "type": "boolean"
+      },
+      "timeout_seconds": {
+        "default": 180.0,
+        "maximum": 3600.0,
+        "minimum": 5.0,
+        "title": "Timeout Seconds",
+        "type": "number"
+      },
+      "trust_prior": {
+        "default": 0.5,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Trust Prior",
+        "type": "number"
+      },
+      "user_id": {
+        "anyOf": [
+          {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "User Id"
+      }
+    },
+    "required": [
+      "id",
+      "provider",
+      "model"
+    ],
+    "title": "AgentConfig",
+    "type": "object"
+  }
+}

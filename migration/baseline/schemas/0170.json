@@ -1,0 +1,128 @@
+{
+  "qualified_name": "mathproofmesh.schemas.InspirationAssignmentPlan",
+  "schema": {
+    "$defs": {
+      "InspirationContextMode": {
+        "enum": [
+          "local",
+          "warm",
+          "cold"
+        ],
+        "title": "InspirationContextMode",
+        "type": "string"
+      },
+      "InspirationMechanism": {
+        "enum": [
+          "representation_switch",
+          "structural_analogy",
+          "auxiliary_construction",
+          "invariant_hypothesis",
+          "reverse_goal_analysis",
+          "bridge_lemma",
+          "surprise_exploration",
+          "meta_replan",
+          "inspiration_composition"
+        ],
+        "title": "InspirationMechanism",
+        "type": "string"
+      },
+      "InspirationProposalAssignment": {
+        "additionalProperties": false,
+        "properties": {
+          "context_mode": {
+            "$ref": "#/$defs/InspirationContextMode"
+          },
+          "mechanism": {
+            "$ref": "#/$defs/InspirationMechanism"
+          },
+          "proposal_slot": {
+            "minimum": 0,
+            "title": "Proposal Slot",
+            "type": "integer"
+          },
+          "proposer_agent_id": {
+            "title": "Proposer Agent Id",
+            "type": "string"
+          },
+          "proposer_role": {
+            "title": "Proposer Role",
+            "type": "string"
+          },
+          "specialist_match": {
+            "title": "Specialist Match",
+            "type": "boolean"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "mechanism",
+          "proposal_slot",
+          "proposer_agent_id",
+          "proposer_role",
+          "context_mode",
+          "specialist_match"
+        ],
+        "title": "InspirationProposalAssignment",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "assignments": {
+        "items": {
+          "$ref": "#/$defs/InspirationProposalAssignment"
+        },
+        "title": "Assignments",
+        "type": "array"
+      },
+      "deferred_reason": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Deferred Reason"
+      },
+      "eligible_agent_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Eligible Agent Ids",
+        "type": "array"
+      },
+      "mechanism": {
+        "$ref": "#/$defs/InspirationMechanism"
+      },
+      "requested_proposals": {
+        "minimum": 0,
+        "title": "Requested Proposals",
+        "type": "integer"
+      },
+      "round_index": {
+        "minimum": 0,
+        "title": "Round Index",
+        "type": "integer"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "task_id",
+      "mechanism",
+      "round_index",
+      "requested_proposals"
+    ],
+    "title": "InspirationAssignmentPlan",
+    "type": "object"
+  }
+}

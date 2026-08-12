@@ -1,0 +1,232 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.InferenceRiskRecord",
+  "schema": {
+    "$defs": {
+      "InferenceRiskType": {
+        "enum": [
+          "necessary_to_sufficient",
+          "eventual_to_global",
+          "pointwise_to_uniform",
+          "finite_range_to_finite_state",
+          "image_inclusion_to_surjectivity",
+          "projection_to_original",
+          "local_to_global",
+          "existence_to_uniform_existence",
+          "pairwise_to_common_witness",
+          "empirical_to_universal",
+          "partial_property_to_total_property",
+          "nonempty_intersection_to_subset_containment",
+          "exists_component_to_all_components",
+          "some_witness_to_all_witnesses",
+          "coverage_to_exhaustiveness",
+          "at_least_one_to_only_from_set",
+          "wrong_direction",
+          "quantifier_swap",
+          "dependency_missing",
+          "scope_mismatch",
+          "ambiguous_semantic_leap"
+        ],
+        "title": "InferenceRiskType",
+        "type": "string"
+      },
+      "PropertyStrength": {
+        "enum": [
+          "existential",
+          "partial",
+          "universal",
+          "exhaustive"
+        ],
+        "title": "PropertyStrength",
+        "type": "string"
+      },
+      "RelationSignature": {
+        "additionalProperties": false,
+        "properties": {
+          "property_strength": {
+            "$ref": "#/$defs/PropertyStrength",
+            "default": "partial"
+          },
+          "semantic_role": {
+            "default": "unknown",
+            "enum": [
+              "property",
+              "component",
+              "witness",
+              "coverage",
+              "membership",
+              "unknown"
+            ],
+            "title": "Semantic Role",
+            "type": "string"
+          },
+          "set_relation": {
+            "$ref": "#/$defs/SetRelationKind",
+            "default": "unknown"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Id"
+          }
+        },
+        "title": "RelationSignature",
+        "type": "object"
+      },
+      "SetRelationKind": {
+        "enum": [
+          "nonempty_intersection",
+          "subset",
+          "superset",
+          "equality",
+          "cover",
+          "partition",
+          "unknown"
+        ],
+        "title": "SetRelationKind",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "conclusion_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Conclusion Id"
+      },
+      "conclusion_relation_signature": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RelationSignature"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "confidence": {
+        "default": 0.5,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "countermodel_task_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Countermodel Task Id"
+      },
+      "deterministic_rule_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Deterministic Rule Id"
+      },
+      "explanation": {
+        "title": "Explanation",
+        "type": "string"
+      },
+      "premise_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Premise Ids",
+        "type": "array"
+      },
+      "premise_relation_signatures": {
+        "items": {
+          "$ref": "#/$defs/RelationSignature"
+        },
+        "title": "Premise Relation Signatures",
+        "type": "array"
+      },
+      "recommended_control_action": {
+        "default": "create_countermodel",
+        "title": "Recommended Control Action",
+        "type": "string"
+      },
+      "required_bridge_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Required Bridge Obligation Ids",
+        "type": "array"
+      },
+      "risk_id": {
+        "title": "Risk Id",
+        "type": "string"
+      },
+      "risk_type": {
+        "$ref": "#/$defs/InferenceRiskType"
+      },
+      "route_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Route Id"
+      },
+      "source_issue_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Source Issue Ids",
+        "type": "array"
+      },
+      "status": {
+        "default": "open",
+        "enum": [
+          "open",
+          "cleared",
+          "refuted",
+          "accepted_with_bridge"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "subject_id": {
+        "title": "Subject Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "subject_id",
+      "risk_type",
+      "explanation"
+    ],
+    "title": "InferenceRiskRecord",
+    "type": "object"
+  }
+}

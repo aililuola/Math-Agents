@@ -1,0 +1,102 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.DependencyRef",
+  "schema": {
+    "$defs": {
+      "DependencyKind": {
+        "enum": [
+          "local_step",
+          "local_claim",
+          "global_fact",
+          "message",
+          "obligation",
+          "tool_certificate",
+          "formal_certificate",
+          "external_result"
+        ],
+        "title": "DependencyKind",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "content_hash": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Content Hash"
+      },
+      "kind": {
+        "$ref": "#/$defs/DependencyKind"
+      },
+      "kind_migration": {
+        "anyOf": [
+          {
+            "enum": [
+              "legacy_external_to_local_step",
+              "legacy_external_to_local_claim",
+              "legacy_external_to_external_result"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Kind Migration"
+      },
+      "source_attempt_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Attempt Id"
+      },
+      "source_delta_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Delta Id"
+      },
+      "source_route_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Route Id"
+      },
+      "target_id": {
+        "title": "Target Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "kind",
+      "target_id"
+    ],
+    "title": "DependencyRef",
+    "type": "object"
+  }
+}

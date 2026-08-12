@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.github.aililuola</groupId>
+    <artifactId>java-mathproofmesh-parent</artifactId>
+    <version>0.8.0</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>mathproofmesh-compatibility</artifactId>
+  <name>MathProofMesh Compatibility</name>
+  <description>Baseline readers, architecture gates, and migration-only tests.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>io.github.aililuola</groupId>
+      <artifactId>mathproofmesh-contracts</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.github.aililuola</groupId>
+      <artifactId>mathproofmesh-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.github.aililuola</groupId>
+      <artifactId>mathproofmesh-server</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.github.aililuola</groupId>
+      <artifactId>mathproofmesh-desktop</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.github.spotbugs</groupId>
+      <artifactId>spotbugs-annotations</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <directory>${maven.multiModuleProjectDirectory}/target/modules/mathproofmesh-compatibility</directory>
+  </build>
+</project>

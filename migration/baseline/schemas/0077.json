@@ -1,0 +1,113 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.CountermodelResult",
+  "schema": {
+    "$defs": {
+      "CountermodelOutcome": {
+        "enum": [
+          "counterexample_found",
+          "not_refuted_bounded",
+          "inconclusive",
+          "blocked"
+        ],
+        "title": "CountermodelOutcome",
+        "type": "string"
+      },
+      "WakeConditionKind": {
+        "enum": [
+          "provider_available",
+          "budget_available",
+          "dependency_fact_available",
+          "obligation_state_changed",
+          "reviewer_available",
+          "task_recompiled",
+          "user_intervention",
+          "config_changed",
+          "round_advanced"
+        ],
+        "title": "WakeConditionKind",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "challenger_agent_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Challenger Agent Id"
+      },
+      "completed_round": {
+        "minimum": 0,
+        "title": "Completed Round",
+        "type": "integer"
+      },
+      "detail": {
+        "title": "Detail",
+        "type": "string"
+      },
+      "evidence_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Evidence Refs",
+        "type": "array"
+      },
+      "independent_review_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Independent Review Refs",
+        "type": "array"
+      },
+      "outcome": {
+        "$ref": "#/$defs/CountermodelOutcome"
+      },
+      "result_id": {
+        "title": "Result Id",
+        "type": "string"
+      },
+      "reviewer_agent_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Reviewer Agent Id"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      },
+      "wake_condition": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/WakeConditionKind"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "result_id",
+      "task_id",
+      "outcome",
+      "detail",
+      "completed_round"
+    ],
+    "title": "CountermodelResult",
+    "type": "object"
+  }
+}

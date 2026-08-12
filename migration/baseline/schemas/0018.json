@@ -1,0 +1,79 @@
+{
+  "qualified_name": "mathproofmesh.config.FalsificationFastLaneControlConfig",
+  "schema": {
+    "$defs": {
+      "ComputationPurpose": {
+        "enum": [
+          "falsify_claim",
+          "check_derived_identity",
+          "test_boundary_cases",
+          "verify_finite_reduction",
+          "validate_constructed_example",
+          "discover_pattern"
+        ],
+        "title": "ComputationPurpose",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "allow_sandboxed_python": {
+        "default": false,
+        "title": "Allow Sandboxed Python",
+        "type": "boolean"
+      },
+      "allowed_purposes": {
+        "items": {
+          "$ref": "#/$defs/ComputationPurpose"
+        },
+        "title": "Allowed Purposes",
+        "type": "array"
+      },
+      "auto_fact_promotion": {
+        "default": false,
+        "title": "Auto Fact Promotion",
+        "type": "boolean"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "exact_arithmetic_only": {
+        "default": true,
+        "title": "Exact Arithmetic Only",
+        "type": "boolean"
+      },
+      "max_cases": {
+        "default": 100000,
+        "maximum": 10000000,
+        "minimum": 1,
+        "title": "Max Cases",
+        "type": "integer"
+      },
+      "max_memory_mb": {
+        "default": 256,
+        "maximum": 4096,
+        "minimum": 32,
+        "title": "Max Memory Mb",
+        "type": "integer"
+      },
+      "max_runtime_seconds": {
+        "default": 10.0,
+        "maximum": 120.0,
+        "minimum": 0.1,
+        "title": "Max Runtime Seconds",
+        "type": "number"
+      },
+      "max_tasks_per_round": {
+        "default": 2,
+        "maximum": 16,
+        "minimum": 0,
+        "title": "Max Tasks Per Round",
+        "type": "integer"
+      }
+    },
+    "title": "FalsificationFastLaneControlConfig",
+    "type": "object"
+  }
+}

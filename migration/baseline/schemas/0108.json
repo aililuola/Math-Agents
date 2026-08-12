@@ -1,0 +1,68 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.RelationSignature",
+  "schema": {
+    "$defs": {
+      "PropertyStrength": {
+        "enum": [
+          "existential",
+          "partial",
+          "universal",
+          "exhaustive"
+        ],
+        "title": "PropertyStrength",
+        "type": "string"
+      },
+      "SetRelationKind": {
+        "enum": [
+          "nonempty_intersection",
+          "subset",
+          "superset",
+          "equality",
+          "cover",
+          "partition",
+          "unknown"
+        ],
+        "title": "SetRelationKind",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "property_strength": {
+        "$ref": "#/$defs/PropertyStrength",
+        "default": "partial"
+      },
+      "semantic_role": {
+        "default": "unknown",
+        "enum": [
+          "property",
+          "component",
+          "witness",
+          "coverage",
+          "membership",
+          "unknown"
+        ],
+        "title": "Semantic Role",
+        "type": "string"
+      },
+      "set_relation": {
+        "$ref": "#/$defs/SetRelationKind",
+        "default": "unknown"
+      },
+      "source_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Id"
+      }
+    },
+    "title": "RelationSignature",
+    "type": "object"
+  }
+}

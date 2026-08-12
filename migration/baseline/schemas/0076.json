@@ -1,0 +1,29 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.ControlActionResult",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "detail": {
+        "default": "",
+        "title": "Detail",
+        "type": "string"
+      },
+      "postcondition_met": {
+        "title": "Postcondition Met",
+        "type": "boolean"
+      },
+      "result_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Result Refs",
+        "type": "array"
+      }
+    },
+    "required": [
+      "postcondition_met"
+    ],
+    "title": "ControlActionResult",
+    "type": "object"
+  }
+}

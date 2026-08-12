@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+  <suppress until="2026-10-31Z">
+    <notes><![CDATA[
+Owner: dependency/CI maintenance.
+Scope: the exact shaded HttpCore 5.3.6 metadata inside
+docker-java-transport-zerodep 3.7.1 (SHA-1
+6cb5345bd550735be72fd0ece15bd2ca1ed27595). This artifact is test scope only
+and is used exclusively by Testcontainers to communicate with the local,
+trusted Docker daemon over its named pipe. It is absent from production
+artifacts and never parses traffic from a remote or user-selected endpoint.
+CVE-2026-54399 and CVE-2026-54428 are remote resource-exhaustion issues in
+HTTP message parsing, so their attack precondition is not reachable in this
+deployment. Review or remove this temporary suppression by 2026-10-31, or
+earlier when Testcontainers/docker-java publishes a fixed zerodep transport.
+    ]]></notes>
+    <sha1>6cb5345bd550735be72fd0ece15bd2ca1ed27595</sha1>
+    <cve>CVE-2026-54399</cve>
+    <cve>CVE-2026-54428</cve>
+  </suppress>
+  <suppress until="2026-10-31Z">
+    <notes><![CDATA[
+Owner: dependency/CI maintenance.
+Scope: the exact shaded HttpCore H2 5.3.6 metadata inside
+docker-java-transport-zerodep 3.7.1 (SHA-1
+498f1e71fffc835edc3e9a42b3bcfcf2a804f0f4). This artifact is test scope only
+and is used exclusively by Testcontainers to communicate with the local,
+trusted Docker daemon over its named pipe. It is absent from production
+artifacts and never parses traffic from a remote or user-selected endpoint.
+CVE-2026-54399 and CVE-2026-54428 are remote resource-exhaustion issues in
+HTTP message parsing, so their attack precondition is not reachable in this
+deployment. Review or remove this temporary suppression by 2026-10-31, or
+earlier when Testcontainers/docker-java publishes a fixed zerodep transport.
+    ]]></notes>
+    <sha1>498f1e71fffc835edc3e9a42b3bcfcf2a804f0f4</sha1>
+    <cve>CVE-2026-54399</cve>
+    <cve>CVE-2026-54428</cve>
+  </suppress>
+  <suppress until="2026-10-31Z">
+    <notes><![CDATA[
+Owner: dependency/CI maintenance.
+Scope: the exact shaded HttpClient 5.5.1 metadata inside
+docker-java-transport-zerodep 3.7.1 (SHA-1
+65c367c5802c3ad030ef79fef924296d8e4990f4). This artifact is test scope only
+and is used exclusively by Testcontainers to communicate with the local,
+trusted Docker daemon over its named pipe. It is absent from production
+artifacts. CVE-2026-64607 requires a peer to return an invalid or unsupported
+Content-Encoding value and can then leak a test-process connection. That
+attack precondition is not reachable from an untrusted endpoint in this
+deployment. Review or remove this temporary suppression by 2026-10-31, or
+earlier when Testcontainers/docker-java publishes a fixed zerodep transport.
+    ]]></notes>
+    <sha1>65c367c5802c3ad030ef79fef924296d8e4990f4</sha1>
+    <cve>CVE-2026-64607</cve>
+  </suppress>
+  <suppress until="2026-09-30Z">
+    <notes><![CDATA[
+Owner: dependency/CI maintenance.
+Scope: the exact org.apache.tomcat.embed core, EL, Jasper, and WebSocket
+11.0.24 artifacts selected by the pinned package-URL expression below.
+CVE-2026-66299 is confined to Tomcat's WebSocket chat example application;
+Apache states deployments without the examples application are not affected.
+The embedded JARs and the packaged Spring Boot application contain no Tomcat
+examples web application or websocket/chat classes, so the vulnerable code is
+absent. Dependency-Check matched the broad Tomcat CPE on the embedded JARs.
+Tomcat 11.0.25, the first listed fixed release, was not yet available from
+Maven Central on 2026-08-11. Review and remove this suppression as soon as
+11.0.25 is released, and no later than 2026-09-30.
+    ]]></notes>
+    <packageUrl regex="true">^pkg:maven/org\.apache\.tomcat\.embed/tomcat-embed-(core|el|jasper|websocket)@11\.0\.24$</packageUrl>
+    <cve>CVE-2026-66299</cve>
+  </suppress>
+  <suppress until="2027-01-31Z">
+    <notes><![CDATA[
+Owner: dependency/CI maintenance.
+CVEs: N/A; this rule removes only a false-positive PostgreSQL server CPE.
+Scope: the exact Flyway PostgreSQL database-support module
+org.flywaydb:flyway-database-postgresql:12.4.0. Dependency-Check has
+misidentified this JDBC support library as PostgreSQL server 12.4.0. The
+module does not embed or distribute the PostgreSQL server, so server CVEs
+derived solely from that CPE do not apply. The package URL and erroneous CPE
+are both pinned; review this rule when Flyway is upgraded.
+    ]]></notes>
+    <packageUrl regex="true">^pkg:maven/org\.flywaydb/flyway-database-postgresql@12\.4\.0$</packageUrl>
+    <cpe regex="true">cpe:/a:postgresql:postgresql(:.*)?$</cpe>
+  </suppress>
+  <suppress until="2027-01-31Z">
+    <notes><![CDATA[
+Owner: dependency/CI maintenance.
+CVEs: N/A; this rule removes only a false-positive PostgreSQL server CPE.
+Scope: the exact test-scope Testcontainers PostgreSQL integration module
+org.testcontainers:testcontainers-postgresql:2.0.5. Dependency-Check has
+misidentified the Java container-orchestration module as PostgreSQL server
+2.0.5. It neither embeds nor distributes that server version, so server CVEs
+derived solely from that CPE do not apply. The package URL and erroneous CPE
+are both pinned; review this rule when Testcontainers is upgraded.
+    ]]></notes>
+    <packageUrl regex="true">^pkg:maven/org\.testcontainers/testcontainers-postgresql@2\.0\.5$</packageUrl>
+    <cpe regex="true">cpe:/a:postgresql:postgresql(:.*)?$</cpe>
+  </suppress>
+  <suppress until="2027-01-31Z">
+    <notes><![CDATA[
+Owner: dependency/CI maintenance.
+CVEs: N/A; this rule removes only a false-positive fredsmith utils CPE.
+Scope: the exact test-scope com.cronutils:cron-utils:9.2.1 artifact brought in
+by io.temporal:temporal-test-server:1.37.0. Dependency-Check has associated
+this Java cron parser with cpe:/a:utils_project:utils. CVE-2021-4277 applies
+to fredsmith/utils screenshot_sync filename handling, not cron-utils. The
+package URL and erroneous CPE are both pinned; review this rule when Temporal
+or cron-utils is upgraded.
+    ]]></notes>
+    <packageUrl regex="true">^pkg:maven/com\.cronutils/cron-utils@9\.2\.1$</packageUrl>
+    <cpe regex="true">cpe:/a:utils_project:utils(:.*)?$</cpe>
+  </suppress>
+</suppressions>

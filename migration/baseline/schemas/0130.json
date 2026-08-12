@@ -1,0 +1,360 @@
+{
+  "qualified_name": "mathproofmesh.schemas.BlindVerificationReport",
+  "schema": {
+    "$defs": {
+      "EvidenceRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_ref": {
+            "title": "Artifact Ref",
+            "type": "string"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Section"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_ref"
+        ],
+        "title": "EvidenceRef",
+        "type": "object"
+      },
+      "FailureLevel": {
+        "enum": [
+          "none",
+          "execution",
+          "plan",
+          "strategy"
+        ],
+        "title": "FailureLevel",
+        "type": "string"
+      },
+      "Severity": {
+        "enum": [
+          "info",
+          "warning",
+          "error",
+          "critical"
+        ],
+        "title": "Severity",
+        "type": "string"
+      },
+      "ToolRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "domains": {
+            "additionalProperties": true,
+            "title": "Domains",
+            "type": "object"
+          },
+          "kind": {
+            "enum": [
+              "sympy_simplify",
+              "sympy_equivalent",
+              "numeric_counterexample",
+              "polynomial_factor",
+              "modular_exhaustive",
+              "bounded_integer_search",
+              "graph_certificate",
+              "recurrence_check",
+              "bounded_greedy_sequence",
+              "candidate_period_check",
+              "exact_geometry",
+              "lean_check"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "max_cases": {
+            "default": 100000,
+            "maximum": 100000000,
+            "minimum": 1,
+            "title": "Max Cases",
+            "type": "integer"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "purpose"
+        ],
+        "title": "ToolRequest",
+        "type": "object"
+      },
+      "ToolResult": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          },
+          "evidence_ref": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/EvidenceRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "result": {
+            "default": null,
+            "title": "Result"
+          }
+        },
+        "required": [
+          "request_id",
+          "kind",
+          "ok"
+        ],
+        "title": "ToolResult",
+        "type": "object"
+      },
+      "VerificationIssue": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Claim Id"
+          },
+          "conclusion_summary": {
+            "default": "",
+            "title": "Conclusion Summary",
+            "type": "string"
+          },
+          "counterexample": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Counterexample"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "issue_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Issue Code"
+          },
+          "issue_id": {
+            "title": "Issue Id",
+            "type": "string"
+          },
+          "phase": {
+            "title": "Phase",
+            "type": "string"
+          },
+          "premise_summary": {
+            "default": "",
+            "title": "Premise Summary",
+            "type": "string"
+          },
+          "repair_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Repair Hint"
+          },
+          "severity": {
+            "$ref": "#/$defs/Severity"
+          },
+          "step_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Step Id"
+          }
+        },
+        "required": [
+          "phase",
+          "severity",
+          "description"
+        ],
+        "title": "VerificationIssue",
+        "type": "object"
+      },
+      "VerificationVerdict": {
+        "enum": [
+          "pass",
+          "fail",
+          "uncertain",
+          "skipped"
+        ],
+        "title": "VerificationVerdict",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Identity-free verifier output expanded with provenance after the call.",
+    "properties": {
+      "checked_dependencies": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Checked Dependencies",
+        "type": "array"
+      },
+      "concise_feedback": {
+        "title": "Concise Feedback",
+        "type": "string"
+      },
+      "confidence": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "failure_level": {
+        "$ref": "#/$defs/FailureLevel",
+        "default": "none"
+      },
+      "first_error_step": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "First Error Step"
+      },
+      "issues": {
+        "items": {
+          "$ref": "#/$defs/VerificationIssue"
+        },
+        "title": "Issues",
+        "type": "array"
+      },
+      "problem_integrity_ok": {
+        "default": true,
+        "title": "Problem Integrity Ok",
+        "type": "boolean"
+      },
+      "structured_issues": {
+        "items": {},
+        "title": "Structured Issues",
+        "type": "array"
+      },
+      "tool_requests": {
+        "items": {
+          "$ref": "#/$defs/ToolRequest"
+        },
+        "title": "Tool Requests",
+        "type": "array"
+      },
+      "tool_results": {
+        "items": {
+          "$ref": "#/$defs/ToolResult"
+        },
+        "title": "Tool Results",
+        "type": "array"
+      },
+      "verdict": {
+        "$ref": "#/$defs/VerificationVerdict"
+      }
+    },
+    "required": [
+      "verdict",
+      "confidence",
+      "concise_feedback"
+    ],
+    "title": "BlindVerificationReport",
+    "type": "object"
+  }
+}

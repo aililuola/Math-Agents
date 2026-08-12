@@ -1,0 +1,143 @@
+{
+  "schema_version": "1.0",
+  "phase": "13",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-31T03:35:17.903Z",
+  "scope": "Temporal durable workflow orchestration",
+  "source": {
+    "authoritative_zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+    "source_files": 401,
+    "source_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "immutability": "PASS"
+  },
+  "workflow_boundary": {
+    "workflow_interfaces": [
+      "MathProofMeshSolveWorkflow",
+      "RouteExplorationWorkflow"
+    ],
+    "workflow_interface_count": 2,
+    "final_review_workflow_exists": false,
+    "final_review_is_idempotent_activity": true,
+    "fixed_stage_machine": "PASS",
+    "business_logic_duplicated_in_workflow": false,
+    "workflow_history_contains_raw_prompt_or_proof": false
+  },
+  "durability_and_control": {
+    "signals": [
+      "pause",
+      "resume",
+      "cancel",
+      "wakeRoute"
+    ],
+    "validated_updates": [
+      "increaseBudget",
+      "submitAuditedDirective"
+    ],
+    "queries": [
+      "status",
+      "currentStage",
+      "routeSummary",
+      "budgetSummary"
+    ],
+    "activity_retry": "PASS",
+    "activity_heartbeat": "PASS",
+    "continue_as_new": "PASS",
+    "history_replay": "PASS",
+    "duplicate_signal_and_update_ids": "PASS"
+  },
+  "exactly_once_and_recovery": {
+    "stable_action_keys": "PASS",
+    "domain_action_inbox_deduplication": "PASS",
+    "provider_call_application_once": "PASS",
+    "database_checkpoint_is_mathematical_authority": true,
+    "temporal_is_scheduling_authority": true,
+    "legacy_checkpoint_migration": "PASS",
+    "terminal_resume_policy": "PASS",
+    "fault_injection_and_recovery": "PASS",
+    "in_process_parity": "PASS"
+  },
+  "temporal_compose": {
+    "image": "temporalio/temporal@sha256:59561b9ef060eaeb1f46cb6a1842d6cbdd8a393eb3b6d315ecef5fe2f0b1d7a6",
+    "server": "1.31.2",
+    "cli": "1.8.1",
+    "loopback_only": true,
+    "container_user": "temporal",
+    "read_only_root": true,
+    "cap_drop_all": true,
+    "no_new_privileges": true,
+    "persistent_sqlite_volume": "PASS",
+    "restart_namespace_id": "37c64119-b25e-4b83-9833-9d2ca6003a93",
+    "health": "SERVING",
+    "container_stopped_after_gate": true,
+    "evidence_log": "migration/logs/phase-13-temporal-compose.log",
+    "evidence_log_sha256": "123529d57c503e279513221e5f9731873996d8768d6a7ddbd8c997dc9dbfd949"
+  },
+  "tests": {
+    "mapped_python_test_files": 8,
+    "mapped_python_functions": 25,
+    "authority_named_junit_cases": 25,
+    "temporal_gate_cases": 4,
+    "focused_cases": 29,
+    "reactor_total": 1382,
+    "report_files": 170,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "online_clean_verify": "PASS",
+    "offline_clean_verify": "PASS",
+    "online_log": "migration/logs/phase-13-verify.log",
+    "online_log_sha256": "c5aad54be7b367ef64c0f1da11b91ab5d7a0ae3a4fb7d3b4293c0d6199908bbd",
+    "offline_log": "migration/logs/phase-13-verify-offline.log",
+    "offline_log_sha256": "ea410d96b2d79469e4ba2f368d768211832d72f8724808d071d556a12f40df3f"
+  },
+  "quality_and_dependency_security": {
+    "java": "Eclipse Temurin 25.0.4+7",
+    "maven": "3.9.16",
+    "maven_wrapper": "3.3.4 only-script",
+    "dependencies_added": [],
+    "dependency_version_changes": [],
+    "temporal_sdk": "1.37.0",
+    "dependency_convergence": "PASS",
+    "external_snapshots": 0,
+    "duplicate_classes": 0,
+    "spotbugs_findsecbugs_findings": 0,
+    "modulith_structure": "PASS",
+    "dependency_tree": "migration/reports/phase-13-dependency-tree.txt",
+    "dependency_tree_sha256": "2f400fa74b152f115b80862818716de7c4ac46e4f07092e872162e3c158ff482",
+    "sbom": {
+      "format": "CycloneDX",
+      "spec_version": "1.6",
+      "components": 88,
+      "dependency_entries": 89,
+      "path": "migration/reports/phase-01-sbom.json",
+      "sha256": "2e547c2b8e6fd95d0b5283f742d99f1be62fd0b58472ae619f17cfd3382d398a"
+    },
+    "owasp": {
+      "engine": "12.2.2",
+      "dependencies": 112,
+      "fail_build_on_cvss": 7.0,
+      "findings_at_or_above_gate": 0,
+      "below_gate_findings": [
+        {
+          "cve": "CVE-2021-4277",
+          "artifact": "com.cronutils:cron-utils:9.2.1",
+          "severity": "MEDIUM",
+          "cvss": 5.3
+        }
+      ],
+      "report_json_sha256": "3677a30b25c0c76147dc54d2b72953abd5d4012710d79866016c39944dcceab3",
+      "report_html_sha256": "7372df6a2674e91d1fcfe667506bf89160f4c70345e1d5423f5dbdb65ce7004d"
+    }
+  },
+  "mappings": {
+    "source_rows": "1/1 migrated",
+    "test_rows": "8/8 ported; 25 Python test functions",
+    "auxiliary_rows": "1/1 translated_verified",
+    "legacy_document_sha256": "e47ad6bbceb86438abf4bd4139990f5ea73a3b3c6ee608f36fd90236ff273db4",
+    "state_rows": "142 + 167 + 92 = 401 unique paths"
+  },
+  "stop_condition": {
+    "phase_14_started_before_phase_13_pass": false
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.MinimalBridgeProposal",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "action_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Action Id"
+      },
+      "candidate_statement": {
+        "title": "Candidate Statement",
+        "type": "string"
+      },
+      "implication_outline": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Implication Outline",
+        "type": "array"
+      },
+      "materialized_obligation_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Materialized Obligation Id"
+      },
+      "overstrong_subject_id": {
+        "title": "Overstrong Subject Id",
+        "type": "string"
+      },
+      "proposal_id": {
+        "title": "Proposal Id",
+        "type": "string"
+      },
+      "relation_to_original": {
+        "default": "unknown",
+        "enum": [
+          "strictly_weaker",
+          "equivalent",
+          "incomparable",
+          "unknown"
+        ],
+        "title": "Relation To Original",
+        "type": "string"
+      },
+      "remaining_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Remaining Obligation Ids",
+        "type": "array"
+      },
+      "required_bridge_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Required Bridge Obligation Ids",
+        "type": "array"
+      },
+      "status": {
+        "default": "candidate",
+        "enum": [
+          "candidate",
+          "reviewed",
+          "accepted",
+          "rejected"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "target_obligation_id": {
+        "title": "Target Obligation Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "overstrong_subject_id",
+      "target_obligation_id",
+      "candidate_statement"
+    ],
+    "title": "MinimalBridgeProposal",
+    "type": "object"
+  }
+}

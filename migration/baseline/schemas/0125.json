@@ -1,0 +1,70 @@
+{
+  "qualified_name": "mathproofmesh.proof_graph.contradictions.ContradictionRecord",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "centrality": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Centrality",
+        "type": "number"
+      },
+      "contradiction_id": {
+        "title": "Contradiction Id",
+        "type": "string"
+      },
+      "message_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Message Ids",
+        "type": "array"
+      },
+      "normalized_statement": {
+        "title": "Normalized Statement",
+        "type": "string"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "resolution_message_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Resolution Message Id"
+      },
+      "route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Route Ids",
+        "type": "array"
+      },
+      "status": {
+        "default": "open",
+        "enum": [
+          "open",
+          "resolved"
+        ],
+        "title": "Status",
+        "type": "string"
+      }
+    },
+    "required": [
+      "message_ids",
+      "route_ids",
+      "normalized_statement",
+      "reason"
+    ],
+    "title": "ContradictionRecord",
+    "type": "object"
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ComputationPlan",
+  "schema": {
+    "$defs": {
+      "ComputationMethod": {
+        "enum": [
+          "sympy_simplify",
+          "sympy_equivalent",
+          "polynomial_factor",
+          "modular_exhaustive",
+          "bounded_integer_search",
+          "graph_certificate",
+          "recurrence_check",
+          "bounded_greedy_sequence",
+          "candidate_period_check",
+          "exact_geometry",
+          "numeric_counterexample",
+          "real_inequality",
+          "number_theory_check",
+          "sandboxed_python",
+          "lean_check"
+        ],
+        "title": "ComputationMethod",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Cross-route description of an approved experiment, never executable code.",
+    "properties": {
+      "assumptions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Assumptions",
+        "type": "array"
+      },
+      "bounded_scope": {
+        "additionalProperties": true,
+        "title": "Bounded Scope",
+        "type": "object"
+      },
+      "decision_use": {
+        "title": "Decision Use",
+        "type": "string"
+      },
+      "exact_arithmetic": {
+        "default": true,
+        "title": "Exact Arithmetic",
+        "type": "boolean"
+      },
+      "experiment_id": {
+        "title": "Experiment Id",
+        "type": "string"
+      },
+      "method": {
+        "$ref": "#/$defs/ComputationMethod"
+      },
+      "plan_id": {
+        "title": "Plan Id",
+        "type": "string"
+      },
+      "request_hash": {
+        "title": "Request Hash",
+        "type": "string"
+      },
+      "source_artifact_ref": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Artifact Ref"
+      },
+      "target_claim": {
+        "title": "Target Claim",
+        "type": "string"
+      }
+    },
+    "required": [
+      "experiment_id",
+      "request_hash",
+      "target_claim",
+      "method",
+      "decision_use"
+    ],
+    "title": "ComputationPlan",
+    "type": "object"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "qualified_name": "mathproofmesh.schemas.FormalizationCoverageReport",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "coverage": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Coverage",
+        "type": "number"
+      },
+      "formally_certified_step_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Formally Certified Step Ids",
+        "type": "array"
+      },
+      "total_step_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Total Step Count",
+        "type": "integer"
+      }
+    },
+    "title": "FormalizationCoverageReport",
+    "type": "object"
+  }
+}

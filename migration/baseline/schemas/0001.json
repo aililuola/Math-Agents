@@ -1,0 +1,160 @@
+{
+  "qualified_name": "mathproofmesh.activity.ActivityEvent",
+  "schema": {
+    "$defs": {
+      "ActivityImportance": {
+        "enum": [
+          "major",
+          "normal",
+          "detail"
+        ],
+        "title": "ActivityImportance",
+        "type": "string"
+      },
+      "ActivityStatus": {
+        "enum": [
+          "running",
+          "completed",
+          "info",
+          "warning",
+          "failed"
+        ],
+        "title": "ActivityStatus",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "description": "A concise, user-facing progress event; never a model chain of thought.",
+    "properties": {
+      "agent_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Agent Id"
+      },
+      "detail": {
+        "default": "",
+        "title": "Detail",
+        "type": "string"
+      },
+      "elapsed_ms": {
+        "minimum": 0,
+        "title": "Elapsed Ms",
+        "type": "integer"
+      },
+      "event_type": {
+        "title": "Event Type",
+        "type": "string"
+      },
+      "importance": {
+        "$ref": "#/$defs/ActivityImportance",
+        "default": "normal"
+      },
+      "initial_event_type": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Initial Event Type"
+      },
+      "metrics": {
+        "additionalProperties": true,
+        "title": "Metrics",
+        "type": "object"
+      },
+      "parent_task_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Parent Task Id"
+      },
+      "progress": {
+        "anyOf": [
+          {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Progress"
+      },
+      "sequence": {
+        "minimum": 1,
+        "title": "Sequence",
+        "type": "integer"
+      },
+      "stage": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Stage"
+      },
+      "started_elapsed_ms": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Started Elapsed Ms"
+      },
+      "status": {
+        "$ref": "#/$defs/ActivityStatus"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      },
+      "timestamp": {
+        "title": "Timestamp",
+        "type": "string"
+      },
+      "title": {
+        "title": "Title",
+        "type": "string"
+      }
+    },
+    "required": [
+      "sequence",
+      "timestamp",
+      "elapsed_ms",
+      "event_type",
+      "status",
+      "task_id",
+      "title"
+    ],
+    "title": "ActivityEvent",
+    "type": "object"
+  }
+}

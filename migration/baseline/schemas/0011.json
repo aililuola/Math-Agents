@@ -1,0 +1,133 @@
+{
+  "qualified_name": "mathproofmesh.config.ContinuationConfig",
+  "schema": {
+    "additionalProperties": false,
+    "description": "Proof-step checkpointing, reconnect, and cross-agent failover controls.",
+    "properties": {
+      "allow_checkpoint_rollback": {
+        "default": true,
+        "title": "Allow Checkpoint Rollback",
+        "type": "boolean"
+      },
+      "allow_cross_agent_failover": {
+        "default": true,
+        "title": "Allow Cross Agent Failover",
+        "type": "boolean"
+      },
+      "checkpoint_pass_threshold": {
+        "default": 0.78,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Checkpoint Pass Threshold",
+        "type": "number"
+      },
+      "checkpoint_policy": {
+        "default": "verified_subgoal",
+        "enum": [
+          "verified_subgoal",
+          "verified_delta"
+        ],
+        "title": "Checkpoint Policy",
+        "type": "string"
+      },
+      "delta_verifier_replicas": {
+        "default": 1,
+        "maximum": 4,
+        "minimum": 1,
+        "title": "Delta Verifier Replicas",
+        "type": "integer"
+      },
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "max_failover_agents": {
+        "default": 2,
+        "maximum": 16,
+        "minimum": 0,
+        "title": "Max Failover Agents",
+        "type": "integer"
+      },
+      "max_new_claims_per_call": {
+        "default": 3,
+        "maximum": 32,
+        "minimum": 0,
+        "title": "Max New Claims Per Call",
+        "type": "integer"
+      },
+      "max_new_steps_per_call": {
+        "default": 3,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Max New Steps Per Call",
+        "type": "integer"
+      },
+      "max_output_tokens_per_segment": {
+        "default": 12000,
+        "maximum": 384000,
+        "minimum": 512,
+        "title": "Max Output Tokens Per Segment",
+        "type": "integer"
+      },
+      "max_segments_per_path": {
+        "default": 12,
+        "maximum": 128,
+        "minimum": 1,
+        "title": "Max Segments Per Path",
+        "type": "integer"
+      },
+      "post_failure_bottleneck_enabled": {
+        "default": true,
+        "title": "Post Failure Bottleneck Enabled",
+        "type": "boolean"
+      },
+      "post_failure_bottleneck_max_output_tokens": {
+        "default": 16000,
+        "maximum": 32000,
+        "minimum": 512,
+        "title": "Post Failure Bottleneck Max Output Tokens",
+        "type": "integer"
+      },
+      "post_failure_bottleneck_once_per_checkpoint": {
+        "default": true,
+        "title": "Post Failure Bottleneck Once Per Checkpoint",
+        "type": "boolean"
+      },
+      "post_failure_trigger_inspiration": {
+        "default": true,
+        "title": "Post Failure Trigger Inspiration",
+        "type": "boolean"
+      },
+      "process_resume_enabled": {
+        "default": true,
+        "title": "Process Resume Enabled",
+        "type": "boolean"
+      },
+      "resume_on_disconnect": {
+        "default": true,
+        "title": "Resume On Disconnect",
+        "type": "boolean"
+      },
+      "retain_rejected_deltas": {
+        "default": true,
+        "title": "Retain Rejected Deltas",
+        "type": "boolean"
+      },
+      "segments_per_explore_call": {
+        "default": 1,
+        "maximum": 8,
+        "minimum": 1,
+        "title": "Segments Per Explore Call",
+        "type": "integer"
+      },
+      "verify_each_delta": {
+        "default": true,
+        "title": "Verify Each Delta",
+        "type": "boolean"
+      }
+    },
+    "title": "ContinuationConfig",
+    "type": "object"
+  }
+}

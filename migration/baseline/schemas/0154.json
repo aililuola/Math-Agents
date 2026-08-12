@@ -1,0 +1,125 @@
+{
+  "qualified_name": "mathproofmesh.schemas.DomainOperatorSpec",
+  "schema": {
+    "additionalProperties": false,
+    "description": "Auditable domain heuristic; it proposes work but proves nothing.",
+    "properties": {
+      "applicability_tokens": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Applicability Tokens",
+        "type": "array"
+      },
+      "domain": {
+        "title": "Domain",
+        "type": "string"
+      },
+      "family": {
+        "enum": [
+          "representation",
+          "construction",
+          "mutation"
+        ],
+        "title": "Family",
+        "type": "string"
+      },
+      "fast_failure_tests": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Fast Failure Tests",
+        "type": "array"
+      },
+      "generated_obligations": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Generated Obligations",
+        "type": "array"
+      },
+      "known_failure_modes": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Known Failure Modes",
+        "type": "array"
+      },
+      "mechanism_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Mechanism Tags",
+        "type": "array"
+      },
+      "object_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Object Tags",
+        "type": "array"
+      },
+      "operation_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Operation Tags",
+        "type": "array"
+      },
+      "operator_id": {
+        "title": "Operator Id",
+        "type": "string"
+      },
+      "preconditions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Preconditions",
+        "type": "array"
+      },
+      "representation_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Representation Tags",
+        "type": "array"
+      },
+      "reversibility_requirements": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Reversibility Requirements",
+        "type": "array"
+      },
+      "suggested_tools": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Suggested Tools",
+        "type": "array"
+      },
+      "title": {
+        "title": "Title",
+        "type": "string"
+      },
+      "transformation": {
+        "title": "Transformation",
+        "type": "string"
+      }
+    },
+    "required": [
+      "operator_id",
+      "domain",
+      "family",
+      "title",
+      "preconditions",
+      "transformation",
+      "generated_obligations",
+      "reversibility_requirements",
+      "fast_failure_tests",
+      "known_failure_modes"
+    ],
+    "title": "DomainOperatorSpec",
+    "type": "object"
+  }
+}

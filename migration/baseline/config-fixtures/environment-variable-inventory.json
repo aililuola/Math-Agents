@@ -1,0 +1,68 @@
+[
+  {
+    "example_value": "[EMPTY]",
+    "name": "DEEPSEEK_AGENT_1_KEY",
+    "secret": true,
+    "source": ".env.example"
+  },
+  {
+    "example_value": "[EMPTY]",
+    "name": "DEEPSEEK_AGENT_2_KEY",
+    "secret": true,
+    "source": ".env.example"
+  },
+  {
+    "example_value": "[EMPTY]",
+    "name": "DEEPSEEK_AGENT_3_KEY",
+    "secret": true,
+    "source": ".env.example"
+  },
+  {
+    "example_value": "[EMPTY]",
+    "name": "DEEPSEEK_AGENT_4_KEY",
+    "secret": true,
+    "source": ".env.example"
+  },
+  {
+    "example_value": "[EMPTY]",
+    "name": "DEEPSEEK_AGENT_5_KEY",
+    "secret": true,
+    "source": ".env.example"
+  },
+  {
+    "example_value": "[EMPTY]",
+    "name": "AGENT_PLANNER_KEY",
+    "secret": true,
+    "source": ".env.example"
+  },
+  {
+    "example_value": "[EMPTY]",
+    "name": "AGENT_EXPLORER_1_KEY",
+    "secret": true,
+    "source": ".env.example"
+  },
+  {
+    "example_value": "[EMPTY]",
+    "name": "AGENT_EXPLORER_2_KEY",
+    "secret": true,
+    "source": ".env.example"
+  },
+  {
+    "example_value": "[EMPTY]",
+    "name": "AGENT_VERIFIER_1_KEY",
+    "secret": true,
+    "source": ".env.example"
+  },
+  {
+    "example_value": "[EMPTY]",
+    "name": "AGENT_VERIFIER_2_KEY",
+    "secret": true,
+    "source": ".env.example"
+  },
+  {
+    "example_value": "[EMPTY]",
+    "name": "AGENT_SYNTHESIZER_KEY",
+    "secret": true,
+    "source": ".env.example"
+  }
+]

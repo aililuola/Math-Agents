@@ -1,0 +1,53 @@
+{
+  "qualified_name": "mathproofmesh.schemas.QuantifierSpec",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "display_name": {
+        "minLength": 1,
+        "title": "Display Name",
+        "type": "string"
+      },
+      "domain": {
+        "minLength": 1,
+        "title": "Domain",
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "forall",
+          "exists",
+          "exists_unique"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "order": {
+        "minimum": 0,
+        "title": "Order",
+        "type": "integer"
+      },
+      "restrictions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Restrictions",
+        "type": "array"
+      },
+      "variable_id": {
+        "minLength": 1,
+        "title": "Variable Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "order",
+      "kind",
+      "variable_id",
+      "display_name",
+      "domain"
+    ],
+    "title": "QuantifierSpec",
+    "type": "object"
+  }
+}

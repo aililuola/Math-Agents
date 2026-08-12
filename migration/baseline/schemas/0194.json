@@ -1,0 +1,200 @@
+{
+  "qualified_name": "mathproofmesh.schemas.PostFailureBottleneckDiagnostic",
+  "schema": {
+    "$defs": {
+      "UsageRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "estimated_cost_usd": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Estimated Cost Usd",
+            "type": "number"
+          },
+          "input_tokens": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "latency_ms": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Latency Ms",
+            "type": "number"
+          },
+          "output_tokens": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "title": "UsageRecord",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Public-state diagnosis after a model call returns no usable artifact.",
+    "properties": {
+      "alternative_mechanism_tags": {
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "title": "Alternative Mechanism Tags",
+        "type": "array"
+      },
+      "attempted_mechanism": {
+        "minLength": 1,
+        "title": "Attempted Mechanism",
+        "type": "string"
+      },
+      "blocked_claim_source": {
+        "enum": [
+          "checkpoint_current_goal",
+          "checkpoint_remaining_subgoal",
+          "working_checkpoint_gap",
+          "typed_public_context"
+        ],
+        "title": "Blocked Claim Source",
+        "type": "string"
+      },
+      "checkpoint_id": {
+        "default": "",
+        "title": "Checkpoint Id",
+        "type": "string"
+      },
+      "confidence": {
+        "default": 0.5,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "diagnostic_id": {
+        "title": "Diagnostic Id",
+        "type": "string"
+      },
+      "exact_failed_internal_step_known": {
+        "const": false,
+        "default": false,
+        "title": "Exact Failed Internal Step Known",
+        "type": "boolean"
+      },
+      "failure_fingerprint": {
+        "default": "",
+        "title": "Failure Fingerprint",
+        "type": "string"
+      },
+      "failure_type": {
+        "default": "reasoning_budget_exhausted",
+        "enum": [
+          "reasoning_budget_exhausted",
+          "reasoning_only_stall"
+        ],
+        "title": "Failure Type",
+        "type": "string"
+      },
+      "path_id": {
+        "default": "",
+        "title": "Path Id",
+        "type": "string"
+      },
+      "preserved_fact_message_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Preserved Fact Message Ids",
+        "type": "array"
+      },
+      "preserved_verified_step_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Preserved Verified Step Ids",
+        "type": "array"
+      },
+      "private_reasoning_recovered": {
+        "const": false,
+        "default": false,
+        "title": "Private Reasoning Recovered",
+        "type": "boolean"
+      },
+      "problem_hash": {
+        "default": "",
+        "title": "Problem Hash",
+        "type": "string"
+      },
+      "raw_artifact_ref": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Raw Artifact Ref"
+      },
+      "related_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Related Obligation Ids",
+        "type": "array"
+      },
+      "requires_inspiration": {
+        "default": true,
+        "title": "Requires Inspiration",
+        "type": "boolean"
+      },
+      "route_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Route Id"
+      },
+      "smallest_blocked_claim": {
+        "minLength": 1,
+        "title": "Smallest Blocked Claim",
+        "type": "string"
+      },
+      "strategy_id": {
+        "default": "",
+        "title": "Strategy Id",
+        "type": "string"
+      },
+      "usage": {
+        "$ref": "#/$defs/UsageRecord"
+      },
+      "why_blocked_from_public_state": {
+        "minLength": 1,
+        "title": "Why Blocked From Public State",
+        "type": "string"
+      }
+    },
+    "required": [
+      "smallest_blocked_claim",
+      "blocked_claim_source",
+      "attempted_mechanism",
+      "why_blocked_from_public_state",
+      "alternative_mechanism_tags"
+    ],
+    "title": "PostFailureBottleneckDiagnostic",
+    "type": "object"
+  }
+}

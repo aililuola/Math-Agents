@@ -1,0 +1,33 @@
+{
+  "qualified_name": "mathproofmesh.schemas.PropositionNormalizationItem",
+  "schema": {
+    "additionalProperties": false,
+    "description": "One repaired statement from the batched semantic normalizer.\n\nThe normalizer restates form only: explicit objects, quantifiers,\nrelation, and scope. It must never prove, refute, strengthen, or weaken\nthe mathematics of the original statement.",
+    "properties": {
+      "is_mathematical_proposition": {
+        "default": true,
+        "title": "Is Mathematical Proposition",
+        "type": "boolean"
+      },
+      "normalized_statement": {
+        "title": "Normalized Statement",
+        "type": "string"
+      },
+      "note": {
+        "default": "",
+        "title": "Note",
+        "type": "string"
+      },
+      "original_statement": {
+        "title": "Original Statement",
+        "type": "string"
+      }
+    },
+    "required": [
+      "original_statement",
+      "normalized_statement"
+    ],
+    "title": "PropositionNormalizationItem",
+    "type": "object"
+  }
+}

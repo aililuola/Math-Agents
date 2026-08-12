@@ -1,0 +1,143 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.ObligationSemanticQuality",
+  "schema": {
+    "$defs": {
+      "ObligationDomain": {
+        "enum": [
+          "mathematical",
+          "search",
+          "process",
+          "tool",
+          "verification",
+          "protocol",
+          "safety"
+        ],
+        "title": "ObligationDomain",
+        "type": "string"
+      },
+      "ObligationSemanticVerdict": {
+        "enum": [
+          "accept",
+          "needs_normalization",
+          "search_or_process_task",
+          "reject"
+        ],
+        "title": "ObligationSemanticVerdict",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "accepted": {
+        "default": false,
+        "title": "Accepted",
+        "type": "boolean"
+      },
+      "domain": {
+        "$ref": "#/$defs/ObligationDomain"
+      },
+      "duplicates_main_goal": {
+        "title": "Duplicates Main Goal",
+        "type": "boolean"
+      },
+      "eligible_for_bottleneck": {
+        "default": false,
+        "title": "Eligible For Bottleneck",
+        "type": "boolean"
+      },
+      "eligible_for_core_debt": {
+        "default": false,
+        "title": "Eligible For Core Debt",
+        "type": "boolean"
+      },
+      "has_executable_first_step": {
+        "title": "Has Executable First Step",
+        "type": "boolean"
+      },
+      "has_explicit_objects": {
+        "title": "Has Explicit Objects",
+        "type": "boolean"
+      },
+      "has_explicit_quantifiers_or_scope": {
+        "title": "Has Explicit Quantifiers Or Scope",
+        "type": "boolean"
+      },
+      "has_explicit_relation": {
+        "title": "Has Explicit Relation",
+        "type": "boolean"
+      },
+      "implicit_quantifiers_detected": {
+        "default": false,
+        "title": "Implicit Quantifiers Detected",
+        "type": "boolean"
+      },
+      "is_placeholder": {
+        "title": "Is Placeholder",
+        "type": "boolean"
+      },
+      "is_self_implication": {
+        "title": "Is Self Implication",
+        "type": "boolean"
+      },
+      "normalization_needs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Normalization Needs",
+        "type": "array"
+      },
+      "obligation_id": {
+        "title": "Obligation Id",
+        "type": "string"
+      },
+      "rejection_reasons": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Rejection Reasons",
+        "type": "array"
+      },
+      "score": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Score",
+        "type": "number"
+      },
+      "semantic_quarantine": {
+        "default": false,
+        "title": "Semantic Quarantine",
+        "type": "boolean"
+      },
+      "truth_apt": {
+        "title": "Truth Apt",
+        "type": "boolean"
+      },
+      "verdict": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ObligationSemanticVerdict"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "obligation_id",
+      "domain",
+      "truth_apt",
+      "has_explicit_objects",
+      "has_explicit_relation",
+      "has_explicit_quantifiers_or_scope",
+      "is_placeholder",
+      "is_self_implication",
+      "duplicates_main_goal",
+      "has_executable_first_step",
+      "score"
+    ],
+    "title": "ObligationSemanticQuality",
+    "type": "object"
+  }
+}

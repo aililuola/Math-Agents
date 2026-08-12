@@ -1,0 +1,1268 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ContextPack",
+  "schema": {
+    "$defs": {
+      "CheckpointStatus": {
+        "enum": [
+          "working",
+          "tentative",
+          "verified",
+          "rejected",
+          "committed"
+        ],
+        "title": "CheckpointStatus",
+        "type": "string"
+      },
+      "CitationRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "applicability_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Applicability Conditions",
+            "type": "array"
+          },
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Authors",
+            "type": "array"
+          },
+          "exact_statement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Exact Statement"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Location"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Url"
+          },
+          "verified": {
+            "default": false,
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "CitationRecord",
+        "type": "object"
+      },
+      "ClaimCard": {
+        "additionalProperties": false,
+        "properties": {
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "conclusion": {
+            "title": "Conclusion",
+            "type": "string"
+          },
+          "content_hash": {
+            "default": "",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "counterexample_risk": {
+            "default": "unknown",
+            "title": "Counterexample Risk",
+            "type": "string"
+          },
+          "dependencies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dependencies",
+            "type": "array"
+          },
+          "dependency_refs": {
+            "items": {},
+            "title": "Dependency Refs",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "items": {
+              "$ref": "#/$defs/EvidenceRef"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "proof_steps": {
+            "items": {
+              "$ref": "#/$defs/ProofStep"
+            },
+            "title": "Proof Steps",
+            "type": "array"
+          },
+          "scope_limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scope Limitations",
+            "type": "array"
+          },
+          "self_confidence": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Self Confidence",
+            "type": "number"
+          },
+          "source_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Agent Id"
+          },
+          "source_attempt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Attempt Id"
+          },
+          "source_delta_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Delta Id"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/$defs/ClaimStatus",
+            "default": "proposed"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "verification_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Verification Confidence"
+          }
+        },
+        "required": [
+          "statement",
+          "conclusion"
+        ],
+        "title": "ClaimCard",
+        "type": "object"
+      },
+      "ClaimStatus": {
+        "enum": [
+          "proposed",
+          "verified",
+          "rejected",
+          "uncertain"
+        ],
+        "title": "ClaimStatus",
+        "type": "string"
+      },
+      "ComputationHint": {
+        "additionalProperties": false,
+        "description": "A planner-authored possibility. It is deliberately not executable.",
+        "properties": {
+          "broad_search": {
+            "default": false,
+            "title": "Broad Search",
+            "type": "boolean"
+          },
+          "decision_use": {
+            "title": "Decision Use",
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/$defs/ComputationPurpose"
+          },
+          "suggested_method": {
+            "$ref": "#/$defs/ComputationMethod"
+          },
+          "target_claim": {
+            "title": "Target Claim",
+            "type": "string"
+          }
+        },
+        "required": [
+          "purpose",
+          "target_claim",
+          "suggested_method",
+          "decision_use"
+        ],
+        "title": "ComputationHint",
+        "type": "object"
+      },
+      "ComputationMethod": {
+        "enum": [
+          "sympy_simplify",
+          "sympy_equivalent",
+          "polynomial_factor",
+          "modular_exhaustive",
+          "bounded_integer_search",
+          "graph_certificate",
+          "recurrence_check",
+          "bounded_greedy_sequence",
+          "candidate_period_check",
+          "exact_geometry",
+          "numeric_counterexample",
+          "real_inequality",
+          "number_theory_check",
+          "sandboxed_python",
+          "lean_check"
+        ],
+        "title": "ComputationMethod",
+        "type": "string"
+      },
+      "ComputationPurpose": {
+        "enum": [
+          "falsify_claim",
+          "check_derived_identity",
+          "test_boundary_cases",
+          "verify_finite_reduction",
+          "validate_constructed_example",
+          "discover_pattern"
+        ],
+        "title": "ComputationPurpose",
+        "type": "string"
+      },
+      "CriticalClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "falsification_test": {
+            "minLength": 1,
+            "title": "Falsification Test",
+            "type": "string"
+          },
+          "necessity": {
+            "default": "required",
+            "enum": [
+              "required",
+              "supporting"
+            ],
+            "title": "Necessity",
+            "type": "string"
+          },
+          "preferred_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preferred Tool"
+          },
+          "statement": {
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          },
+          "status": {
+            "default": "needs_check",
+            "enum": [
+              "candidate",
+              "needs_check",
+              "verified",
+              "refuted",
+              "blocked"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "statement",
+          "falsification_test"
+        ],
+        "title": "CriticalClaim",
+        "type": "object"
+      },
+      "EvidenceRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_ref": {
+            "title": "Artifact Ref",
+            "type": "string"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Section"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_ref"
+        ],
+        "title": "EvidenceRef",
+        "type": "object"
+      },
+      "ProblemContract": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Tools",
+            "type": "array"
+          },
+          "canonical_statement": {
+            "default": "",
+            "title": "Canonical Statement",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "definitions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Definitions",
+            "type": "array"
+          },
+          "deliverables": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Deliverables",
+            "type": "array"
+          },
+          "exact_statement": {
+            "title": "Exact Statement",
+            "type": "string"
+          },
+          "goal_hash": {
+            "default": "",
+            "title": "Goal Hash",
+            "type": "string"
+          },
+          "hard_constraints": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Hard Constraints",
+            "type": "array"
+          },
+          "integrity_hash": {
+            "default": "",
+            "title": "Integrity Hash",
+            "type": "string"
+          },
+          "interpretation_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Interpretation Agent Id"
+          },
+          "interpretation_confidence": {
+            "default": 1.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Interpretation Confidence",
+            "type": "number"
+          },
+          "interpretation_raw_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Interpretation Raw Ref"
+          },
+          "interpretation_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Interpretation Reasons",
+            "type": "array"
+          },
+          "interpretation_source": {
+            "default": "original",
+            "enum": [
+              "original",
+              "user_confirmed",
+              "auto_assumed"
+            ],
+            "title": "Interpretation Source",
+            "type": "string"
+          },
+          "normalized_statement": {
+            "title": "Normalized Statement",
+            "type": "string"
+          },
+          "original_statement": {
+            "default": "",
+            "title": "Original Statement",
+            "type": "string"
+          },
+          "output_language": {
+            "default": "zh-CN",
+            "title": "Output Language",
+            "type": "string"
+          },
+          "problem_id": {
+            "title": "Problem Id",
+            "type": "string"
+          },
+          "problem_kind": {
+            "$ref": "#/$defs/ProblemKind",
+            "default": "unknown"
+          },
+          "semantic_view": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ProblemSemanticView"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "task_requirements": {
+            "items": {
+              "$ref": "#/$defs/TaskRequirement"
+            },
+            "title": "Task Requirements",
+            "type": "array"
+          }
+        },
+        "required": [
+          "exact_statement",
+          "normalized_statement"
+        ],
+        "title": "ProblemContract",
+        "type": "object"
+      },
+      "ProblemKind": {
+        "enum": [
+          "proof",
+          "calculation",
+          "logic",
+          "optimization",
+          "construction",
+          "research",
+          "mixed",
+          "unknown"
+        ],
+        "title": "ProblemKind",
+        "type": "string"
+      },
+      "ProblemSemanticView": {
+        "additionalProperties": false,
+        "description": "Audited prompt sidecar excluded from the frozen goal identity.",
+        "properties": {
+          "audit_findings": {
+            "items": {
+              "$ref": "#/$defs/SemanticInvariantAudit"
+            },
+            "title": "Audit Findings",
+            "type": "array"
+          },
+          "authoritative": {
+            "const": false,
+            "default": false,
+            "title": "Authoritative",
+            "type": "boolean"
+          },
+          "candidate_confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Candidate Confidence",
+            "type": "number"
+          },
+          "deterministic_audit_passed": {
+            "default": false,
+            "title": "Deterministic Audit Passed",
+            "type": "boolean"
+          },
+          "english_statement": {
+            "title": "English Statement",
+            "type": "string"
+          },
+          "missing_protected_fragments": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Protected Fragments",
+            "type": "array"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "protected_fragments": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Protected Fragments",
+            "type": "array"
+          },
+          "source_language": {
+            "title": "Source Language",
+            "type": "string"
+          },
+          "source_statement_hash": {
+            "title": "Source Statement Hash",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "usable",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_statement_hash",
+          "source_language",
+          "english_statement",
+          "candidate_confidence",
+          "status"
+        ],
+        "title": "ProblemSemanticView",
+        "type": "object"
+      },
+      "ProofCheckpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "active_assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Active Assumptions",
+            "type": "array"
+          },
+          "checkpoint_id": {
+            "title": "Checkpoint Id",
+            "type": "string"
+          },
+          "content_hash": {
+            "default": "",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_goal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Goal"
+          },
+          "failover_chain": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Failover Chain",
+            "type": "array"
+          },
+          "final_answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Final Answer"
+          },
+          "known_risks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Known Risks",
+            "type": "array"
+          },
+          "parent_checkpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent Checkpoint Id"
+          },
+          "path_id": {
+            "title": "Path Id",
+            "type": "string"
+          },
+          "problem_hash": {
+            "title": "Problem Hash",
+            "type": "string"
+          },
+          "proof_complete": {
+            "default": false,
+            "title": "Proof Complete",
+            "type": "boolean"
+          },
+          "proof_sketch": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Proof Sketch",
+            "type": "string"
+          },
+          "remaining_subgoals": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Remaining Subgoals",
+            "type": "array"
+          },
+          "segment_index": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Segment Index",
+            "type": "integer"
+          },
+          "source_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Agent Id"
+          },
+          "source_delta_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Delta Id"
+          },
+          "status": {
+            "$ref": "#/$defs/CheckpointStatus",
+            "default": "committed"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "verification_report_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Verification Report Ids",
+            "type": "array"
+          },
+          "verified_claim_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Verified Claim Ids",
+            "type": "array"
+          },
+          "verified_steps": {
+            "items": {
+              "$ref": "#/$defs/ProofStep"
+            },
+            "title": "Verified Steps",
+            "type": "array"
+          },
+          "working_notes": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Working Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "problem_hash",
+          "path_id",
+          "strategy_id"
+        ],
+        "title": "ProofCheckpoint",
+        "type": "object"
+      },
+      "ProofStep": {
+        "additionalProperties": false,
+        "properties": {
+          "branch_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branch Label"
+          },
+          "calculation_checks": {
+            "items": {
+              "$ref": "#/$defs/ToolRequest"
+            },
+            "title": "Calculation Checks",
+            "type": "array"
+          },
+          "calculation_evidence_refs": {
+            "items": {
+              "$ref": "#/$defs/EvidenceRef"
+            },
+            "title": "Calculation Evidence Refs",
+            "type": "array"
+          },
+          "calculations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Calculations",
+            "type": "array"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/$defs/CitationRecord"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "confidence": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "dependencies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dependencies",
+            "type": "array"
+          },
+          "dependency_refs": {
+            "items": {},
+            "title": "Dependency Refs",
+            "type": "array"
+          },
+          "is_key_step": {
+            "default": false,
+            "title": "Is Key Step",
+            "type": "boolean"
+          },
+          "justification": {
+            "title": "Justification",
+            "type": "string"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          },
+          "step_type": {
+            "default": "derivation",
+            "enum": [
+              "derivation",
+              "assumption_intro",
+              "assumption_discharge",
+              "case_split",
+              "case_close",
+              "definition",
+              "construction"
+            ],
+            "title": "Step Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id",
+          "statement",
+          "justification"
+        ],
+        "title": "ProofStep",
+        "type": "object"
+      },
+      "SemanticInvariantAudit": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "invariant": {
+            "minLength": 1,
+            "title": "Invariant",
+            "type": "string"
+          },
+          "source_values": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Values",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "pass",
+              "fail",
+              "not_applicable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target_values": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "invariant",
+          "status",
+          "detail"
+        ],
+        "title": "SemanticInvariantAudit",
+        "type": "object"
+      },
+      "StrategyCard": {
+        "additionalProperties": false,
+        "properties": {
+          "assigned_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Assigned Agent Id"
+          },
+          "bottleneck": {
+            "title": "Bottleneck",
+            "type": "string"
+          },
+          "calculation_checks": {
+            "items": {
+              "$ref": "#/$defs/ToolRequest"
+            },
+            "title": "Calculation Checks",
+            "type": "array"
+          },
+          "calculation_evidence_refs": {
+            "items": {
+              "$ref": "#/$defs/EvidenceRef"
+            },
+            "title": "Calculation Evidence Refs",
+            "type": "array"
+          },
+          "computation_hints": {
+            "items": {
+              "$ref": "#/$defs/ComputationHint"
+            },
+            "title": "Computation Hints",
+            "type": "array"
+          },
+          "core_idea": {
+            "title": "Core Idea",
+            "type": "string"
+          },
+          "critical_claims": {
+            "items": {
+              "$ref": "#/$defs/CriticalClaim"
+            },
+            "title": "Critical Claims",
+            "type": "array"
+          },
+          "estimated_cost": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Estimated Cost",
+            "type": "number"
+          },
+          "estimated_success": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Estimated Success",
+            "type": "number"
+          },
+          "expected_lemmas": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Expected Lemmas",
+            "type": "array"
+          },
+          "falsification_test": {
+            "title": "Falsification Test",
+            "type": "string"
+          },
+          "independence_basis": {
+            "title": "Independence Basis",
+            "type": "string"
+          },
+          "inspiration_proposal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inspiration Proposal Id"
+          },
+          "key_original_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Key Original Step"
+          },
+          "parent_strategy_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Strategy Ids",
+            "type": "array"
+          },
+          "prerequisites": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Prerequisites",
+            "type": "array"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "core_idea",
+          "independence_basis",
+          "bottleneck",
+          "falsification_test",
+          "estimated_success"
+        ],
+        "title": "StrategyCard",
+        "type": "object"
+      },
+      "TaskRequirement": {
+        "description": "The user-visible artifact that must be delivered for the task to finish.",
+        "enum": [
+          "proof",
+          "solution",
+          "computation",
+          "conjecture",
+          "counterexample",
+          "classification",
+          "optimization",
+          "construction",
+          "research_progress"
+        ],
+        "title": "TaskRequirement",
+        "type": "string"
+      },
+      "ToolRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "domains": {
+            "additionalProperties": true,
+            "title": "Domains",
+            "type": "object"
+          },
+          "kind": {
+            "enum": [
+              "sympy_simplify",
+              "sympy_equivalent",
+              "numeric_counterexample",
+              "polynomial_factor",
+              "modular_exhaustive",
+              "bounded_integer_search",
+              "graph_certificate",
+              "recurrence_check",
+              "bounded_greedy_sequence",
+              "candidate_period_check",
+              "exact_geometry",
+              "lean_check"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "max_cases": {
+            "default": 100000,
+            "maximum": 100000000,
+            "minimum": 1,
+            "title": "Max Cases",
+            "type": "integer"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "purpose"
+        ],
+        "title": "ToolRequest",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "evidence_refs": {
+        "items": {
+          "$ref": "#/$defs/EvidenceRef"
+        },
+        "title": "Evidence Refs",
+        "type": "array"
+      },
+      "notes": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Notes",
+        "type": "array"
+      },
+      "problem": {
+        "$ref": "#/$defs/ProblemContract"
+      },
+      "proof_checkpoint": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ProofCheckpoint"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "remaining_call_budget": {
+        "default": 0,
+        "title": "Remaining Call Budget",
+        "type": "integer"
+      },
+      "round_index": {
+        "default": 0,
+        "title": "Round Index",
+        "type": "integer"
+      },
+      "strategy": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/StrategyCard"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "targeted_feedback": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Targeted Feedback",
+        "type": "array"
+      },
+      "uncertain_claims": {
+        "items": {
+          "$ref": "#/$defs/ClaimCard"
+        },
+        "title": "Uncertain Claims",
+        "type": "array"
+      },
+      "verified_claims": {
+        "items": {
+          "$ref": "#/$defs/ClaimCard"
+        },
+        "title": "Verified Claims",
+        "type": "array"
+      }
+    },
+    "required": [
+      "problem"
+    ],
+    "title": "ContextPack",
+    "type": "object"
+  }
+}

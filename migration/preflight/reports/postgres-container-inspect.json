@@ -1,0 +1,39 @@
+{
+    "captured_at_utc":  "2026-07-30T08:15:17.6386394Z",
+    "name":  "mathproofmesh-phase00-postgres-1",
+    "image":  "postgres@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296",
+    "image_id":  "sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296",
+    "user":  "999:999",
+    "command":  [
+                    "postgres"
+                ],
+    "read_only_root_filesystem":  true,
+    "cap_drop":  [
+                     "ALL"
+                 ],
+    "security_options":  [
+                             "no-new-privileges:true"
+                         ],
+    "pids_limit":  256,
+    "memory_bytes":  805306368,
+    "nano_cpus":  1000000000,
+    "health_status":  "healthy",
+    "running":  true,
+    "ports":  {
+                  "5432/tcp":  [
+                                   {
+                                       "HostIp":  "127.0.0.1",
+                                       "HostPort":  "55432"
+                                   }
+                               ]
+              },
+    "mounts":  [
+                   {
+                       "type":  "bind",
+                       "source":  "C:\\Users\\yanxinyu\\Desktop\\JavaMathProofMeshMigration\\Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control\\JavaMathProofMesh-0.8.0\\.work\\container-preflight\\postgres",
+                       "destination":  "/var/lib/postgresql",
+                       "mode":  "rw",
+                       "rw":  true
+                   }
+               ]
+}

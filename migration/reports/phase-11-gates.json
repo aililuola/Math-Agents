@@ -1,0 +1,125 @@
+{
+  "schema_version": "1.0",
+  "phase": "11",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-31T02:48:29.841Z",
+  "scope": "Inspiration engine and bounded novelty control",
+  "source": {
+    "authoritative_zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+    "source_files": 401,
+    "source_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "immutability": "PASS"
+  },
+  "authority_boundary": {
+    "inspiration_may_write_fact": false,
+    "inspiration_may_close_obligation": false,
+    "inspiration_may_close_checkpoint": false,
+    "inspiration_may_change_problem_hash": false,
+    "author_may_referee_same_proposal": false,
+    "novelty_is_correctness": false
+  },
+  "mode_semantics": {
+    "off_provider_calls": 0,
+    "shadow_provider_calls": 0,
+    "shadow_business_mutations": 0,
+    "active_requires_scheduler_admission": "PASS",
+    "active_requires_independent_review": "PASS",
+    "per_trigger_caps_cross_mechanisms": "PASS"
+  },
+  "mechanisms": {
+    "representation_switchboard": "PASS",
+    "verified_local_analogy": "PASS",
+    "auxiliary_construction": "PASS",
+    "invariant_and_monovariant_hypothesis": "PASS",
+    "reverse_goal_with_explicit_bridge": "PASS",
+    "seeded_surprise_mutation": "PASS",
+    "ontology_and_novelty_signature": "PASS",
+    "independently_reviewed_composition": "PASS",
+    "persistent_meta_strategy": "PASS"
+  },
+  "scheduling_and_learning": {
+    "assignment_distinct_and_bounded": "PASS",
+    "warm_cold_context_isolation": "PASS",
+    "meta_context_contains_proof_transcripts": false,
+    "protected_finalization_budget": "PASS",
+    "fixed_seed_replay": "PASS",
+    "ucb_schedulable_pool_only": "PASS",
+    "minimum_exploration": "PASS",
+    "credit_is_proposal_fact_and_citation_specific": "PASS",
+    "positive_experience_requires_fact_gate": "PASS",
+    "rejected_analogy_is_negative": "PASS",
+    "cross_run_scope": "project-and-tenant-local"
+  },
+  "tests": {
+    "mapped_python_test_files": 23,
+    "mapped_python_functions": 70,
+    "authority_named_junit_cases": 70,
+    "auxiliary_hash_cases_added": 2,
+    "phase_specific_total": 72,
+    "reactor_total": 1246,
+    "report_files": 143,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "online_clean_verify": "PASS",
+    "offline_clean_verify": "PASS",
+    "online_log": "migration/logs/phase-11-verify-online.log",
+    "online_log_sha256": "e236eadd2e2e5f982776545152161fb3e698d9180feeabeffad9fd3bdf23a427",
+    "offline_log": "migration/logs/phase-11-verify-offline.log",
+    "offline_log_sha256": "a7a15587872fd81402463f8541cb04e316e18422704252b2bd962b9e065317dc",
+    "failed_online_attempt": {
+      "path": "migration/logs/phase-11-verify-online-attempt-1.log",
+      "sha256": "7d45dde3620dfe8eb74c5bf6f6f71afee52b1001d1be222da799813b17d38e69",
+      "classification": "initial SpotBugs findings corrected before final gates",
+      "semantic_or_assertion_failure": false
+    }
+  },
+  "quality_and_dependency_security": {
+    "java": "Eclipse Temurin 25.0.4+7",
+    "maven": "3.9.16",
+    "maven_wrapper": "3.3.4 only-script",
+    "dependencies_added": [],
+    "dependency_version_changes": [],
+    "dependency_convergence": "PASS",
+    "external_snapshots": 0,
+    "duplicate_classes": 0,
+    "spotbugs_findsecbugs_findings": 0,
+    "modulith_structure": "PASS",
+    "dependency_tree": "migration/reports/phase-11-dependency-tree.txt",
+    "dependency_tree_sha256": "9bb2f532489fa261ce4548b44cac8224faefc1458d15a741a006b42a1609b6db",
+    "sbom": {
+      "format": "CycloneDX",
+      "spec_version": "1.6",
+      "components": 88,
+      "dependency_entries": 89,
+      "path": "migration/reports/phase-01-sbom.json",
+      "sha256": "2e547c2b8e6fd95d0b5283f742d99f1be62fd0b58472ae619f17cfd3382d398a"
+    },
+    "owasp": {
+      "engine": "12.2.2",
+      "dependencies": 112,
+      "fail_build_on_cvss": 7.0,
+      "findings_at_or_above_gate": 0,
+      "below_gate_findings": [
+        {
+          "cve": "CVE-2021-4277",
+          "artifact": "com.cronutils:cron-utils:9.2.1",
+          "severity": "MEDIUM",
+          "cvss": 5.3
+        }
+      ],
+      "report_json_sha256": "4170d79b01ff926d8ec23e39541095f40d21a0297496ee06ff1def563baef98d",
+      "report_html_sha256": "87d9fe9ea8ab6f1ba44695d24590891a02536c63e990486f7bbfc303cfd2b97d"
+    }
+  },
+  "mappings": {
+    "source_rows": "23/23 migrated",
+    "test_rows": "23/23 ported; 70 Python test functions",
+    "auxiliary_rows": "2/2 closed; 1 copied_verified, 1 translated_verified",
+    "state_rows": "142 + 167 + 92 = 401 unique paths"
+  },
+  "stop_condition": {
+    "phase_12_started_before_phase_11_pass": false
+  }
+}

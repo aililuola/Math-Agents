@@ -1,0 +1,71 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.MessageUtilityContract",
+  "schema": {
+    "$defs": {
+      "MessageExpectedEffect": {
+        "enum": [
+          "close",
+          "reduce",
+          "refute",
+          "rewrite",
+          "provide_construction"
+        ],
+        "title": "MessageExpectedEffect",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "contract_id": {
+        "title": "Contract Id",
+        "type": "string"
+      },
+      "expected_core_debt_reduction": {
+        "default": 0.0,
+        "minimum": 0.0,
+        "title": "Expected Core Debt Reduction",
+        "type": "number"
+      },
+      "expected_effect": {
+        "$ref": "#/$defs/MessageExpectedEffect"
+      },
+      "expires_round": {
+        "minimum": 0,
+        "title": "Expires Round",
+        "type": "integer"
+      },
+      "message_id": {
+        "title": "Message Id",
+        "type": "string"
+      },
+      "required_assumptions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Required Assumptions",
+        "type": "array"
+      },
+      "source_route_id": {
+        "title": "Source Route Id",
+        "type": "string"
+      },
+      "target_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Obligation Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "message_id",
+      "source_route_id",
+      "target_obligation_ids",
+      "expected_effect",
+      "required_assumptions",
+      "expires_round"
+    ],
+    "title": "MessageUtilityContract",
+    "type": "object"
+  }
+}

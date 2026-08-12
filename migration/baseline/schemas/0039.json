@@ -1,0 +1,62 @@
+{
+  "qualified_name": "mathproofmesh.config.ValidationEscalationConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "adversarial_prompt_review": {
+        "default": true,
+        "title": "Adversarial Prompt Review",
+        "type": "boolean"
+      },
+      "blind_same_model_review": {
+        "default": true,
+        "title": "Blind Same Model Review",
+        "type": "boolean"
+      },
+      "cross_provider_review": {
+        "default": false,
+        "title": "Cross Provider Review",
+        "type": "boolean"
+      },
+      "deterministic_checks_first": {
+        "default": true,
+        "title": "Deterministic Checks First",
+        "type": "boolean"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "escalate_before_fact_promotion": {
+        "default": true,
+        "title": "Escalate Before Fact Promotion",
+        "type": "boolean"
+      },
+      "escalate_final_proof": {
+        "default": true,
+        "title": "Escalate Final Proof",
+        "type": "boolean"
+      },
+      "escalate_on_reviewer_disagreement": {
+        "default": true,
+        "title": "Escalate On Reviewer Disagreement",
+        "type": "boolean"
+      },
+      "high_risk_threshold": {
+        "default": 0.75,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "High Risk Threshold",
+        "type": "number"
+      },
+      "tool_or_formal_check_on_high_risk": {
+        "default": true,
+        "title": "Tool Or Formal Check On High Risk",
+        "type": "boolean"
+      }
+    },
+    "title": "ValidationEscalationConfig",
+    "type": "object"
+  }
+}

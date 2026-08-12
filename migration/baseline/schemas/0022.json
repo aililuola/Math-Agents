@@ -1,0 +1,607 @@
+{
+  "qualified_name": "mathproofmesh.config.InspirationConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "active_proposals_per_task": {
+        "default": 3,
+        "maximum": 16,
+        "minimum": 1,
+        "title": "Active Proposals Per Task",
+        "type": "integer"
+      },
+      "adaptive_mechanism_selection": {
+        "default": true,
+        "title": "Adaptive Mechanism Selection",
+        "type": "boolean"
+      },
+      "adaptive_min_exploration_rate": {
+        "default": 0.15,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Adaptive Min Exploration Rate",
+        "type": "number"
+      },
+      "adaptive_min_observations": {
+        "default": 1,
+        "maximum": 64,
+        "minimum": 0,
+        "title": "Adaptive Min Observations",
+        "type": "integer"
+      },
+      "adaptive_reward_call_cost": {
+        "default": 0.1,
+        "maximum": 8.0,
+        "minimum": 0.0,
+        "title": "Adaptive Reward Call Cost",
+        "type": "number"
+      },
+      "adaptive_reward_debt_weight": {
+        "default": 1.0,
+        "maximum": 32.0,
+        "minimum": 0.0,
+        "title": "Adaptive Reward Debt Weight",
+        "type": "number"
+      },
+      "adaptive_reward_fact_weight": {
+        "default": 4.0,
+        "maximum": 32.0,
+        "minimum": 0.0,
+        "title": "Adaptive Reward Fact Weight",
+        "type": "number"
+      },
+      "adaptive_reward_final_citation_weight": {
+        "default": 3.0,
+        "maximum": 32.0,
+        "minimum": 0.0,
+        "title": "Adaptive Reward Final Citation Weight",
+        "type": "number"
+      },
+      "adaptive_reward_obligation_weight": {
+        "default": 1.0,
+        "maximum": 32.0,
+        "minimum": 0.0,
+        "title": "Adaptive Reward Obligation Weight",
+        "type": "number"
+      },
+      "adaptive_reward_refutation_cost": {
+        "default": 1.0,
+        "maximum": 32.0,
+        "minimum": 0.0,
+        "title": "Adaptive Reward Refutation Cost",
+        "type": "number"
+      },
+      "adaptive_reward_token_cost_per_100k": {
+        "default": 0.1,
+        "maximum": 8.0,
+        "minimum": 0.0,
+        "title": "Adaptive Reward Token Cost Per 100K",
+        "type": "number"
+      },
+      "adaptive_ucb_weight": {
+        "default": 0.75,
+        "maximum": 8.0,
+        "minimum": 0.0,
+        "title": "Adaptive Ucb Weight",
+        "type": "number"
+      },
+      "all_routes_failed_trigger": {
+        "default": true,
+        "title": "All Routes Failed Trigger",
+        "type": "boolean"
+      },
+      "allow_external_retrieval": {
+        "default": false,
+        "title": "Allow External Retrieval",
+        "type": "boolean"
+      },
+      "analogy_agent": {
+        "default": true,
+        "title": "Analogy Agent",
+        "type": "boolean"
+      },
+      "analogy_library_enabled": {
+        "default": true,
+        "title": "Analogy Library Enabled",
+        "type": "boolean"
+      },
+      "analogy_library_path": {
+        "default": "benchmarks/analogy_library.jsonl",
+        "title": "Analogy Library Path",
+        "type": "string"
+      },
+      "analogy_top_k": {
+        "default": 6,
+        "maximum": 64,
+        "minimum": 1,
+        "title": "Analogy Top K",
+        "type": "integer"
+      },
+      "auxiliary_construction_inventor": {
+        "default": true,
+        "title": "Auxiliary Construction Inventor",
+        "type": "boolean"
+      },
+      "bidirectional_frontier_enabled": {
+        "default": true,
+        "title": "Bidirectional Frontier Enabled",
+        "type": "boolean"
+      },
+      "bridge_lemma_generator": {
+        "default": true,
+        "title": "Bridge Lemma Generator",
+        "type": "boolean"
+      },
+      "cold_context_proposals_per_task": {
+        "default": 1,
+        "maximum": 16,
+        "minimum": 0,
+        "title": "Cold Context Proposals Per Task",
+        "type": "integer"
+      },
+      "composer_max_candidates_per_round": {
+        "default": 2,
+        "maximum": 16,
+        "minimum": 0,
+        "title": "Composer Max Candidates Per Round",
+        "type": "integer"
+      },
+      "composer_max_combined_cost": {
+        "default": 4,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Composer Max Combined Cost",
+        "type": "integer"
+      },
+      "composer_max_sources": {
+        "default": 2,
+        "maximum": 4,
+        "minimum": 2,
+        "title": "Composer Max Sources",
+        "type": "integer"
+      },
+      "composer_require_quick_falsification": {
+        "default": true,
+        "title": "Composer Require Quick Falsification",
+        "type": "boolean"
+      },
+      "controlled_surprise_mutation_enabled": {
+        "default": true,
+        "title": "Controlled Surprise Mutation Enabled",
+        "type": "boolean"
+      },
+      "cross_run_learning_enabled": {
+        "default": false,
+        "title": "Cross Run Learning Enabled",
+        "type": "boolean"
+      },
+      "cross_run_learning_path": {
+        "default": ".mathproofmesh/learning",
+        "title": "Cross Run Learning Path",
+        "type": "string"
+      },
+      "cross_run_max_experiences": {
+        "default": 2000,
+        "maximum": 100000,
+        "minimum": 0,
+        "title": "Cross Run Max Experiences",
+        "type": "integer"
+      },
+      "cross_run_max_negative_analogies": {
+        "default": 2000,
+        "maximum": 100000,
+        "minimum": 0,
+        "title": "Cross Run Max Negative Analogies",
+        "type": "integer"
+      },
+      "cross_run_max_outcomes": {
+        "default": 10000,
+        "maximum": 500000,
+        "minimum": 0,
+        "title": "Cross Run Max Outcomes",
+        "type": "integer"
+      },
+      "cross_run_require_final_citation": {
+        "default": true,
+        "title": "Cross Run Require Final Citation",
+        "type": "boolean"
+      },
+      "domain_operator_max_prompt_items": {
+        "default": 8,
+        "maximum": 64,
+        "minimum": 1,
+        "title": "Domain Operator Max Prompt Items",
+        "type": "integer"
+      },
+      "domain_operator_plugins_enabled": {
+        "default": true,
+        "title": "Domain Operator Plugins Enabled",
+        "type": "boolean"
+      },
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "experience_distillation_enabled": {
+        "default": true,
+        "title": "Experience Distillation Enabled",
+        "type": "boolean"
+      },
+      "final_repair_failure_trigger": {
+        "default": true,
+        "title": "Final Repair Failure Trigger",
+        "type": "boolean"
+      },
+      "frontier_max_backward_claims": {
+        "default": 8,
+        "maximum": 64,
+        "minimum": 1,
+        "title": "Frontier Max Backward Claims",
+        "type": "integer"
+      },
+      "frontier_max_bridge_candidates": {
+        "default": 3,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Frontier Max Bridge Candidates",
+        "type": "integer"
+      },
+      "frontier_max_forward_claims": {
+        "default": 8,
+        "maximum": 64,
+        "minimum": 1,
+        "title": "Frontier Max Forward Claims",
+        "type": "integer"
+      },
+      "frontier_min_candidate_overlap": {
+        "default": 0.35,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Frontier Min Candidate Overlap",
+        "type": "number"
+      },
+      "inspiration_composer_enabled": {
+        "default": true,
+        "title": "Inspiration Composer Enabled",
+        "type": "boolean"
+      },
+      "inspiration_context_max_chars": {
+        "default": 24000,
+        "maximum": 500000,
+        "minimum": 1000,
+        "title": "Inspiration Context Max Chars",
+        "type": "integer"
+      },
+      "invariant_hypothesis_agent": {
+        "default": true,
+        "title": "Invariant Hypothesis Agent",
+        "type": "boolean"
+      },
+      "max_consecutive_surprise_rejections": {
+        "default": 2,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Max Consecutive Surprise Rejections",
+        "type": "integer"
+      },
+      "max_distilled_experiences": {
+        "default": 256,
+        "maximum": 10000,
+        "minimum": 0,
+        "title": "Max Distilled Experiences",
+        "type": "integer"
+      },
+      "max_inspiration_tasks_per_round": {
+        "default": 2,
+        "maximum": 32,
+        "minimum": 0,
+        "title": "Max Inspiration Tasks Per Round",
+        "type": "integer"
+      },
+      "max_materialized_proposals_per_trigger": {
+        "default": 1,
+        "maximum": 16,
+        "minimum": 0,
+        "title": "Max Materialized Proposals Per Trigger",
+        "type": "integer"
+      },
+      "max_negative_analogy_records": {
+        "default": 256,
+        "maximum": 10000,
+        "minimum": 0,
+        "title": "Max Negative Analogy Records",
+        "type": "integer"
+      },
+      "max_new_routes_per_trigger": {
+        "default": 2,
+        "maximum": 16,
+        "minimum": 0,
+        "title": "Max New Routes Per Trigger",
+        "type": "integer"
+      },
+      "max_proposals_per_task": {
+        "default": 3,
+        "maximum": 16,
+        "minimum": 1,
+        "title": "Max Proposals Per Task",
+        "type": "integer"
+      },
+      "max_reviewed_proposals_per_task": {
+        "default": 2,
+        "maximum": 16,
+        "minimum": 1,
+        "title": "Max Reviewed Proposals Per Task",
+        "type": "integer"
+      },
+      "max_single_agent_proposals_per_task": {
+        "default": 2,
+        "maximum": 16,
+        "minimum": 1,
+        "title": "Max Single Agent Proposals Per Task",
+        "type": "integer"
+      },
+      "mechanism_duplicate_threshold": {
+        "default": 0.86,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Mechanism Duplicate Threshold",
+        "type": "number"
+      },
+      "meta_allow_route_abandon": {
+        "default": true,
+        "title": "Meta Allow Route Abandon",
+        "type": "boolean"
+      },
+      "meta_directive_cooldown_rounds": {
+        "default": 2,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Meta Directive Cooldown Rounds",
+        "type": "integer"
+      },
+      "meta_directive_expiry_rounds": {
+        "default": 2,
+        "maximum": 32,
+        "minimum": 0,
+        "title": "Meta Directive Expiry Rounds",
+        "type": "integer"
+      },
+      "meta_directive_max_estimated_calls": {
+        "default": 8,
+        "maximum": 64,
+        "minimum": 0,
+        "title": "Meta Directive Max Estimated Calls",
+        "type": "integer"
+      },
+      "meta_directives_enabled": {
+        "default": true,
+        "title": "Meta Directives Enabled",
+        "type": "boolean"
+      },
+      "minimum_verified_gain": {
+        "default": 1,
+        "maximum": 128,
+        "minimum": 0,
+        "title": "Minimum Verified Gain",
+        "type": "integer"
+      },
+      "mode": {
+        "default": "shadow",
+        "enum": [
+          "off",
+          "shadow",
+          "active"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "negative_analogy_library_enabled": {
+        "default": true,
+        "title": "Negative Analogy Library Enabled",
+        "type": "boolean"
+      },
+      "novelty_mechanism_weight": {
+        "default": 0.24,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Novelty Mechanism Weight",
+        "type": "number"
+      },
+      "novelty_object_weight": {
+        "default": 0.16,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Novelty Object Weight",
+        "type": "number"
+      },
+      "novelty_obligation_weight": {
+        "default": 0.1,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Novelty Obligation Weight",
+        "type": "number"
+      },
+      "novelty_principle_weight": {
+        "default": 0.1,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Novelty Principle Weight",
+        "type": "number"
+      },
+      "novelty_representation_weight": {
+        "default": 0.24,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Novelty Representation Weight",
+        "type": "number"
+      },
+      "novelty_threshold": {
+        "default": 0.65,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Novelty Threshold",
+        "type": "number"
+      },
+      "novelty_transformation_weight": {
+        "default": 0.16,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Novelty Transformation Weight",
+        "type": "number"
+      },
+      "persistent_meta_strategist": {
+        "default": true,
+        "title": "Persistent Meta Strategist",
+        "type": "boolean"
+      },
+      "proof_debt_min_reduction": {
+        "default": 0.03,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Proof Debt Min Reduction",
+        "type": "number"
+      },
+      "proposals_enter_fact_memory": {
+        "default": false,
+        "title": "Proposals Enter Fact Memory",
+        "type": "boolean"
+      },
+      "proposer_generalist_roles": {
+        "items": {
+          "enum": [
+            "planner",
+            "explorer",
+            "summarizer",
+            "structural_verifier",
+            "detailed_verifier",
+            "meta_reviewer",
+            "synthesizer",
+            "final_verifier",
+            "experimenter",
+            "route_prover",
+            "route_skeptic",
+            "tool_specialist",
+            "route_referee",
+            "bridge_prover",
+            "conflict_resolver",
+            "counterexample_hunter",
+            "representation_switchboard",
+            "analogy_agent",
+            "construction_inventor",
+            "invariant_hypothesis_agent",
+            "reverse_goal_analyzer",
+            "meta_strategist",
+            "inspiration_referee",
+            "general"
+          ],
+          "type": "string"
+        },
+        "title": "Proposer Generalist Roles",
+        "type": "array"
+      },
+      "protect_finalization_reserve": {
+        "default": true,
+        "title": "Protect Finalization Reserve",
+        "type": "boolean"
+      },
+      "repeated_error_threshold": {
+        "default": 2,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Repeated Error Threshold",
+        "type": "integer"
+      },
+      "representation_switchboard": {
+        "default": true,
+        "title": "Representation Switchboard",
+        "type": "boolean"
+      },
+      "require_inspiration_referee": {
+        "default": true,
+        "title": "Require Inspiration Referee",
+        "type": "boolean"
+      },
+      "reverse_goal_analysis": {
+        "default": true,
+        "title": "Reverse Goal Analysis",
+        "type": "boolean"
+      },
+      "route_budget_share_trigger": {
+        "default": 0.5,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Route Budget Share Trigger",
+        "type": "number"
+      },
+      "route_redundancy_trigger": {
+        "default": 0.8,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Route Redundancy Trigger",
+        "type": "number"
+      },
+      "shared_bottleneck_trigger": {
+        "default": true,
+        "title": "Shared Bottleneck Trigger",
+        "type": "boolean"
+      },
+      "stagnation_rounds": {
+        "default": 2,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Stagnation Rounds",
+        "type": "integer"
+      },
+      "surprise_budget_fraction": {
+        "default": 0.08,
+        "maximum": 0.5,
+        "minimum": 0.0,
+        "title": "Surprise Budget Fraction",
+        "type": "number"
+      },
+      "surprise_budget_max_calls": {
+        "default": 32,
+        "maximum": 128,
+        "minimum": 0,
+        "title": "Surprise Budget Max Calls",
+        "type": "integer"
+      },
+      "surprise_budget_min_calls": {
+        "default": 10,
+        "maximum": 64,
+        "minimum": 0,
+        "title": "Surprise Budget Min Calls",
+        "type": "integer"
+      },
+      "surprise_cooldown_rounds": {
+        "default": 2,
+        "maximum": 32,
+        "minimum": 0,
+        "title": "Surprise Cooldown Rounds",
+        "type": "integer"
+      },
+      "surprise_exploration": {
+        "default": true,
+        "title": "Surprise Exploration",
+        "type": "boolean"
+      },
+      "warm_context_max_facts": {
+        "default": 5,
+        "maximum": 64,
+        "minimum": 0,
+        "title": "Warm Context Max Facts",
+        "type": "integer"
+      },
+      "warm_context_max_negatives": {
+        "default": 5,
+        "maximum": 64,
+        "minimum": 0,
+        "title": "Warm Context Max Negatives",
+        "type": "integer"
+      }
+    },
+    "title": "InspirationConfig",
+    "type": "object"
+  }
+}

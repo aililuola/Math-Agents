@@ -1,0 +1,81 @@
+{
+  "qualified_name": "mathproofmesh.schemas.InspirationTrigger",
+  "schema": {
+    "$defs": {
+      "InspirationTriggerType": {
+        "enum": [
+          "stagnation",
+          "repeated_first_error",
+          "high_route_redundancy",
+          "all_routes_failed",
+          "shared_bottleneck",
+          "proof_debt_plateau",
+          "final_repair_failed",
+          "manual"
+        ],
+        "title": "InspirationTriggerType",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "affected_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Affected Route Ids",
+        "type": "array"
+      },
+      "evidence_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Evidence Refs",
+        "type": "array"
+      },
+      "proof_debt_before": {
+        "default": 0.0,
+        "minimum": 0.0,
+        "title": "Proof Debt Before",
+        "type": "number"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "repeated_error_fingerprints": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Repeated Error Fingerprints",
+        "type": "array"
+      },
+      "round_index": {
+        "minimum": 0,
+        "title": "Round Index",
+        "type": "integer"
+      },
+      "trigger_id": {
+        "title": "Trigger Id",
+        "type": "string"
+      },
+      "trigger_type": {
+        "$ref": "#/$defs/InspirationTriggerType"
+      },
+      "verified_gain_recent": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Verified Gain Recent",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "trigger_type",
+      "round_index",
+      "affected_route_ids",
+      "reason"
+    ],
+    "title": "InspirationTrigger",
+    "type": "object"
+  }
+}

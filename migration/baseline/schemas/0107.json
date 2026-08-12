@@ -1,0 +1,53 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.RealizerRepairTask",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "failed_candidate_id": {
+        "title": "Failed Candidate Id",
+        "type": "string"
+      },
+      "repair_operator": {
+        "enum": [
+          "replace_realizer_preserve_structure",
+          "minimal_admissible_realizer",
+          "alternative_representative",
+          "repair_boundary_conditions"
+        ],
+        "title": "Repair Operator",
+        "type": "string"
+      },
+      "required_constraints": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Required Constraints",
+        "type": "array"
+      },
+      "structure_id": {
+        "title": "Structure Id",
+        "type": "string"
+      },
+      "targeted_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Targeted Obligation Ids",
+        "type": "array"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "structure_id",
+      "failed_candidate_id",
+      "repair_operator",
+      "required_constraints",
+      "targeted_obligation_ids"
+    ],
+    "title": "RealizerRepairTask",
+    "type": "object"
+  }
+}

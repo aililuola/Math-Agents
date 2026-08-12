@@ -1,0 +1,86 @@
+{
+  "schema_version": "1.0",
+  "phase": "03",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-30T12:30:29.241Z",
+  "python_source_mode": "read-only",
+  "profiles": [
+    {
+      "python_fixture": "config.deepseek-v4-pro.proof-control-active.yaml",
+      "java_profile": "config/proof-control-active.yaml",
+      "yaml_sha256": "6173be9ac59aec5de64d3c4d2605283b5524a68447a44a6c2ebf284255aa9192",
+      "normalized_fixture": "migration/baseline/config-fixtures/normalized/config.deepseek-v4-pro.proof-control-active.json",
+      "normalized_fixture_sha256": "f4d5960576c7a2b560f95ec4a49fca90fbb14d1a6b12c384ef4e1df7f16fe6ea",
+      "strict_parse": "PASS",
+      "normalized_semantics": "PASS",
+      "redacted_semantics": "PASS"
+    },
+    {
+      "python_fixture": "config.deepseek-v4-pro.proof-control-shadow.yaml",
+      "java_profile": "config/proof-control-shadow.yaml",
+      "yaml_sha256": "83ad1623d0fa7bb657e411186d86188f9bc4f33b5984bcda7026f600a1bbd58a",
+      "normalized_fixture": "migration/baseline/config-fixtures/normalized/config.deepseek-v4-pro.proof-control-shadow.json",
+      "normalized_fixture_sha256": "dded18ef9c3799fef98a199c1b8fef94ac65f1a61eda576cc46acdfe9d0f4e52",
+      "strict_parse": "PASS",
+      "normalized_semantics": "PASS",
+      "redacted_semantics": "PASS"
+    },
+    {
+      "python_fixture": "config.deepseek-v4-pro.smoke.yaml",
+      "java_profile": "config/deepseek-v4-pro-smoke.yaml",
+      "yaml_sha256": "5f6ce9b8e74ad733c50d4d8f21496ba893c987b6c56d446f2630a25faa1feacb",
+      "normalized_fixture": "migration/baseline/config-fixtures/normalized/config.deepseek-v4-pro.smoke.json",
+      "normalized_fixture_sha256": "55a8fe7ec350d5bd14aad6d2455cb4bcef77ad90e9cc775fcb54dc9f5f807d7b",
+      "strict_parse": "PASS",
+      "normalized_semantics": "PASS",
+      "redacted_semantics": "PASS"
+    },
+    {
+      "python_fixture": "config.deepseek-v4-pro.topology-active.yaml",
+      "java_profile": "config/topology-active.yaml",
+      "yaml_sha256": "351ab270aa1fb35f05bb5344564bdcc69cb3e5017953d5515b5878dc471df7f4",
+      "normalized_fixture": "migration/baseline/config-fixtures/normalized/config.deepseek-v4-pro.topology-active.json",
+      "normalized_fixture_sha256": "8b30aac62c17caa9cbbb6e8dd59a7a90363585e4cbafaccb5547367aa0c057b9",
+      "strict_parse": "PASS",
+      "normalized_semantics": "PASS",
+      "redacted_semantics": "PASS"
+    },
+    {
+      "python_fixture": "config.deepseek-v4-pro.yaml",
+      "java_profile": "config/deepseek-v4-pro.yaml",
+      "yaml_sha256": "c5fe586cc9b1cea4e76ce0aa47fbf74039443daf67d254774edd1ce116a1604a",
+      "normalized_fixture": "migration/baseline/config-fixtures/normalized/config.deepseek-v4-pro.json",
+      "normalized_fixture_sha256": "a531bbab8b2ac2ecbf54a85ee3df644ac03e6e7dc1e721a5943ce87f40a22680",
+      "strict_parse": "PASS",
+      "normalized_semantics": "PASS",
+      "redacted_semantics": "PASS"
+    },
+    {
+      "python_fixture": "config.example.yaml",
+      "java_profile": "config/application.yaml",
+      "yaml_sha256": "9733bcbf4f8d87c9bbceb4b5f22f54bc8384c80a2eda922a934fc7dab4945a68",
+      "normalized_fixture": "migration/baseline/config-fixtures/normalized/config.example.json",
+      "normalized_fixture_sha256": "7dca5fbbcfe33a3997a0b43c83d00abb0777171b7dc552dd50d177adc924e97b",
+      "strict_parse": "PASS",
+      "normalized_semantics": "PASS",
+      "redacted_semantics": "PASS"
+    }
+  ],
+  "coverage": {
+    "profiles": 6,
+    "exact_yaml_copies": 6,
+    "strict_parse_cases": 6,
+    "normalized_semantic_matches": 6,
+    "redacted_semantic_matches": 6,
+    "test": "ConfigProfileParityTest"
+  },
+  "environment_template": {
+    "source_fixture": "migration/baseline/auxiliary/.env.example",
+    "source_sha256": "66f1068ce43817a63fb453a2b4e12ef4de210d3e2732e801733b481edc1c0971",
+    "java_template": ".env.local.example",
+    "java_template_sha256": "b010399bf014f9c24658bcddfd0c60207bcbf0322784290bd7d91464f4f09ec8",
+    "secret_slots": 14,
+    "nonempty_secret_slots": 0,
+    "result": "PASS"
+  }
+}

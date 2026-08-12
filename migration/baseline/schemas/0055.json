@@ -1,0 +1,284 @@
+{
+  "qualified_name": "mathproofmesh.inspiration.trigger_policy.InspirationSnapshot",
+  "schema": {
+    "$defs": {
+      "NoveltySignature": {
+        "additionalProperties": false,
+        "properties": {
+          "core_objects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Core Objects",
+            "type": "array"
+          },
+          "extension_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Extension Tags",
+            "type": "array"
+          },
+          "key_transformations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Key Transformations",
+            "type": "array"
+          },
+          "mechanism_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Mechanism Tags",
+            "type": "array"
+          },
+          "normalization_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Normalization Confidence"
+          },
+          "normalized_hash": {
+            "default": "",
+            "title": "Normalized Hash",
+            "type": "string"
+          },
+          "normalizer_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Normalizer Version"
+          },
+          "proof_principles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Proof Principles",
+            "type": "array"
+          },
+          "raw_tags": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Raw Tags",
+            "type": "object"
+          },
+          "representation_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Representation Tags",
+            "type": "array"
+          },
+          "targeted_obligation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Targeted Obligation Ids",
+            "type": "array"
+          }
+        },
+        "title": "NoveltySignature",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "active_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Active Route Ids",
+        "type": "array"
+      },
+      "current_path_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Current Path Count",
+        "type": "integer"
+      },
+      "domain": {
+        "default": "unknown",
+        "title": "Domain",
+        "type": "string"
+      },
+      "failed_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Failed Route Ids",
+        "type": "array"
+      },
+      "final_repair_failed": {
+        "default": false,
+        "title": "Final Repair Failed",
+        "type": "boolean"
+      },
+      "finalization_reserve_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Finalization Reserve Calls",
+        "type": "integer"
+      },
+      "first_error_fingerprints": {
+        "items": {
+          "type": "string"
+        },
+        "title": "First Error Fingerprints",
+        "type": "array"
+      },
+      "manual_evidence_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Manual Evidence Refs",
+        "type": "array"
+      },
+      "manual_trigger": {
+        "default": false,
+        "title": "Manual Trigger",
+        "type": "boolean"
+      },
+      "manual_trigger_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Manual Trigger Route Ids",
+        "type": "array"
+      },
+      "max_paths": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Max Paths",
+        "type": "integer"
+      },
+      "message_utility_by_route": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "title": "Message Utility By Route",
+        "type": "object"
+      },
+      "obligation_kinds": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Obligation Kinds",
+        "type": "object"
+      },
+      "open_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Open Obligation Ids",
+        "type": "array"
+      },
+      "problem_hash": {
+        "default": "",
+        "title": "Problem Hash",
+        "type": "string"
+      },
+      "proof_debt_by_route": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "title": "Proof Debt By Route",
+        "type": "object"
+      },
+      "proof_debt_history": {
+        "items": {
+          "type": "number"
+        },
+        "title": "Proof Debt History",
+        "type": "array"
+      },
+      "proof_debt_reduction_recent": {
+        "default": 0.0,
+        "title": "Proof Debt Reduction Recent",
+        "type": "number"
+      },
+      "remaining_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Remaining Calls",
+        "type": "integer"
+      },
+      "round_index": {
+        "minimum": 0,
+        "title": "Round Index",
+        "type": "integer"
+      },
+      "route_budget_share": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "title": "Route Budget Share",
+        "type": "object"
+      },
+      "route_redundancy": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Route Redundancy",
+        "type": "number"
+      },
+      "route_signatures": {
+        "items": {
+          "$ref": "#/$defs/NoveltySignature"
+        },
+        "title": "Route Signatures",
+        "type": "array"
+      },
+      "shared_bottleneck_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Shared Bottleneck Ids",
+        "type": "array"
+      },
+      "stagnation_rounds_by_route": {
+        "additionalProperties": {
+          "type": "integer"
+        },
+        "title": "Stagnation Rounds By Route",
+        "type": "object"
+      },
+      "unresolved_conflict_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Unresolved Conflict Ids",
+        "type": "array"
+      },
+      "verified_fact_gain_recent": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Verified Fact Gain Recent",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "round_index"
+    ],
+    "title": "InspirationSnapshot",
+    "type": "object"
+  }
+}

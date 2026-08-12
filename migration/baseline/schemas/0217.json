@@ -1,0 +1,53 @@
+{
+  "qualified_name": "mathproofmesh.schemas.SurpriseBudgetState",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "cooldown_until_round": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Cooldown Until Round"
+      },
+      "finalization_reserve_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Finalization Reserve Calls",
+        "type": "integer"
+      },
+      "rejection_streak": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Rejection Streak",
+        "type": "integer"
+      },
+      "reserved_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Reserved Calls",
+        "type": "integer"
+      },
+      "total_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Total Calls",
+        "type": "integer"
+      },
+      "used_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Used Calls",
+        "type": "integer"
+      }
+    },
+    "title": "SurpriseBudgetState",
+    "type": "object"
+  }
+}

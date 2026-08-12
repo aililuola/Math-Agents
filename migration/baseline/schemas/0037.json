@@ -1,0 +1,61 @@
+{
+  "qualified_name": "mathproofmesh.config.TypedCommunicationConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "exactly_once_delivery": {
+        "default": true,
+        "title": "Exactly Once Delivery",
+        "type": "boolean"
+      },
+      "max_assumptions": {
+        "default": 24,
+        "maximum": 256,
+        "minimum": 0,
+        "title": "Max Assumptions",
+        "type": "integer"
+      },
+      "max_dependencies": {
+        "default": 64,
+        "maximum": 1024,
+        "minimum": 0,
+        "title": "Max Dependencies",
+        "type": "integer"
+      },
+      "max_message_chars": {
+        "default": 24000,
+        "maximum": 500000,
+        "minimum": 1000,
+        "title": "Max Message Chars",
+        "type": "integer"
+      },
+      "require_content_hash": {
+        "default": true,
+        "title": "Require Content Hash",
+        "type": "boolean"
+      },
+      "require_problem_hash": {
+        "default": true,
+        "title": "Require Problem Hash",
+        "type": "boolean"
+      },
+      "require_receipt": {
+        "default": true,
+        "title": "Require Receipt",
+        "type": "boolean"
+      },
+      "schema_version": {
+        "default": "1",
+        "title": "Schema Version",
+        "type": "string"
+      }
+    },
+    "title": "TypedCommunicationConfig",
+    "type": "object"
+  }
+}

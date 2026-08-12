@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0",
+  "phase": "15",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-31T05:38:42.117Z",
+  "scope": "JavaFX desktop, DPAPI credential protection, and Windows jpackage delivery",
+  "source": {
+    "authoritative_zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+    "source_files": 401,
+    "source_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "immutability": "PASS"
+  },
+  "desktop_runtime": {
+    "toolkit": "JavaFX 25.0.4 WebView",
+    "embedded_server": "Spring Boot 4.1.0 on a random loopback port",
+    "session_authentication": "one-time in-memory bearer token",
+    "webview_provider_key_access": false,
+    "ui_transport": [
+      "HTTP",
+      "SSE"
+    ],
+    "direct_database_repository_access": false,
+    "external_navigation_blocked": true,
+    "file_navigation_blocked": true,
+    "download_and_devtools_blocked": true,
+    "classpath_resources_only": true,
+    "server_lifecycle_resume_settings": "PASS",
+    "topology_and_timeline_views": "PASS"
+  },
+  "credential_security": {
+    "windows_provider": "JNA 5.19.1 DPAPI",
+    "ciphertext_and_entropy_metadata_only": true,
+    "round_trip": "PASS",
+    "wrong_user_and_corrupt_ciphertext": "PASS",
+    "plaintext_written": false,
+    "secret_log_or_export_leak": false,
+    "non_windows_policy": "environment or external provider only",
+    "safe_run_deletion": "PASS"
+  },
+  "packaging": {
+    "jdk": "Eclipse Temurin 25.0.4+7 jlink/jpackage",
+    "wix": "5.0.2 target-local",
+    "app_image_health_check": "PASS; version=0.8.0",
+    "installer": {
+      "path": "target/desktop-dist/MathProofMesh-0.8.0.exe",
+      "size_bytes": 160105984,
+      "sha256": "797502f3f254d53fdf3270a07322d6159d3859e1cbe104ad7439c2f03bd07fcb"
+    },
+    "portable_zip": {
+      "path": "target/desktop-dist/MathProofMesh-0.8.0-windows-x64-portable.zip",
+      "size_bytes": 160687056,
+      "sha256": "97f934428918bfe100abd0c1926b066a669e525a216c9722ccb6885d138a65f1"
+    },
+    "checksum_file": {
+      "path": "target/desktop-dist/SHA256SUMS.txt",
+      "sha256": "28ce6810854641e03cbfd912ef4c470a08ebf8a25e758a4205d9acbd19ce10f3"
+    },
+    "package_smoke": "PASS"
+  },
+  "tests": {
+    "mapped_python_test_files": 2,
+    "mapped_python_functions": 13,
+    "authority_named_junit_cases": 13,
+    "desktop_gate_cases": 6,
+    "desktop_module_tests": 19,
+    "reactor_total": 1420,
+    "report_files": 178,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "online_clean_verify": "PASS",
+    "offline_clean_verify": "PASS",
+    "online_log": "migration/reports/phase-15-verify-online.log",
+    "online_log_sha256": "59843945806d15d166c13adca1e372542ae240eb6ce8fcb7bdb809330d47b935",
+    "offline_log": "migration/reports/phase-15-verify-offline.log",
+    "offline_log_sha256": "c04c7fce031dd3b64859875771f542efad8664c889cd522b0e49fb5be069b5e3"
+  },
+  "quality_and_dependency_security": {
+    "java": "Eclipse Temurin 25.0.4+7",
+    "maven": "3.9.16",
+    "maven_wrapper": "3.3.4 only-script",
+    "dependencies_added": [
+      "com.github.spotbugs:spotbugs-annotations:4.10.3",
+      "org.springframework.boot:spring-boot-starter-test:4.1.0"
+    ],
+    "dependency_version_changes": [],
+    "dependency_convergence": "PASS",
+    "external_snapshots": 0,
+    "duplicate_classes": 0,
+    "spotbugs_findsecbugs_findings": 0,
+    "modulith_structure": "PASS",
+    "dependency_tree": "migration/reports/phase-15-dependency-tree.txt",
+    "dependency_tree_sha256": "e6d1a3a493060b97a0650513092f37b32f936b38f3cbcd30b18610d5804bd30e",
+    "sbom": {
+      "format": "CycloneDX",
+      "spec_version": "1.6",
+      "components": 111,
+      "dependency_entries": 112,
+      "path": "migration/reports/phase-01-sbom.json",
+      "sha256": "1dcb27e020355df83d97501c97924cc8a6982210d24c1d793eb467b65f6f479e"
+    },
+    "owasp": {
+      "engine": "12.2.2",
+      "dependencies": 115,
+      "fail_build_on_cvss": 7.0,
+      "findings_at_or_above_gate": 0,
+      "below_gate_findings": [
+        {
+          "cve": "CVE-2021-4277",
+          "artifact": "com.cronutils:cron-utils:9.2.1",
+          "severity": "MEDIUM",
+          "cvss": 5.3
+        }
+      ],
+      "report_json_sha256": "34add796ba17de76faefccac683f56c44ad2d781cbf2ea7e31ec73073372b75f",
+      "report_html_sha256": "f5b3f31015ccefae534fe28b912b9f7568144306659cdcc9f38cb56db3859fee"
+    }
+  },
+  "mappings": {
+    "source_rows": "15/15 migrated",
+    "test_rows": "2/2 ported; 13 Python test functions",
+    "auxiliary_rows": "10/10 translated_verified",
+    "state_rows": "142 + 167 + 92 = 401 unique paths"
+  },
+  "audit_attempts": {
+    "initial_spotbugs_findings": 39,
+    "final_spotbugs_findings": 0,
+    "package_lock_and_long_path_cleanup": "target-local generated package directories were validated, removed safely, and verification rerun"
+  },
+  "stop_condition": {
+    "phase_16_started_before_phase_15_pass": false
+  }
+}

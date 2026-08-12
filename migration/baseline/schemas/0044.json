@@ -1,0 +1,40 @@
+{
+  "qualified_name": "mathproofmesh.deep_exploration.ExplorationEvidence",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "explicit_critical_target": {
+        "default": false,
+        "title": "Explicit Critical Target",
+        "type": "boolean"
+      },
+      "final_reserve_available": {
+        "default": false,
+        "title": "Final Reserve Available",
+        "type": "boolean"
+      },
+      "has_verified_checkpoint": {
+        "default": false,
+        "title": "Has Verified Checkpoint",
+        "type": "boolean"
+      },
+      "meta_approved": {
+        "default": false,
+        "title": "Meta Approved",
+        "type": "boolean"
+      },
+      "novelty_review_passed": {
+        "default": false,
+        "title": "Novelty Review Passed",
+        "type": "boolean"
+      },
+      "referee_confirmed_mechanism_change": {
+        "default": false,
+        "title": "Referee Confirmed Mechanism Change",
+        "type": "boolean"
+      }
+    },
+    "title": "ExplorationEvidence",
+    "type": "object"
+  }
+}

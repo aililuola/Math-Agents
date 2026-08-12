@@ -1,0 +1,203 @@
+{
+  "qualified_name": "mathproofmesh.schemas.MessageReceipt",
+  "schema": {
+    "$defs": {
+      "QuantifierSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "forall",
+              "exists",
+              "exists_unique"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "order": {
+            "minimum": 0,
+            "title": "Order",
+            "type": "integer"
+          },
+          "restrictions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restrictions",
+            "type": "array"
+          },
+          "variable_id": {
+            "minLength": 1,
+            "title": "Variable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order",
+          "kind",
+          "variable_id",
+          "display_name",
+          "domain"
+        ],
+        "title": "QuantifierSpec",
+        "type": "object"
+      },
+      "ReceiptStatus": {
+        "enum": [
+          "accepted",
+          "rejected",
+          "duplicate",
+          "expired",
+          "deferred"
+        ],
+        "title": "ReceiptStatus",
+        "type": "string"
+      },
+      "VariableBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "owner_scope": {
+            "minLength": 1,
+            "title": "Owner Scope",
+            "type": "string"
+          },
+          "variable_id": {
+            "minLength": 1,
+            "title": "Variable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "variable_id",
+          "display_name",
+          "domain",
+          "owner_scope"
+        ],
+        "title": "VariableBinding",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "acknowledged_at": {
+        "title": "Acknowledged At",
+        "type": "string"
+      },
+      "claimed_closed_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Claimed Closed Obligation Ids",
+        "type": "array"
+      },
+      "delivered_round": {
+        "minimum": 0,
+        "title": "Delivered Round",
+        "type": "integer"
+      },
+      "message_id": {
+        "title": "Message Id",
+        "type": "string"
+      },
+      "parsed_assumptions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Parsed Assumptions",
+        "type": "array"
+      },
+      "parsed_conclusion": {
+        "default": "",
+        "title": "Parsed Conclusion",
+        "type": "string"
+      },
+      "parsed_quantifiers": {
+        "items": {
+          "$ref": "#/$defs/QuantifierSpec"
+        },
+        "title": "Parsed Quantifiers",
+        "type": "array"
+      },
+      "parsed_variable_bindings": {
+        "items": {
+          "$ref": "#/$defs/VariableBinding"
+        },
+        "title": "Parsed Variable Bindings",
+        "type": "array"
+      },
+      "reason": {
+        "default": "",
+        "title": "Reason",
+        "type": "string"
+      },
+      "receipt_id": {
+        "title": "Receipt Id",
+        "type": "string"
+      },
+      "receipt_token": {
+        "default": "",
+        "title": "Receipt Token",
+        "type": "string"
+      },
+      "referenced_in_step_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Referenced In Step Ids",
+        "type": "array"
+      },
+      "semantic_hash": {
+        "default": "",
+        "title": "Semantic Hash",
+        "type": "string"
+      },
+      "status": {
+        "$ref": "#/$defs/ReceiptStatus"
+      },
+      "target_route_id": {
+        "title": "Target Route Id",
+        "type": "string"
+      },
+      "used": {
+        "default": false,
+        "title": "Used",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "message_id",
+      "target_route_id",
+      "status",
+      "delivered_round"
+    ],
+    "title": "MessageReceipt",
+    "type": "object"
+  }
+}

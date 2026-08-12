@@ -1,0 +1,95 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.RewriteSemanticAssessment",
+  "schema": {
+    "$defs": {
+      "RewriteSemanticVerdict": {
+        "enum": [
+          "valid",
+          "tautological",
+          "placeholder",
+          "no_executable_step",
+          "no_target",
+          "lost_domain_mechanism",
+          "scope_invalid",
+          "duplicate"
+        ],
+        "title": "RewriteSemanticVerdict",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "candidate_bridge_node_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Candidate Bridge Node Ids",
+        "type": "array"
+      },
+      "candidate_strategy_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Candidate Strategy Id"
+      },
+      "canonical_source_hash": {
+        "title": "Canonical Source Hash",
+        "type": "string"
+      },
+      "canonical_target_hash": {
+        "title": "Canonical Target Hash",
+        "type": "string"
+      },
+      "domain_mechanism_preserved": {
+        "title": "Domain Mechanism Preserved",
+        "type": "boolean"
+      },
+      "has_executable_first_step": {
+        "title": "Has Executable First Step",
+        "type": "boolean"
+      },
+      "has_nontrivial_graph_change": {
+        "title": "Has Nontrivial Graph Change",
+        "type": "boolean"
+      },
+      "is_self_implication": {
+        "title": "Is Self Implication",
+        "type": "boolean"
+      },
+      "reasons": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Reasons",
+        "type": "array"
+      },
+      "rewrite_request_id": {
+        "title": "Rewrite Request Id",
+        "type": "string"
+      },
+      "verdict": {
+        "$ref": "#/$defs/RewriteSemanticVerdict"
+      }
+    },
+    "required": [
+      "rewrite_request_id",
+      "candidate_strategy_id",
+      "candidate_bridge_node_ids",
+      "verdict",
+      "canonical_source_hash",
+      "canonical_target_hash",
+      "is_self_implication",
+      "has_nontrivial_graph_change",
+      "has_executable_first_step",
+      "domain_mechanism_preserved",
+      "reasons"
+    ],
+    "title": "RewriteSemanticAssessment",
+    "type": "object"
+  }
+}

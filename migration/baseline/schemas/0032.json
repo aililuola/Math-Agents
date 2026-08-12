@@ -1,0 +1,412 @@
+{
+  "qualified_name": "mathproofmesh.config.SchedulerConfig",
+  "schema": {
+    "additionalProperties": false,
+    "description": "Adaptive breadth/depth policy and its budget-aware admission controls.",
+    "properties": {
+      "allow_strategy_failure_repair": {
+        "default": false,
+        "title": "Allow Strategy Failure Repair",
+        "type": "boolean"
+      },
+      "analogy_relevance_weight": {
+        "default": 0.12,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Analogy Relevance Weight",
+        "type": "number"
+      },
+      "auxiliary_fact_gain_weight": {
+        "default": 0.08,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Auxiliary Fact Gain Weight",
+        "type": "number"
+      },
+      "bridge_priority_weight": {
+        "default": 0.28,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Bridge Priority Weight",
+        "type": "number"
+      },
+      "common_mode_risk_penalty": {
+        "default": 0.3,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Common Mode Risk Penalty",
+        "type": "number"
+      },
+      "construction_relevance_weight": {
+        "default": 0.14,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Construction Relevance Weight",
+        "type": "number"
+      },
+      "contradiction_priority_weight": {
+        "default": 0.36,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Contradiction Priority Weight",
+        "type": "number"
+      },
+      "core_proof_debt_reduction_weight": {
+        "default": 0.32,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Core Proof Debt Reduction Weight",
+        "type": "number"
+      },
+      "core_verified_bridge_gain_weight": {
+        "default": 0.25,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Core Verified Bridge Gain Weight",
+        "type": "number"
+      },
+      "counterexample_priority_weight": {
+        "default": 0.42,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Counterexample Priority Weight",
+        "type": "number"
+      },
+      "diagnostic_candidate_limit": {
+        "default": 12,
+        "maximum": 128,
+        "minimum": 1,
+        "title": "Diagnostic Candidate Limit",
+        "type": "integer"
+      },
+      "diagnostics_enabled": {
+        "default": true,
+        "title": "Diagnostics Enabled",
+        "type": "boolean"
+      },
+      "execution_failure_penalty": {
+        "default": 0.12,
+        "maximum": 2.0,
+        "minimum": 0.0,
+        "title": "Execution Failure Penalty",
+        "type": "number"
+      },
+      "execution_failure_progress_cap": {
+        "default": 0.45,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Execution Failure Progress Cap",
+        "type": "number"
+      },
+      "failed_path_cooldown_rounds": {
+        "default": 1,
+        "maximum": 32,
+        "minimum": 0,
+        "title": "Failed Path Cooldown Rounds",
+        "type": "integer"
+      },
+      "failed_progress_discount": {
+        "default": 0.1,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Failed Progress Discount",
+        "type": "number"
+      },
+      "finish_transition_buffer_calls": {
+        "default": 1,
+        "maximum": 64,
+        "minimum": 0,
+        "title": "Finish Transition Buffer Calls",
+        "type": "integer"
+      },
+      "force_widen_when_all_failed": {
+        "default": true,
+        "title": "Force Widen When All Failed",
+        "type": "boolean"
+      },
+      "global_no_progress_rounds_before_meta_pivot": {
+        "default": 2,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Global No Progress Rounds Before Meta Pivot",
+        "type": "integer"
+      },
+      "global_no_progress_rounds_before_stop": {
+        "default": 3,
+        "maximum": 64,
+        "minimum": 2,
+        "title": "Global No Progress Rounds Before Stop",
+        "type": "integer"
+      },
+      "goal_alignment_weight": {
+        "default": 0.18,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Goal Alignment Weight",
+        "type": "number"
+      },
+      "hard_stagnation_enabled": {
+        "default": true,
+        "title": "Hard Stagnation Enabled",
+        "type": "boolean"
+      },
+      "include_meta_review_in_cost": {
+        "default": true,
+        "title": "Include Meta Review In Cost",
+        "type": "boolean"
+      },
+      "include_post_action_verification_in_cost": {
+        "default": true,
+        "title": "Include Post Action Verification In Cost",
+        "type": "boolean"
+      },
+      "inspiration_novelty_weight": {
+        "default": 0.2,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Inspiration Novelty Weight",
+        "type": "number"
+      },
+      "max_actions_per_round": {
+        "default": 2,
+        "maximum": 16,
+        "minimum": 1,
+        "title": "Max Actions Per Round",
+        "type": "integer"
+      },
+      "max_execution_repairs_per_path": {
+        "default": 1,
+        "maximum": 32,
+        "minimum": 0,
+        "title": "Max Execution Repairs Per Path",
+        "type": "integer"
+      },
+      "max_normal_attempts_per_signature": {
+        "default": 1,
+        "maximum": 4,
+        "minimum": 1,
+        "title": "Max Normal Attempts Per Signature",
+        "type": "integer"
+      },
+      "max_plan_repairs_per_path": {
+        "default": 1,
+        "maximum": 32,
+        "minimum": 0,
+        "title": "Max Plan Repairs Per Path",
+        "type": "integer"
+      },
+      "max_repair_attempts_per_signature": {
+        "default": 1,
+        "maximum": 4,
+        "minimum": 0,
+        "title": "Max Repair Attempts Per Signature",
+        "type": "integer"
+      },
+      "max_unknown_failure_repairs_per_path": {
+        "default": 1,
+        "maximum": 32,
+        "minimum": 0,
+        "title": "Max Unknown Failure Repairs Per Path",
+        "type": "integer"
+      },
+      "meaningful_progress_threshold": {
+        "default": 0.04,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Meaningful Progress Threshold",
+        "type": "number"
+      },
+      "message_utility_weight": {
+        "default": 0.1,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Message Utility Weight",
+        "type": "number"
+      },
+      "meta_replan_weight": {
+        "default": 0.15,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Meta Replan Weight",
+        "type": "number"
+      },
+      "obligation_base_weight": {
+        "default": 1.0,
+        "maximum": 100.0,
+        "minimum": 0.0,
+        "title": "Obligation Base Weight",
+        "type": "number"
+      },
+      "obligation_centrality_weight": {
+        "default": 1.0,
+        "maximum": 100.0,
+        "minimum": 0.0,
+        "title": "Obligation Centrality Weight",
+        "type": "number"
+      },
+      "obligation_conflict_weight": {
+        "default": 0.75,
+        "maximum": 100.0,
+        "minimum": 0.0,
+        "title": "Obligation Conflict Weight",
+        "type": "number"
+      },
+      "obligation_dependency_weight": {
+        "default": 0.25,
+        "maximum": 100.0,
+        "minimum": 0.0,
+        "title": "Obligation Dependency Weight",
+        "type": "number"
+      },
+      "obligation_failure_weight": {
+        "default": 0.3,
+        "maximum": 100.0,
+        "minimum": 0.0,
+        "title": "Obligation Failure Weight",
+        "type": "number"
+      },
+      "obligation_main_goal_weight": {
+        "default": 2.0,
+        "maximum": 100.0,
+        "minimum": 0.0,
+        "title": "Obligation Main Goal Weight",
+        "type": "number"
+      },
+      "obligation_shared_route_weight": {
+        "default": 0.4,
+        "maximum": 100.0,
+        "minimum": 0.0,
+        "title": "Obligation Shared Route Weight",
+        "type": "number"
+      },
+      "plan_failure_penalty": {
+        "default": 0.3,
+        "maximum": 2.0,
+        "minimum": 0.0,
+        "title": "Plan Failure Penalty",
+        "type": "number"
+      },
+      "plan_failure_progress_cap": {
+        "default": 0.18,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Plan Failure Progress Cap",
+        "type": "number"
+      },
+      "proof_debt_reduction_weight": {
+        "default": 0.22,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Proof Debt Reduction Weight",
+        "type": "number"
+      },
+      "repeated_failure_penalty": {
+        "default": 0.15,
+        "maximum": 2.0,
+        "minimum": 0.0,
+        "title": "Repeated Failure Penalty",
+        "type": "number"
+      },
+      "representation_switch_weight": {
+        "default": 0.16,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Representation Switch Weight",
+        "type": "number"
+      },
+      "reserve_revision_cycles": {
+        "default": 1,
+        "maximum": 32,
+        "minimum": 0,
+        "title": "Reserve Revision Cycles",
+        "type": "integer"
+      },
+      "route_redundancy_penalty": {
+        "default": 0.24,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Route Redundancy Penalty",
+        "type": "number"
+      },
+      "shared_bottleneck_weight": {
+        "default": 0.18,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Shared Bottleneck Weight",
+        "type": "number"
+      },
+      "strategy_failure_penalty": {
+        "default": 0.5,
+        "maximum": 2.0,
+        "minimum": 0.0,
+        "title": "Strategy Failure Penalty",
+        "type": "number"
+      },
+      "strategy_failure_progress_cap": {
+        "default": 0.05,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Strategy Failure Progress Cap",
+        "type": "number"
+      },
+      "structural_failure_penalty": {
+        "default": 0.3,
+        "maximum": 2.0,
+        "minimum": 0.0,
+        "title": "Structural Failure Penalty",
+        "type": "number"
+      },
+      "structural_failure_progress_cap": {
+        "default": 0.1,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Structural Failure Progress Cap",
+        "type": "number"
+      },
+      "surprise_exploration_weight": {
+        "default": 0.1,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Surprise Exploration Weight",
+        "type": "number"
+      },
+      "uncertain_progress_discount": {
+        "default": 0.4,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Uncertain Progress Discount",
+        "type": "number"
+      },
+      "unverified_progress_discount": {
+        "default": 0.55,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Unverified Progress Discount",
+        "type": "number"
+      },
+      "verification_call_safety_margin": {
+        "default": 0,
+        "maximum": 16,
+        "minimum": 0,
+        "title": "Verification Call Safety Margin",
+        "type": "integer"
+      },
+      "verified_fact_gain_weight": {
+        "default": 0.24,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Verified Fact Gain Weight",
+        "type": "number"
+      },
+      "widen_paths_per_action": {
+        "default": 2,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Widen Paths Per Action",
+        "type": "integer"
+      }
+    },
+    "title": "SchedulerConfig",
+    "type": "object"
+  }
+}

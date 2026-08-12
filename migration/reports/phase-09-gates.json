@@ -1,0 +1,141 @@
+{
+  "schema_version": "1.0",
+  "phase": "09",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-30T18:21:28.927Z",
+  "scope": "Verification escalation, blind final review, mutation, capability profiles, and formal micro-certificates",
+  "source": {
+    "authoritative_zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+    "source_files": 401,
+    "source_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "immutability": "PASS"
+  },
+  "validation_ladder": {
+    "order": [
+      "deterministic_structural",
+      "blind_same_model",
+      "adversarial_blind",
+      "optional_cross_provider",
+      "tool_or_formal"
+    ],
+    "structural_before_detailed": "PASS",
+    "risk_aware_escalation": "PASS",
+    "missing_optional_provider_degrades_with_diagnostic": "PASS",
+    "required_level_missing_fails_closed": "PASS"
+  },
+  "review_isolation": {
+    "author_may_review_own_work": false,
+    "independent_reviewer_required": "PASS",
+    "blind_detailed_receives_prior_assessment": false,
+    "forbidden_prompt_tokens": [
+      "agent_id",
+      "route_id",
+      "route_score",
+      "self_confidence",
+      "previous review",
+      "vote"
+    ],
+    "static_and_runtime_leakage_hits": 0,
+    "typed_fact_and_negative_evidence_preserved": "PASS",
+    "legacy_claim_bypass": 0
+  },
+  "claim_authority": {
+    "feedback_premise_eligible": false,
+    "incomplete_attempt_promotes_unaccepted_claim": false,
+    "claim_counterexample_invalidates_claim": "PASS",
+    "dependency_invalidation_demotes_fact": "PASS",
+    "resume_is_monotonic": "PASS",
+    "scoped_accepted_claim_promotion": "PASS",
+    "final_proof_gate_bypass": 0
+  },
+  "capability_and_calibration": {
+    "domain_and_role_cells_are_separate": "PASS",
+    "self_report_changes_capability": false,
+    "mutation_acceptance_lowers_verifier_capability": "PASS",
+    "mutation_kinds": [
+      "hypothesis_drop",
+      "quantifier_flip",
+      "sign_flip",
+      "dependency_removal",
+      "conclusion_strengthening"
+    ],
+    "all_mutation_kinds_exercised": "PASS",
+    "first_error_and_false_positive_calibration": "PASS"
+  },
+  "formal_microcertificates": {
+    "default_enabled": false,
+    "backend_interface": "PASS",
+    "shared_high_centrality_selection": "PASS",
+    "compiler_failure_creates_formalization_task": "PASS",
+    "compiler_failure_refutes_natural_claim": false,
+    "coverage_accounting": "PASS"
+  },
+  "tests": {
+    "mapped_python_test_files": 10,
+    "mapped_python_functions": 26,
+    "same_semantic_core_tests": 26,
+    "blind_prompt_construction_tests_added": 1,
+    "authority_document_hash_cases_added": 2,
+    "phase_specific_total": 29,
+    "reactor_total": 955,
+    "report_files": 73,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "online_clean_verify": "PASS",
+    "offline_clean_verify": "PASS",
+    "containers_remaining_after_tests": 0,
+    "online_log": "migration/logs/phase-09-verify.log",
+    "online_log_sha256": "5690a78856f94b8c389594638882858bf738ab215c56e29a80c6252de5c9547b",
+    "offline_log": "migration/logs/phase-09-verify-offline.log",
+    "offline_log_sha256": "09ad88050f5d0dd8b941b50d68afac15165b637759768b0a0a9af032157eec63"
+  },
+  "quality_and_dependency_security": {
+    "java": "Eclipse Temurin 25.0.4+7",
+    "maven": "3.9.16",
+    "maven_wrapper": "3.3.4 only-script",
+    "dependencies_added": [],
+    "dependency_version_changes": [],
+    "dependency_convergence": "PASS",
+    "external_snapshots": 0,
+    "duplicate_classes": 0,
+    "spotbugs_findsecbugs_findings": 0,
+    "modulith_structure": "PASS",
+    "dependency_tree": "migration/reports/phase-09-dependency-tree.txt",
+    "dependency_tree_sha256": "904f40b5026f88843d5485625c50622777a9eab284e6a4503b0257c2f651adf2",
+    "sbom": {
+      "format": "CycloneDX",
+      "spec_version": "1.6",
+      "components": 88,
+      "dependency_entries": 89,
+      "path": "migration/reports/phase-01-sbom.json",
+      "sha256": "2e547c2b8e6fd95d0b5283f742d99f1be62fd0b58472ae619f17cfd3382d398a"
+    },
+    "owasp": {
+      "engine": "12.2.2",
+      "dependencies": 112,
+      "fail_build_on_cvss": 7.0,
+      "findings_at_or_above_gate": 0,
+      "below_gate_findings": [
+        {
+          "cve": "CVE-2021-4277",
+          "artifact": "com.cronutils:cron-utils:9.2.1",
+          "severity": "MEDIUM",
+          "cvss": 5.3
+        }
+      ],
+      "report_json_sha256": "d3cb3d73318e1bcef354ee361cc077111a437339d9faeb1f59b93436a946880d",
+      "report_html_sha256": "3cc042513234167dbab8bd1b5f3319e06b69f55629b898058db07184fd120c39"
+    }
+  },
+  "mappings": {
+    "source_rows": "6/6 migrated",
+    "test_rows": "10/10 ported; 26 Python test functions",
+    "auxiliary_rows": "2/2 translated_verified",
+    "state_rows": "142 + 167 + 92 = 401 unique paths"
+  },
+  "stop_condition": {
+    "phase_10_started_before_phase_09_pass": false
+  }
+}

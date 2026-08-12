@@ -1,0 +1,86 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.AbstractStructureProposal",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "components": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Components",
+        "type": "array"
+      },
+      "evidence_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Evidence Refs",
+        "type": "array"
+      },
+      "preserved_constraints": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Preserved Constraints",
+        "type": "array"
+      },
+      "proposed_reduction": {
+        "title": "Proposed Reduction",
+        "type": "string"
+      },
+      "removable_components": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Removable Components",
+        "type": "array"
+      },
+      "representation_kind": {
+        "title": "Representation Kind",
+        "type": "string"
+      },
+      "route_id": {
+        "title": "Route Id",
+        "type": "string"
+      },
+      "source_subject_id": {
+        "title": "Source Subject Id",
+        "type": "string"
+      },
+      "status": {
+        "default": "candidate",
+        "enum": [
+          "candidate",
+          "validated_structure",
+          "refuted_structure",
+          "exhausted"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "structure_id": {
+        "title": "Structure Id",
+        "type": "string"
+      },
+      "target_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Obligation Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "route_id",
+      "source_subject_id",
+      "representation_kind",
+      "components",
+      "proposed_reduction",
+      "removable_components",
+      "preserved_constraints",
+      "target_obligation_ids"
+    ],
+    "title": "AbstractStructureProposal",
+    "type": "object"
+  }
+}

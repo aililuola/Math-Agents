@@ -1,0 +1,124 @@
+{
+  "qualified_name": "mathproofmesh.verification.escalation.ValidationExecution",
+  "schema": {
+    "$defs": {
+      "EscalationPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "blocks_fact_promotion": {
+            "default": false,
+            "title": "Blocks Fact Promotion",
+            "type": "boolean"
+          },
+          "diagnostics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "levels": {
+            "items": {
+              "$ref": "#/$defs/ValidationLevel"
+            },
+            "title": "Levels",
+            "type": "array"
+          },
+          "risk_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Risk Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "risk_score",
+          "levels"
+        ],
+        "title": "EscalationPlan",
+        "type": "object"
+      },
+      "ValidationLevel": {
+        "enum": [
+          "deterministic",
+          "blind_same_model",
+          "adversarial_blind",
+          "cross_provider",
+          "tool_or_formal"
+        ],
+        "title": "ValidationLevel",
+        "type": "string"
+      },
+      "ValidationStepResult": {
+        "additionalProperties": false,
+        "properties": {
+          "diagnostic": {
+            "default": "",
+            "title": "Diagnostic",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "executed": {
+            "title": "Executed",
+            "type": "boolean"
+          },
+          "level": {
+            "$ref": "#/$defs/ValidationLevel"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "level",
+          "executed",
+          "passed"
+        ],
+        "title": "ValidationStepResult",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "diagnostics": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Diagnostics",
+        "type": "array"
+      },
+      "fact_promotion_allowed": {
+        "default": false,
+        "title": "Fact Promotion Allowed",
+        "type": "boolean"
+      },
+      "passed": {
+        "default": false,
+        "title": "Passed",
+        "type": "boolean"
+      },
+      "plan": {
+        "$ref": "#/$defs/EscalationPlan"
+      },
+      "steps": {
+        "items": {
+          "$ref": "#/$defs/ValidationStepResult"
+        },
+        "title": "Steps",
+        "type": "array"
+      }
+    },
+    "required": [
+      "plan"
+    ],
+    "title": "ValidationExecution",
+    "type": "object"
+  }
+}

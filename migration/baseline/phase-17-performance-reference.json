@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "phase": "17",
+  "established_at_utc": "2026-07-31T09:00:56.592770+00:00",
+  "policy": "First passing reference on the recorded machine. Subsequent runs must be no more than 20 percent slower for every scenario.",
+  "machine_fingerprint": {
+    "os": "Windows",
+    "architecture": "AMD64",
+    "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "logical_cpus": 20,
+    "physical_memory_bytes": 34188517376,
+    "jdk": "openjdk version \"25.0.4\" 2026-07-21 LTS | OpenJDK Runtime Environment Temurin-25.0.4+7 (build 25.0.4+7-LTS) | OpenJDK 64-Bit Server VM Temurin-25.0.4+7 (build 25.0.4+7-LTS, mixed mode, sharing)"
+  },
+  "scenarios": {
+    "message_admission_dedup_delivery_10000": {
+      "metric_definition": "large_elapsed_ns",
+      "metric_ns": 274786500
+    },
+    "concurrent_mock_agent_calls_100": {
+      "metric_definition": "elapsed_ns",
+      "metric_ns": 44456500
+    },
+    "large_proof_graph": {
+      "metric_definition": "build_elapsed_ns + closure_and_debt_elapsed_ns + counterexample_propagation_elapsed_ns",
+      "metric_ns": 211051500
+    },
+    "checkpoint_outbox_retry_1000": {
+      "metric_definition": "checkpoint_elapsed_ns + outbox_insert_elapsed_ns + claim_release_reclaim_publish_elapsed_ns",
+      "metric_ns": 28122953400
+    },
+    "python_sidecar_cold_warm": {
+      "metric_definition": "cold_elapsed_ns + warm_total_elapsed_ns",
+      "metric_ns": 2519050900
+    },
+    "sse_long_stream_resume": {
+      "metric_definition": "stream_elapsed_ns + resume_elapsed_ns",
+      "metric_ns": 58201500
+    },
+    "temporal_multi_route_replay_continue_as_new": {
+      "metric_definition": "multi_route_elapsed_ns + replay_elapsed_ns + continue_as_new_elapsed_ns",
+      "metric_ns": 692395800
+    }
+  }
+}

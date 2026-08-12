@@ -1,0 +1,1165 @@
+schema_version: "1.0"
+phase: "17"
+captured_at_utc: "2026-07-31T09:28:09.618Z"
+phase_00_captured_at_utc: "2026-07-30T08:25:25.7419683Z"
+
+source:
+  authoritative_zip:
+    path: "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip"
+    sha256: "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2"
+    file_count: 401
+  canonical_manifest:
+    path: "SOURCE_SNAPSHOT_SHA256SUMS.txt"
+    sha256: "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770"
+    file_count: 401
+
+python:
+  version: "3.14.2"
+  installation_mode: "non-editable"
+  baseline_result: "759 passed, 821 warnings in 43.57s"
+  resolved_package_lock: "migration/baseline/python-requirements-lock.txt"
+  package_index:
+    primary_attempt: "https://pypi.org/simple"
+    successful_fallback: "https://pypi.tuna.tsinghua.edu.cn/simple"
+  proxy_tools_sdist:
+    filename: "proxy_tools-0.1.0.tar.gz"
+    sha256: "ccb3751f529c047e2d8a58440d86b205303cf0fe8146f784d1cbcd94f0a28010"
+  pip_check: "pass"
+
+jdk:
+  distribution: "Eclipse Temurin"
+  version: "25.0.4+7"
+  java_version: "25.0.4"
+  platform: "windows-x64"
+  api_url: "https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&heap_size=normal&image_type=jdk&jvm_impl=hotspot&os=windows&vendor=eclipse"
+  download_url: "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4%2B7/OpenJDK25U-jdk_x64_windows_hotspot_25.0.4_7.zip"
+  archive:
+    filename: "OpenJDK25U-jdk_x64_windows_hotspot_25.0.4_7.zip"
+    size_bytes: 141164204
+    vendor_sha256: "7caab7db43bf4b94a2e6252c699e70d90084f9aa7c943cd3414761fd540937ae"
+    computed_sha256: "7caab7db43bf4b94a2e6252c699e70d90084f9aa7c943cd3414761fd540937ae"
+    checksum_status: "pass"
+    downloaded_at_utc: "2026-07-30T06:00:13.5546935Z"
+  install_path: ".tools/jdk-25"
+
+maven:
+  version: "3.9.16"
+  bootstrap:
+    download_url: "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.16/apache-maven-3.9.16-bin.zip"
+    official_sha512_url: "https://downloads.apache.org/maven/maven-3/3.9.16/binaries/apache-maven-3.9.16-bin.zip.sha512"
+    archive_size_bytes: 9395475
+    official_sha512: "ed41650d42485cfc243fad22158caf9cbb5dc408ce7a09ddb94dd42a019de929ca43065bfa450612cf12bf78b5cafa3884b96c090de326ff590448c933454af3"
+    computed_sha512: "ed41650d42485cfc243fad22158caf9cbb5dc408ce7a09ddb94dd42a019de929ca43065bfa450612cf12bf78b5cafa3884b96c090de326ff590448c933454af3"
+    computed_sha256: "5af3b743dd8b876b5c45da33b676251e5f1687712644abb4ee519ca56e1d89ce"
+    checksum_status: "pass"
+    downloaded_at_utc: "2026-07-30T07:00:42Z"
+    pgp_status: "not_performed_optional"
+  wrapper:
+    plugin: "org.apache.maven.plugins:maven-wrapper-plugin:3.3.4"
+    type: "only-script"
+    generated_at_utc: "2026-07-30T07:46:31.3054736Z"
+    distribution_url: "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.16/apache-maven-3.9.16-bin.zip"
+    distribution_sha256: "5af3b743dd8b876b5c45da33b676251e5f1687712644abb4ee519ca56e1d89ce"
+    independent_version_check_at_utc: "2026-07-30T07:52:08.6607046Z"
+    independent_version_check: "Apache Maven 3.9.16"
+    files:
+      mvnw_sha256: "cae96cef89ebea3531221f4ae17c23cf8edf67d00eae8306d4186ae1bbed4d02"
+      mvnw_cmd_sha256: "46eedb8419bd14fe70d5bb2916d7b6f51806e51b39d5b76a42610384ca929c1c"
+      properties_sha256: "51b221ede4e074d19bb44d6d485bb7b298e77874572a09697aba0a9e234e0745"
+      wrapper_jar_present: false
+      downloader_source_present: false
+
+phase_00_framework_preflight:
+  java_release: "25"
+  bom:
+    spring_boot: "4.1.0"
+    spring_modulith: "2.1.0"
+    temporal_java: "1.37.0"
+  resolved:
+    spring_framework: "7.0.8"
+    temporal_sdk: "1.37.0"
+    temporal_testing: "1.37.0"
+    javafx: "25.0.4:win"
+    postgresql_jdbc: "42.7.11"
+    flyway_core: "12.4.0"
+    flyway_database_postgresql: "12.4.0"
+    testcontainers_postgresql: "2.0.5"
+    picocli: "4.7.7"
+    jgrapht: "1.5.3"
+    jna_jpms: "5.19.1"
+    jna_platform_jpms: "5.19.1"
+    archunit: "1.4.2"
+  convergence_alignment:
+    guava: "33.5.0-jre"
+    error_prone_annotations: "2.45.0"
+    legacy_jna_excluded_from_testcontainers: true
+  build_plugins:
+    maven_enforcer_plugin: "3.6.3"
+    extra_enforcer_rules: "1.10.0"
+    spotbugs_maven_plugin: "4.10.3.0"
+    findsecbugs_plugin: "1.14.0"
+    jacoco_maven_plugin: "0.8.15"
+    owasp_dependency_check_maven: "12.2.2"
+    cyclonedx_maven_plugin: "2.9.2"
+    maven_dependency_plugin: "3.9.0"
+    maven_help_plugin: "3.5.1"
+  preflight:
+    online_go_offline: "pass"
+    offline_resolution: "pass"
+    snapshots: 0
+    unresolved_conflicts: 0
+    duplicate_classes: 0
+
+containers:
+  platform: "linux/amd64"
+  docker_engine: "29.6.2"
+  docker_compose: "v5.3.1"
+  postgres:
+    requested_tag: "postgres:18.4-bookworm"
+    image_id: "sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296"
+    immutable_reference: "postgres@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296"
+    verified_server: "PostgreSQL 18.4"
+    health_check: "pass"
+    loopback_binding: "127.0.0.1:55432:5432"
+    hardened_read_only_root: true
+  temporal:
+    requested_tag: "temporalio/temporal:1.8.1"
+    image_id: "sha256:59561b9ef060eaeb1f46cb6a1842d6cbdd8a393eb3b6d315ecef5fe2f0b1d7a6"
+    immutable_reference: "temporalio/temporal@sha256:59561b9ef060eaeb1f46cb6a1842d6cbdd8a393eb3b6d315ecef5fe2f0b1d7a6"
+    verified_cli: "1.8.1"
+    verified_embedded_server: "1.31.2"
+    health_check: "SERVING"
+    loopback_binding: "127.0.0.1:7233:7233"
+    headless: true
+    sqlite_persistent: true
+    sqlite_integrity: "ok"
+    hardened_read_only_root: true
+
+phase_00_evidence:
+  effective_pom: "migration/preflight/reports/effective-pom.xml"
+  dependency_tree: "migration/preflight/reports/dependency-tree.txt"
+  plugin_resolution: "migration/preflight/reports/plugin-resolution.txt"
+  conflict_report: "migration/preflight/reports/dependency-conflict-report.txt"
+  image_inspect: "migration/preflight/reports/container-image-inspect.json"
+  temporal_inspect: "migration/preflight/reports/temporal-container-inspect.json"
+  postgres_inspect: "migration/preflight/reports/postgres-container-inspect.json"
+
+phase_01:
+  status: "passed"
+  project:
+    group_id: "io.github.aililuola"
+    version: "0.8.0-SNAPSHOT"
+    java_release: "25"
+    modules:
+      - "mathproofmesh-contracts"
+      - "mathproofmesh-core"
+      - "mathproofmesh-server"
+      - "mathproofmesh-desktop"
+      - "mathproofmesh-compatibility"
+    independent_python_sidecar: "python-compute-service"
+    parent_pom_sha256: "c3cc03869c74e7aa4d48d53c3a56fd81ec1a7ca741a2c162529502c87dfa4fcb"
+    module_pom_sha256:
+      contracts: "d581f14183e0b617fdc7bb61b3eb7b80802f75c769149f5850a3f5ce66a18246"
+      core: "05db66ae5c2ef1398db1af417a73198ef91d7889ee6baa490be748147ae801d9"
+      server: "9d224b4e18809d05355e0860a08caa4ec778e9bb7dc65a5f34f3d29cd9b02d31"
+      desktop: "65b05f8b6764c10512a484a07997ed6ae8d8f400923f926fde24b970f15ad217"
+      compatibility: "b8cba7182a49f90ba94f3316f686bfdc76101b42829791652642aaddf100d405"
+  reused_phase_00_locks:
+    jdk: "Eclipse Temurin 25.0.4+7"
+    maven: "3.9.16"
+    wrapper: "3.3.4 only-script"
+    python_baseline: "759 passed"
+    source_files: 401
+    postgres_image: "postgres@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296"
+    temporal_image: "temporalio/temporal@sha256:59561b9ef060eaeb1f46cb6a1842d6cbdd8a393eb3b6d315ecef5fe2f0b1d7a6"
+  dependency_management:
+    bom:
+      spring_boot: "4.1.0"
+      spring_modulith: "2.1.0"
+      temporal_java: "1.37.0"
+    project_dependencies:
+      javafx: "25.0.4:win"
+      picocli: "4.7.7"
+      jgrapht: "1.5.3"
+      jna_jpms: "5.19.1"
+      archunit: "1.4.2"
+      guava: "33.5.0-jre"
+      error_prone_annotations: "2.45.0"
+    security_patch_overrides:
+      jackson_databind: "2.21.5"
+      log4j_api_and_to_slf4j: "2.25.5"
+      postgresql_jdbc: "42.7.12"
+    deferred:
+      testcontainers: "2.0.5 locked; not present in the phase-01 dependency graph"
+  build_plugins:
+    maven_clean_plugin: "3.5.0"
+    maven_resources_plugin: "3.5.0"
+    maven_compiler_plugin: "3.15.0"
+    maven_surefire_plugin: "3.5.5"
+    maven_failsafe_plugin: "3.5.5"
+    maven_jar_plugin: "3.5.0"
+    maven_install_plugin: "3.1.4"
+    maven_deploy_plugin: "3.1.4"
+    maven_enforcer_plugin: "3.6.3"
+    extra_enforcer_rules: "1.10.0"
+    spotbugs_maven_plugin: "4.10.3.0"
+    findsecbugs_plugin: "1.14.0"
+    jacoco_maven_plugin: "0.8.15"
+    owasp_dependency_check_maven: "12.2.2"
+    cyclonedx_maven_plugin: "2.9.2"
+    maven_dependency_plugin: "3.9.0"
+    maven_help_plugin: "3.5.1"
+  verification:
+    online_verify: "pass; 11 tests, 0 failures, 0 errors, 0 skipped"
+    offline_verify: "pass; 11 tests, 0 failures, 0 errors, 0 skipped"
+    online_go_offline: "pass"
+    dependency_convergence: "pass"
+    external_snapshots: 0
+    reactor_snapshots: "0.8.0-SNAPSHOT only"
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    boot_context: "pass"
+    modulith_scan: "pass"
+    temporal_in_process_smoke: "pass"
+    archunit_module_direction: "pass"
+    original_source_immutability: "pass; 401 files"
+  security:
+    owasp_engine: "12.2.2"
+    fail_build_on_cvss: 7.0
+    analyzed_dependencies: 93
+    vulnerable_dependencies: 0
+    vulnerability_findings: 0
+    high_or_critical_findings: 0
+    assembly_analyzer: "disabled; Java-only reactor"
+    report_json: "migration/reports/dependency-check/dependency-check-report.json"
+    report_json_sha256: "237883fda45b79efca94754cfd883efdce610d092f2f97795f309fda53e20e07"
+    report_html: "migration/reports/dependency-check/dependency-check-report.html"
+    report_html_sha256: "71b22813619633252efdda5c944d73cdc00bbabfd4adc289c85891f05d28cf04"
+  sbom:
+    format: "CycloneDX JSON"
+    spec_version: "1.6"
+    components: 86
+    dependency_entries: 87
+    path: "migration/reports/phase-01-sbom.json"
+    sha256: "797d35fc270e385a5c14094a3454817080a2971af89f87b8ddc789dcd41b8a67"
+  reports:
+    dependency_tree:
+      path: "migration/reports/phase-01-dependency-tree.txt"
+      sha256: "f46c69aa7b94eca90d0660236f4dd372968f173e76bbbe7ebb50f773f2a9c3aa"
+    plugin_resolution:
+      path: "migration/reports/phase-01-plugin-resolution.txt"
+      sha256: "d2ca6518462fa413c386d10f2e03b5aac4f16f5b19d0e510009ab0c65225b54e"
+
+phase_02:
+  status: "passed"
+  dependencies_added: []
+  dependency_version_changes: []
+  package: "io.github.aililuola.mathproofmesh.contract"
+  contract_inventory:
+    records: 102
+    enums: 40
+    total_contract_types: 142
+    authoritative_inventory: "migration/phase-02-contract-inventory.json"
+  current_pom_sha256:
+    parent: "c3cc03869c74e7aa4d48d53c3a56fd81ec1a7ca741a2c162529502c87dfa4fcb"
+    contracts: "043dfd92bffd28d45e4498c09cabd1a82682c98d3f1ca0c5d9f01ef402a13901"
+    core: "ffdc9ee013a09f68290f125bae995e0556622bc0d39ca299fc1451599ee9be58"
+    server: "5ab74627bfc4c34ba6e73a2244b6e727d86d8c8d168ad59cb10b56abb595fb26"
+    desktop: "32dd6d585e67062c80edbafffb0e4b1e3cc2ac70a1779fdb6eaded8b33f790ba"
+    compatibility: "2a289796d019ecc56848034a26a8394ef85b6a0da3d1edac2d040582d9097f0e"
+  verification:
+    online_clean_verify: "pass; 38 tests, 0 failures, 0 errors, 0 skipped"
+    offline_clean_verify: "pass; 38 tests, 0 failures, 0 errors, 0 skipped"
+    contract_tests: "pass; 28 tests including all 102 model schemas"
+    hash_vectors: "pass; 16/16"
+    java_to_python_oracle_cases: "pass; 10/10"
+    dependency_convergence: "pass"
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    contract_spring_dependencies: 0
+    core_map_string_object_occurrences: 0
+    original_source_immutability: "pass; 401 files"
+  security:
+    sbom: "CycloneDX 1.6; 86 components; 87 dependency entries"
+    sbom_path: "migration/reports/phase-01-sbom.json"
+    sbom_sha256: "797d35fc270e385a5c14094a3454817080a2971af89f87b8ddc789dcd41b8a67"
+    owasp_engine: "12.2.2"
+    analyzed_dependencies: 93
+    vulnerable_dependencies: 0
+    vulnerability_findings: 0
+    report_json_sha256: "bfaf0fb9ce52b47f1c94c205ca2358f0afe3d15f3049dc7d70c664dabc946a01"
+    report_html_sha256: "de272278cf4ec78d32ffe0ec463af27852d1a237878637acdb0f94ef5112ca81"
+  mappings:
+    source: "2/2 migrated"
+    tests: "3/3 ported"
+    auxiliary: "0 phase-02 rows"
+
+phase_03:
+  status: "passed"
+  dependencies_added:
+    - group_id: "com.fasterxml.jackson.dataformat"
+      artifact_id: "jackson-dataformat-yaml"
+      version: "2.21.4"
+      scope: "compile"
+      target_module: "mathproofmesh-server"
+  dependency_version_changes: []
+  resolved_transitive:
+    snakeyaml: "2.6"
+  package: "io.github.aililuola.mathproofmesh.config"
+  configuration_inventory:
+    records: 38
+    fields: 556
+    field_constraints: 577
+    source: "migration/reports/phase-03-config-field-inventory.json"
+    source_sha256: "2d252af1ba9c6846b83fb6cccfc4f807a31138a370e9a42dd34f81c84aeac01f"
+  current_pom_sha256:
+    parent: "c3cc03869c74e7aa4d48d53c3a56fd81ec1a7ca741a2c162529502c87dfa4fcb"
+    contracts: "043dfd92bffd28d45e4498c09cabd1a82682c98d3f1ca0c5d9f01ef402a13901"
+    core: "ffdc9ee013a09f68290f125bae995e0556622bc0d39ca299fc1451599ee9be58"
+    server: "71fb93c7954983b7c3b3b985e104e19c623cc6a2ccf907092b4e2c0f70e13a08"
+    desktop: "32dd6d585e67062c80edbafffb0e4b1e3cc2ac70a1779fdb6eaded8b33f790ba"
+    compatibility: "2a289796d019ecc56848034a26a8394ef85b6a0da3d1edac2d040582d9097f0e"
+  verification:
+    online_clean_verify: "pass; 682 tests, 0 failures, 0 errors, 0 skipped"
+    offline_clean_verify: "pass; 682 tests, 0 failures, 0 errors, 0 skipped"
+    phase_03_tests: "pass; 644 tests"
+    original_profiles: "pass; 6/6 strict parse and redacted semantic parity"
+    field_constraints: "pass; 577/577"
+    cross_validators: "pass; 22 tests"
+    goal_preflight: "pass; 6 mapped Python semantics"
+    secret_redaction: "pass; 4 tests"
+    provider_endpoint_policy: "pass; 7 tests"
+    dependency_convergence: "pass"
+    external_snapshots: 0
+    reactor_snapshots: "0.8.0-SNAPSHOT only"
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    original_source_immutability: "pass; 401 files"
+  security:
+    sbom: "CycloneDX 1.6; 87 components; 88 dependency entries"
+    sbom_path: "migration/reports/phase-01-sbom.json"
+    sbom_sha256: "bf2bcf861ac17789b7ef3eee0d2e4c16efe8ea2f32a1165375817e43690416ed"
+    owasp_engine: "12.2.2"
+    analyzed_dependencies: 94
+    vulnerable_dependencies: 0
+    vulnerability_findings: 0
+    report_json_sha256: "55b77a94a6e7f1190cde5d84284a912e6c962de7eccd09094a48de1ef8c86294"
+    report_html_sha256: "4509592e39689b39f19eca3ef580a5fa37dc1892f9d94fecaf387648aa0cc3db"
+  reports:
+    dependency_tree:
+      path: "migration/reports/phase-03-dependency-tree.txt"
+      sha256: "db38606b61cc1f888fbb0199620d889eb44030551c9da7c890cd8065d5c0cb39"
+    differential:
+      path: "migration/reports/phase-03-differential.json"
+    gates:
+      path: "migration/reports/phase-03-gates.json"
+  mappings:
+    source: "2/2 migrated"
+    tests: "2/2 ported"
+    auxiliary: "7/7 translated_verified"
+
+phase_04:
+  status: "passed"
+  dependencies_added:
+    - group_id: "org.testcontainers"
+      artifact_id: "testcontainers-junit-jupiter"
+      version: "2.0.5"
+      scope: "test"
+      target_module: "mathproofmesh-server"
+    - group_id: "org.testcontainers"
+      artifact_id: "testcontainers-postgresql"
+      version: "2.0.5"
+      scope: "test"
+      target_module: "mathproofmesh-server"
+    - group_id: "net.java.dev.jna"
+      artifact_id: "jna-jpms"
+      version: "5.19.1"
+      scope: "test"
+      target_module: "mathproofmesh-server"
+    - group_id: "net.java.dev.jna"
+      artifact_id: "jna-platform-jpms"
+      version: "5.19.1"
+      scope: "test"
+      target_module: "mathproofmesh-server"
+    - group_id: "com.github.spotbugs"
+      artifact_id: "spotbugs-annotations"
+      version: "4.10.3"
+      scope: "provided"
+      target_module: "mathproofmesh-server"
+  dependency_version_changes: []
+  persistence_stack:
+    spring_jdbc: "7.0.8"
+    flyway_core: "12.4.0"
+    flyway_database_postgresql: "12.4.0"
+    postgresql_driver: "42.7.12"
+    testcontainers: "2.0.5"
+    docker_java: "3.7.1"
+  database:
+    engine: "PostgreSQL 18.4"
+    migration: "mathproofmesh-server/src/main/resources/db/migration/V1__initial_schema.sql"
+    migration_sha256: "b6df538974e02c7fb5e17e1fdd5387321da53f94584afa0680d612c146706f9f"
+    application_tables: 40
+    flyway_empty_schema: "pass"
+    flyway_restart_idempotency: "pass"
+  containers:
+    postgres: "postgres@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296"
+    testcontainers_ryuk: "testcontainers/ryuk@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0"
+    image_lock: "migration/image-lock.env"
+    image_lock_sha256: "7c722b214185f24171cd5d1c2f5a588db02db8f8c800bd01b2f33e0e4ed4c944"
+    compose_config: "pass"
+    post_test_cleanup: "pass; no Testcontainers containers remained"
+  current_pom_sha256:
+    parent: "b0099171246dc32a1366c4d135dc3549facc5d78ab20b44cccc595d0d4b7e270"
+    contracts: "043dfd92bffd28d45e4498c09cabd1a82682c98d3f1ca0c5d9f01ef402a13901"
+    core: "ffdc9ee013a09f68290f125bae995e0556622bc0d39ca299fc1451599ee9be58"
+    server: "8bcea94d942ff47041bccf706bfec339e84e8299e88bb02bad1948ba035654e9"
+    desktop: "32dd6d585e67062c80edbafffb0e4b1e3cc2ac70a1779fdb6eaded8b33f790ba"
+    compatibility: "2a289796d019ecc56848034a26a8394ef85b6a0da3d1edac2d040582d9097f0e"
+  verification:
+    online_clean_verify: "pass; 703 tests, 0 failures, 0 errors, 0 skipped"
+    offline_clean_verify: "pass; 703 tests, 0 failures, 0 errors, 0 skipped"
+    phase_04_tests: "pass; 21 tests"
+    postgres_integration_tests: "pass; 9 tests against PostgreSQL 18.4"
+    artifact_tests: "pass; traversal, absolute path, malformed hash, symlink/reparse, hash mismatch, size, quota, atomic replacement"
+    transactional_tests: "pass; outbox crash rollback, claim recovery, inbox dedupe, append-only event log"
+    concurrency_tests: "pass; lease takeover has one winner; stale fencing and optimistic versions rejected"
+    no_jpa_hibernate_h2: "pass"
+    no_concatenated_sql: "pass"
+    dependency_convergence: "pass"
+    external_snapshots: 0
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    original_source_immutability: "pass; 401 files"
+  security:
+    sbom: "CycloneDX 1.6; 88 components; 89 dependency entries"
+    sbom_path: "migration/reports/phase-01-sbom.json"
+    sbom_sha256: "53fff79ac235a38abf4efb333e7a47783cdb37491f9d9900a6b7c79b11e52963"
+    owasp_engine: "12.2.2"
+    analyzed_dependencies: 112
+    unsuppressed_vulnerable_dependencies: 0
+    unsuppressed_vulnerability_findings: 0
+    temporary_suppressions:
+      cves: ["CVE-2026-54399", "CVE-2026-54428"]
+      scope: "Testcontainers-only shaded HttpCore 5.3.6 talking to the trusted local Docker named pipe"
+      owner: "dependency/CI maintenance"
+      expires: "2026-10-31"
+      file: "migration/dependency-check-suppressions.xml"
+      file_sha256: "38ff5d35db496e2a675c19fbf1e6ea299096c9884e34604c14ff4d2521827a5c"
+    report_json_sha256: "defc03d04bb6cc6503a7f4a4768ed777b3f41c3956748a35c1c83ab963417124"
+    report_html_sha256: "881f4aaff66d8a091cc77fb78bd8b433ff91a40a8e92350dd8d3874f7fa9715a"
+  reports:
+    dependency_tree:
+      path: "migration/reports/phase-04-dependency-tree.txt"
+      sha256: "a9e64a3fadfa36a91f66d866256b0a64fd1613c8b09031b2ddab0bc2b628c72f"
+    gates:
+      path: "migration/reports/phase-04-gates.json"
+  mappings:
+    source: "1/1 migrated"
+    tests: "2/2 ported"
+    auxiliary: "0 phase-04 rows"
+
+phase_07:
+  status: "passed"
+  dependencies_added: []
+  dependency_version_changes: []
+  provider_stack:
+    transport: "JDK 25 java.net.http.HttpClient"
+    json: "Jackson from the locked Spring Boot dependency management"
+    streaming: "project-owned bounded SSE parser"
+    spring_ai_dependencies: 0
+  persistence:
+    migration: "mathproofmesh-server/src/main/resources/db/migration/V4__provider_call_runtime.sql"
+    migration_sha256: "4f23201411fbf68ce3291e8cbb249e538d72bc530708fcb3aeb45af7fd69a7a3"
+    flyway_migrations: 4
+    application_tables: 44
+  current_pom_sha256:
+    parent: "a6542215301d0f09161903da217e517e5f2b82743a3efc8cdde110c631b11bec"
+    contracts: "043dfd92bffd28d45e4498c09cabd1a82682c98d3f1ca0c5d9f01ef402a13901"
+    core: "d82b82efa85d71f064bebac3103f6c4e3f739f5267fe976cb8553aaa479dd874"
+    server: "ae282986662d82bac4fcfc02121ac99fa8cb0620037a9a0647335ac6e6f9999f"
+    desktop: "32dd6d585e67062c80edbafffb0e4b1e3cc2ac70a1779fdb6eaded8b33f790ba"
+    compatibility: "2a289796d019ecc56848034a26a8394ef85b6a0da3d1edac2d040582d9097f0e"
+  verification:
+    online_clean_verify: "pass; 849 tests, 0 failures, 0 errors, 0 skipped"
+    offline_clean_verify: "pass; 849 tests, 0 failures, 0 errors, 0 skipped"
+    provider_adapter_fixtures: "pass; DeepSeek, Anthropic, Gemini, OpenAI-compatible, and Mock"
+    bounded_sse: "pass; fragmentation, UTF-8, tail, byte limit, first-byte/idle timeout, cancellation, and reconnect"
+    runtime_policy: "pass; fair bounded semaphores, RPM, Retry-After, failover, circuit, and 401/403 same-key prohibition"
+    call_ledger: "pass; state machine, ambiguity, idempotent apply, usage reconciliation, and persisted circuit state"
+    live_provider_calls: 0
+    spring_ai_dependencies: 0
+    dependency_convergence: "pass"
+    external_snapshots: 0
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    original_source_immutability: "pass; 401 files"
+  security:
+    sbom: "CycloneDX 1.6; 88 components; 89 dependency entries"
+    sbom_path: "migration/reports/phase-01-sbom.json"
+    sbom_sha256: "2e547c2b8e6fd95d0b5283f742d99f1be62fd0b58472ae619f17cfd3382d398a"
+    owasp_engine: "12.2.2"
+    analyzed_dependencies: 112
+    findings_at_or_above_cvss_7: 0
+    medium_findings_below_gate: "CVE-2021-4277 in cron-utils 9.2.1; CVSS 5.3"
+    scan_privacy: "NVD/KEV public-feed download only; dependency-coordinate submission analyzers disabled"
+    false_positive_cpe_suppressions:
+      - "org.flywaydb:flyway-database-postgresql:12.4.0 is not PostgreSQL server 12.4.0"
+      - "org.testcontainers:testcontainers-postgresql:2.0.5 is not PostgreSQL server 2.0.5"
+    suppression_file: "migration/dependency-check-suppressions.xml"
+    suppression_file_sha256: "d0069c042ad600b6d1f17aa85fd1398661ea74dab9ad27ba5bb24b5c4decda92"
+    report_json_sha256: "0964d52018c20b893e8f1110c6080289cbb37e8a7d3def41c36868bbf47bb824"
+    report_html_sha256: "eaf66d65b2e13e64c9301bcdc0c7a23be7ba2221173333ed4907b2a744d2b597"
+  reports:
+    dependency_tree:
+      path: "migration/reports/phase-07-dependency-tree.txt"
+      sha256: "ebe8bf809d9d6f20ca07c01d31e10819ff600f464b6fa463f08c120d84152243"
+    gates:
+      path: "migration/reports/phase-07-gates.json"
+  mappings:
+    source: "10/10 migrated"
+    tests: "4/4 ported"
+    auxiliary: "2/2 translated_verified"
+
+phase_08:
+  status: "passed"
+  dependencies_added: []
+  dependency_version_changes: []
+  sidecar:
+    root: "python-compute-service"
+    protocol: "JSON-RPC 2.0 JSONL over UTF-8 stdin/stdout"
+    protocol_version: "1.0"
+    tcp_listener: false
+    requirements_lock:
+      path: "python-compute-service/requirements.lock"
+      sha256: "c53f2203f537b0334b272527274e9bd200665d3dbcfdce9d3e0ab3b2f2b3ff68"
+    build_requirements_lock:
+      path: "python-compute-service/build-requirements.lock"
+      sha256: "446640e4e2603c15bb14975213604b2cace9d4f9b918407cbd8deb5c9e556f8a"
+    packages:
+      - name: "mpmath"
+        version: "1.3.0"
+        wheel_sha256: "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"
+      - name: "sympy"
+        version: "1.14.0"
+        wheel_sha256: "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5"
+      - name: "z3-solver"
+        version: "4.16.0.0"
+        wheel_sha256: "eb5df383cb6a3d6b7767dbdca348ac71f6f41e82f76c9ac42002a1f55e35f462"
+      - name: "setuptools"
+        version: "83.0.0"
+        wheel_sha256: "29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3"
+    offline_hash_install: "pass"
+  current_pom_sha256:
+    parent: "a6542215301d0f09161903da217e517e5f2b82743a3efc8cdde110c631b11bec"
+    core: "d82b82efa85d71f064bebac3103f6c4e3f739f5267fe976cb8553aaa479dd874"
+    server: "ae282986662d82bac4fcfc02121ac99fa8cb0620037a9a0647335ac6e6f9999f"
+    compatibility: "2a289796d019ecc56848034a26a8394ef85b6a0da3d1edac2d040582d9097f0e"
+  verification:
+    online_clean_verify: "pass; 922 tests, 0 failures, 0 errors, 0 skipped"
+    offline_clean_verify: "pass; 922 tests, 0 failures, 0 errors, 0 skipped"
+    phase_08_tests: "pass; 73 tests"
+    java_native_handlers: "pass; exact and bounded computation semantics"
+    sidecar_differential: "pass; 4 cases"
+    sidecar_protocol: "pass; 8 cases"
+    sandbox_security: "pass; 4 cases"
+    dependency_convergence: "pass"
+    external_snapshots: 0
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    original_source_immutability: "pass; 401 files"
+  security:
+    sbom: "CycloneDX 1.6; 88 components; 89 dependency entries"
+    sbom_path: "migration/reports/phase-01-sbom.json"
+    sbom_sha256: "2e547c2b8e6fd95d0b5283f742d99f1be62fd0b58472ae619f17cfd3382d398a"
+    owasp_engine: "12.2.2"
+    analyzed_dependencies: 112
+    findings_at_or_above_cvss_7: 0
+    medium_findings_below_gate: "CVE-2021-4277 in cron-utils 9.2.1; CVSS 5.3"
+    report_json_sha256: "f50f41ddc5ffaf1e68a09687c956a497ebcf5de03fd642a52d3f82af3d86e546"
+    report_html_sha256: "ea3ded46eb8aedfcf77aaf7f237ac717e4455e8412d172194a39d2a872b3bc0a"
+  reports:
+    dependency_tree:
+      path: "migration/reports/phase-08-dependency-tree.txt"
+      sha256: "904f40b5026f88843d5485625c50622777a9eab284e6a4503b0257c2f651adf2"
+    differential:
+      path: "migration/reports/phase-08-differential.json"
+    gates:
+      path: "migration/reports/phase-08-gates.json"
+  mappings:
+    source: "19/19 migrated"
+    tests: "8/8 ported; 56 Python functions"
+    auxiliary: "4/4 translated_or_reimplemented_verified"
+
+phase_09:
+  status: "passed"
+  dependencies_added: []
+  dependency_version_changes: []
+  current_pom_sha256:
+    parent: "a6542215301d0f09161903da217e517e5f2b82743a3efc8cdde110c631b11bec"
+    contracts: "043dfd92bffd28d45e4498c09cabd1a82682c98d3f1ca0c5d9f01ef402a13901"
+    core: "d82b82efa85d71f064bebac3103f6c4e3f739f5267fe976cb8553aaa479dd874"
+    server: "ae282986662d82bac4fcfc02121ac99fa8cb0620037a9a0647335ac6e6f9999f"
+    desktop: "32dd6d585e67062c80edbafffb0e4b1e3cc2ac70a1779fdb6eaded8b33f790ba"
+    compatibility: "2a289796d019ecc56848034a26a8394ef85b6a0da3d1edac2d040582d9097f0e"
+  verification:
+    online_clean_verify: "pass; 955 tests, 0 failures, 0 errors, 0 skipped"
+    offline_clean_verify: "pass; 955 tests, 0 failures, 0 errors, 0 skipped"
+    phase_09_tests: "pass; 29 focused cases"
+    structural_first_ladder: "pass"
+    author_reviewer_separation: "pass"
+    blind_prompt_and_packet_leakage_hits: 0
+    mutation_kinds_exercised: 5
+    formal_failure_refutes_natural_claim: false
+    dependency_convergence: "pass"
+    external_snapshots: 0
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    original_source_immutability: "pass; 401 files"
+  security:
+    sbom: "CycloneDX 1.6; 88 components; 89 dependency entries"
+    sbom_path: "migration/reports/phase-01-sbom.json"
+    sbom_sha256: "2e547c2b8e6fd95d0b5283f742d99f1be62fd0b58472ae619f17cfd3382d398a"
+    owasp_engine: "12.2.2"
+    analyzed_dependencies: 112
+    findings_at_or_above_cvss_7: 0
+    medium_findings_below_gate: "CVE-2021-4277 in cron-utils 9.2.1; CVSS 5.3"
+    report_json_sha256: "d3cb3d73318e1bcef354ee361cc077111a437339d9faeb1f59b93436a946880d"
+    report_html_sha256: "3cc042513234167dbab8bd1b5f3319e06b69f55629b898058db07184fd120c39"
+  reports:
+    dependency_tree:
+      path: "migration/reports/phase-09-dependency-tree.txt"
+      sha256: "904f40b5026f88843d5485625c50622777a9eab284e6a4503b0257c2f651adf2"
+    gates:
+      path: "migration/reports/phase-09-gates.json"
+      sha256: "05e98e5209a7609f50e794e34d1f1de36cbe57c072136c6789da44f69f574949"
+    phase_report:
+      path: "migration/reports/phase-09.md"
+      sha256: "dac5935fa44c3a1f71ba889fd4f0984064620595ed35be5201731fa70b6ee450"
+  mappings:
+    source: "6/6 migrated"
+    tests: "10/10 ported; 26 Python functions"
+    auxiliary: "2/2 translated_verified"
+
+phase_10:
+  status: "passed"
+  dependencies_added: []
+  dependency_version_changes: []
+  current_pom_sha256:
+    parent: "a6542215301d0f09161903da217e517e5f2b82743a3efc8cdde110c631b11bec"
+    contracts: "043dfd92bffd28d45e4498c09cabd1a82682c98d3f1ca0c5d9f01ef402a13901"
+    core: "d82b82efa85d71f064bebac3103f6c4e3f739f5267fe976cb8553aaa479dd874"
+    server: "ae282986662d82bac4fcfc02121ac99fa8cb0620037a9a0647335ac6e6f9999f"
+    desktop: "32dd6d585e67062c80edbafffb0e4b1e3cc2ac70a1779fdb6eaded8b33f790ba"
+    compatibility: "2a289796d019ecc56848034a26a8394ef85b6a0da3d1edac2d040582d9097f0e"
+  verification:
+    online_clean_verify: "pass; 1174 tests, 0 failures, 0 errors, 0 skipped"
+    offline_clean_verify: "pass; 1174 tests, 0 failures, 0 errors, 0 skipped"
+    phase_10_tests: "pass; 219 focused cases"
+    authority_named_python_cases: 203
+    benchmark_cases: 10
+    benchmark_provider_calls: 0
+    proof_control_authority_boundary: "pass"
+    off_shadow_active_semantics: "pass"
+    exact_idempotent_actions: "pass"
+    terminal_resume_provider_calls: 0
+    common_mode_and_falsification: "pass"
+    dependency_convergence: "pass"
+    external_snapshots: 0
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    original_source_immutability: "pass; 401 files"
+  security:
+    sbom: "CycloneDX 1.6; 88 components; 89 dependency entries"
+    sbom_path: "migration/reports/phase-01-sbom.json"
+    sbom_sha256: "2e547c2b8e6fd95d0b5283f742d99f1be62fd0b58472ae619f17cfd3382d398a"
+    owasp_engine: "12.2.2"
+    analyzed_dependencies: 112
+    findings_at_or_above_cvss_7: 0
+    medium_findings_below_gate: "CVE-2021-4277 in cron-utils 9.2.1; CVSS 5.3"
+    report_json_sha256: "024e6f5051d1672379d1475e8b0c232eb257d0653e57c66a325214b8c27875db"
+    report_html_sha256: "f190fb8ef2308822826f46b0a11934052e2b8ca445a7eb2dbe32f28d81071e16"
+  reports:
+    dependency_tree:
+      path: "migration/reports/phase-10-dependency-tree.txt"
+      sha256: "2f400fa74b152f115b80862818716de7c4ac46e4f07092e872162e3c158ff482"
+    gates:
+      path: "migration/reports/phase-10-gates.json"
+      sha256: "98c54717872b37c5e79bc9a30b79672aca3936f1f6cf07839a0450f76f21f809"
+    phase_report:
+      path: "migration/reports/phase-10.md"
+      sha256: "bb4d53bab76f688f8b53a086206e37b5cca80f7fc925fe4b318e3ef58ed914a3"
+  mappings:
+    source: "29/29 migrated"
+    tests: "46/46 ported; 203 Python functions"
+    auxiliary: "16/16 closed"
+
+phase_11:
+  status: "passed"
+  dependencies_added: []
+  dependency_version_changes: []
+  current_pom_sha256:
+    parent: "a6542215301d0f09161903da217e517e5f2b82743a3efc8cdde110c631b11bec"
+    contracts: "043dfd92bffd28d45e4498c09cabd1a82682c98d3f1ca0c5d9f01ef402a13901"
+    core: "d82b82efa85d71f064bebac3103f6c4e3f739f5267fe976cb8553aaa479dd874"
+    server: "ae282986662d82bac4fcfc02121ac99fa8cb0620037a9a0647335ac6e6f9999f"
+    desktop: "32dd6d585e67062c80edbafffb0e4b1e3cc2ac70a1779fdb6eaded8b33f790ba"
+    compatibility: "2a289796d019ecc56848034a26a8394ef85b6a0da3d1edac2d040582d9097f0e"
+  verification:
+    online_clean_verify: "pass; 1246 tests, 0 failures, 0 errors, 0 skipped"
+    offline_clean_verify: "pass; 1246 tests, 0 failures, 0 errors, 0 skipped"
+    phase_11_tests: "pass; 72 focused cases"
+    authority_named_python_cases: 70
+    off_provider_calls: 0
+    shadow_business_mutations: 0
+    author_referee_separation: "pass"
+    inspiration_authority_boundary: "pass"
+    fixed_seed_and_ucb_determinism: "pass"
+    cross_run_scope: "project-and-tenant-local"
+    dependency_convergence: "pass"
+    external_snapshots: 0
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    original_source_immutability: "pass; 401 files"
+  security:
+    sbom: "CycloneDX 1.6; 88 components; 89 dependency entries"
+    sbom_path: "migration/reports/phase-01-sbom.json"
+    sbom_sha256: "2e547c2b8e6fd95d0b5283f742d99f1be62fd0b58472ae619f17cfd3382d398a"
+    owasp_engine: "12.2.2"
+    analyzed_dependencies: 112
+    findings_at_or_above_cvss_7: 0
+    medium_findings_below_gate: "CVE-2021-4277 in cron-utils 9.2.1; CVSS 5.3"
+    report_json_sha256: "4170d79b01ff926d8ec23e39541095f40d21a0297496ee06ff1def563baef98d"
+    report_html_sha256: "87d9fe9ea8ab6f1ba44695d24590891a02536c63e990486f7bbfc303cfd2b97d"
+  reports:
+    dependency_tree:
+      path: "migration/reports/phase-11-dependency-tree.txt"
+      sha256: "9bb2f532489fa261ce4548b44cac8224faefc1458d15a741a006b42a1609b6db"
+    gates:
+      path: "migration/reports/phase-11-gates.json"
+      sha256: "6357564c788b401cd9efdec70410b1863a7271b27fb41c35c359247b93d87b53"
+    phase_report:
+      path: "migration/reports/phase-11.md"
+      sha256: "3f087530cced504afe1b867377bca1214b22bda9b74aeecd5e690c8355cab07c"
+  mappings:
+    source: "23/23 migrated"
+    tests: "23/23 ported; 70 Python functions"
+    auxiliary: "2/2 closed"
+
+phase_12:
+  status: "passed"
+  dependencies_added: []
+  dependency_version_changes: []
+  current_pom_sha256:
+    parent: "a6542215301d0f09161903da217e517e5f2b82743a3efc8cdde110c631b11bec"
+    contracts: "043dfd92bffd28d45e4498c09cabd1a82682c98d3f1ca0c5d9f01ef402a13901"
+    core: "d82b82efa85d71f064bebac3103f6c4e3f739f5267fe976cb8553aaa479dd874"
+    server: "ae282986662d82bac4fcfc02121ac99fa8cb0620037a9a0647335ac6e6f9999f"
+    desktop: "32dd6d585e67062c80edbafffb0e4b1e3cc2ac70a1779fdb6eaded8b33f790ba"
+    compatibility: "2a289796d019ecc56848034a26a8394ef85b6a0da3d1edac2d040582d9097f0e"
+  verification:
+    online_clean_verify: "pass; 1353 tests, 0 failures, 0 errors, 0 skipped"
+    offline_clean_verify: "pass; 1353 tests, 0 failures, 0 errors, 0 skipped"
+    phase_12_tests: "pass; 107 authority-named cases"
+    authority_named_python_cases: 107
+    fixed_pipeline_and_route_isolation: "pass"
+    author_referee_separation: "pass"
+    checkpoint_cas_and_committed_only_resume: "pass"
+    deep_exploration_signature_leases: "pass"
+    broker_only_cross_route_boundary: "pass"
+    mock_runner_outcomes_and_fenced_lease: "pass"
+    dependency_convergence: "pass"
+    external_snapshots: 0
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    original_source_immutability: "pass; 401 files"
+  security:
+    sbom: "CycloneDX 1.6; 88 components; 89 dependency entries"
+    sbom_path: "migration/reports/phase-01-sbom.json"
+    sbom_sha256: "2e547c2b8e6fd95d0b5283f742d99f1be62fd0b58472ae619f17cfd3382d398a"
+    owasp_engine: "12.2.2"
+    analyzed_dependencies: 112
+    findings_at_or_above_cvss_7: 0
+    medium_findings_below_gate: "CVE-2021-4277 in cron-utils 9.2.1; CVSS 5.3"
+    report_json_sha256: "abbfc5fc6311b12ac6cbc505aad01fee2b199c99bbcff7379f8efe1e9e0108ad"
+    report_html_sha256: "b753a5b059e91b2a9aa6ee23131f81fce57b710626d0262fcb214ce2eeadeb73"
+  reports:
+    dependency_tree:
+      path: "migration/reports/phase-12-dependency-tree.txt"
+      sha256: "2f400fa74b152f115b80862818716de7c4ac46e4f07092e872162e3c158ff482"
+    gates:
+      path: "migration/reports/phase-12-gates.json"
+      sha256: "4a85acba7f937beb49595177ade66a915c7529ffc0fabe39514b64eaf3cf2438"
+    phase_report:
+      path: "migration/reports/phase-12.md"
+      sha256: "139821c35e577db215522d6ed71a0813b682c99e96b41b8c3bdc4a2bb050aa9d"
+  mappings:
+    source: "13/13 migrated"
+    tests: "18/18 ported; 107 Python functions"
+    auxiliary: "none assigned"
+
+phase_13:
+  status: "passed"
+  dependencies_added: []
+  dependency_version_changes: []
+  current_pom_sha256:
+    parent: "a6542215301d0f09161903da217e517e5f2b82743a3efc8cdde110c631b11bec"
+    contracts: "043dfd92bffd28d45e4498c09cabd1a82682c98d3f1ca0c5d9f01ef402a13901"
+    core: "d82b82efa85d71f064bebac3103f6c4e3f739f5267fe976cb8553aaa479dd874"
+    server: "ae282986662d82bac4fcfc02121ac99fa8cb0620037a9a0647335ac6e6f9999f"
+    desktop: "32dd6d585e67062c80edbafffb0e4b1e3cc2ac70a1779fdb6eaded8b33f790ba"
+    compatibility: "2a289796d019ecc56848034a26a8394ef85b6a0da3d1edac2d040582d9097f0e"
+  verification:
+    online_clean_verify: "pass; 1382 tests, 0 failures, 0 errors, 0 skipped"
+    offline_clean_verify: "pass; 1382 tests, 0 failures, 0 errors, 0 skipped"
+    phase_13_tests: "pass; 25 authority-named and 4 Temporal gate cases"
+    authority_named_python_cases: 25
+    workflow_interfaces: 2
+    history_replay_and_continue_as_new: "pass"
+    signals_updates_queries: "pass"
+    idempotent_activity_application: "pass"
+    legacy_checkpoint_recovery: "pass"
+    temporal_compose_persistence: "pass"
+    temporal_compose_hardening: "pass"
+    dependency_convergence: "pass"
+    external_snapshots: 0
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    original_source_immutability: "pass; 401 files"
+  security:
+    sbom: "CycloneDX 1.6; 88 components; 89 dependency entries"
+    sbom_path: "migration/reports/phase-01-sbom.json"
+    sbom_sha256: "2e547c2b8e6fd95d0b5283f742d99f1be62fd0b58472ae619f17cfd3382d398a"
+    owasp_engine: "12.2.2"
+    analyzed_dependencies: 112
+    findings_at_or_above_cvss_7: 0
+    medium_findings_below_gate: "CVE-2021-4277 in cron-utils 9.2.1; CVSS 5.3"
+    report_json_sha256: "3677a30b25c0c76147dc54d2b72953abd5d4012710d79866016c39944dcceab3"
+    report_html_sha256: "7372df6a2674e91d1fcfe667506bf89160f4c70345e1d5423f5dbdb65ce7004d"
+  reports:
+    dependency_tree:
+      path: "migration/reports/phase-13-dependency-tree.txt"
+      sha256: "2f400fa74b152f115b80862818716de7c4ac46e4f07092e872162e3c158ff482"
+    gates:
+      path: "migration/reports/phase-13-gates.json"
+      sha256: "0d5ce4a51eec324482d209dd7a4e73301d0172672da9bc544b26d4a17f8a5db4"
+    phase_report:
+      path: "migration/reports/phase-13.md"
+      sha256: "0007f9f2a0bf73b319f4789237ae21673783ac432cb044f6c340c66dba8657b6"
+  mappings:
+    source: "1/1 migrated"
+    tests: "8/8 ported; 25 Python functions"
+    auxiliary: "1/1 translated_verified"
+
+phase_14:
+  status: "passed"
+  dependencies_added:
+    - "org.springframework.boot:spring-boot-starter-web:4.1.0"
+    - "org.springframework.boot:spring-boot-starter-actuator:4.1.0"
+  dependency_version_changes:
+    - "org.apache.tomcat.embed:tomcat-embed-core:11.0.22 -> 11.0.24"
+    - "org.apache.tomcat.embed:tomcat-embed-el:11.0.22 -> 11.0.24"
+    - "org.apache.tomcat.embed:tomcat-embed-websocket:11.0.22 -> 11.0.24"
+  current_pom_sha256:
+    parent: "28a17702c8061eb01cd2b6c73dae67b7cdb45ea22c129ebdabbf715f8d8f6ef1"
+    contracts: "043dfd92bffd28d45e4498c09cabd1a82682c98d3f1ca0c5d9f01ef402a13901"
+    core: "d82b82efa85d71f064bebac3103f6c4e3f739f5267fe976cb8553aaa479dd874"
+    server: "77614d02abed45792ba69e895375f16c4cff5f59a96c7dde1b659671e966dabc"
+    desktop: "32dd6d585e67062c80edbafffb0e4b1e3cc2ac70a1779fdb6eaded8b33f790ba"
+    compatibility: "2a289796d019ecc56848034a26a8394ef85b6a0da3d1edac2d040582d9097f0e"
+  verification:
+    online_clean_verify: "pass; 1401 tests, 0 failures, 0 errors, 0 skipped"
+    offline_clean_verify: "pass; 1401 tests, 0 failures, 0 errors, 0 skipped"
+    phase_14_tests: "pass; 12 authority-named and 7 API gate cases"
+    authority_named_python_cases: 12
+    api_gate_cases: 7
+    bearer_and_loopback_policy: "pass"
+    resumable_sse_and_redaction: "pass"
+    read_only_queries_and_artifacts: "pass"
+    cli_reports_and_observability: "pass"
+    dependency_convergence: "pass"
+    external_snapshots: 0
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    original_source_immutability: "pass; 401 files"
+  security:
+    sbom: "CycloneDX 1.6; 111 components; 112 dependency entries"
+    sbom_path: "migration/reports/phase-01-sbom.json"
+    sbom_sha256: "ceffa2ef4762376dec03430fb7fe4ff62ba96016c5e95d9647e37f308dbbadcd"
+    owasp_engine: "12.2.2"
+    analyzed_dependencies: 115
+    findings_at_or_above_cvss_7: 0
+    medium_findings_below_gate: "CVE-2021-4277 in cron-utils 9.2.1; CVSS 5.3"
+    report_json_sha256: "f9c64fb402b777cc5432d55429bf21e0a80af967367d932867c2d7cefac77277"
+    report_html_sha256: "b30b13bc7f1548d571bbe1dd0323923b4eef29f0e0668177a402e06ca3ddc4ba"
+  reports:
+    dependency_tree:
+      path: "migration/reports/phase-14-dependency-tree.txt"
+      sha256: "8f43553323c76189dd9169801131fd6ea152738fa85a5a521bc871e2cc56dc7a"
+    gates:
+      path: "migration/reports/phase-14-gates.json"
+      sha256: "55826727bb32075f27921c0f83e2da97f4e74c089c8579287eecfe0233e71fa5"
+    phase_report:
+      path: "migration/reports/phase-14.md"
+      sha256: "993dced3419fbca4130fe6914c4637ac90281ab7f70d40616ad4807fbaba5ef9"
+  mappings:
+    source: "6/6 migrated"
+    tests: "4/4 ported; 12 Python functions"
+    auxiliary: "2/2 translated_verified"
+
+phase_15:
+  status: "passed"
+  dependencies_added:
+    - "com.github.spotbugs:spotbugs-annotations:4.10.3 (provided)"
+    - "org.springframework.boot:spring-boot-starter-test:4.1.0 (test)"
+  dependency_version_changes: []
+  desktop_stack:
+    javafx: "25.0.4"
+    jna_jpms: "5.19.1"
+    spring_boot: "4.1.0"
+    wix: "5.0.2 target-local"
+    packaging: "Eclipse Temurin 25.0.4+7 jlink/jpackage"
+  current_pom_sha256:
+    parent: "28a17702c8061eb01cd2b6c73dae67b7cdb45ea22c129ebdabbf715f8d8f6ef1"
+    contracts: "043dfd92bffd28d45e4498c09cabd1a82682c98d3f1ca0c5d9f01ef402a13901"
+    core: "d82b82efa85d71f064bebac3103f6c4e3f739f5267fe976cb8553aaa479dd874"
+    server: "77614d02abed45792ba69e895375f16c4cff5f59a96c7dde1b659671e966dabc"
+    desktop: "785d44a1344a5e4f643196d4913f08292df70fca5d81564c100c3b77acdc35ac"
+    compatibility: "2a289796d019ecc56848034a26a8394ef85b6a0da3d1edac2d040582d9097f0e"
+  verification:
+    online_clean_verify: "pass; 1420 tests, 0 failures, 0 errors, 0 skipped"
+    offline_clean_verify: "pass; 1420 tests, 0 failures, 0 errors, 0 skipped"
+    phase_15_tests: "pass; 13 authority-named and 6 desktop gate cases"
+    authority_named_python_cases: 13
+    desktop_gate_cases: 6
+    desktop_module_tests: 19
+    javafx_loopback_http_sse_only: "pass"
+    webview_secret_and_navigation_boundary: "pass"
+    dpapi_and_redaction: "pass"
+    desktop_packaging_and_health: "pass"
+    dependency_convergence: "pass"
+    external_snapshots: 0
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    original_source_immutability: "pass; 401 files"
+  packaging:
+    installer:
+      path: "target/desktop-dist/MathProofMesh-0.8.0.exe"
+      size_bytes: 160105984
+      sha256: "797502f3f254d53fdf3270a07322d6159d3859e1cbe104ad7439c2f03bd07fcb"
+    portable_zip:
+      path: "target/desktop-dist/MathProofMesh-0.8.0-windows-x64-portable.zip"
+      size_bytes: 160687056
+      sha256: "97f934428918bfe100abd0c1926b066a669e525a216c9722ccb6885d138a65f1"
+    checksum_file:
+      path: "target/desktop-dist/SHA256SUMS.txt"
+      sha256: "28ce6810854641e03cbfd912ef4c470a08ebf8a25e758a4205d9acbd19ce10f3"
+  security:
+    sbom: "CycloneDX 1.6; 111 components; 112 dependency entries"
+    sbom_path: "migration/reports/phase-01-sbom.json"
+    sbom_sha256: "1dcb27e020355df83d97501c97924cc8a6982210d24c1d793eb467b65f6f479e"
+    owasp_engine: "12.2.2"
+    analyzed_dependencies: 115
+    findings_at_or_above_cvss_7: 0
+    medium_findings_below_gate: "CVE-2021-4277 in cron-utils 9.2.1; CVSS 5.3"
+    report_json_sha256: "34add796ba17de76faefccac683f56c44ad2d781cbf2ea7e31ec73073372b75f"
+    report_html_sha256: "f5b3f31015ccefae534fe28b912b9f7568144306659cdcc9f38cb56db3859fee"
+  reports:
+    dependency_tree:
+      path: "migration/reports/phase-15-dependency-tree.txt"
+      sha256: "e6d1a3a493060b97a0650513092f37b32f936b38f3cbcd30b18610d5804bd30e"
+    gates:
+      path: "migration/reports/phase-15-gates.json"
+      sha256: "6427290e025344dc520b57dc2de5e6e4f803768c0f42895380fb51a67903ac75"
+    phase_report:
+      path: "migration/reports/phase-15.md"
+      sha256: "cbb434b5ed9991fbb1b56da01617304d7859ae759f6be44c0a70071cbf2ef563"
+  mappings:
+    source: "15/15 migrated"
+    tests: "2/2 ported; 13 Python functions"
+    auxiliary: "10/10 translated_verified"
+
+phase_16:
+  status: "passed"
+  dependencies_added:
+    - "com.github.spotbugs:spotbugs-annotations:4.10.3 (provided)"
+  dependency_version_changes: []
+  compatibility:
+    importer: "read-only, bounded, two-pass hashed, unique manifest identity"
+    ordered_versions: "0.7 -> 0.8.0 -> 0.8.1 -> 0.8.2"
+    unaudited_claims: "quarantined"
+    terminal_resume_provider_calls: 0
+    nonterminal_resume: "latest committed checkpoint"
+    shadow_sections: 10
+    authority_named_cases: 98
+    unexplained_differences: 0
+  current_pom_sha256:
+    parent: "28a17702c8061eb01cd2b6c73dae67b7cdb45ea22c129ebdabbf715f8d8f6ef1"
+    contracts: "043dfd92bffd28d45e4498c09cabd1a82682c98d3f1ca0c5d9f01ef402a13901"
+    core: "d82b82efa85d71f064bebac3103f6c4e3f739f5267fe976cb8553aaa479dd874"
+    server: "77614d02abed45792ba69e895375f16c4cff5f59a96c7dde1b659671e966dabc"
+    desktop: "785d44a1344a5e4f643196d4913f08292df70fca5d81564c100c3b77acdc35ac"
+    compatibility: "777cb726de282b82ede057e0fa4a78e0187c516d9b05b7ea4aa4e80ae39f2e25"
+  verification:
+    online_clean_verify: "pass; 1549 tests, 0 failures, 0 errors, 0 skipped"
+    offline_clean_verify: "pass; 1549 tests, 0 failures, 0 errors, 0 skipped"
+    compatibility_module_tests: 148
+    legacy_importer_cases: 20
+    shadow_comparator_cases: 10
+    python_java_shadow_cases: 1
+    dependency_convergence: "pass"
+    external_snapshots: 0
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    original_source_immutability: "pass; 401 files"
+  security:
+    sbom: "CycloneDX 1.6; 111 components; 112 dependency entries"
+    sbom_path: "migration/reports/phase-01-sbom.json"
+    sbom_sha256: "dcd97c48edbcd8cbdd80524c813085b4e6db9b646769782bf0f4185e1f50e5db"
+    owasp_engine: "12.2.2"
+    analyzed_dependencies: 115
+    findings_at_or_above_cvss_7: 0
+    medium_findings_below_gate: "CVE-2021-4277 in cron-utils 9.2.1; CVSS 5.3"
+    report_json_sha256: "4da46587c58328b54166acccd146859dd3baaefd60fe60f73f9aa23a8cbaaae3"
+    report_html_sha256: "cbbaca59e3fa5d0ed4bd83148444013bc3e2eaa76ef4721b1fb9fc46c5bb3dc6"
+  reports:
+    dependency_tree:
+      path: "migration/reports/phase-16-dependency-tree.txt"
+      sha256: "44a85ca29e7ef8271b1b09caf1b103a1a67d93ce0dcb5eb657e1e9d92e3823d9"
+    differential:
+      path: "migration/reports/phase-16-differential.json"
+      sha256: "6e1c819e16cdb7c75312b9c17b44218dd618cd4cbfc5aace9f3e8fa3f9c6527a"
+    gates:
+      path: "migration/reports/phase-16-gates.json"
+      sha256: "b796874fc08adb356e4f069f8c58d7716237b4a0c9298e7463553b82b6fdb2c9"
+    phase_report:
+      path: "migration/reports/phase-16.md"
+      sha256: "6617e454b13d59bdf61c69f584b66b9c735f5d52f74633d92c814474374abf7c"
+  mappings:
+    source: "142/142 migrated"
+    tests: "167/167 terminal; 149 ported, 18 differential"
+    auxiliary: "92/92 terminal; 49 translated, 6 reimplemented, 5 verified, 32 copied"
+    union: "401 unique frozen paths; 0 pending"
+
+phase_17:
+  status: "passed"
+  release_version: "0.8.0"
+  dependencies_added: []
+  dependency_version_changes: []
+  current_pom_sha256:
+    parent: "c1511a7f0df945b2baa005de4936d51fce16e784e2c943672c2a56671997d584"
+    contracts: "3c30eefb378f96c4078ed7187ab6bf4b5acb2dc84f2cacecaacae231b46fbcd0"
+    core: "af7c2aa98093f60db8399986e71bc5da366d6526904469c7235706b886df29d6"
+    server: "11194306b7fd575ba4b1d8768d1d8f8a86e05f9acaf8219f4bf6223419d18cb0"
+    desktop: "dcdb78a7ae449b7db0387d0adc88c610f69d77eeb5089a20e75808e97143bd3b"
+    compatibility: "fcf41a5cea23429fb249010b5be5695a5a4f6e1f750ca4f97159d49ec59541eb"
+  verification:
+    online_clean_verify: "pass; 1934 tests, 0 failures, 0 errors, 0 skipped"
+    offline_clean_verify: "pass; 1934 tests, 0 failures, 0 errors, 0 skipped"
+    report_files: 224
+    contracts_tests: 39
+    core_tests: 902
+    server_tests: 825
+    desktop_tests: 19
+    compatibility_tests: 149
+    dependency_convergence: "pass"
+    external_snapshots: 0
+    duplicate_classes: 0
+    spotbugs_findsecbugs_findings: 0
+    original_source_immutability: "pass; 401 files"
+    final_python_baseline: "759 passed"
+  coverage:
+    contracts_adjusted_line_percent: 95.099541
+    contracts_adjusted_branch_percent: 87.420814
+    core_line_percent: 91.062632
+    core_branch_percent: 75.100461
+    audited_invariant_line_percent: 94.431555
+    audited_invariant_branch_percent: 86.145765
+    server_line_percent: 87.709665
+    desktop_line_percent: 70.380623
+    critical_scenarios_percent: 100.0
+  security:
+    sbom: "CycloneDX 1.6; 111 components"
+    sbom_path: "migration/reports/phase-17-sbom.json"
+    sbom_sha256: "c2bf89511baa19e36b123abd21e5c80a73c3d3af68ec93f6d9ac33a255e9f92c"
+    license_components: 111
+    missing_or_unreviewed_licenses: 0
+    secret_findings: 0
+    owasp_engine: "12.2.2"
+    analyzed_dependencies: 115
+    findings_at_or_above_cvss_7: 0
+    medium_findings_below_gate: "CVE-2021-4277 in cron-utils 9.2.1; CVSS 5.3"
+    report_json_sha256: "8e40b6d066323adb7298ea68dee886049ca5eb9c7d9b25ce1c33113821159115"
+    report_html_sha256: "7777154973e1762cd6ef45016807c8c25884b95aac7ee729f6a1f7ddf10b22ac"
+  performance:
+    reference_path: "migration/baseline/phase-17-performance-reference.json"
+    reference_sha256: "d09133d75ee81ba92863ff405f3f860026c46b9bb64c62b9a28434eef7e287d6"
+    report_path: "migration/reports/phase-17-performance.json"
+    report_sha256: "e21b1a521933dc9ba7b0f738af5e9fa98e086e87a1970bde11f33694d23beb3c"
+    same_machine_limit: 1.20
+    scenarios_passed: "7/7"
+    maximum_final_ratio: 1.045738
+  release:
+    server_jar:
+      path: "target/modules/mathproofmesh-server/mathproofmesh-server-0.8.0-exec.jar"
+      size_bytes: 67096239
+      sha256: "90679278035d0057819e609f866d7a0fcc7f6a117310f3238cd0c71d5f16fb93"
+    cli_jar:
+      path: "target/modules/mathproofmesh-server/mathproofmesh-server-0.8.0-cli.jar"
+      size_bytes: 67096241
+      sha256: "a643f28c313ed1cbf8cac8a80a78f34a0d02fc27feba055adb4679f38366fbf8"
+    desktop_installer:
+      path: "target/desktop-dist/MathProofMesh-0.8.0.exe"
+      size_bytes: 160101888
+      sha256: "db9332e5a88fb3b67b63babaed75ae4897d7f5166bc774df7fcf9f82b75c0399"
+    desktop_portable_zip:
+      path: "target/desktop-dist/MathProofMesh-0.8.0-windows-x64-portable.zip"
+      size_bytes: 160686849
+      sha256: "180966e3afc36fc448066608d8c9d17d6828d37d2b816cdbe161b269ed321d1e"
+    desktop_checksums_sha256: "f7bcdb5d670f93c53fc05603256770030f785ed233884d62ca7105af33becdf4"
+    archive:
+      path: "target/release/JavaMathProofMesh-0.8.0.zip"
+      size_bytes: 444812647
+      sha256: "3c26153010b3a9606d6d4cf4227c091bcc78946f955f1c93bcfd5ed63311f0ec"
+    archive_checksum_file_sha256: "3f375b982b6b504318d0db2f0ee296d78f38a2b489b8a19a744e9ee168b49641"
+    bundle_checksum_file_sha256: "c2fe4ba2a64a4e49620eecc8275da119a8791d81acf5ae569826cda5e4a6c0a2"
+    database_migrations: 4
+    demonstrations: "packaged Mock solve and old-run resume passed"
+  reports:
+    dependency_tree:
+      path: "migration/reports/phase-17-dependency-tree.txt"
+      sha256: "91103b7d48c76db72871f26e90a7c621291a268d378ccc1915d17a52b442d955"
+    coverage:
+      path: "migration/reports/phase-17-coverage.json"
+      sha256: "9d9db37d4f81f586fe579d0cb8edb4560f95dec8aede78a17cd68f178dbe78bb"
+    security:
+      path: "migration/reports/phase-17-security.json"
+      sha256: "bff42ea59c6fab660965638d0743fb02ae5d58be4cfcc5798f961f4316c50c7c"
+    licenses:
+      path: "migration/reports/phase-17-licenses.json"
+      sha256: "5d2e65e51d6dc63b70851f15d52811427ab536543782b640532481de2e1e2ac1"
+    python_baseline:
+      path: "migration/reports/phase-17-python-baseline.json"
+      sha256: "12b213af9859959adc27393e07a892b143df3f58b465e60b7670e5683851dd49"
+    demonstrations:
+      path: "migration/reports/phase-17-demonstrations.json"
+      sha256: "abe8402da5e9246bc058e792898f8f81eeb6842cbdc436132d67c8f44f394e38"
+    online_log:
+      path: "migration/reports/phase-17-verify-online.log"
+      sha256: "3e30b77dc20becdd3374b9d13db836495b21e264308c5131bbec297ed78a1935"
+    offline_log:
+      path: "migration/reports/phase-17-verify-offline.log"
+      sha256: "579383d131b35b1d558b35540fa5c73f103afd3003dec5cbc237399c79b99814"
+    gates:
+      path: "migration/reports/phase-17-gates.json"
+      sha256: "dfeeeac508121558770abf25c38559b029ffc436ffeaec98be76f6e6c5d37d10"
+    phase_report:
+      path: "migration/reports/phase-17.md"
+      sha256: "21e8312fd4c48a6272c1fa0301e55bb00450dc2b6d8727bfd88bc9e7f5c07843"
+    completion_report:
+      path: "MIGRATION_COMPLETION_REPORT.md"
+      sha256: "83d9697e280262342d84e2e104d9ac18ad4a02f97dd990ce857cd3e655cbacbc"
+  mappings:
+    source: "142/142 migrated"
+    tests: "167/167 terminal; 149 ported, 18 differential"
+    auxiliary: "92/92 terminal; 49 translated, 6 reimplemented, 5 verified, 32 copied"
+    union: "401 unique frozen paths; 0 pending"

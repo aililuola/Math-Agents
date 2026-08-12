@@ -1,0 +1,129 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.ControlActionRecord",
+  "schema": {
+    "$defs": {
+      "ControlActionStatus": {
+        "enum": [
+          "proposed",
+          "admitted",
+          "executing",
+          "executed",
+          "deferred",
+          "rejected",
+          "failed"
+        ],
+        "title": "ControlActionStatus",
+        "type": "string"
+      },
+      "ControlActionType": {
+        "enum": [
+          "create_sub_obligation",
+          "bind_route_target",
+          "rewrite_blueprint",
+          "weaken_target",
+          "create_minimal_bridge",
+          "create_countermodel_task",
+          "execute_countermodel_task",
+          "activate_induction_measure",
+          "create_assumption_challenger",
+          "execute_assumption_challenger",
+          "materialize_bottleneck_cluster",
+          "materialize_falsification_task",
+          "schedule_route_update",
+          "defer_inspiration_review",
+          "reassign_inspiration_review",
+          "execute_meta_pivot",
+          "close_by_direct_premise"
+        ],
+        "title": "ControlActionType",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "action_id": {
+        "title": "Action Id",
+        "type": "string"
+      },
+      "action_type": {
+        "$ref": "#/$defs/ControlActionType"
+      },
+      "admission_reason": {
+        "default": "",
+        "title": "Admission Reason",
+        "type": "string"
+      },
+      "created_round": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Created Round",
+        "type": "integer"
+      },
+      "executed_round": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Executed Round"
+      },
+      "failure_reason": {
+        "default": "",
+        "title": "Failure Reason",
+        "type": "string"
+      },
+      "idempotency_key": {
+        "title": "Idempotency Key",
+        "type": "string"
+      },
+      "payload": {
+        "additionalProperties": true,
+        "title": "Payload",
+        "type": "object"
+      },
+      "result_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Result Refs",
+        "type": "array"
+      },
+      "route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Route Ids",
+        "type": "array"
+      },
+      "source_record_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Source Record Ids",
+        "type": "array"
+      },
+      "status": {
+        "$ref": "#/$defs/ControlActionStatus",
+        "default": "proposed"
+      },
+      "target_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Obligation Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "action_type",
+      "idempotency_key"
+    ],
+    "title": "ControlActionRecord",
+    "type": "object"
+  }
+}

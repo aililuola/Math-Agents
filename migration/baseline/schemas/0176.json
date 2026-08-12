@@ -1,0 +1,1147 @@
+{
+  "qualified_name": "mathproofmesh.schemas.InspirationProposal",
+  "schema": {
+    "$defs": {
+      "AnalogyMapping": {
+        "additionalProperties": false,
+        "properties": {
+          "analogy_id": {
+            "title": "Analogy Id",
+            "type": "string"
+          },
+          "non_transferable_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Non Transferable Conditions",
+            "type": "array"
+          },
+          "novelty_signature": {
+            "$ref": "#/$defs/NoveltySignature"
+          },
+          "object_correspondence": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Object Correspondence",
+            "type": "object"
+          },
+          "operation_correspondence": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Operation Correspondence",
+            "type": "object"
+          },
+          "required_bridge_lemmas": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Bridge Lemmas",
+            "type": "array"
+          },
+          "source_problem_summary": {
+            "title": "Source Problem Summary",
+            "type": "string"
+          },
+          "source_record_id": {
+            "title": "Source Record Id",
+            "type": "string"
+          },
+          "target_problem_hash": {
+            "title": "Target Problem Hash",
+            "type": "string"
+          },
+          "transfer_risks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transfer Risks",
+            "type": "array"
+          },
+          "transferable_lemmas": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transferable Lemmas",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_record_id",
+          "source_problem_summary",
+          "target_problem_hash",
+          "object_correspondence",
+          "operation_correspondence",
+          "transferable_lemmas",
+          "non_transferable_conditions",
+          "transfer_risks",
+          "novelty_signature"
+        ],
+        "title": "AnalogyMapping",
+        "type": "object"
+      },
+      "ComposedInspiration": {
+        "additionalProperties": false,
+        "properties": {
+          "combined_mechanism": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Combined Mechanism",
+            "type": "array"
+          },
+          "compatibility_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Compatibility Conditions",
+            "type": "array"
+          },
+          "composition_id": {
+            "title": "Composition Id",
+            "type": "string"
+          },
+          "estimated_cost": {
+            "default": 1,
+            "minimum": 0,
+            "title": "Estimated Cost",
+            "type": "integer"
+          },
+          "fast_failure_tests": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fast Failure Tests",
+            "type": "array"
+          },
+          "first_executable_step": {
+            "minLength": 1,
+            "title": "First Executable Step",
+            "type": "string"
+          },
+          "new_obligations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "New Obligations",
+            "type": "array"
+          },
+          "novelty_signature": {
+            "$ref": "#/$defs/NoveltySignature"
+          },
+          "source_proposal_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Proposal Ids",
+            "type": "array"
+          },
+          "target_obligation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Obligation Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "composition_id",
+          "source_proposal_ids",
+          "target_obligation_ids",
+          "compatibility_conditions",
+          "combined_mechanism",
+          "first_executable_step",
+          "new_obligations",
+          "fast_failure_tests",
+          "novelty_signature"
+        ],
+        "title": "ComposedInspiration",
+        "type": "object"
+      },
+      "ConstructionProposal": {
+        "additionalProperties": false,
+        "properties": {
+          "constructed_objects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Constructed Objects",
+            "type": "array"
+          },
+          "construction_type": {
+            "title": "Construction Type",
+            "type": "string"
+          },
+          "definition": {
+            "minLength": 1,
+            "title": "Definition",
+            "type": "string"
+          },
+          "expected_invariant_or_relation": {
+            "title": "Expected Invariant Or Relation",
+            "type": "string"
+          },
+          "expected_proof_debt_reduction": {
+            "default": "",
+            "title": "Expected Proof Debt Reduction",
+            "type": "string"
+          },
+          "failure_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Failure Conditions",
+            "type": "array"
+          },
+          "falsification_tests": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Falsification Tests",
+            "type": "array"
+          },
+          "generated_obligations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Generated Obligations",
+            "type": "array"
+          },
+          "intended_obligations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Intended Obligations",
+            "type": "array"
+          },
+          "novelty_signature": {
+            "$ref": "#/$defs/NoveltySignature"
+          },
+          "operator_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operator Id"
+          },
+          "operator_preconditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Operator Preconditions",
+            "type": "array"
+          },
+          "proposal_id": {
+            "title": "Proposal Id",
+            "type": "string"
+          },
+          "reversibility_requirements": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reversibility Requirements",
+            "type": "array"
+          },
+          "suggested_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggested Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "construction_type",
+          "constructed_objects",
+          "definition",
+          "intended_obligations",
+          "expected_invariant_or_relation",
+          "falsification_tests",
+          "novelty_signature"
+        ],
+        "title": "ConstructionProposal",
+        "type": "object"
+      },
+      "EvidenceType": {
+        "enum": [
+          "unverified_idea",
+          "numerical_heuristic",
+          "bounded_experiment",
+          "exact_symbolic_identity",
+          "complete_finite_enumeration",
+          "sat_smt_certificate",
+          "counterexample",
+          "natural_proof_audited",
+          "formal_kernel_certificate"
+        ],
+        "title": "EvidenceType",
+        "type": "string"
+      },
+      "FrontierBridge": {
+        "additionalProperties": false,
+        "properties": {
+          "backward_frontier_id": {
+            "title": "Backward Frontier Id",
+            "type": "string"
+          },
+          "bridge_id": {
+            "title": "Bridge Id",
+            "type": "string"
+          },
+          "compatibility_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Compatibility Conditions",
+            "type": "array"
+          },
+          "forward_frontier_id": {
+            "title": "Forward Frontier Id",
+            "type": "string"
+          },
+          "lexical_overlap": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Lexical Overlap",
+            "type": "number"
+          },
+          "missing_implication": {
+            "minLength": 1,
+            "title": "Missing Implication",
+            "type": "string"
+          },
+          "required_supporting_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Supporting Conditions",
+            "type": "array"
+          },
+          "semantic_relationship": {
+            "default": "scope_only",
+            "enum": [
+              "scope_only",
+              "candidate_ingredient"
+            ],
+            "title": "Semantic Relationship",
+            "type": "string"
+          },
+          "source_sufficiency_assumed": {
+            "const": false,
+            "default": false,
+            "title": "Source Sufficiency Assumed",
+            "type": "boolean"
+          },
+          "status": {
+            "default": "open",
+            "enum": [
+              "open",
+              "refuted",
+              "closed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bridge_id",
+          "forward_frontier_id",
+          "backward_frontier_id",
+          "missing_implication",
+          "compatibility_conditions"
+        ],
+        "title": "FrontierBridge",
+        "type": "object"
+      },
+      "FrontierClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "direction": {
+            "enum": [
+              "forward",
+              "backward"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "frontier_id": {
+            "title": "Frontier Id",
+            "type": "string"
+          },
+          "quantifiers": {
+            "items": {
+              "$ref": "#/$defs/QuantifierSpec"
+            },
+            "title": "Quantifiers",
+            "type": "array"
+          },
+          "scope_limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scope Limitations",
+            "type": "array"
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Ref"
+          },
+          "statement": {
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          },
+          "supported": {
+            "default": false,
+            "title": "Supported",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "frontier_id",
+          "direction",
+          "statement"
+        ],
+        "title": "FrontierClaim",
+        "type": "object"
+      },
+      "InspirationContextMode": {
+        "enum": [
+          "local",
+          "warm",
+          "cold"
+        ],
+        "title": "InspirationContextMode",
+        "type": "string"
+      },
+      "InspirationMechanism": {
+        "enum": [
+          "representation_switch",
+          "structural_analogy",
+          "auxiliary_construction",
+          "invariant_hypothesis",
+          "reverse_goal_analysis",
+          "bridge_lemma",
+          "surprise_exploration",
+          "meta_replan",
+          "inspiration_composition"
+        ],
+        "title": "InspirationMechanism",
+        "type": "string"
+      },
+      "InvariantHypothesis": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_operations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Operations",
+            "type": "array"
+          },
+          "behavior": {
+            "enum": [
+              "invariant",
+              "nondecreasing",
+              "nonincreasing"
+            ],
+            "title": "Behavior",
+            "type": "string"
+          },
+          "boundary_case": {
+            "minLength": 1,
+            "title": "Boundary Case",
+            "type": "string"
+          },
+          "boundary_result": {
+            "minLength": 1,
+            "title": "Boundary Result",
+            "type": "string"
+          },
+          "candidate_expression": {
+            "minLength": 1,
+            "title": "Candidate Expression",
+            "type": "string"
+          },
+          "falsification_request": {
+            "minLength": 1,
+            "title": "Falsification Request",
+            "type": "string"
+          },
+          "hypothesis_id": {
+            "title": "Hypothesis Id",
+            "type": "string"
+          },
+          "novelty_signature": {
+            "$ref": "#/$defs/NoveltySignature"
+          },
+          "state_definition": {
+            "minLength": 1,
+            "title": "State Definition",
+            "type": "string"
+          },
+          "target_obligation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Obligation Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "target_obligation_ids",
+          "state_definition",
+          "allowed_operations",
+          "candidate_expression",
+          "behavior",
+          "boundary_case",
+          "boundary_result",
+          "falsification_request",
+          "novelty_signature"
+        ],
+        "title": "InvariantHypothesis",
+        "type": "object"
+      },
+      "NoveltySignature": {
+        "additionalProperties": false,
+        "properties": {
+          "core_objects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Core Objects",
+            "type": "array"
+          },
+          "extension_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Extension Tags",
+            "type": "array"
+          },
+          "key_transformations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Key Transformations",
+            "type": "array"
+          },
+          "mechanism_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Mechanism Tags",
+            "type": "array"
+          },
+          "normalization_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Normalization Confidence"
+          },
+          "normalized_hash": {
+            "default": "",
+            "title": "Normalized Hash",
+            "type": "string"
+          },
+          "normalizer_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Normalizer Version"
+          },
+          "proof_principles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Proof Principles",
+            "type": "array"
+          },
+          "raw_tags": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Raw Tags",
+            "type": "object"
+          },
+          "representation_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Representation Tags",
+            "type": "array"
+          },
+          "targeted_obligation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Targeted Obligation Ids",
+            "type": "array"
+          }
+        },
+        "title": "NoveltySignature",
+        "type": "object"
+      },
+      "QuantifierSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "forall",
+              "exists",
+              "exists_unique"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "order": {
+            "minimum": 0,
+            "title": "Order",
+            "type": "integer"
+          },
+          "restrictions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restrictions",
+            "type": "array"
+          },
+          "variable_id": {
+            "minLength": 1,
+            "title": "Variable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order",
+          "kind",
+          "variable_id",
+          "display_name",
+          "domain"
+        ],
+        "title": "QuantifierSpec",
+        "type": "object"
+      },
+      "RepresentationCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "expected_advantage": {
+            "title": "Expected Advantage",
+            "type": "string"
+          },
+          "failure_risks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Failure Risks",
+            "type": "array"
+          },
+          "fast_failure_tests": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fast Failure Tests",
+            "type": "array"
+          },
+          "generated_obligations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Generated Obligations",
+            "type": "array"
+          },
+          "known_failure_modes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Known Failure Modes",
+            "type": "array"
+          },
+          "lost_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lost Conditions",
+            "type": "array"
+          },
+          "new_candidate_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "New Candidate Tools",
+            "type": "array"
+          },
+          "novelty_signature": {
+            "$ref": "#/$defs/NoveltySignature"
+          },
+          "object_mapping": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Object Mapping",
+            "type": "object"
+          },
+          "operator_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operator Id"
+          },
+          "operator_preconditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Operator Preconditions",
+            "type": "array"
+          },
+          "preserved_invariants": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Preserved Invariants",
+            "type": "array"
+          },
+          "representation_name": {
+            "title": "Representation Name",
+            "type": "string"
+          },
+          "reversibility_requirements": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reversibility Requirements",
+            "type": "array"
+          },
+          "rewritten_problem_view": {
+            "title": "Rewritten Problem View",
+            "type": "string"
+          },
+          "source_problem_hash": {
+            "title": "Source Problem Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_problem_hash",
+          "representation_name",
+          "rewritten_problem_view",
+          "object_mapping",
+          "preserved_invariants",
+          "expected_advantage",
+          "failure_risks",
+          "novelty_signature"
+        ],
+        "title": "RepresentationCandidate",
+        "type": "object"
+      },
+      "ReverseGoalPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "backward_frontier": {
+            "items": {
+              "$ref": "#/$defs/FrontierClaim"
+            },
+            "title": "Backward Frontier",
+            "type": "array"
+          },
+          "bridge_requests": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Bridge Requests",
+            "type": "array"
+          },
+          "fact_supported_claims": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fact Supported Claims",
+            "type": "array"
+          },
+          "forward_frontier": {
+            "items": {
+              "$ref": "#/$defs/FrontierClaim"
+            },
+            "title": "Forward Frontier",
+            "type": "array"
+          },
+          "frontier_bridges": {
+            "items": {
+              "$ref": "#/$defs/FrontierBridge"
+            },
+            "title": "Frontier Bridges",
+            "type": "array"
+          },
+          "goal": {
+            "title": "Goal",
+            "type": "string"
+          },
+          "minimal_gaps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Minimal Gaps",
+            "type": "array"
+          },
+          "novelty_signature": {
+            "$ref": "#/$defs/NoveltySignature"
+          },
+          "plan_id": {
+            "title": "Plan Id",
+            "type": "string"
+          },
+          "sufficient_intermediate_claims": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sufficient Intermediate Claims",
+            "type": "array"
+          },
+          "target_obligation_id": {
+            "title": "Target Obligation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_obligation_id",
+          "goal",
+          "sufficient_intermediate_claims",
+          "minimal_gaps",
+          "bridge_requests",
+          "novelty_signature"
+        ],
+        "title": "ReverseGoalPlan",
+        "type": "object"
+      },
+      "SurpriseMutationDirective": {
+        "additionalProperties": false,
+        "description": "A deterministic, replayable creative mutation contract.",
+        "properties": {
+          "deterministic": {
+            "const": true,
+            "default": true,
+            "title": "Deterministic",
+            "type": "boolean"
+          },
+          "directive_id": {
+            "title": "Directive Id",
+            "type": "string"
+          },
+          "fast_failure_tests": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fast Failure Tests",
+            "type": "array"
+          },
+          "generated_obligations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Generated Obligations",
+            "type": "array"
+          },
+          "known_failure_modes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Known Failure Modes",
+            "type": "array"
+          },
+          "operator_id": {
+            "title": "Operator Id",
+            "type": "string"
+          },
+          "preconditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Preconditions",
+            "type": "array"
+          },
+          "reversibility_requirements": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reversibility Requirements",
+            "type": "array"
+          },
+          "seed": {
+            "minimum": 0,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "suggested_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggested Tools",
+            "type": "array"
+          },
+          "target_obligation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Obligation Ids",
+            "type": "array"
+          },
+          "transformation": {
+            "title": "Transformation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "directive_id",
+          "operator_id",
+          "seed",
+          "target_obligation_ids",
+          "transformation",
+          "preconditions",
+          "generated_obligations",
+          "reversibility_requirements",
+          "fast_failure_tests",
+          "known_failure_modes"
+        ],
+        "title": "SurpriseMutationDirective",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "analogy": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AnalogyMapping"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "composition": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ComposedInspiration"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "construction": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ConstructionProposal"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "context_mode": {
+        "$ref": "#/$defs/InspirationContextMode",
+        "default": "local"
+      },
+      "estimated_cost": {
+        "minimum": 0,
+        "title": "Estimated Cost",
+        "type": "integer"
+      },
+      "evidence_type": {
+        "$ref": "#/$defs/EvidenceType",
+        "default": "unverified_idea"
+      },
+      "expected_information_gain": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Expected Information Gain",
+        "type": "number"
+      },
+      "generated_obligations": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Generated Obligations",
+        "type": "array"
+      },
+      "invariant": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/InvariantHypothesis"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "mechanism": {
+        "$ref": "#/$defs/InspirationMechanism"
+      },
+      "mutation": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SurpriseMutationDirective"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "novelty_score": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Novelty Score",
+        "type": "number"
+      },
+      "novelty_signature": {
+        "$ref": "#/$defs/NoveltySignature"
+      },
+      "proposal_id": {
+        "title": "Proposal Id",
+        "type": "string"
+      },
+      "proposal_slot": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Proposal Slot",
+        "type": "integer"
+      },
+      "rationale_summary": {
+        "title": "Rationale Summary",
+        "type": "string"
+      },
+      "representation": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RepresentationCandidate"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "reverse_goal": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ReverseGoalPlan"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "source_agent_id": {
+        "title": "Source Agent Id",
+        "type": "string"
+      },
+      "statement": {
+        "title": "Statement",
+        "type": "string"
+      },
+      "target_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Route Ids",
+        "type": "array"
+      },
+      "task_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Task Id"
+      },
+      "trigger_id": {
+        "title": "Trigger Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "trigger_id",
+      "mechanism",
+      "source_agent_id",
+      "target_route_ids",
+      "statement",
+      "rationale_summary",
+      "generated_obligations",
+      "novelty_signature",
+      "novelty_score",
+      "expected_information_gain",
+      "estimated_cost"
+    ],
+    "title": "InspirationProposal",
+    "type": "object"
+  }
+}

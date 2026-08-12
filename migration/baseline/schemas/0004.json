@@ -1,0 +1,39 @@
+{
+  "qualified_name": "mathproofmesh.config.BlueprintReviewControlConfig",
+  "schema": {
+    "additionalProperties": false,
+    "description": "Hard bounds for route-admission review and repair work.",
+    "properties": {
+      "max_batch_repair_items": {
+        "default": 12,
+        "maximum": 128,
+        "minimum": 1,
+        "title": "Max Batch Repair Items",
+        "type": "integer"
+      },
+      "max_nodes_per_batch": {
+        "default": 12,
+        "maximum": 128,
+        "minimum": 1,
+        "title": "Max Nodes Per Batch",
+        "type": "integer"
+      },
+      "max_repair_rounds": {
+        "default": 2,
+        "maximum": 8,
+        "minimum": 0,
+        "title": "Max Repair Rounds",
+        "type": "integer"
+      },
+      "max_review_calls_per_round": {
+        "default": 2,
+        "maximum": 16,
+        "minimum": 0,
+        "title": "Max Review Calls Per Round",
+        "type": "integer"
+      }
+    },
+    "title": "BlueprintReviewControlConfig",
+    "type": "object"
+  }
+}

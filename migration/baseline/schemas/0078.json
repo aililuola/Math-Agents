@@ -1,0 +1,123 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.CountermodelTaskRecord",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "assigned_agent_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Assigned Agent Id"
+      },
+      "executable_task_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Executable Task Id"
+      },
+      "execution_action_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Execution Action Id"
+      },
+      "reason": {
+        "default": "",
+        "title": "Reason",
+        "type": "string"
+      },
+      "result_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Result Id"
+      },
+      "result_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Result Refs",
+        "type": "array"
+      },
+      "route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Route Ids",
+        "type": "array"
+      },
+      "source_goal_link_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Goal Link Id"
+      },
+      "source_record_id": {
+        "title": "Source Record Id",
+        "type": "string"
+      },
+      "status": {
+        "default": "pending",
+        "enum": [
+          "pending",
+          "assigned",
+          "ready",
+          "running",
+          "deferred",
+          "inapplicable",
+          "completed",
+          "inconclusive",
+          "blocked",
+          "failed",
+          "expired"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "target_obligation_id": {
+        "title": "Target Obligation Id",
+        "type": "string"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "source_record_id",
+      "target_obligation_id"
+    ],
+    "title": "CountermodelTaskRecord",
+    "type": "object"
+  }
+}

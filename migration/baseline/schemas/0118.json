@@ -1,0 +1,362 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.StrategyBlueprintCompilation",
+  "schema": {
+    "$defs": {
+      "BlueprintEdge": {
+        "additionalProperties": false,
+        "properties": {
+          "edge_id": {
+            "title": "Edge Id",
+            "type": "string"
+          },
+          "implication_outline": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Implication Outline",
+            "type": "array"
+          },
+          "origin": {
+            "default": "list_order_guess",
+            "enum": [
+              "planner_structured",
+              "definition_dependency",
+              "explicit_strategy_outline",
+              "list_order_guess",
+              "review_generated"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "relation": {
+            "enum": [
+              "implies",
+              "depends_on",
+              "equivalent_to",
+              "closes",
+              "requires_construction"
+            ],
+            "title": "Relation",
+            "type": "string"
+          },
+          "source_node_id": {
+            "title": "Source Node Id",
+            "type": "string"
+          },
+          "target_node_id": {
+            "title": "Target Node Id",
+            "type": "string"
+          },
+          "verified": {
+            "default": false,
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "edge_id",
+          "source_node_id",
+          "target_node_id",
+          "relation"
+        ],
+        "title": "BlueprintEdge",
+        "type": "object"
+      },
+      "BlueprintNode": {
+        "additionalProperties": false,
+        "properties": {
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "executable_first_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Executable First Step"
+          },
+          "kind": {
+            "$ref": "#/$defs/BlueprintNodeKind"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "normalized_statement": {
+            "title": "Normalized Statement",
+            "type": "string"
+          },
+          "quantifiers": {
+            "items": {
+              "$ref": "#/$defs/QuantifierSpec"
+            },
+            "title": "Quantifiers",
+            "type": "array"
+          },
+          "scope_signature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scope Signature Id"
+          },
+          "semantic_quality_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Semantic Quality Score",
+            "type": "number"
+          },
+          "source_field": {
+            "enum": [
+              "critical_claim",
+              "expected_lemma",
+              "bottleneck",
+              "key_original_step",
+              "generated_bridge",
+              "main_goal",
+              "given"
+            ],
+            "title": "Source Field",
+            "type": "string"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "strategy_id",
+          "kind",
+          "statement",
+          "normalized_statement",
+          "source_field",
+          "semantic_quality_score"
+        ],
+        "title": "BlueprintNode",
+        "type": "object"
+      },
+      "BlueprintNodeKind": {
+        "enum": [
+          "given",
+          "claim",
+          "lemma",
+          "construction",
+          "case_split",
+          "countermodel_task",
+          "computation_task",
+          "target"
+        ],
+        "title": "BlueprintNodeKind",
+        "type": "string"
+      },
+      "QuantifierSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "forall",
+              "exists",
+              "exists_unique"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "order": {
+            "minimum": 0,
+            "title": "Order",
+            "type": "integer"
+          },
+          "restrictions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restrictions",
+            "type": "array"
+          },
+          "variable_id": {
+            "minLength": 1,
+            "title": "Variable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order",
+          "kind",
+          "variable_id",
+          "display_name",
+          "domain"
+        ],
+        "title": "QuantifierSpec",
+        "type": "object"
+      },
+      "StrategyBlueprint": {
+        "additionalProperties": false,
+        "properties": {
+          "blueprint_id": {
+            "title": "Blueprint Id",
+            "type": "string"
+          },
+          "compilation_confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Compilation Confidence",
+            "type": "number"
+          },
+          "complete_path_to_main_goal": {
+            "title": "Complete Path To Main Goal",
+            "type": "boolean"
+          },
+          "direct_target_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Direct Target Node Ids",
+            "type": "array"
+          },
+          "edge_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Edge Ids",
+            "type": "array"
+          },
+          "main_goal_node_id": {
+            "title": "Main Goal Node Id",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "open_gap_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Open Gap Node Ids",
+            "type": "array"
+          },
+          "preserves_mechanism_signature": {
+            "title": "Preserves Mechanism Signature",
+            "type": "boolean"
+          },
+          "problem_hash": {
+            "title": "Problem Hash",
+            "type": "string"
+          },
+          "root_entry_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Root Entry Node Ids",
+            "type": "array"
+          },
+          "status": {
+            "default": "draft",
+            "enum": [
+              "draft",
+              "compiled",
+              "needs_review",
+              "accepted",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blueprint_id",
+          "strategy_id",
+          "problem_hash",
+          "node_ids",
+          "edge_ids",
+          "main_goal_node_id",
+          "direct_target_node_ids",
+          "root_entry_node_ids",
+          "open_gap_node_ids",
+          "preserves_mechanism_signature",
+          "complete_path_to_main_goal",
+          "compilation_confidence"
+        ],
+        "title": "StrategyBlueprint",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "blueprint": {
+        "$ref": "#/$defs/StrategyBlueprint"
+      },
+      "edges": {
+        "items": {
+          "$ref": "#/$defs/BlueprintEdge"
+        },
+        "title": "Edges",
+        "type": "array"
+      },
+      "materialized_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Materialized Obligation Ids",
+        "type": "array"
+      },
+      "nodes": {
+        "items": {
+          "$ref": "#/$defs/BlueprintNode"
+        },
+        "title": "Nodes",
+        "type": "array"
+      },
+      "review_reasons": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Review Reasons",
+        "type": "array"
+      }
+    },
+    "required": [
+      "blueprint",
+      "nodes",
+      "edges"
+    ],
+    "title": "StrategyBlueprintCompilation",
+    "type": "object"
+  }
+}

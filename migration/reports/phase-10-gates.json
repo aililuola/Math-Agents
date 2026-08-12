@@ -1,0 +1,133 @@
+{
+  "schema_version": "1.0",
+  "phase": "10",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-31T02:12:02.352Z",
+  "scope": "Goal-Plan-Failure-Utility proof control",
+  "source": {
+    "authoritative_zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+    "source_files": 401,
+    "source_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "immutability": "PASS"
+  },
+  "authority_boundary": {
+    "proof_control_may_write_fact": false,
+    "proof_control_may_close_obligation": false,
+    "proof_control_may_change_problem_hash": false,
+    "proof_control_outputs_advisory_actions_only": "PASS",
+    "fact_promotion_requires_existing_authority_gate": "PASS",
+    "checkpoint_commit_requires_existing_authority_gate": "PASS"
+  },
+  "mode_and_action_semantics": {
+    "off_has_business_effects": false,
+    "shadow_has_business_mutations": false,
+    "active_requires_hierarchical_dependencies": "PASS",
+    "action_keys_are_exact_and_stable": "PASS",
+    "action_application_is_idempotent": "PASS",
+    "terminal_resume_work_items": 0,
+    "terminal_resume_provider_calls": 0,
+    "meta_pivot_is_exactly_once": "PASS"
+  },
+  "proof_control": {
+    "subphases": [
+      "10A goal and semantic alignment",
+      "10B plan and strategy blueprint",
+      "10C failure and bottleneck control",
+      "10D utility and route admission",
+      "10E scope, dependency, and inference risk",
+      "10F falsification and common-mode challenge",
+      "10G resume, near-miss, and realizer repair"
+    ],
+    "typed_dependencies": "PASS",
+    "scope_and_inference_risk": "PASS",
+    "common_mode_transitive_closure": "PASS",
+    "independent_challenger_review": "PASS",
+    "falsification_executable_or_deferred": "PASS",
+    "bounded_non_refutation_proves_claim": false,
+    "zero_utility_normal_message_is_local": "PASS",
+    "near_miss_is_authoritative_fact": false,
+    "abstract_realizer_structure_is_preserved": "PASS",
+    "induction_measure_requires_review": "PASS",
+    "facade_is_small_and_delegating": "PASS"
+  },
+  "benchmarks": {
+    "fixtures": 10,
+    "fixtures_sha256_verified": "PASS",
+    "provider_calls": 0,
+    "runner_reimplemented": "PASS",
+    "documentation_retained_and_consolidated": "PASS"
+  },
+  "tests": {
+    "mapped_python_test_files": 46,
+    "mapped_python_functions": 203,
+    "authority_named_junit_cases": 203,
+    "benchmark_cases": 10,
+    "auxiliary_hash_cases_added": 6,
+    "phase_specific_total": 219,
+    "reactor_total": 1174,
+    "report_files": 120,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "online_clean_verify": "PASS",
+    "offline_clean_verify": "PASS",
+    "online_log": "migration/logs/phase-10-verify.log",
+    "online_log_sha256": "8cb378c168265eaab13cc8f829e29c41d116e8e32658011785a9fb68b8945b78",
+    "offline_log": "migration/logs/phase-10-verify-offline.log",
+    "offline_log_sha256": "a9d5eb31ce14aa276638128ce5859b6756cb7d19f539509673760f884bdc8f99",
+    "failed_offline_attempt": {
+      "path": "migration/logs/phase-10-verify-offline-attempt-1.log",
+      "sha256": "56e0e1033514bab5f83674fbdf0137e43a9da5bc73d3b59089cca83c7dbb19fc",
+      "classification": "transient Testcontainers PostgreSQL connection timeout",
+      "semantic_or_assertion_failure": false
+    }
+  },
+  "quality_and_dependency_security": {
+    "java": "Eclipse Temurin 25.0.4+7",
+    "maven": "3.9.16",
+    "maven_wrapper": "3.3.4 only-script",
+    "dependencies_added": [],
+    "dependency_version_changes": [],
+    "dependency_convergence": "PASS",
+    "external_snapshots": 0,
+    "duplicate_classes": 0,
+    "spotbugs_findsecbugs_findings": 0,
+    "modulith_structure": "PASS",
+    "dependency_tree": "migration/reports/phase-10-dependency-tree.txt",
+    "dependency_tree_sha256": "2f400fa74b152f115b80862818716de7c4ac46e4f07092e872162e3c158ff482",
+    "sbom": {
+      "format": "CycloneDX",
+      "spec_version": "1.6",
+      "components": 88,
+      "dependency_entries": 89,
+      "path": "migration/reports/phase-01-sbom.json",
+      "sha256": "2e547c2b8e6fd95d0b5283f742d99f1be62fd0b58472ae619f17cfd3382d398a"
+    },
+    "owasp": {
+      "engine": "12.2.2",
+      "dependencies": 112,
+      "fail_build_on_cvss": 7.0,
+      "findings_at_or_above_gate": 0,
+      "below_gate_findings": [
+        {
+          "cve": "CVE-2021-4277",
+          "artifact": "com.cronutils:cron-utils:9.2.1",
+          "severity": "MEDIUM",
+          "cvss": 5.3
+        }
+      ],
+      "report_json_sha256": "024e6f5051d1672379d1475e8b0c232eb257d0653e57c66a325214b8c27875db",
+      "report_html_sha256": "f190fb8ef2308822826f46b0a11934052e2b8ca445a7eb2dbe32f28d81071e16"
+    }
+  },
+  "mappings": {
+    "source_rows": "29/29 migrated",
+    "test_rows": "46/46 ported; 203 Python test functions",
+    "auxiliary_rows": "16/16 closed; 5 translated_verified, 10 copied_verified, 1 reimplemented_verified",
+    "state_rows": "142 + 167 + 92 = 401 unique paths"
+  },
+  "stop_condition": {
+    "phase_11_started_before_phase_10_pass": false
+  }
+}

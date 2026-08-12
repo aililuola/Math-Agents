@@ -1,0 +1,39 @@
+{
+  "qualified_name": "mathproofmesh.desktop.app.ClarificationDecisionRequest",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "canonical_statement": {
+        "maxLength": 2000000,
+        "minLength": 1,
+        "title": "Canonical Statement",
+        "type": "string"
+      },
+      "request_id": {
+        "maxLength": 160,
+        "minLength": 1,
+        "title": "Request Id",
+        "type": "string"
+      },
+      "selected_candidate_index": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Selected Candidate Index"
+      }
+    },
+    "required": [
+      "request_id",
+      "canonical_statement"
+    ],
+    "title": "ClarificationDecisionRequest",
+    "type": "object"
+  }
+}

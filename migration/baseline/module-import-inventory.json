@@ -1,0 +1,550 @@
+[
+  {
+    "module": "mathproofmesh",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.activity",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.agents",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.broker_phase",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.budget",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.cli",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.communication",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.communication.broker",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.communication.messages",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.communication.policies",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.communication.receipts",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.communication.route_registry",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.broker",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.cache",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.contracts",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.handlers",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.handlers.base",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.handlers.geometry",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.handlers.graph",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.handlers.integer_search",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.handlers.modular",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.handlers.number_theory",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.handlers.real_inequality",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.handlers.recurrence",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.handlers.sequence",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.handlers.symbolic",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.policy",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.computation.sandbox",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.config",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.context_policy",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.continuation",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.critical_calculations",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.cross_route_phase",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.deep_exploration",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.desktop",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.desktop.app",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.desktop.configuration",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.desktop.main",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.desktop.manager",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.desktop.paths",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.desktop.repository",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.desktop.runtime",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.desktop.security",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.desktop.settings",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.goal_preflight",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.analogy_agent",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.assignment",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.composer",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.construction_inventor",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.context",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.cross_run_learning",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.domain_operators",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.engine",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.experience",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.invariant_hypothesis",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.local_library",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.meta_control",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.meta_strategist",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.models",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.novelty",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.ontology",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.outcomes",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.representation_switchboard",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.reverse_goal",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.surprise_budget",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.surprise_mutation",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration.trigger_policy",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.inspiration_phase",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.llm",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.llm.anthropic",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.llm.base",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.llm.deepseek",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.llm.gemini",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.llm.mock",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.llm.openai_compatible",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.llm.pool",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.memory",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.mock_demo",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.orchestrator",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.prompts",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.action_dispatcher",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.bottleneck",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.claim_lifecycle",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.common_mode",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.controller",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.dependencies",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.domains",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.failure_control",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.falsification",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.gates",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.goal_alignment",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.induction",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.inference_risk",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.message_utility",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.models",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.near_miss",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.proof_roles",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.realizer",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.resume_policy",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.route_target",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.scope_guard",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.semantic_profile",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.semantic_quality",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.semantic_view",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.state",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.strategy_blueprint",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_control.tasks",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_graph",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_graph.bridges",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_graph.contradictions",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_graph.matching",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_graph.models",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_graph.store",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.proof_identity",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.reasoning_trace",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.report",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.resume_phase",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.route_pipeline",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.schemas",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.server",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.stall_recovery",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.store",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.synthesis_phase",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.task_contracts",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.teams",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.teams.role_runner",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.teams.route_team",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.tools",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.topology",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.verification",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.verification.capability_profile",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.verification.escalation",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.verification.formal_microcert",
+    "status": "imported"
+  },
+  {
+    "module": "mathproofmesh.verification.mutation",
+    "status": "imported"
+  }
+]

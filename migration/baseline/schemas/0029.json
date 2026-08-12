@@ -1,0 +1,124 @@
+{
+  "qualified_name": "mathproofmesh.config.RouteAdmissionControlConfig",
+  "schema": {
+    "$defs": {
+      "BlueprintReviewControlConfig": {
+        "additionalProperties": false,
+        "description": "Hard bounds for route-admission review and repair work.",
+        "properties": {
+          "max_batch_repair_items": {
+            "default": 12,
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Max Batch Repair Items",
+            "type": "integer"
+          },
+          "max_nodes_per_batch": {
+            "default": 12,
+            "maximum": 128,
+            "minimum": 1,
+            "title": "Max Nodes Per Batch",
+            "type": "integer"
+          },
+          "max_repair_rounds": {
+            "default": 2,
+            "maximum": 8,
+            "minimum": 0,
+            "title": "Max Repair Rounds",
+            "type": "integer"
+          },
+          "max_review_calls_per_round": {
+            "default": 2,
+            "maximum": 16,
+            "minimum": 0,
+            "title": "Max Review Calls Per Round",
+            "type": "integer"
+          }
+        },
+        "title": "BlueprintReviewControlConfig",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "blueprint_review": {
+        "$ref": "#/$defs/BlueprintReviewControlConfig"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "fail_closed_if_all_rejected": {
+        "default": true,
+        "title": "Fail Closed If All Rejected",
+        "type": "boolean"
+      },
+      "max_regeneration_attempts": {
+        "default": 1,
+        "maximum": 4,
+        "minimum": 0,
+        "title": "Max Regeneration Attempts",
+        "type": "integer"
+      },
+      "max_semantic_repair_calls": {
+        "default": 2,
+        "maximum": 8,
+        "minimum": 0,
+        "title": "Max Semantic Repair Calls",
+        "type": "integer"
+      },
+      "min_goal_alignment": {
+        "default": 0.65,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Min Goal Alignment",
+        "type": "number"
+      },
+      "mode": {
+        "default": "shadow",
+        "enum": [
+          "off",
+          "shadow",
+          "active"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "reject_heuristic_only_as_main_route": {
+        "default": true,
+        "title": "Reject Heuristic Only As Main Route",
+        "type": "boolean"
+      },
+      "reject_necessary_only_as_main_route": {
+        "default": true,
+        "title": "Reject Necessary Only As Main Route",
+        "type": "boolean"
+      },
+      "require_falsification_test": {
+        "default": true,
+        "title": "Require Falsification Test",
+        "type": "boolean"
+      },
+      "require_mechanism_novelty": {
+        "default": true,
+        "title": "Require Mechanism Novelty",
+        "type": "boolean"
+      },
+      "semantic_repair_budget_fraction": {
+        "default": 0.1,
+        "maximum": 0.5,
+        "minimum": 0.0,
+        "title": "Semantic Repair Budget Fraction",
+        "type": "number"
+      },
+      "semantic_repair_enabled": {
+        "default": true,
+        "title": "Semantic Repair Enabled",
+        "type": "boolean"
+      }
+    },
+    "title": "RouteAdmissionControlConfig",
+    "type": "object"
+  }
+}

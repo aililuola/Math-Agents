@@ -1,0 +1,9 @@
+{
+  "qualified_name": "mathproofmesh.deep_exploration.ExplorationModel",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "ExplorationModel",
+    "type": "object"
+  }
+}

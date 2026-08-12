@@ -1,0 +1,89 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.InspirationReviewDeferral",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "assigned_reviewer_agent_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Assigned Reviewer Agent Id"
+      },
+      "defer_action_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Defer Action Id"
+      },
+      "deferral_id": {
+        "title": "Deferral Id",
+        "type": "string"
+      },
+      "proposal_id": {
+        "title": "Proposal Id",
+        "type": "string"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "reassign_action_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Reassign Action Id"
+      },
+      "review_status": {
+        "default": "deferred",
+        "enum": [
+          "deferred",
+          "reassigned",
+          "completed"
+        ],
+        "title": "Review Status",
+        "type": "string"
+      },
+      "reviewed": {
+        "default": false,
+        "title": "Reviewed",
+        "type": "boolean"
+      },
+      "task_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Task Id"
+      }
+    },
+    "required": [
+      "proposal_id",
+      "reason"
+    ],
+    "title": "InspirationReviewDeferral",
+    "type": "object"
+  }
+}

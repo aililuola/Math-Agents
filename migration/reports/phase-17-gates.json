@@ -1,0 +1,241 @@
+{
+  "schema_version": "1.0",
+  "phase": "17",
+  "generated_at_utc": "2026-07-31T13:53:09.836028+00:00",
+  "result": "PASS",
+  "gates": {
+    "authority": {
+      "result": "PASS",
+      "zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+      "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+      "expected_zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+      "frozen_manifest": "SOURCE_SNAPSHOT_SHA256SUMS.txt",
+      "frozen_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+      "expected_frozen_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770"
+    },
+    "source_mapping": {
+      "result": "PASS",
+      "path": "migration/source-state.csv",
+      "rows": 142,
+      "expected_rows": 142,
+      "accepted_statuses": [
+        "migrated"
+      ],
+      "observed_statuses": [
+        "migrated"
+      ],
+      "duplicate_paths": [],
+      "invalid_statuses": []
+    },
+    "test_mapping": {
+      "result": "PASS",
+      "path": "migration/test-state.csv",
+      "rows": 167,
+      "expected_rows": 167,
+      "accepted_statuses": [
+        "differential",
+        "ported"
+      ],
+      "observed_statuses": [
+        "differential",
+        "ported"
+      ],
+      "duplicate_paths": [],
+      "invalid_statuses": []
+    },
+    "auxiliary_mapping": {
+      "result": "PASS",
+      "path": "migration/auxiliary-state.csv",
+      "rows": 92,
+      "expected_rows": 92,
+      "accepted_statuses": [
+        "copied_verified",
+        "reimplemented_verified",
+        "translated_verified",
+        "verified"
+      ],
+      "observed_statuses": [
+        "copied_verified",
+        "reimplemented_verified",
+        "translated_verified",
+        "verified"
+      ],
+      "duplicate_paths": [],
+      "invalid_statuses": []
+    },
+    "frozen_401_path_closure": {
+      "result": "PASS",
+      "frozen_paths": 401,
+      "mapped_unique_paths": 401,
+      "cross_map_overlap_count": 0,
+      "missing_from_mappings": [],
+      "extra_in_mappings": []
+    },
+    "reports": {
+      "coverage": {
+        "result": "PASS",
+        "path": "migration/reports/phase-17-coverage.json",
+        "recorded_result": "PASS",
+        "sha256": "9d9db37d4f81f586fe579d0cb8edb4560f95dec8aede78a17cd68f178dbe78bb"
+      },
+      "security": {
+        "result": "PASS",
+        "path": "migration/reports/phase-17-security.json",
+        "recorded_result": "PASS",
+        "sha256": "5d99d27f19d74f176d42ab085857d9f4fa9ff26a4462c869bfa3ffda6d334e34"
+      },
+      "licenses": {
+        "result": "PASS",
+        "path": "migration/reports/phase-17-licenses.json",
+        "recorded_result": "PASS",
+        "sha256": "6383bd8786c79b5e3db36f8888e7f2ca74c0fa178876a69003e72ddce70f842e"
+      },
+      "performance": {
+        "result": "PASS",
+        "path": "migration/reports/phase-17-performance.json",
+        "recorded_result": "PASS",
+        "sha256": "e21b1a521933dc9ba7b0f738af5e9fa98e086e87a1970bde11f33694d23beb3c"
+      },
+      "python_baseline": {
+        "result": "PASS",
+        "path": "migration/reports/phase-17-python-baseline.json",
+        "recorded_result": "PASS",
+        "sha256": "12b213af9859959adc27393e07a892b143df3f58b465e60b7670e5683851dd49"
+      },
+      "demonstrations": {
+        "result": "PASS",
+        "path": "migration/reports/phase-17-demonstrations.json",
+        "recorded_result": "PASS",
+        "sha256": "abe8402da5e9246bc058e792898f8f81eeb6842cbdc436132d67c8f44f394e38"
+      },
+      "result": "PASS"
+    },
+    "dependency_tree": {
+      "result": "PASS",
+      "path": "migration/reports/phase-17-dependency-tree.txt",
+      "sha256": "91103b7d48c76db72871f26e90a7c621291a268d378ccc1915d17a52b442d955"
+    },
+    "online_verify": {
+      "result": "PASS",
+      "path": "migration/reports/phase-17-verify-online.log",
+      "full_verification_pass": true,
+      "exit_code_zero": true,
+      "sha256": "3e30b77dc20becdd3374b9d13db836495b21e264308c5131bbec297ed78a1935"
+    },
+    "offline_verify": {
+      "result": "PASS",
+      "path": "migration/reports/phase-17-verify-offline.log",
+      "full_verification_pass": true,
+      "exit_code_zero": true,
+      "sha256": "579383d131b35b1d558b35540fa5c73f103afd3003dec5cbc237399c79b99814"
+    },
+    "maven_test_reports": {
+      "result": "PASS",
+      "report_files": 230,
+      "tests": 1949,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "invalid": []
+    },
+    "release_contents": {
+      "result": "PASS",
+      "missing": [],
+      "database_migrations": [
+        "V1__initial_schema.sql",
+        "V2__typed_message_broker.sql",
+        "V3__memory_and_proof_graph_authority.sql",
+        "V4__provider_call_runtime.sql"
+      ],
+      "desktop_artifacts": [
+        "MathProofMesh-0.8.0-windows-x64-portable.zip",
+        "MathProofMesh-0.8.0.exe",
+        "SHA256SUMS.txt"
+      ],
+      "desktop_zip": true,
+      "desktop_installer": true,
+      "release_manifest_valid": true,
+      "release_manifest_error": ""
+    },
+    "bundle_checksums": {
+      "result": "PASS",
+      "files": 195,
+      "malformed_lines": [],
+      "unlisted_files": [],
+      "missing_files": [],
+      "mismatches": []
+    },
+    "release_archive": {
+      "result": "PASS",
+      "path": "target/release/JavaMathProofMesh-0.8.0.zip",
+      "sha256": "692ecad3fd16f2be4c870f274757b479d4e882de10a1ac2e05d62cea13252e4c",
+      "recorded_sha256": "692ecad3fd16f2be4c870f274757b479d4e882de10a1ac2e05d62cea13252e4c",
+      "malformed_lines": []
+    },
+    "completion_documents": {
+      "result": "PASS",
+      "missing": [],
+      "checks": {
+        "feature_matrix": true,
+        "three_mapping_classes": true,
+        "401_closure": true,
+        "known_limits": true,
+        "differences": true,
+        "evidence": true
+      }
+    },
+    "readme_clean_start": {
+      "result": "PASS",
+      "checks": {
+        "release_command": true,
+        "packaged_cli": true,
+        "jdk_25": true,
+        "mock": true
+      }
+    },
+    "no_required_incomplete_code": {
+      "result": "PASS",
+      "files_scanned": 875,
+      "findings": []
+    },
+    "release_version": {
+      "result": "PASS",
+      "poms": 6,
+      "versions": [
+        {
+          "path": "pom.xml",
+          "version": "0.8.0"
+        },
+        {
+          "path": "mathproofmesh-compatibility/pom.xml",
+          "version": "0.8.0"
+        },
+        {
+          "path": "mathproofmesh-contracts/pom.xml",
+          "version": "0.8.0"
+        },
+        {
+          "path": "mathproofmesh-core/pom.xml",
+          "version": "0.8.0"
+        },
+        {
+          "path": "mathproofmesh-desktop/pom.xml",
+          "version": "0.8.0"
+        },
+        {
+          "path": "mathproofmesh-server/pom.xml",
+          "version": "0.8.0"
+        }
+      ],
+      "snapshot_occurrences": []
+    },
+    "migration_state": {
+      "result": "PASS",
+      "current_phase": "17",
+      "phase_17_status": "passed",
+      "phase_17_result": "PASS",
+      "phase_17_report": "migration/reports/phase-17.md"
+    }
+  },
+  "failures": []
+}

@@ -1,0 +1,154 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.InductionMeasureProposal",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "activation_action_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Activation Action Id"
+      },
+      "base_cases": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Base Cases",
+        "type": "array"
+      },
+      "blueprint_node_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Blueprint Node Id"
+      },
+      "confidence": {
+        "default": 0.5,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "induction_step_relation": {
+        "title": "Induction Step Relation",
+        "type": "string"
+      },
+      "measure_name": {
+        "title": "Measure Name",
+        "type": "string"
+      },
+      "proposal_id": {
+        "title": "Proposal Id",
+        "type": "string"
+      },
+      "rejection_reason": {
+        "default": "",
+        "title": "Rejection Reason",
+        "type": "string"
+      },
+      "review_evidence_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Review Evidence Ids",
+        "type": "array"
+      },
+      "reviewer_agent_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Reviewer Agent Id"
+      },
+      "route_id": {
+        "title": "Route Id",
+        "type": "string"
+      },
+      "source_agent_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Agent Id"
+      },
+      "source_record_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Source Record Ids",
+        "type": "array"
+      },
+      "status": {
+        "default": "candidate",
+        "enum": [
+          "candidate",
+          "accepted",
+          "rejected"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "strict_decrease_argument": {
+        "title": "Strict Decrease Argument",
+        "type": "string"
+      },
+      "target_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Obligation Ids",
+        "type": "array"
+      },
+      "trigger_features": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Trigger Features",
+        "type": "array"
+      },
+      "well_founded_domain": {
+        "title": "Well Founded Domain",
+        "type": "string"
+      },
+      "why_natural_index_is_insufficient": {
+        "title": "Why Natural Index Is Insufficient",
+        "type": "string"
+      }
+    },
+    "required": [
+      "route_id",
+      "target_obligation_ids",
+      "measure_name",
+      "well_founded_domain",
+      "base_cases",
+      "induction_step_relation",
+      "strict_decrease_argument",
+      "why_natural_index_is_insufficient",
+      "trigger_features"
+    ],
+    "title": "InductionMeasureProposal",
+    "type": "object"
+  }
+}

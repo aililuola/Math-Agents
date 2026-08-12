@@ -1,0 +1,85 @@
+{
+  "qualified_name": "mathproofmesh.desktop.repository.DesktopRunMetadata",
+  "schema": {
+    "properties": {
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "error": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Error"
+      },
+      "lifecycle": {
+        "enum": [
+          "queued",
+          "running",
+          "awaiting_confirmation",
+          "completed",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ],
+        "title": "Lifecycle",
+        "type": "string"
+      },
+      "mode": {
+        "default": "solve",
+        "enum": [
+          "solve",
+          "resume"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "process_id": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Process Id"
+      },
+      "profile": {
+        "enum": [
+          "smoke",
+          "formal",
+          "active",
+          "proof_control_shadow",
+          "proof_control_active"
+        ],
+        "title": "Profile",
+        "type": "string"
+      },
+      "run_id": {
+        "title": "Run Id",
+        "type": "string"
+      },
+      "updated_at": {
+        "title": "Updated At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "run_id",
+      "profile",
+      "lifecycle",
+      "created_at",
+      "updated_at"
+    ],
+    "title": "DesktopRunMetadata",
+    "type": "object"
+  }
+}

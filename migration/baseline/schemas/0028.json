@@ -1,0 +1,42 @@
+{
+  "qualified_name": "mathproofmesh.config.RealizerControlConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "max_realizer_repairs_per_structure": {
+        "default": 2,
+        "maximum": 16,
+        "minimum": 0,
+        "title": "Max Realizer Repairs Per Structure",
+        "type": "integer"
+      },
+      "preserve_abstract_proposal_after_candidate_failure": {
+        "default": true,
+        "title": "Preserve Abstract Proposal After Candidate Failure",
+        "type": "boolean"
+      },
+      "require_explicit_admissibility": {
+        "default": true,
+        "title": "Require Explicit Admissibility",
+        "type": "boolean"
+      },
+      "require_falsification_test": {
+        "default": true,
+        "title": "Require Falsification Test",
+        "type": "boolean"
+      },
+      "require_well_founded_descent": {
+        "default": true,
+        "title": "Require Well Founded Descent",
+        "type": "boolean"
+      }
+    },
+    "title": "RealizerControlConfig",
+    "type": "object"
+  }
+}

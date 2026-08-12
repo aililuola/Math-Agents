@@ -1,0 +1,126 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.NearMissRecord",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "abstract_idea": {
+        "title": "Abstract Idea",
+        "type": "string"
+      },
+      "authoritative": {
+        "const": false,
+        "default": false,
+        "title": "Authoritative",
+        "type": "boolean"
+      },
+      "concrete_candidate": {
+        "title": "Concrete Candidate",
+        "type": "string"
+      },
+      "failed_constraints": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Failed Constraints",
+        "type": "array"
+      },
+      "first_failure_type": {
+        "title": "First Failure Type",
+        "type": "string"
+      },
+      "near_miss_id": {
+        "title": "Near Miss Id",
+        "type": "string"
+      },
+      "preserved_properties": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Preserved Properties",
+        "type": "array"
+      },
+      "repair_module": {
+        "default": "bounded_local_repair",
+        "enum": [
+          "realizer_repair",
+          "induction_selector",
+          "minimal_bridge",
+          "scope_goal_rewrite",
+          "bounded_local_repair"
+        ],
+        "title": "Repair Module",
+        "type": "string"
+      },
+      "route_id": {
+        "title": "Route Id",
+        "type": "string"
+      },
+      "salvageable_components": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Salvageable Components",
+        "type": "array"
+      },
+      "source_target_id": {
+        "title": "Source Target Id",
+        "type": "string"
+      },
+      "suggested_induction_measures": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Suggested Induction Measures",
+        "type": "array"
+      },
+      "suggested_repair_operators": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Suggested Repair Operators",
+        "type": "array"
+      },
+      "target_obligation_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Target Obligation Id"
+      },
+      "verifier_confidence": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Verifier Confidence",
+        "type": "number"
+      },
+      "verifier_report_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Verifier Report Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "route_id",
+      "source_target_id",
+      "abstract_idea",
+      "concrete_candidate",
+      "preserved_properties",
+      "failed_constraints",
+      "first_failure_type",
+      "salvageable_components",
+      "suggested_repair_operators",
+      "suggested_induction_measures",
+      "verifier_report_ids",
+      "verifier_confidence"
+    ],
+    "title": "NearMissRecord",
+    "type": "object"
+  }
+}

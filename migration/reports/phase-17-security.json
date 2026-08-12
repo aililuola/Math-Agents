@@ -1,0 +1,270 @@
+{
+  "schema_version": "1.0",
+  "phase": "17",
+  "generated_at_utc": "2026-08-12T05:14:43.889861+00:00",
+  "result": "PASS",
+  "gates": {
+    "owasp_dependency_check": {
+      "report": "migration/reports/dependency-check/dependency-check-report.json",
+      "dependencies_scanned": 115,
+      "visible_findings": [],
+      "cvss_ge_7_findings": [],
+      "threshold": 7.0,
+      "result": "PASS"
+    },
+    "spotbugs_findsecbugs": {
+      "analyzers": [
+        "SpotBugs",
+        "FindSecBugs"
+      ],
+      "modules": {
+        "mathproofmesh-contracts": {
+          "bugs": 0,
+          "security_bugs": 0,
+          "result": "PASS",
+          "report": "target/modules/mathproofmesh-contracts/spotbugs.xml"
+        },
+        "mathproofmesh-core": {
+          "bugs": 0,
+          "security_bugs": 0,
+          "result": "PASS",
+          "report": "target/modules/mathproofmesh-core/spotbugs.xml"
+        },
+        "mathproofmesh-server": {
+          "bugs": 0,
+          "security_bugs": 0,
+          "result": "PASS",
+          "report": "target/modules/mathproofmesh-server/spotbugs.xml"
+        },
+        "mathproofmesh-desktop": {
+          "bugs": 0,
+          "security_bugs": 0,
+          "result": "PASS",
+          "report": "target/modules/mathproofmesh-desktop/spotbugs.xml"
+        },
+        "mathproofmesh-compatibility": {
+          "bugs": 0,
+          "security_bugs": 0,
+          "result": "PASS",
+          "report": "target/modules/mathproofmesh-compatibility/spotbugs.xml"
+        }
+      },
+      "result": "PASS"
+    },
+    "licenses": {
+      "report": "migration/reports/phase-17-licenses.json",
+      "components": 111,
+      "missing": 0,
+      "unreviewed": 0,
+      "result": "PASS"
+    },
+    "secret_scan": {
+      "policy": "High-confidence private-key and provider-token formats are scanned across active source, tests, scripts, configuration, CI, and docs. Values are never copied into the report.",
+      "files_scanned": 1047,
+      "findings": [],
+      "result": "PASS"
+    },
+    "security_tests": {
+      "policy": "Injection, traversal, SSRF, secret, parser, process, concurrency, timeout, output, and persistence boundaries require executed suites with zero failure, error, or skip.",
+      "surfaces": {
+        "secret_redaction": {
+          "result": "PASS",
+          "suites": [
+            {
+              "suite": "io.github.aililuola.mathproofmesh.config.SecretValueSecurityTest",
+              "tests": 4,
+              "failures": 0,
+              "errors": 0,
+              "skipped": 0,
+              "result": "PASS",
+              "report": "target/modules/mathproofmesh-server/surefire-reports/TEST-io.github.aililuola.mathproofmesh.config.SecretValueSecurityTest.xml"
+            }
+          ]
+        },
+        "ssrf_and_endpoint_allowlist": {
+          "result": "PASS",
+          "suites": [
+            {
+              "suite": "io.github.aililuola.mathproofmesh.config.ProviderEndpointPolicyTest",
+              "tests": 7,
+              "failures": 0,
+              "errors": 0,
+              "skipped": 0,
+              "result": "PASS",
+              "report": "target/modules/mathproofmesh-server/surefire-reports/TEST-io.github.aililuola.mathproofmesh.config.ProviderEndpointPolicyTest.xml"
+            }
+          ]
+        },
+        "sql_and_repository_boundaries": {
+          "result": "PASS",
+          "suites": [
+            {
+              "suite": "io.github.aililuola.mathproofmesh.persistence.PersistencePolicyTest",
+              "tests": 3,
+              "failures": 0,
+              "errors": 0,
+              "skipped": 0,
+              "result": "PASS",
+              "report": "target/modules/mathproofmesh-server/surefire-reports/TEST-io.github.aililuola.mathproofmesh.persistence.PersistencePolicyTest.xml"
+            },
+            {
+              "suite": "io.github.aililuola.mathproofmesh.persistence.PersistencePostgresIT",
+              "tests": 9,
+              "failures": 0,
+              "errors": 0,
+              "skipped": 0,
+              "result": "PASS",
+              "report": "target/modules/mathproofmesh-server/failsafe-reports/TEST-io.github.aililuola.mathproofmesh.persistence.PersistencePostgresIT.xml"
+            }
+          ]
+        },
+        "sidecar_injection_timeout_and_output_bounds": {
+          "result": "PASS",
+          "suites": [
+            {
+              "suite": "io.github.aililuola.mathproofmesh.sidecar.PythonSidecarProtocolTest",
+              "tests": 8,
+              "failures": 0,
+              "errors": 0,
+              "skipped": 0,
+              "result": "PASS",
+              "report": "target/modules/mathproofmesh-server/surefire-reports/TEST-io.github.aililuola.mathproofmesh.sidecar.PythonSidecarProtocolTest.xml"
+            },
+            {
+              "suite": "io.github.aililuola.mathproofmesh.sidecar.SandboxSecurityIT",
+              "tests": 4,
+              "failures": 0,
+              "errors": 0,
+              "skipped": 0,
+              "result": "PASS",
+              "report": "target/modules/mathproofmesh-server/failsafe-reports/TEST-io.github.aililuola.mathproofmesh.sidecar.SandboxSecurityIT.xml"
+            }
+          ]
+        },
+        "http_input_auth_concurrency_and_sse_resume": {
+          "result": "PASS",
+          "suites": [
+            {
+              "suite": "io.github.aililuola.mathproofmesh.api.ApiGateTest",
+              "tests": 7,
+              "failures": 0,
+              "errors": 0,
+              "skipped": 0,
+              "result": "PASS",
+              "report": "target/modules/mathproofmesh-server/surefire-reports/TEST-io.github.aililuola.mathproofmesh.api.ApiGateTest.xml"
+            }
+          ]
+        },
+        "provider_sse_resource_bounds": {
+          "result": "PASS",
+          "suites": [
+            {
+              "suite": "io.github.aililuola.mathproofmesh.provider.BoundedSseParserTest",
+              "tests": 5,
+              "failures": 0,
+              "errors": 0,
+              "skipped": 0,
+              "result": "PASS",
+              "report": "target/modules/mathproofmesh-server/surefire-reports/TEST-io.github.aililuola.mathproofmesh.provider.BoundedSseParserTest.xml"
+            },
+            {
+              "suite": "io.github.aililuola.mathproofmesh.provider.AgentRuntimePolicyTest",
+              "tests": 8,
+              "failures": 0,
+              "errors": 0,
+              "skipped": 0,
+              "result": "PASS",
+              "report": "target/modules/mathproofmesh-server/surefire-reports/TEST-io.github.aililuola.mathproofmesh.provider.AgentRuntimePolicyTest.xml"
+            }
+          ]
+        }
+      },
+      "result": "PASS"
+    },
+    "suppression_metadata": {
+      "suppressions": [
+        {
+          "until": "2026-10-31Z",
+          "owner_recorded": true,
+          "scope_and_reason_recorded": true,
+          "cve_or_explicit_na_recorded": true,
+          "review_instruction_recorded": true,
+          "not_expired": true,
+          "result": "PASS"
+        },
+        {
+          "until": "2026-10-31Z",
+          "owner_recorded": true,
+          "scope_and_reason_recorded": true,
+          "cve_or_explicit_na_recorded": true,
+          "review_instruction_recorded": true,
+          "not_expired": true,
+          "result": "PASS"
+        },
+        {
+          "until": "2026-10-31Z",
+          "owner_recorded": true,
+          "scope_and_reason_recorded": true,
+          "cve_or_explicit_na_recorded": true,
+          "review_instruction_recorded": true,
+          "not_expired": true,
+          "result": "PASS"
+        },
+        {
+          "until": "2026-09-30Z",
+          "owner_recorded": true,
+          "scope_and_reason_recorded": true,
+          "cve_or_explicit_na_recorded": true,
+          "review_instruction_recorded": true,
+          "not_expired": true,
+          "result": "PASS"
+        },
+        {
+          "until": "2027-01-31Z",
+          "owner_recorded": true,
+          "scope_and_reason_recorded": true,
+          "cve_or_explicit_na_recorded": true,
+          "review_instruction_recorded": true,
+          "not_expired": true,
+          "result": "PASS"
+        },
+        {
+          "until": "2027-01-31Z",
+          "owner_recorded": true,
+          "scope_and_reason_recorded": true,
+          "cve_or_explicit_na_recorded": true,
+          "review_instruction_recorded": true,
+          "not_expired": true,
+          "result": "PASS"
+        },
+        {
+          "until": "2027-01-31Z",
+          "owner_recorded": true,
+          "scope_and_reason_recorded": true,
+          "cve_or_explicit_na_recorded": true,
+          "review_instruction_recorded": true,
+          "not_expired": true,
+          "result": "PASS"
+        }
+      ],
+      "result": "PASS"
+    },
+    "deployment_documentation": {
+      "checks": {
+        "loopback_development_binding": "PASS",
+        "production_tls_or_mtls": "PASS",
+        "least_privilege": "PASS",
+        "backup_and_restore": "PASS",
+        "development_not_production": "PASS"
+      },
+      "result": "PASS"
+    },
+    "release_version": {
+      "version": "0.8.0",
+      "active_poms": 6,
+      "snapshot_occurrences": [],
+      "result": "PASS"
+    }
+  },
+  "failures": []
+}

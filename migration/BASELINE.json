@@ -1,0 +1,2410 @@
+{
+  "baseline_execution_source_path": "P:\\.work\\source",
+  "environment": {
+    "docker": {
+      "available": true,
+      "command": [
+        "docker",
+        "version"
+      ],
+      "exit_code": 0,
+      "output": "Client:\n Version:           29.6.2\n API version:       1.55\n Go version:        go1.26.5\n Git commit:        dfc4efb\n Built:             Thu Jul 16 16:14:59 2026\n OS/Arch:           windows/amd64\n Context:           desktop-linux\n\nServer: Docker Desktop 4.83.0 (234302)\n Engine:\n  Version:          29.6.2\n  API version:      1.55 (minimum version 1.40)\n  Go version:       go1.26.5\n  Git commit:       3d80467\n  Built:            Thu Jul 16 16:12:20 2026\n  OS/Arch:          linux/amd64\n  Experimental:     false\n containerd:\n  Version:          v2.2.5\n  GitCommit:        e53c7c1516c3b2bff98eb76f1f4117477e6f4e66\n runc:\n  Version:          1.3.6\n  GitCommit:        v1.3.6-0-g491b69ba\n docker-init:\n  Version:          0.19.0\n  GitCommit:        de40ad0"
+    },
+    "docker_compose": {
+      "available": true,
+      "command": [
+        "docker",
+        "compose",
+        "version"
+      ],
+      "exit_code": 0,
+      "output": "Docker Compose version v5.3.1"
+    },
+    "git": {
+      "available": true,
+      "command": [
+        "git",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "git version 2.45.1.windows.1"
+    },
+    "java": {
+      "available": true,
+      "command": [
+        "C:\\Users\\yanxinyu\\Desktop\\JavaMathProofMeshMigration\\Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control\\JavaMathProofMesh-0.8.0\\.tools\\jdk-25\\bin\\java.exe",
+        "-version"
+      ],
+      "exit_code": 0,
+      "output": "openjdk version \"25.0.4\" 2026-07-21 LTS\nOpenJDK Runtime Environment Temurin-25.0.4+7 (build 25.0.4+7-LTS)\nOpenJDK 64-Bit Server VM Temurin-25.0.4+7 (build 25.0.4+7-LTS, mixed mode, sharing)"
+    },
+    "javac": {
+      "available": true,
+      "command": [
+        "C:\\Users\\yanxinyu\\Desktop\\JavaMathProofMeshMigration\\Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control\\JavaMathProofMesh-0.8.0\\.tools\\jdk-25\\bin\\javac.exe",
+        "-version"
+      ],
+      "exit_code": 0,
+      "output": "javac 25.0.4"
+    },
+    "os": {
+      "machine": "AMD64",
+      "platform": "Windows-11-10.0.26200-SP0",
+      "release": "11",
+      "system": "Windows"
+    },
+    "python": {
+      "executable": "P:\\.venv-baseline\\Scripts\\python.exe",
+      "version": "3.14.2 (tags/v3.14.2:df79316, Dec  5 2025, 17:18:21) [MSC v.1944 64 bit (AMD64)]"
+    }
+  },
+  "exports": {
+    "config": {
+      "environment_variable_count": 11,
+      "field_count": 318,
+      "normalized_profile_count": 6,
+      "source_fixture_count": 8
+    },
+    "enums": 82,
+    "phase_zero_auxiliary_copies": [
+      {
+        "sha256": "583da2312f064c47dcb5b8b8a4efad50988312212acfd0bce4542f5954c183b7",
+        "size_bytes": 11318,
+        "source_path": "BUILD_INFO.json",
+        "target_path": "migration/baseline/BUILD_INFO.json"
+      },
+      {
+        "sha256": "ae15411da7c80562dc90daf6ceb45b36e72a47eb8ecb6479c6b1a48362b4c639",
+        "size_bytes": 53,
+        "source_path": "benchmarks/__init__.py",
+        "target_path": "migration/baseline/auxiliary/benchmarks/__init__.py"
+      },
+      {
+        "sha256": "cc5b747bdb2c8e7c1dd49b9ccad0f1eed5019cd5d38e5102f27cfc1bf6eaf10e",
+        "size_bytes": 53,
+        "source_path": "benchmarks/proof_control/__init__.py",
+        "target_path": "migration/baseline/auxiliary/benchmarks/proof_control/__init__.py"
+      },
+      {
+        "sha256": "f634471cc47f35296e3e6aef16ea4ef5a82faa677fe5199b6c6ec36183820eab",
+        "size_bytes": 80,
+        "source_path": "benchmarks/topology/__init__.py",
+        "target_path": "migration/baseline/auxiliary/benchmarks/topology/__init__.py"
+      },
+      {
+        "sha256": "6d50dc6126645a589b0c567f76d7b710afacfe9a5861c1477c075124e14c2021",
+        "size_bytes": 1247,
+        "source_path": "pyproject.toml",
+        "target_path": "migration/baseline/pyproject.toml"
+      }
+    ],
+    "pydantic_schemas": 236
+  },
+  "phase": "00",
+  "planned_python_tests": 759,
+  "python_baseline": {
+    "editable_install": false,
+    "inventory": {
+      "collected_test_items": 759,
+      "explicit_test_functions": 707,
+      "mapped_files": 167,
+      "parameterized_expansion": 52,
+      "support_files": 3,
+      "test_modules": 164
+    },
+    "log": "migration/logs/python-baseline.log",
+    "result": "PASS",
+    "summary": "759 passed, 821 warnings in 43.57s"
+  },
+  "python_project": {
+    "build_info": {
+      "artifacts": {
+        "desktop_installer": "MathProofMesh-0.8.2-ed7486a-Setup-x64.exe",
+        "desktop_installer_sha256": "B140AEB77AF06255FB97CC9937AE416A4133036620935F6F43286E8F2BAA4320",
+        "installed_exe_sha256": "1C43B331FF607B9B3501F45058413D4BBF9387ECE82A206EEF5B929C140805B3",
+        "installed_health_check": "PASS for runtime build ed7486a",
+        "portable_exe_sha256": "1C43B331FF607B9B3501F45058413D4BBF9387ECE82A206EEF5B929C140805B3",
+        "provider_outputs_committed": false,
+        "runs_committed": false,
+        "sdist": null,
+        "status": "WINDOWS DESKTOP 0.8.2 BUILD, INSTALLER, AND LOCAL INSTALLATION VALIDATED FOR ED7486A",
+        "wheel": null,
+        "windows_installer": "packaging/windows/output/MathProofMesh-0.8.2-Setup-x64.exe",
+        "windows_installer_sha256": "B140AEB77AF06255FB97CC9937AE416A4133036620935F6F43286E8F2BAA4320"
+      },
+      "base_branch": "feature/mathproofmesh-v0.7.0-hierarchical-sparse-topology",
+      "base_commit": "866e7270a01babb93342d272b99865b449e3b934",
+      "counts": {
+        "docs_directory_lines": 4389,
+        "documentation_files": 31,
+        "source_lines": 73032,
+        "source_python_files": 137,
+        "test_lines": 25900,
+        "test_python_files": 166
+      },
+      "deepseek_profile": {
+        "active_max_new_steps_per_segment": 20,
+        "active_max_rounds": 24,
+        "active_max_segments_per_path": 20,
+        "active_max_total_calls": 450,
+        "active_max_total_tokens": 30000000,
+        "active_operating_max_output_tokens": 128000,
+        "active_provider_max_output_tokens": 384000,
+        "active_segment_max_output_tokens": 128000,
+        "agent_count": 5,
+        "formal_max_new_steps_per_segment": 12,
+        "formal_max_output_tokens": 100000,
+        "keys_persisted": false,
+        "model": "deepseek-v4-pro",
+        "provider": "deepseek",
+        "reasoning_effort": "max",
+        "smoke_max_new_steps_per_segment": 8,
+        "smoke_max_output_tokens": 96000,
+        "sse_streaming_enabled": true,
+        "thinking_enabled": true
+      },
+      "hierarchical_topology": {
+        "active_broker_prompt_delivery": true,
+        "active_experiment_config": "config.deepseek-v4-pro.topology-active.yaml",
+        "active_route_team_execution": true,
+        "blind_artifact_paths_redacted": true,
+        "blind_final_review": true,
+        "blind_typed_evidence_provenance": true,
+        "bounded_blind_negative_context": true,
+        "bridge_and_contradiction_brokers": true,
+        "broker_admitted_global_fact_context": true,
+        "capability_driven_dispatch": true,
+        "continuation_required_for_active_topology": true,
+        "deepseek_default_graph_mode": "shadow",
+        "exactly_once_resume": true,
+        "explicit_fact_dependency_priority": true,
+        "global_fact_report_gate": true,
+        "hierarchical_prompt_fallback_fails_closed": true,
+        "independent_tool_specialist_call": true,
+        "legacy_checkpoint_claim_quarantine": true,
+        "legacy_claim_bypass_closed": true,
+        "legacy_default_preserved": true,
+        "legacy_pre_strategy_resume_route_rebuild": true,
+        "mandatory_negative_context_fails_closed": true,
+        "mechanism_duplicate_detection": true,
+        "message_broker_and_receipts": true,
+        "pairwise_distinct_route_roles": true,
+        "proof_obligation_graph": true,
+        "purpose_differentiated_fact_context": true,
+        "receipt_quantifier_and_binding_reparse": true,
+        "route_local_teams": true,
+        "selected_prover_membership_synchronized": true,
+        "semantic_receipt_validation": true,
+        "typed_memory": true,
+        "typed_message_protocol": true,
+        "validation_escalation_executor": true,
+        "verified_message_utility": true
+      },
+      "inspiration_engine": {
+        "active_proposals_per_task": 3,
+        "adaptive_outcome_ledger": true,
+        "atomic_inspiration_call_reservations": true,
+        "audited_meta_directive_control": true,
+        "auxiliary_construction_inventor": true,
+        "bidirectional_fact_goal_frontiers": true,
+        "checkpoint_and_activity": true,
+        "controlled_seeded_surprise_mutation": true,
+        "deepseek_default_mode": "shadow",
+        "explicit_inspiration_credit_targets": true,
+        "fixed_outcome_credit_scope": true,
+        "independently_reviewed_inspiration_composer": true,
+        "invariant_monovariant_hypothesis_agent": true,
+        "max_materialized_proposals_per_trigger": 1,
+        "max_reviewed_proposals_per_task": 2,
+        "multi_proposal_fact_and_citation_credit": true,
+        "negative_analogy_library": true,
+        "novelty_signature_and_referee": true,
+        "p0_complete": true,
+        "parallel_candidate_generation_without_global_lock": true,
+        "per_trigger_route_cap_enforced": true,
+        "persistent_meta_strategist": true,
+        "pre_review_candidate_deduplication": true,
+        "project_local_cross_run_learning": true,
+        "rejected_proposal_blind_serialization": true,
+        "representation_switchboard": true,
+        "required_referee_switch_enforced": true,
+        "reverse_goal_analyzer": true,
+        "schedulable_only_ucb_pool": true,
+        "scheduler_admission_before_model_calls": true,
+        "surprise_budget_explorer": true,
+        "typed_domain_operator_plugins": true,
+        "ucb_with_minimum_exploration": true,
+        "verified_experience_distiller": true,
+        "verified_local_analogy_agent": true,
+        "versioned_mechanism_ontology": true,
+        "warm_and_cold_candidate_contexts": true
+      },
+      "project": "MathProofMesh",
+      "proof_control": {
+        "abstract_realizer_repair_and_near_miss": true,
+        "active_profile": "config.deepseek-v4-pro.proof-control-active.yaml",
+        "audited_bilingual_problem_sidecar": true,
+        "bilingual_semantic_conflicts_fail_closed": true,
+        "claim_extraction_dependency_namespace_protocol": true,
+        "claim_level_referee_ledger": true,
+        "common_mode_checkpoint_exactly_once": true,
+        "common_mode_dependency_sidecar": true,
+        "common_mode_family_key_identity_preserved": true,
+        "common_mode_transitive_dependency_closure": true,
+        "core_debt_compression_and_common_mode": true,
+        "countermodel_checkpoint_backfill": true,
+        "countermodel_dispatcher_execution": true,
+        "countermodel_result_sidecar": true,
+        "countermodel_stagnation_stop_protection": true,
+        "cross_language_common_mode_text_matching": true,
+        "default_enabled": false,
+        "default_mode": "off",
+        "dependency_kind_migration_audited": true,
+        "deterministic_problem_translation_audit": true,
+        "executable_assumption_challenger": true,
+        "executable_falsification_lifecycle": true,
+        "fact_write_authority_preserved": true,
+        "failure_blueprint_and_message_utility": true,
+        "falsification_route_continue_synthesis_gates": true,
+        "goal_alignment_and_minimal_sufficiency": true,
+        "idempotent_control_action_dispatcher": true,
+        "independent_assumption_challenge_review": true,
+        "independent_countermodel_review": true,
+        "legacy_dependency_kind_contextual_migration": true,
+        "legacy_unaudited_semantic_view_quarantine": true,
+        "live_route_common_mode_cutset": true,
+        "material_effect_meta_pivot": true,
+        "math_object_hashes_unchanged": true,
+        "meta_pivot_exactly_once": true,
+        "multilingual_common_mode_dependency_families": true,
+        "nonexecutable_falsification_deferred": true,
+        "nontrivial_rewrite_semantics_and_lineage": true,
+        "obligation_close_authority_preserved": true,
+        "obligation_semantic_quality_gate": true,
+        "original_problem_authority_preserved": true,
+        "original_strategy_archive_and_lineage": true,
+        "reasoning_token_and_tier_settings_unchanged": true,
+        "scope_signatures_and_ten_inference_risks": true,
+        "semantic_bugfix_work_packages_complete": 13,
+        "semantic_execution_work_packages_complete": 13,
+        "shadow_profile": "config.deepseek-v4-pro.proof-control-shadow.yaml",
+        "sidecar_metadata": true,
+        "strategy_blueprint_before_admission": true,
+        "strict_obligation_domain_separation": true,
+        "terminal_resume_zero_provider_call": true,
+        "typed_dependency_namespaces": true,
+        "v07_checkpoint_migration": true,
+        "v080_sidecar_migration": true,
+        "v081_checkpoint_migration": true,
+        "verifier_issue_risk_mapping": true,
+        "wakeable_waiting_and_intervention_freeze": true,
+        "work_packages_complete": 17,
+        "zero_utility_broadcast_locality": true
+      },
+      "python_requirement": ">=3.11",
+      "release_branch": "feature/mathproofmesh-v0.8.0-goal-plan-failure-utility-control",
+      "reliability_control": {
+        "all_computation_methods_preflighted": true,
+        "bounded_post_failure_recovery_lineage": true,
+        "bounded_typed_probe_fast_path": true,
+        "canonical_computation_identity_index": true,
+        "certified_progress_tracking": true,
+        "computation_contract_repair": true,
+        "computation_plan_bidirectional_decisions": true,
+        "conservative_structured_control_normalization": true,
+        "contract_repair_audit_artifacts": true,
+        "critical_counterexample_propagation": true,
+        "critical_finite_calculation_gate": true,
+        "deferred_computation_retry_before_route_call": true,
+        "discovery_and_assertion_contracts_split": true,
+        "durable_deferred_computation_queue": true,
+        "executable_proof_control_prevents_no_action_stop": true,
+        "first_stream_chunk_timeout_seconds": 90,
+        "goal_integrity_hard_gate": true,
+        "hard_stop_after_no_progress_rounds": 3,
+        "meta_pivot_after_no_progress_rounds": 2,
+        "narrow_contract_repair_schema": true,
+        "one_normal_plus_one_repair_per_signature": true,
+        "optional_batch_provider_circuit_short_circuit": true,
+        "pattern_candidate_evidence_binding": true,
+        "pattern_candidates_excluded_from_fact_memory": true,
+        "pre_checkpoint_calculation_certificates": true,
+        "provider_circuit_breaker_persisted": true,
+        "queued_agent_calls_reported_separately": true,
+        "semantic_calculation_trigger": true,
+        "semantic_computation_deduplication": true,
+        "semantics_preserving_sandbox_fallback": true,
+        "server_owned_calculation_evidence": true,
+        "single_no_thinking_pattern_completion": true,
+        "stable_mathematical_identity": true,
+        "structured_pattern_candidates": true,
+        "task_deliverables_separated_from_truth_status": true,
+        "usage_total_reconciliation": true,
+        "write_before_deduplication_guard": true
+      },
+      "runtime_build_commit": "ed7486aae4915c14971f65725982c4b0ca772f88",
+      "validated_on": "2026-07-27",
+      "validation": {
+        "compileall": "PASS",
+        "configuration_parse": "PASS",
+        "desktop_package_tests": "19 passed; packaged health check and hidden-window smoke PASS",
+        "directed_computation_smoke": "PASS; bounded_greedy_sequence produced 12 exact bounded terms and one evidence-linked unproved candidate formula",
+        "installer_compile": "PASS with Inno Setup 6.7.3",
+        "offline_proof_control_benchmark": {
+          "component_contracts_passed": 14,
+          "fixtures": 10,
+          "mode_variants": 3,
+          "provider_calls": 0,
+          "status": "PASS"
+        },
+        "offline_topology_benchmark": {
+          "cases": 6,
+          "component_contracts_passed": 21,
+          "provider_calls": 0,
+          "status": "PASS",
+          "variants": 11
+        },
+        "pytest": "759 passed after editable install with dev, server, and desktop extras including z3-solver",
+        "real_provider_calls": "NOT RUN; credentials intentionally unused",
+        "reasoning_first_computation_regression": "PASS",
+        "required_e2e_resume": "PASS within the 759-test full suite, including countermodel checkpoint recovery and exactly-once execution",
+        "ruff_check": "PASS",
+        "ruff_format_check": "PASS"
+      },
+      "version": "0.8.2"
+    },
+    "name": "mathproofmesh",
+    "requires_python": ">=3.11",
+    "version": "0.8.2"
+  },
+  "schema_version": "1.0",
+  "source_absolute_path": "C:\\Users\\yanxinyu\\Desktop\\JavaMathProofMeshMigration\\Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control",
+  "source_manifest": {
+    "file_count": 401,
+    "files": [
+      {
+        "path": ".env.example",
+        "sha256": "66f1068ce43817a63fb453a2b4e12ef4de210d3e2732e801733b481edc1c0971",
+        "size_bytes": 407
+      },
+      {
+        "path": ".github/workflows/ci.yml",
+        "sha256": "ab1d95cbe0fdb3efa58c3de181efa1b6975c947bc03e37a0482d5912f042527f",
+        "size_bytes": 632
+      },
+      {
+        "path": ".gitignore",
+        "sha256": "f39c3ae1f16d7e1af50197c06dac55879a4ab197f12937478157785befbd2889",
+        "size_bytes": 205
+      },
+      {
+        "path": "BUILD_INFO.json",
+        "sha256": "583da2312f064c47dcb5b8b8a4efad50988312212acfd0bce4542f5954c183b7",
+        "size_bytes": 11318
+      },
+      {
+        "path": "LICENSE",
+        "sha256": "1e2ed19e10224e2cd6674f0377a6ea1ede3aed8866dd498409320821ea55f139",
+        "size_bytes": 1083
+      },
+      {
+        "path": "README.md",
+        "sha256": "19c7d4e05f192f06a32d7735497b8b4bbd7bb10ba2f002b6e45a73ca54823602",
+        "size_bytes": 39276
+      },
+      {
+        "path": "RELEASE_NOTES_0.3.1.md",
+        "sha256": "f5593e4c86a8baf30644609bfd566d83b3dcb58c44b3524130ffcae5a59c53ff",
+        "size_bytes": 1902
+      },
+      {
+        "path": "RELEASE_NOTES_0.5.0.md",
+        "sha256": "6691f07c39c7e993c8a5ab33e29c85b3356b7765702556ce12714a2512dc03c8",
+        "size_bytes": 2984
+      },
+      {
+        "path": "RELEASE_NOTES_0.5.1.md",
+        "sha256": "0ef2c8f013c993f153cfb0e4210a0efa66ff70b7f996c43f67d3572e6e8e3830",
+        "size_bytes": 4129
+      },
+      {
+        "path": "RELEASE_NOTES_0.6.0.md",
+        "sha256": "a74ce0cd711220d3419ff85e563207defc1214370986f681449190e97dcb63b0",
+        "size_bytes": 2355
+      },
+      {
+        "path": "RELEASE_NOTES_0.7.0.md",
+        "sha256": "1c11ede2d408b1a934b62436d38d46302fe9eb7602e41dc48b8896dacf6319d8",
+        "size_bytes": 23626
+      },
+      {
+        "path": "RELEASE_NOTES_0.8.0.md",
+        "sha256": "a0a0fb91739c82cafabeb89aa1e7ec9a4ce8c3a09bc96b9d27b89de603f64096",
+        "size_bytes": 2106
+      },
+      {
+        "path": "RELEASE_NOTES_0.8.1.md",
+        "sha256": "33fdc3d3d21264b08722df05fd3eeee59e63c41ab8aa762679fb07e560ec86b9",
+        "size_bytes": 3102
+      },
+      {
+        "path": "RELEASE_NOTES_0.8.2.md",
+        "sha256": "6867dc41d65de53636f61cd90aba7b9f505cc17f3a0f3588bb566bc5566abc90",
+        "size_bytes": 4091
+      },
+      {
+        "path": "benchmarks/__init__.py",
+        "sha256": "ae15411da7c80562dc90daf6ceb45b36e72a47eb8ecb6479c6b1a48362b4c639",
+        "size_bytes": 53
+      },
+      {
+        "path": "benchmarks/analogy_library.jsonl",
+        "sha256": "01a4d209de6ea708370ea9e1530a789f13161e6f6c388b033b9f858e4e06bad0",
+        "size_bytes": 2365
+      },
+      {
+        "path": "benchmarks/proof_control/README.md",
+        "sha256": "4b21001c294379fab3350df2e55361d69eb181d9fc5cbc8a2224203f6b462a83",
+        "size_bytes": 886
+      },
+      {
+        "path": "benchmarks/proof_control/__init__.py",
+        "sha256": "cc5b747bdb2c8e7c1dd49b9ccad0f1eed5019cd5d38e5102f27cfc1bf6eaf10e",
+        "size_bytes": 53
+      },
+      {
+        "path": "benchmarks/proof_control/abstract_realizer_repair.json",
+        "sha256": "239454fb4bdcaf9a077765513a6c1b5e84f90fd222477573739874c31c28840a",
+        "size_bytes": 468
+      },
+      {
+        "path": "benchmarks/proof_control/bounded_gap_nonperiodic.json",
+        "sha256": "ab9d18fbbf89003f829a237100328618e50cf0ca79ae2353ab14f0d81a70942b",
+        "size_bytes": 411
+      },
+      {
+        "path": "benchmarks/proof_control/common_mode_assumption.json",
+        "sha256": "0dcbdd81d7b10ebf8a322a2e9fe3289897c13625080a2982c115396c712f180b",
+        "size_bytes": 288
+      },
+      {
+        "path": "benchmarks/proof_control/eventual_to_global.json",
+        "sha256": "4e9335c3ad96c126c1fcd5034ce656ba20b8cee8394aa01ab88c5cea10ff249e",
+        "size_bytes": 268
+      },
+      {
+        "path": "benchmarks/proof_control/image_inclusion_not_surjective.json",
+        "sha256": "a30365307bad12b46ae43b2776802c18e0ef8fe0cfc936fc6807fde5111950aa",
+        "size_bytes": 300
+      },
+      {
+        "path": "benchmarks/proof_control/message_without_use.json",
+        "sha256": "aa717ca65043ed4d856f51ec9d43218406e6baad39b785ddce323e332c54cfa2",
+        "size_bytes": 249
+      },
+      {
+        "path": "benchmarks/proof_control/obligation_compression.json",
+        "sha256": "253fcc04d331019b3548abb0a4794bc5d9115107ef5387f06c547e210dad9069",
+        "size_bytes": 256
+      },
+      {
+        "path": "benchmarks/proof_control/occurrence_induction.json",
+        "sha256": "f5d7990b38b51e0ad069ab93996c093d770fd131a272c9fe934f5f76b64637f9",
+        "size_bytes": 328
+      },
+      {
+        "path": "benchmarks/proof_control/overstrong_target.json",
+        "sha256": "fd01b823edde03e71fdef99fa2fcf7209c2d1c5ac42ef7d67dd0e813d5e363e7",
+        "size_bytes": 260
+      },
+      {
+        "path": "benchmarks/proof_control/projection_information_loss.json",
+        "sha256": "4a07ee62ada388f0db6381c5041e881c49083bc73a1b1661a8fb9cbb6e6a9473",
+        "size_bytes": 296
+      },
+      {
+        "path": "benchmarks/proof_control/run_mock_benchmark.py",
+        "sha256": "e08b64c05acb6a0a8e1678ba3315027cbce20887b640cd2485ac81a60ba72be6",
+        "size_bytes": 23818
+      },
+      {
+        "path": "benchmarks/reasoning_first_computation.py",
+        "sha256": "941d372eed641ff4c681ff3121d482a4532af800d208f1b9d7d318623f5154f3",
+        "size_bytes": 5672
+      },
+      {
+        "path": "benchmarks/topology/README.md",
+        "sha256": "6be46038332e75e28f93e7e0af62ec9c333d35c852987ccdc0f0fdc2d0531530",
+        "size_bytes": 891
+      },
+      {
+        "path": "benchmarks/topology/__init__.py",
+        "sha256": "f634471cc47f35296e3e6aef16ea4ef5a82faa677fe5199b6c6ec36183820eab",
+        "size_bytes": 80
+      },
+      {
+        "path": "benchmarks/topology/computation_scope_case.json",
+        "sha256": "611f42e3a56923d41711b759880a3bd6e8f1b3e1cd3093d50a3b6be9e24bdf57",
+        "size_bytes": 465
+      },
+      {
+        "path": "benchmarks/topology/contradiction_case.json",
+        "sha256": "97e7f04b1f70420d9e3c82baeafd3aeb236dd975aa12ef53bbd50ed0974d713e",
+        "size_bytes": 427
+      },
+      {
+        "path": "benchmarks/topology/duplicate_route_case.json",
+        "sha256": "907f90c85f006d11a171f69d07217e0fdbac9fa8655f051853688adbe0f95656",
+        "size_bytes": 618
+      },
+      {
+        "path": "benchmarks/topology/mock_benchmark_results.json",
+        "sha256": "2f5d2f0a2a5bf94d0ce8a20e0e585a0c280691cb3dc2815926fbc01bd7e9e826",
+        "size_bytes": 20448
+      },
+      {
+        "path": "benchmarks/topology/mutation_review_cases.json",
+        "sha256": "4b8f63c7bdc851e0938e107e51e113d5c85012c8582cd1dd7e366b04852a872f",
+        "size_bytes": 549
+      },
+      {
+        "path": "benchmarks/topology/resume_delivery_case.json",
+        "sha256": "c31e04f736b78c5a6b9b43d749140f677fbadb12b156350e50c0c95e92f1ed81",
+        "size_bytes": 361
+      },
+      {
+        "path": "benchmarks/topology/run_mock_benchmark.py",
+        "sha256": "928e08cbdfb6f5e6f9645e0fcc79699bf4bd3d8f91b537f5772347ce4db9e94d",
+        "size_bytes": 33145
+      },
+      {
+        "path": "benchmarks/topology/shared_bridge_case.json",
+        "sha256": "ebaefb704c95c3b35e782f924c87bb953afb4d4c344f3d9f7142a6228b537794",
+        "size_bytes": 431
+      },
+      {
+        "path": "config.deepseek-v4-pro.proof-control-active.yaml",
+        "sha256": "6173be9ac59aec5de64d3c4d2605283b5524a68447a44a6c2ebf284255aa9192",
+        "size_bytes": 17645
+      },
+      {
+        "path": "config.deepseek-v4-pro.proof-control-shadow.yaml",
+        "sha256": "83ad1623d0fa7bb657e411186d86188f9bc4f33b5984bcda7026f600a1bbd58a",
+        "size_bytes": 17573
+      },
+      {
+        "path": "config.deepseek-v4-pro.smoke.yaml",
+        "sha256": "5f6ce9b8e74ad733c50d4d8f21496ba893c987b6c56d446f2630a25faa1feacb",
+        "size_bytes": 10573
+      },
+      {
+        "path": "config.deepseek-v4-pro.topology-active.yaml",
+        "sha256": "351ab270aa1fb35f05bb5344564bdcc69cb3e5017953d5515b5878dc471df7f4",
+        "size_bytes": 17194
+      },
+      {
+        "path": "config.deepseek-v4-pro.yaml",
+        "sha256": "c5fe586cc9b1cea4e76ce0aa47fbf74039443daf67d254774edd1ce116a1604a",
+        "size_bytes": 11343
+      },
+      {
+        "path": "config.example.yaml",
+        "sha256": "9733bcbf4f8d87c9bbceb4b5f22f54bc8384c80a2eda922a934fc7dab4945a68",
+        "size_bytes": 10173
+      },
+      {
+        "path": "docs/ACTIVITY_TIMELINE.md",
+        "sha256": "63a2bf89890ba603892569aa512b7f6c8f1c520c13163025dab95712600c66ed",
+        "size_bytes": 7047
+      },
+      {
+        "path": "docs/AGENT_CAPABILITY_PROFILE.md",
+        "sha256": "4a77762aae88e8992bf1d7b0a9277bf381f49a5331627a3b2781cd3b0236543b",
+        "size_bytes": 1168
+      },
+      {
+        "path": "docs/ARCHITECTURE.md",
+        "sha256": "703af1db56c2425e526e1f177c0bc01c9ef61d4500d35f4c5fd781ca6dd1fe17",
+        "size_bytes": 20488
+      },
+      {
+        "path": "docs/CHECKPOINT_RESUME.md",
+        "sha256": "e47ad6bbceb86438abf4bd4139990f5ea73a3b3c6ee608f36fd90236ff273db4",
+        "size_bytes": 11025
+      },
+      {
+        "path": "docs/COMMUNICATION_TOPOLOGY.md",
+        "sha256": "1888bdc9036bdfa6de8d3b8b571f1ea98f2798bf82c706ed14cc375165ec8cdf",
+        "size_bytes": 5903
+      },
+      {
+        "path": "docs/COMPUTATION_POLICY.md",
+        "sha256": "ca63c15615938d408b83c0f5a1e588f8f72b2b661794c52d13d93a56a4193bd1",
+        "size_bytes": 14378
+      },
+      {
+        "path": "docs/DEEPSEEK_V4_PRO.md",
+        "sha256": "48e5773893ff7540efe826a85af1fc86364a03f2df231461db4f2110ac543e52",
+        "size_bytes": 12851
+      },
+      {
+        "path": "docs/DEPLOYMENT.md",
+        "sha256": "455b6ff1685ef8f9675799c8309b9cdde73d3448d1e7ba98ecd30a503559ee74",
+        "size_bytes": 8663
+      },
+      {
+        "path": "docs/GOAL_PLAN_FAILURE_UTILITY_CONTROL.md",
+        "sha256": "3fb72e601d1f936cb693b8ae49583de1dc381aebed53c0a549303ba23673a846",
+        "size_bytes": 5836
+      },
+      {
+        "path": "docs/INSPIRATION_ENGINE.md",
+        "sha256": "a971b7877d82eba1ee1cf33a096577fd8873e68679a3cb96ae544bf52a78fe1f",
+        "size_bytes": 15705
+      },
+      {
+        "path": "docs/MATHPROOFMESH_0.7_OVERVIEW.md",
+        "sha256": "481ca018446fa04cb7746899c77d6ee23576996b8d2e072e7b11084abcaed806",
+        "size_bytes": 47040
+      },
+      {
+        "path": "docs/MIGRATION_0.7.md",
+        "sha256": "d5ccdac9e69fc897ae6615626d2da8fc9e742582ad2b729b2a1ae9d9eebec234",
+        "size_bytes": 2050
+      },
+      {
+        "path": "docs/NEAR_MISS_AND_REALIZER_REPAIR.md",
+        "sha256": "bdecdc352fb3db43c36d9435a6095bd479533535a96221efe68923d9833c5599",
+        "size_bytes": 3962
+      },
+      {
+        "path": "docs/PROMPT_PROTOCOL.md",
+        "sha256": "22d22fdcf5cf7e16f2c2e4325c4c68cdea484d2f0aaef89afbc41e0e82448921",
+        "size_bytes": 13820
+      },
+      {
+        "path": "docs/PROOF_CONTROL_MIGRATION_0.8.md",
+        "sha256": "d051aa9435241874f265aca71a076d03a3cc6744eccd651405cc8fc7cc4a4825",
+        "size_bytes": 3224
+      },
+      {
+        "path": "docs/PROOF_OBLIGATION_GRAPH.md",
+        "sha256": "0ac4b062b87b334db458c9460962000324084a19a8886898657085bf1e448b7b",
+        "size_bytes": 2239
+      },
+      {
+        "path": "docs/PROOF_SCOPE_AND_INFERENCE_RISKS.md",
+        "sha256": "0799c94ad14c98a2e16b102709ebc47029cb50fc24319566de46b6a4d0d30909",
+        "size_bytes": 4010
+      },
+      {
+        "path": "docs/RESEARCH_NOTES.md",
+        "sha256": "5b446b030c40a17978194a238953753d212e377bb4841cf5047f5c1ec1253cfa",
+        "size_bytes": 12645
+      },
+      {
+        "path": "docs/TYPED_MEMORY.md",
+        "sha256": "fb7601020dec99f0317cd510c32b4509299a01adfa9b91291da367fbf7757026",
+        "size_bytes": 2671
+      },
+      {
+        "path": "docs/TYPED_MESSAGE_PROTOCOL.md",
+        "sha256": "dc6c94d156ee1632735c5a2414d6fe6e6251650c831b9364a3361bcf33e1c1ed",
+        "size_bytes": 3981
+      },
+      {
+        "path": "docs/V0_7_BASELINE_AUDIT.md",
+        "sha256": "958be7e36d49f90df0e9cb46a57345d3e8863ff3c7414d3746fb409ee1060a86",
+        "size_bytes": 5130
+      },
+      {
+        "path": "docs/V0_8_1_SEMANTIC_CONTROL_FIX_MAP.md",
+        "sha256": "f67d48607c64858877d9291cd2024eeb45dfb7a95948f3104355eabb291ff557",
+        "size_bytes": 14183
+      },
+      {
+        "path": "docs/V0_8_2_SEMANTIC_EXECUTION_FIX_MAP.md",
+        "sha256": "f10db70783b031886e88ad209baa35d8d96de04f791b260ff377a9b7eb094d11",
+        "size_bytes": 19786
+      },
+      {
+        "path": "docs/V0_8_3_ROUTE_ADMISSION_RECOVERY_MAP.md",
+        "sha256": "22a15ff7722e6e6c5b529d338442370b45b38235130bb7348c5dd3f4f67899e9",
+        "size_bytes": 10352
+      },
+      {
+        "path": "docs/V0_8_5_COMMON_MODE_RECOVERY_FIX_MAP.md",
+        "sha256": "bf7ee9adeb85082f40d2e7bb2f722a60d326cdf8f2a5df8243647eb63ed46954",
+        "size_bytes": 3942
+      },
+      {
+        "path": "docs/V0_8_6_BILINGUAL_SEMANTIC_AUDIT_MAP.md",
+        "sha256": "16f32e05255d2d2525850dcce7ff6bf00f8d25100ce463094ba467391a9679b5",
+        "size_bytes": 3670
+      },
+      {
+        "path": "docs/V0_8_7_DEPENDENCY_REF_MIGRATION_MAP.md",
+        "sha256": "5af5e8c0ed8eae67342a6163e6040cd1b3d02ccc23e8ac6e2adbbe5f1d6e2a05",
+        "size_bytes": 3605
+      },
+      {
+        "path": "docs/V0_8_COMMON_MODE_EXECUTION_CLOSURE_MAP.md",
+        "sha256": "02465ad386950f852792a06ad663472ceefd21116eb596b23bb0552df81d97de",
+        "size_bytes": 7273
+      },
+      {
+        "path": "docs/V0_8_PROOF_CONTROL_IMPLEMENTATION_MAP.md",
+        "sha256": "af82e67dae1633e6357866d1450513351edecf03f471b487af392a506c1fcaf8",
+        "size_bytes": 14238
+      },
+      {
+        "path": "docs/VALIDATION.md",
+        "sha256": "7bea2cb7f5123dd53a70ef5129defc042f43fb51b5e877e644f9343509c14572",
+        "size_bytes": 18864
+      },
+      {
+        "path": "docs/VALIDATION_ESCALATION.md",
+        "sha256": "f1d615a2c2b7fd400734f213c2fabcb08e98ad4877d8ab91166636e4d3d770f5",
+        "size_bytes": 1806
+      },
+      {
+        "path": "examples/problem.txt",
+        "sha256": "38d046bd471ba40078196ffa8a091afa9759e814d2ead93420a685de724328b4",
+        "size_bytes": 76
+      },
+      {
+        "path": "packaging/windows/MathProofMesh.iss",
+        "sha256": "5e3bd086b2799003dc472d2f9bf974b39a37b61a0c03d49abd2243a464c8301b",
+        "size_bytes": 1536
+      },
+      {
+        "path": "packaging/windows/MathProofMesh.spec",
+        "sha256": "4dc90ab4b50650fdc07887057da9983588124de9b4df5d44385685292f689be6",
+        "size_bytes": 2398
+      },
+      {
+        "path": "packaging/windows/README.md",
+        "sha256": "7a6179035c898d6072ce60a68f2f1c82def33c79af9de638edb56f7c1fc14dde",
+        "size_bytes": 1375
+      },
+      {
+        "path": "packaging/windows/assets/mathproofmesh.ico",
+        "sha256": "90899e185b91f9ef12a2b090760d8f6a9aefaedb5b0f5134db8c778c56f14dff",
+        "size_bytes": 75288
+      },
+      {
+        "path": "packaging/windows/assets/mathproofmesh.png",
+        "sha256": "918252777a50cad52bd2f46b9667e54efa01b6efa99129ef111b890b427c43a4",
+        "size_bytes": 947129
+      },
+      {
+        "path": "packaging/windows/build.ps1",
+        "sha256": "0894ac11643ab0f0084b045f09314f2ab25dc469321c5743e2f7a29e25098be7",
+        "size_bytes": 4891
+      },
+      {
+        "path": "packaging/windows/desktop_entry.py",
+        "sha256": "119ad33b20cb98f255ecad6acd5d1b9fa08db37038fed68e56eaa31d1b7105d6",
+        "size_bytes": 197
+      },
+      {
+        "path": "packaging/windows/languages/ChineseSimplified.isl",
+        "sha256": "869e43e7c7b8d20c7e4397c8e98f7d1b7cf0528803acdf019ad350143ec85469",
+        "size_bytes": 21019
+      },
+      {
+        "path": "packaging/windows/make_icon.py",
+        "sha256": "6af1dc1ff1ef404b2096973368ea5bc4364a985c9ee4a9f6e17eed774b44098e",
+        "size_bytes": 1188
+      },
+      {
+        "path": "packaging/windows/version_info.txt",
+        "sha256": "7c2998c6c8c1d5540f0fabc7af2411a661985484b9cbc354ee615dd543b0fcc5",
+        "size_bytes": 874
+      },
+      {
+        "path": "pyproject.toml",
+        "sha256": "6d50dc6126645a589b0c567f76d7b710afacfe9a5861c1477c075124e14c2021",
+        "size_bytes": 1247
+      },
+      {
+        "path": "scripts/directed_computation_smoke.py",
+        "sha256": "7030c1b35df780872a5598dc19231307776ec5f132fc5a948ae35d64dcf2cd6c",
+        "size_bytes": 11065
+      },
+      {
+        "path": "scripts/validate.sh",
+        "sha256": "ac2e622b75420b018cc629e87d84c9b28c63652520acc7010ca03482e0631bdc",
+        "size_bytes": 557
+      },
+      {
+        "path": "scripts/verify_sandbox.py",
+        "sha256": "c739ff316f392e67c033e97f339eaae26d075b258261a4e005c88430364509bb",
+        "size_bytes": 3737
+      },
+      {
+        "path": "src/mathproofmesh/__init__.py",
+        "sha256": "b1fbf757416a905bc8d0d8a07fa5d7b8e7c2b7c8c02ac54e711c633446b40c87",
+        "size_bytes": 313
+      },
+      {
+        "path": "src/mathproofmesh/activity.py",
+        "sha256": "ead9c0c8997dd89a00dd493bda87fb6ab9d8d166694a2e041e1d7d0db3d8c389",
+        "size_bytes": 31570
+      },
+      {
+        "path": "src/mathproofmesh/agents.py",
+        "sha256": "79f309bf925156c2cc4834f1d8dba99aabcad7c6bcf00f9865327012f2508684",
+        "size_bytes": 80457
+      },
+      {
+        "path": "src/mathproofmesh/broker_phase.py",
+        "sha256": "8b3ac21aec8ce6e68211fa5b28f68a738a72f3815e780267eeeac674c72ff832",
+        "size_bytes": 3321
+      },
+      {
+        "path": "src/mathproofmesh/budget.py",
+        "sha256": "fe66cad12d2881696fd48fba8572d88102ebb2ed3b96d7dc6cc13cdf58134182",
+        "size_bytes": 63942
+      },
+      {
+        "path": "src/mathproofmesh/cli.py",
+        "sha256": "3a1c9ae7610537565e2f42feeb89e0d7e0a8fb62014f459b10b0be1a2eadc1e9",
+        "size_bytes": 19550
+      },
+      {
+        "path": "src/mathproofmesh/communication/__init__.py",
+        "sha256": "999d5809092cf595678daa1cf68a1d64507e0596acf2929c4dca31be7d5c5c62",
+        "size_bytes": 219
+      },
+      {
+        "path": "src/mathproofmesh/communication/broker.py",
+        "sha256": "a5996f36a94398b1a8bdba20f588d4237dcf99c5d557f6adc03e0457a7af9b59",
+        "size_bytes": 46732
+      },
+      {
+        "path": "src/mathproofmesh/communication/messages.py",
+        "sha256": "32057d6432ff3f69ede9554eefdafc0d7e44f8e2117f9727e21a6b97b099e34f",
+        "size_bytes": 719
+      },
+      {
+        "path": "src/mathproofmesh/communication/policies.py",
+        "sha256": "6027ade03bf22c4f6ace1f452589cf062e1192e9b1b403f6388767bbed7883d2",
+        "size_bytes": 4933
+      },
+      {
+        "path": "src/mathproofmesh/communication/receipts.py",
+        "sha256": "0c035463e798eb5a70e2b99cd8bcaea914492de04c72801f75be5f7e2e71a1ef",
+        "size_bytes": 2136
+      },
+      {
+        "path": "src/mathproofmesh/communication/route_registry.py",
+        "sha256": "01ca674841b7d1f2024a3ea04c3c77076aac179a96049293903518c58b346caf",
+        "size_bytes": 16049
+      },
+      {
+        "path": "src/mathproofmesh/computation/__init__.py",
+        "sha256": "eaf1b89a46ca5f530fdcbac93242ecb6941fa207b619d52b81022517af9db349",
+        "size_bytes": 291
+      },
+      {
+        "path": "src/mathproofmesh/computation/broker.py",
+        "sha256": "d94e9db047089094588db4db2592d2e9bc103879101cde7e0f5b18a41089bc71",
+        "size_bytes": 56005
+      },
+      {
+        "path": "src/mathproofmesh/computation/cache.py",
+        "sha256": "fc19c641af9440d72dd1acaeb1e33a4b521b34dbe5c226ec35edbbfbfba00c66",
+        "size_bytes": 12205
+      },
+      {
+        "path": "src/mathproofmesh/computation/contracts.py",
+        "sha256": "dff3305096a00df092453ede2a0be878a6fb2bed74ed94334ad71b095a3cd8a9",
+        "size_bytes": 32177
+      },
+      {
+        "path": "src/mathproofmesh/computation/handlers/__init__.py",
+        "sha256": "4482eeb398a7190b7a10996d57aa13e1146f31acab095b81f6d95ff5b584b717",
+        "size_bytes": 123
+      },
+      {
+        "path": "src/mathproofmesh/computation/handlers/base.py",
+        "sha256": "a3460dcc799cbec46a06986e527c92fbc937a3b6bc44c3f8c63c05d57338c2db",
+        "size_bytes": 741
+      },
+      {
+        "path": "src/mathproofmesh/computation/handlers/geometry.py",
+        "sha256": "0a928e3801b7fa340e04729fd85f23e02a982b30c0b42ad8e95f74860807990e",
+        "size_bytes": 8776
+      },
+      {
+        "path": "src/mathproofmesh/computation/handlers/graph.py",
+        "sha256": "db9958c44d3e5ab8e3ada9e6b92677bf2a937a5ae5170be9b7a2e23ab8a3751e",
+        "size_bytes": 8723
+      },
+      {
+        "path": "src/mathproofmesh/computation/handlers/integer_search.py",
+        "sha256": "dd9af4d2401f313f4c7c856ac2c7046d37d08830f5b1f126e44bbf96933b7e64",
+        "size_bytes": 11212
+      },
+      {
+        "path": "src/mathproofmesh/computation/handlers/modular.py",
+        "sha256": "e1faf2aae3f44fc1073f66937ca3354867c3d77349a65c5f67e13a764ad3cf12",
+        "size_bytes": 7972
+      },
+      {
+        "path": "src/mathproofmesh/computation/handlers/number_theory.py",
+        "sha256": "f2e754a10b071bd824ffab1cda31f9ba8ba1c9f95c15fdf4f49998e7461d3bc2",
+        "size_bytes": 21429
+      },
+      {
+        "path": "src/mathproofmesh/computation/handlers/real_inequality.py",
+        "sha256": "2dacfc897cd713d3688169be55de6d835b41619f78eb5ed486b4b1c6cc66571e",
+        "size_bytes": 14891
+      },
+      {
+        "path": "src/mathproofmesh/computation/handlers/recurrence.py",
+        "sha256": "10838bf0b3e38f27f9f46cf0eacad3112c0bf2add80cf7a96ddaaeb54977e021",
+        "size_bytes": 4921
+      },
+      {
+        "path": "src/mathproofmesh/computation/handlers/sequence.py",
+        "sha256": "295ef2c596555507c929508827d6c835dd8c732a2df4b44aab5a56d26e004006",
+        "size_bytes": 9092
+      },
+      {
+        "path": "src/mathproofmesh/computation/handlers/symbolic.py",
+        "sha256": "352191ae958e4b6dfc5de37e273a26af92c0872a65bb0c5fafb6c4818138e68c",
+        "size_bytes": 12144
+      },
+      {
+        "path": "src/mathproofmesh/computation/policy.py",
+        "sha256": "e702079456f77ec3e0f91e4281f1dc558537c946d440b1fbf5e01931ba2991c7",
+        "size_bytes": 13252
+      },
+      {
+        "path": "src/mathproofmesh/computation/sandbox.py",
+        "sha256": "18f55b41f76660bd2cc5adfb0e7e304358ef01cce6e439ea085cb13bd9bc6d69",
+        "size_bytes": 17421
+      },
+      {
+        "path": "src/mathproofmesh/config.py",
+        "sha256": "41eada761e2351dd8bfcce6f51141d8aa0f64bc9b2a61ebb177a9805fdbec0e8",
+        "size_bytes": 58009
+      },
+      {
+        "path": "src/mathproofmesh/context_policy.py",
+        "sha256": "11b725da740d7058d54864b9fdab7649c3df41ceb208e00abc6238f4a65ad556",
+        "size_bytes": 20967
+      },
+      {
+        "path": "src/mathproofmesh/continuation.py",
+        "sha256": "4c68267eae02877badffd1cf1be7e34eafed98d2dfead0dddff51caa314cd8d5",
+        "size_bytes": 15576
+      },
+      {
+        "path": "src/mathproofmesh/critical_calculations.py",
+        "sha256": "9f70c303604d5630061256e58b02d076ea7b696cedd91b3779ae1b4abd3919de",
+        "size_bytes": 19125
+      },
+      {
+        "path": "src/mathproofmesh/cross_route_phase.py",
+        "sha256": "58812c23c81d07913b64e4c50d9ba66162d149e1c79f9998dc19c508c52e0e18",
+        "size_bytes": 739
+      },
+      {
+        "path": "src/mathproofmesh/deep_exploration.py",
+        "sha256": "d0af9a236fc3aed3d0b8152bc7dc4a7d687c0015ad78afd298b061af45f98bfc",
+        "size_bytes": 28554
+      },
+      {
+        "path": "src/mathproofmesh/desktop/__init__.py",
+        "sha256": "76a6554b6fa2c78c0bf40418a9a75903063f38797c96a66b00295b95f7689184",
+        "size_bytes": 166
+      },
+      {
+        "path": "src/mathproofmesh/desktop/app.py",
+        "sha256": "824e449a3072a430f71072255c58ed5713d8cda946c47cc0cca8e0e8526b0618",
+        "size_bytes": 17496
+      },
+      {
+        "path": "src/mathproofmesh/desktop/configuration.py",
+        "sha256": "b9c488991913bdc2916ae1b85f9e33beda89a768c1c4080ce135afd19b01b3f9",
+        "size_bytes": 4504
+      },
+      {
+        "path": "src/mathproofmesh/desktop/main.py",
+        "sha256": "3e565f7878693f1753ea6e2980b33e926bc9e274e0b754f1ac047d7c36150c47",
+        "size_bytes": 4186
+      },
+      {
+        "path": "src/mathproofmesh/desktop/manager.py",
+        "sha256": "7ae53fe57bc2f6349b6d25f209f5768fc6e335b0d6b38a7a4440615ec31d05cf",
+        "size_bytes": 17950
+      },
+      {
+        "path": "src/mathproofmesh/desktop/paths.py",
+        "sha256": "460ef3d317042b8ef6fc9a151f5e2334ab3f30179c10286b4c928672411ba92d",
+        "size_bytes": 2270
+      },
+      {
+        "path": "src/mathproofmesh/desktop/repository.py",
+        "sha256": "bfea5f88bb76bbc86427320c6cd5fda92cd0fc9a6919ba7accffb43275c17bed",
+        "size_bytes": 26665
+      },
+      {
+        "path": "src/mathproofmesh/desktop/runtime.py",
+        "sha256": "c67349f37c3037e26c13062517c2bfd2c6fdfe6fda0af0fed7a50aa193515b0b",
+        "size_bytes": 4176
+      },
+      {
+        "path": "src/mathproofmesh/desktop/security.py",
+        "sha256": "d8ba5476dff1873983d1907f439ecf511ff8884e534466466cdccb6497bdb1ef",
+        "size_bytes": 8155
+      },
+      {
+        "path": "src/mathproofmesh/desktop/settings.py",
+        "sha256": "4c76372cd2749421847e78d6a3207fb7de20811ed61a0fb70c70ee0b60f1b278",
+        "size_bytes": 1686
+      },
+      {
+        "path": "src/mathproofmesh/desktop/web/assets/app-icon.png",
+        "sha256": "8150c2799bef86b103547d54459f59a090b1477a56a6f1c3b697c7d77a659f23",
+        "size_bytes": 15550
+      },
+      {
+        "path": "src/mathproofmesh/desktop/web/assets/app.js",
+        "sha256": "87fbb591df10e8e793e3f287151f6ac29727bd66fcb3f70c613ab6029de8945d",
+        "size_bytes": 71400
+      },
+      {
+        "path": "src/mathproofmesh/desktop/web/assets/styles.css",
+        "sha256": "1c4c0add92811cb8496922d5bc4253aa2c6daa5cba51cdf1397da47b1beceebb",
+        "size_bytes": 38706
+      },
+      {
+        "path": "src/mathproofmesh/desktop/web/assets/topology.js",
+        "sha256": "915243ae42b718982950fbb77a4928015c2bf5cfba7cab464573501ce30ed74b",
+        "size_bytes": 26244
+      },
+      {
+        "path": "src/mathproofmesh/desktop/web/index.html",
+        "sha256": "f6c6233e534b26c27c9b67d22248e59d3aa8a2149abcf34fe85dd4bb44e4d5aa",
+        "size_bytes": 21806
+      },
+      {
+        "path": "src/mathproofmesh/goal_preflight.py",
+        "sha256": "ccecdc3a99a5fec81a4187d050884e69af373774dba384183cdbe9e68a9aeb8f",
+        "size_bytes": 5649
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/__init__.py",
+        "sha256": "fa3a3f75230005316518c785d312240d9c6f011a544fcb9ca7dcecf7c19e4189",
+        "size_bytes": 929
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/analogy_agent.py",
+        "sha256": "41b33dc6549d49533a8fb0d15c31a3d24ac61948655cc2d518f0cae34689b4ac",
+        "size_bytes": 3816
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/assignment.py",
+        "sha256": "a28ea8250f5f9aaa4bd7f2b2a75a4adb191eddc70451fe2abc439dba99f7d63c",
+        "size_bytes": 5014
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/composer.py",
+        "sha256": "aba469eb82ec8ea3d51adb9e2621f4f6b61bfb8524a0df6ba3b738f9520a06a0",
+        "size_bytes": 11119
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/construction_inventor.py",
+        "sha256": "1e53dbed2a335038aabf88e09149f2fdbd815fc916dc5d43f2634ac47663dfdd",
+        "size_bytes": 8894
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/context.py",
+        "sha256": "f78af118851730a58134a306637fe9b34a198df56af345dfb30407c4777d6a11",
+        "size_bytes": 14356
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/cross_run_learning.py",
+        "sha256": "62094f567c4df7ac478a661dfc71e91a7ada94407d3a450b87ffcc5338f23674",
+        "size_bytes": 7435
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/domain_operators.py",
+        "sha256": "d3b9c0290d30f7eb56e4779388ccd08d896cec30baa265608d40a80aeebbd118",
+        "size_bytes": 22303
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/engine.py",
+        "sha256": "4161335a6cd135d55d6ae32dcb5c731e63828c7b68f068a3b9d124cc65cf6725",
+        "size_bytes": 120853
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/experience.py",
+        "sha256": "6cdaa44bc9457de3470d5d06617fe4ee2f73eb19d3b94bcc8dd83a129f4acd3c",
+        "size_bytes": 7136
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/invariant_hypothesis.py",
+        "sha256": "15c826aa74ed6eadf4e6cbb7805c2e94d9e67e998e56ddb77633c5bdbfeaeb0f",
+        "size_bytes": 4342
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/local_library.py",
+        "sha256": "c4eadbf91c24fb2e68b45bd56e294588562604fe97582a0359f042e93f2a2cdc",
+        "size_bytes": 7288
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/meta_control.py",
+        "sha256": "08c9cf5df20978bc4cfa70dd383941ae07fd1dd4f4c4965ef7faf9b0231cef92",
+        "size_bytes": 11350
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/meta_strategist.py",
+        "sha256": "187f4e67f8e749b58bbe12beca01aa95e7017ccb3a129df943067e4162968812",
+        "size_bytes": 6667
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/models.py",
+        "sha256": "ae645eb71a2427f64ff245e18c231d415255f178b6617f4c260fa689ee61e136",
+        "size_bytes": 1952
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/novelty.py",
+        "sha256": "5aae70ec56d893d0927ae78b99942c65fbd9508672c69ab85c7bb8521340ac47",
+        "size_bytes": 9495
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/ontology.py",
+        "sha256": "02b69459cc4329d36562b5a92acce7ea391554239cc2e92c306d65ec63252b4e",
+        "size_bytes": 8580
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/outcomes.py",
+        "sha256": "230b17c396a5538663b7fddf575979a613244978ee5c693e1f1f82c8f15a46de",
+        "size_bytes": 9422
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/representation_switchboard.py",
+        "sha256": "e597173f8b2c00d10750eeb621996f37113226ed727187a8d7d92f9dbb361ab9",
+        "size_bytes": 10265
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/reverse_goal.py",
+        "sha256": "c546af7c1e13ac8475eb44caca2dcbdd33a5d86d941acb9b2504389bd9f1a6c9",
+        "size_bytes": 16314
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/surprise_budget.py",
+        "sha256": "5f84d603d940a9c76c55a17220451dabd7ac1541c2e44ac0b48291a2163fe55d",
+        "size_bytes": 4979
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/surprise_mutation.py",
+        "sha256": "48718f3af6c371e3a446ae2dc7da985144e22f9a86796b34b4299209cb25aec1",
+        "size_bytes": 11033
+      },
+      {
+        "path": "src/mathproofmesh/inspiration/trigger_policy.py",
+        "sha256": "4794759614d1bee2027736c74259b43cb3d2e74b5c702c4792926d44cc0bff52",
+        "size_bytes": 14494
+      },
+      {
+        "path": "src/mathproofmesh/inspiration_phase.py",
+        "sha256": "32a0f7e7992aedba27fc2af107e4b24f53e909cbed1afcc5db07ef21d535da8b",
+        "size_bytes": 3909
+      },
+      {
+        "path": "src/mathproofmesh/llm/__init__.py",
+        "sha256": "2f35d19816d9af9a35f5a5d4c173eb43c99b6e0fe6ce42c8739950bdccab5ff5",
+        "size_bytes": 421
+      },
+      {
+        "path": "src/mathproofmesh/llm/anthropic.py",
+        "sha256": "38ffc39ed7b27242c075d55fa4a75e500fac2f509fb937a2021c7dddd0179851",
+        "size_bytes": 2748
+      },
+      {
+        "path": "src/mathproofmesh/llm/base.py",
+        "sha256": "d6b1f3f25986d747aaed807b8e40f7d04928fcdf1c7964ebb8d1569892434e18",
+        "size_bytes": 2694
+      },
+      {
+        "path": "src/mathproofmesh/llm/deepseek.py",
+        "sha256": "9b841d958337c342b4cb728a969a7aaf9c4ade1adb94d772365e97c82b827033",
+        "size_bytes": 20140
+      },
+      {
+        "path": "src/mathproofmesh/llm/gemini.py",
+        "sha256": "bd92fc17ff630df01bcd6c23762cfd7e98ec2bbcf8136152aeacf7812f067423",
+        "size_bytes": 3240
+      },
+      {
+        "path": "src/mathproofmesh/llm/mock.py",
+        "sha256": "2a18e98830c0586cbf72752a726eb99ef6b332fcf735398c4046c96a0ad054f4",
+        "size_bytes": 1596
+      },
+      {
+        "path": "src/mathproofmesh/llm/openai_compatible.py",
+        "sha256": "f7e26beb0cf541b809b6bd1b1c27ca2a672200f18944fcd9f73560d9ef42ef71",
+        "size_bytes": 2686
+      },
+      {
+        "path": "src/mathproofmesh/llm/pool.py",
+        "sha256": "45355d0006a79ffaa400a9d6a528e3a5fba936e5026e43c64c9d313313bd4222",
+        "size_bytes": 31259
+      },
+      {
+        "path": "src/mathproofmesh/memory.py",
+        "sha256": "aecac803681be2c57869a55f48369506b5421a54a3259b67927fcfe4da29672b",
+        "size_bytes": 44576
+      },
+      {
+        "path": "src/mathproofmesh/mock_demo.py",
+        "sha256": "4393e5e3af0066387190bb82310e63982d8954c7cfbacf77ee59239331872e5a",
+        "size_bytes": 33824
+      },
+      {
+        "path": "src/mathproofmesh/orchestrator.py",
+        "sha256": "0efb3aa67feb758f072c25408ea56bba6ad5f9e4a1c601e3de18b21fcae8f3f6",
+        "size_bytes": 686781
+      },
+      {
+        "path": "src/mathproofmesh/prompts.py",
+        "sha256": "73102d4a698da8c63f51c4acb26fbc69cc7e6666ac97d71e58ac74e0b24cf2c2",
+        "size_bytes": 102061
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/__init__.py",
+        "sha256": "d33818e74649ccb5f8337932a73933affb06b620e6acc3c9506563009d9a6011",
+        "size_bytes": 5928
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/action_dispatcher.py",
+        "sha256": "ccee21d658de94a0cddb4f4b13c71a7f4393ba6f2e966128c40d67977fbf4f84",
+        "size_bytes": 16366
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/bottleneck.py",
+        "sha256": "daf54b2b37f43b0f275ae2929d71da63157be44661d24a7b4beb4783dd1380f7",
+        "size_bytes": 9215
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/claim_lifecycle.py",
+        "sha256": "c40d7f8f82dea2cbf43b9405e70119bdce8eda75386e32cf4bff48fb5aa45316",
+        "size_bytes": 19382
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/common_mode.py",
+        "sha256": "902639fb86682e1557133149c589932aea3306a88397535a49a34ad7d640b52a",
+        "size_bytes": 43994
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/controller.py",
+        "sha256": "e4f0e3bf0f8006b554dfbf855afba3d15488fd9d3303d6aeacea52528c1bc2d2",
+        "size_bytes": 297034
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/dependencies.py",
+        "sha256": "a995cc661c5db618654c8940106df6f7df1ffa5a6e25b2be14227c637ee02464",
+        "size_bytes": 8403
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/domains.py",
+        "sha256": "22005b0dfc7506ed7f01d210cdcd022e5793584cc79bf767383b6ce7f6e3f463",
+        "size_bytes": 6152
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/failure_control.py",
+        "sha256": "dd871b28ff067c7060b651054cb1ff85e710735d7fff3f3cea9eaca7659440bc",
+        "size_bytes": 8992
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/falsification.py",
+        "sha256": "c14d9ad89c5511caf7ad9fbf2c6da233db9bdbfc8e5bffeb1d6b28c14d8c3e67",
+        "size_bytes": 16565
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/gates.py",
+        "sha256": "0e1e7f671e3d7a913f05553ddee1bfb7ca8f78e8ba303a99d043f3b4e2073afd",
+        "size_bytes": 22899
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/goal_alignment.py",
+        "sha256": "aa5be1a297c083656531bafb75e6031ef6a3766fc97b4273fdec392adf9c4e91",
+        "size_bytes": 19986
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/induction.py",
+        "sha256": "65ffbdb106194090e89df11e901e587428a41fa79a62fe5f897255118235daa3",
+        "size_bytes": 7547
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/inference_risk.py",
+        "sha256": "3784dfd0dd39f01aa62d28416d969bd8ee5492487d0f43afb7b835ada36b8031",
+        "size_bytes": 23353
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/message_utility.py",
+        "sha256": "d39590790da19d7c52dcfcfc03365ce874da1d4be08587a8a8c3d435add9f448",
+        "size_bytes": 10975
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/models.py",
+        "sha256": "ddc7a4882011c8920f8bf67ea8b12991a45bf7cbb6fac8fcdca2f85fd01b7f7f",
+        "size_bytes": 50186
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/near_miss.py",
+        "sha256": "840dcfeaa219f86efe23df261fcf63eb3b4a97f3ef1a55ded4ca979e82177bd9",
+        "size_bytes": 11128
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/proof_roles.py",
+        "sha256": "111f8f68fef52ac646f07638d21ad3ea69e393dfc1f26ae3ccea6c401453e167",
+        "size_bytes": 5237
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/realizer.py",
+        "sha256": "00258ed801b84e0957a326c25701cb417471b221ffcb3a3c74467c49e2308e33",
+        "size_bytes": 9650
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/resume_policy.py",
+        "sha256": "f1f7bf069ec01cb5b96f9ea69aa62b4faf33036ae2f353eb2467d37108169b68",
+        "size_bytes": 7172
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/route_target.py",
+        "sha256": "93bbaa942963ea11f3c620fb09105e528e60dbf4cff1ddfc93821517a18ffee6",
+        "size_bytes": 7709
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/scope_guard.py",
+        "sha256": "4ade57ab1a2251af9f92758649d098fa244e3bd564c9c3580a04f5b1f50a213d",
+        "size_bytes": 12774
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/semantic_profile.py",
+        "sha256": "c261e16a427bd56582f13dd3f8646a81a9545936adb19dcfc91130c7d809599a",
+        "size_bytes": 14744
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/semantic_quality.py",
+        "sha256": "989fc8cf2d489deb1341d61149b4ee8b0cf32ecf933137b1b67d5d7b84499959",
+        "size_bytes": 17482
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/semantic_view.py",
+        "sha256": "223848d70fff47348c50a9271026b70cb482223fc7ed13dc1ada75174a950a61",
+        "size_bytes": 4087
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/state.py",
+        "sha256": "f8d3b6f7d6013b69aed8337bebed1638b1b1ed422f995f61be361ca33182a7f8",
+        "size_bytes": 23465
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/strategy_blueprint.py",
+        "sha256": "50fd7b117533c6614242f53bb2923795066b92849acc6949a6611ec4ec9889aa",
+        "size_bytes": 27885
+      },
+      {
+        "path": "src/mathproofmesh/proof_control/tasks.py",
+        "sha256": "12c6b0d5e4d8b2794c1a125dd4ce3f3066d5d87dd48fa39d354536807bbf2639",
+        "size_bytes": 34702
+      },
+      {
+        "path": "src/mathproofmesh/proof_graph/__init__.py",
+        "sha256": "556f9564b6cd68de9b0d93b2c332dd0495241dc6072c2e73d84ee31de734e3ae",
+        "size_bytes": 361
+      },
+      {
+        "path": "src/mathproofmesh/proof_graph/bridges.py",
+        "sha256": "e349cdd6122872b420b4df2b5d1daf34923d365ff54d5577a549de3992b9a045",
+        "size_bytes": 5387
+      },
+      {
+        "path": "src/mathproofmesh/proof_graph/contradictions.py",
+        "sha256": "6bf71fc6fa08ab6aab365bd6fde336a5e4239bb0398b4132dc5cec7496f7e630",
+        "size_bytes": 8147
+      },
+      {
+        "path": "src/mathproofmesh/proof_graph/matching.py",
+        "sha256": "e041f1ad51cabc688d39d890513b27626f3ae3a978f281eb927016357a41f1dc",
+        "size_bytes": 4887
+      },
+      {
+        "path": "src/mathproofmesh/proof_graph/models.py",
+        "sha256": "8af6d88d6d90500450ba95270323c345fdb8a29f8730e7e38b3d32989f4bfb91",
+        "size_bytes": 301
+      },
+      {
+        "path": "src/mathproofmesh/proof_graph/store.py",
+        "sha256": "b6f65172484705d77d9d4cfb0bb251a7553122a19c9edd6c63de35521af27f3b",
+        "size_bytes": 35369
+      },
+      {
+        "path": "src/mathproofmesh/proof_identity.py",
+        "sha256": "8d1b4e24a751a82d124b44b4c353fe7ac9e68015263d2c91ded0f86b48ad03ee",
+        "size_bytes": 9647
+      },
+      {
+        "path": "src/mathproofmesh/reasoning_trace.py",
+        "sha256": "39bd911512190a40439320ce44759110b6ff189003b2bc87c072c9b0684bf33c",
+        "size_bytes": 13308
+      },
+      {
+        "path": "src/mathproofmesh/report.py",
+        "sha256": "738f2618a90a0907af4c9ea6d30b56d67f172f58dc07b7ede5cc3edb14d9ac86",
+        "size_bytes": 30544
+      },
+      {
+        "path": "src/mathproofmesh/resume_phase.py",
+        "sha256": "c3218d411c773fb0b625a69a267b1241ee512166aae7915c5ed174a0493078b3",
+        "size_bytes": 1702
+      },
+      {
+        "path": "src/mathproofmesh/route_pipeline.py",
+        "sha256": "93f74b5d69f7bea6be4c9ef44bb38af19d4c519be2e9a3a0a3c2f0b8cb815482",
+        "size_bytes": 5481
+      },
+      {
+        "path": "src/mathproofmesh/schemas.py",
+        "sha256": "f52d9c763afcf098cfdfc70ded5ca6c14007b5949261f76188a3c4c5c7082a7b",
+        "size_bytes": 107811
+      },
+      {
+        "path": "src/mathproofmesh/server.py",
+        "sha256": "6b715ae94b4243dc765c874d960edfe2e98af4074bc92271a4c925192a621f1d",
+        "size_bytes": 10862
+      },
+      {
+        "path": "src/mathproofmesh/stall_recovery.py",
+        "sha256": "45fb28c61fae0a2b71f796af047469035b0451d9f3cef0f66fe49c134629a863",
+        "size_bytes": 15007
+      },
+      {
+        "path": "src/mathproofmesh/store.py",
+        "sha256": "2aac9388de4c555bc362fe4f5c96e015e37fa02765340133791e876d8007b519",
+        "size_bytes": 24965
+      },
+      {
+        "path": "src/mathproofmesh/synthesis_phase.py",
+        "sha256": "bd4d12548c4f4181f21d5ca139c625f423d23748fe56594c4759997f50485b38",
+        "size_bytes": 16582
+      },
+      {
+        "path": "src/mathproofmesh/task_contracts.py",
+        "sha256": "027c11a41aea7096c45beb9288444f980f9339bc1013424f8c9b10cbe359f689",
+        "size_bytes": 11094
+      },
+      {
+        "path": "src/mathproofmesh/teams/__init__.py",
+        "sha256": "344ce5bfc96c46848b507b2f673b0eebf5ff4de9a3ca82ad9bf9ab3a44c60673",
+        "size_bytes": 336
+      },
+      {
+        "path": "src/mathproofmesh/teams/role_runner.py",
+        "sha256": "8e3ec02b5aeaa3e7f846626593b44df4507a696972f755b8019288733b7a7c9d",
+        "size_bytes": 2980
+      },
+      {
+        "path": "src/mathproofmesh/teams/route_team.py",
+        "sha256": "7940819ad03f78d9834c87f571b89bba830c565c6d3b85b9bf265b202ed733c1",
+        "size_bytes": 15875
+      },
+      {
+        "path": "src/mathproofmesh/tools.py",
+        "sha256": "71ddad4fca0ffbd78655452baf13a1ee53d0888db5bb1b89b3be2945dab6e045",
+        "size_bytes": 334
+      },
+      {
+        "path": "src/mathproofmesh/topology.py",
+        "sha256": "edca606303da9b20cad2bf14f4e4104f27a51af95db01eb058e463c5e8b8ae60",
+        "size_bytes": 15751
+      },
+      {
+        "path": "src/mathproofmesh/verification/__init__.py",
+        "sha256": "bdfdffc41777138964485766d022947c2fa20411238599c0e707eda33e7c3a8e",
+        "size_bytes": 825
+      },
+      {
+        "path": "src/mathproofmesh/verification/capability_profile.py",
+        "sha256": "d4485317145332bd8f04048551af331e79341a8883c8b56f13e9c08d05214a2a",
+        "size_bytes": 6306
+      },
+      {
+        "path": "src/mathproofmesh/verification/escalation.py",
+        "sha256": "718c8dcc9dcfd673a569b3226c8e3ec31de824880a05d0f2b67f5f766a6b341d",
+        "size_bytes": 6104
+      },
+      {
+        "path": "src/mathproofmesh/verification/formal_microcert.py",
+        "sha256": "f11e6f2aab9f59b59a2a7775cbe6883193f3f4a308224e821fd78a2f6b94c572",
+        "size_bytes": 4408
+      },
+      {
+        "path": "src/mathproofmesh/verification/mutation.py",
+        "sha256": "4a316acf3fac029aa803d62cbe01520e719d8e89aae24641ecbe964086f53259",
+        "size_bytes": 2293
+      },
+      {
+        "path": "tests/conftest.py",
+        "sha256": "f46b9a511d80f60d95597c58de59e4b2e1f5b1afd55131abd2111c01462e0037",
+        "size_bytes": 617
+      },
+      {
+        "path": "tests/test_abstract_realizer_separation.py",
+        "sha256": "c863a80df594e7c72bcf96ea5c39baa06205ac3830cc61f8c6728eac64fa6581",
+        "size_bytes": 2693
+      },
+      {
+        "path": "tests/test_active_bridge_conflict.py",
+        "sha256": "800f8ca10bf76aed13f443c27bc5162f0950f4ff703700fe6450f914927c99a8",
+        "size_bytes": 6329
+      },
+      {
+        "path": "tests/test_active_broker_delivery.py",
+        "sha256": "4ecfbbd83d731d727c238332d6d9ebe992d1ded0f4cfb34b9fb4a3cf76e321f8",
+        "size_bytes": 3914
+      },
+      {
+        "path": "tests/test_active_inspiration_e2e.py",
+        "sha256": "697658fbf44460601c13bfe90597ef412b8bc02dbe895b811caf9178fe0456e3",
+        "size_bytes": 7483
+      },
+      {
+        "path": "tests/test_active_inspiration_rejection_finalization.py",
+        "sha256": "06a0d33c6cec3b31e203892c08c4f94689a712558a06f0a1eaf287647d6dccb0",
+        "size_bytes": 3924
+      },
+      {
+        "path": "tests/test_active_resume_exactly_once.py",
+        "sha256": "e1604be8b88f28c01403d2405ac4cc5d98f30ff74a59330961fb3e2e5157abe8",
+        "size_bytes": 2058
+      },
+      {
+        "path": "tests/test_active_route_team.py",
+        "sha256": "c1aa9fa6e586ea8869ac032105414ccfec858904aa388c2a2dbfe658a4381f3c",
+        "size_bytes": 5253
+      },
+      {
+        "path": "tests/test_activity.py",
+        "sha256": "decd4a7ae21928a7b2c0ea8250135da76d2d4e81ad5664dcca918fc390c90e1c",
+        "size_bytes": 7334
+      },
+      {
+        "path": "tests/test_agent_capability_profile.py",
+        "sha256": "ff6c6e899ec50865be3f1c24d1a03b96fc4136223c3b20085119b93caf30c1d3",
+        "size_bytes": 3335
+      },
+      {
+        "path": "tests/test_analogy_agent.py",
+        "sha256": "5d1140808e64a706335ab1e19e0af6953144c9fe9c515383a411c48f8cf48c8f",
+        "size_bytes": 2235
+      },
+      {
+        "path": "tests/test_blind_final_review.py",
+        "sha256": "51b7f6752a58faad1bb40baa2cd3c8be2d0efe68739a29d04673cdec939e99ea",
+        "size_bytes": 4449
+      },
+      {
+        "path": "tests/test_blind_packet_negative_inspiration.py",
+        "sha256": "e108c55b0e657ea9cb21bc614a2e495ef121348d27a142e21974a4c4e56823f7",
+        "size_bytes": 3460
+      },
+      {
+        "path": "tests/test_bottleneck_compression.py",
+        "sha256": "a911c88639e68ee280992839140959f12fab22a68d471d7cba1c59b3825836ff",
+        "size_bytes": 2981
+      },
+      {
+        "path": "tests/test_bridge_broker.py",
+        "sha256": "cdffd2de14913ee7c5e586331d92f70a969bc36dbbe201b033df21cd2e6c02dd",
+        "size_bytes": 1745
+      },
+      {
+        "path": "tests/test_budget_scheduler.py",
+        "sha256": "6e9b8086a511433bea114c8608f0adfe421ce86d17504c83e4ec4ebab90d94ab",
+        "size_bytes": 28285
+      },
+      {
+        "path": "tests/test_claim_verification_monotonicity.py",
+        "sha256": "944aa4c62d6968eb70a1a9a09490c91f26f2a419927698b95fa3b6ce6354c0ad",
+        "size_bytes": 6799
+      },
+      {
+        "path": "tests/test_cli_desktop_resume.py",
+        "sha256": "97e6c8129362b5e475598639e6e1cb3b49aeab0236721b2059d75737adacf5d9",
+        "size_bytes": 1467
+      },
+      {
+        "path": "tests/test_common_mode_assumption.py",
+        "sha256": "715768d88a2b16e0ae762bee6ad9dc36e0caa337d4999f591cebea4b97c9c5cf",
+        "size_bytes": 6129
+      },
+      {
+        "path": "tests/test_common_mode_assumption_domains.py",
+        "sha256": "eb782e3d5e67f38b7557882e85dff3948f5a682a760c26fdf15f5e3e1710cfa3",
+        "size_bytes": 5902
+      },
+      {
+        "path": "tests/test_common_mode_execution_closure.py",
+        "sha256": "7eaed68476740afbda96efc2f86ca7531048b60a9034d04c8f747fff76f7b198",
+        "size_bytes": 27403
+      },
+      {
+        "path": "tests/test_computation.py",
+        "sha256": "7453662462f4198b607b9972a0d3cc1b3661e49792589d2fe7734df5732fed57",
+        "size_bytes": 42146
+      },
+      {
+        "path": "tests/test_computation_benchmark.py",
+        "sha256": "da7e4b8ada24366243d0cd38c6c345a50a46321ea773f6c2a88f35fb3e4ede90",
+        "size_bytes": 404
+      },
+      {
+        "path": "tests/test_computation_contracts.py",
+        "sha256": "3d6cc182d08ab8fdc52d4c3c0fe303df739de8985c947d3e4a196508db018d4d",
+        "size_bytes": 13527
+      },
+      {
+        "path": "tests/test_computation_evidence_gate.py",
+        "sha256": "fe657bc6c6da39281f2ff4f195aff1c829aed8b1937fd61b06bbbaba267764e1",
+        "size_bytes": 1657
+      },
+      {
+        "path": "tests/test_construction_inventor.py",
+        "sha256": "4d93035ce3256d42322a3d95615faa2231e350015b42dc7bad9da0dadd5e9bda",
+        "size_bytes": 2745
+      },
+      {
+        "path": "tests/test_context_selection_policy.py",
+        "sha256": "0ef7ae8ff782932a77588d97783037ce1d7f50ac5ba44c362612fb8c26b61a23",
+        "size_bytes": 11443
+      },
+      {
+        "path": "tests/test_continuation.py",
+        "sha256": "2385595bf6ab66a342a7f0327744bfdcd7e1666bd4d3fd47e9390597d0dee8bd",
+        "size_bytes": 36355
+      },
+      {
+        "path": "tests/test_continue_deepening_gate.py",
+        "sha256": "46dd0613cb888be6a33929ba37507dca2735e80de2564bcb31c2e13cdf8f3898",
+        "size_bytes": 2790
+      },
+      {
+        "path": "tests/test_contradiction_broker.py",
+        "sha256": "a2190e724d356c3839673932e306bcf20acc0a7e71ec59918e1b55e15b018206",
+        "size_bytes": 1870
+      },
+      {
+        "path": "tests/test_control_action_materialization.py",
+        "sha256": "4d263d6e30418025ddf926df49d75ba89a3507dff95f0d3ab682937d7a74c4f0",
+        "size_bytes": 12844
+      },
+      {
+        "path": "tests/test_core_proof_debt.py",
+        "sha256": "49aa556e018d7f4abc507e0c01e5bcda342629a611944ef362930d7d4194a149",
+        "size_bytes": 3511
+      },
+      {
+        "path": "tests/test_countermodel_execution_closure.py",
+        "sha256": "97ceef3ab552886ca6c38c8db0dad58977871f478c1acbfcdf0ddbf1d9732e31",
+        "size_bytes": 8817
+      },
+      {
+        "path": "tests/test_critical_calculation_gate.py",
+        "sha256": "5229b32c9a2280d04e02c328addc4e8d8624667977a1540c1a141898214c0768",
+        "size_bytes": 9561
+      },
+      {
+        "path": "tests/test_cross_route_phase.py",
+        "sha256": "310a6a0671cc416bc54bfbfb636adf5dc37d1bd0aa45ce11728f41f230ce2fe6",
+        "size_bytes": 862
+      },
+      {
+        "path": "tests/test_cross_run_inspiration_learning.py",
+        "sha256": "28069d0c63ec6a1b1f1171ad180ac7c7aca4ca933a647f9cb8cfaaba42df2828",
+        "size_bytes": 5341
+      },
+      {
+        "path": "tests/test_deep_exploration_policy.py",
+        "sha256": "d7911f9185b4c23ac631bc7e1f80ec2eda2309c583caafc2f35640c774fef98a",
+        "size_bytes": 14089
+      },
+      {
+        "path": "tests/test_deep_exploration_runtime.py",
+        "sha256": "7787c2ce3f45afb8a26dcd37b10a5edfac712b4514309ff54279fe66f31094f0",
+        "size_bytes": 22864
+      },
+      {
+        "path": "tests/test_deepseek.py",
+        "sha256": "d91bb5de241d6a0a6e0681abf2bbddce0d1e3c7cf26521706217c6b72aeb97b2",
+        "size_bytes": 17109
+      },
+      {
+        "path": "tests/test_dependency_ref_namespaces.py",
+        "sha256": "5f28d1dbdba399db055ea94d0c7776ce5b13be3c09794124749d1861bcce3e6f",
+        "size_bytes": 9852
+      },
+      {
+        "path": "tests/test_desktop.py",
+        "sha256": "5424b0ac674d0f22bea8ba86f093ebe449e66f9391c9d560aac370ef55cb34c6",
+        "size_bytes": 26376
+      },
+      {
+        "path": "tests/test_direct_premise_closure.py",
+        "sha256": "2b991a800839bff4470db2a931f36a6874e64be00f935bbca8dfd3b304664291",
+        "size_bytes": 2398
+      },
+      {
+        "path": "tests/test_directed_computation_smoke.py",
+        "sha256": "f93e6ef1f68c233b275491f5d9eaade2bce81b07b02bb7b1fafc9979d0a038c1",
+        "size_bytes": 1206
+      },
+      {
+        "path": "tests/test_domain_strategy_preservation.py",
+        "sha256": "a4bca70034f93ab13769e10843ae7f82e71b0a777400b491a0cd766f585326f3",
+        "size_bytes": 4408
+      },
+      {
+        "path": "tests/test_end_to_end.py",
+        "sha256": "e0ff0d2341822079788faea1fe8bce6a692c25912fd5ae7e2447abc7fcf3da0e",
+        "size_bytes": 1486
+      },
+      {
+        "path": "tests/test_executable_countermodel_falsification_tasks.py",
+        "sha256": "74d0aae8aa5cbb71be652c2d5195c39a0963159e9b430fd7e944943b9611c7c8",
+        "size_bytes": 4596
+      },
+      {
+        "path": "tests/test_failure_classification_and_blueprint.py",
+        "sha256": "8e8ed2aef7fc06c8726e17313a8aea6b5c9e39c98ce5a7ece917b3ac89c5d11d",
+        "size_bytes": 4591
+      },
+      {
+        "path": "tests/test_falsification_fast_lane.py",
+        "sha256": "5a925caabaf7a650ed72c05ca8328ff4e8cd252679443576c9a5c9d402a9e411",
+        "size_bytes": 5412
+      },
+      {
+        "path": "tests/test_falsification_task_materialization.py",
+        "sha256": "40ecc133df04622d80537d2734fceaa09c561e52934cf6b0b3388c629fa8a4af",
+        "size_bytes": 8675
+      },
+      {
+        "path": "tests/test_feedback_authority.py",
+        "sha256": "50fde56bc1ef04bf1f013e6b4533b1401534c7f505c79aa8472b73fb81f73b6c",
+        "size_bytes": 3594
+      },
+      {
+        "path": "tests/test_formal_microcert.py",
+        "sha256": "d855dc35de43b34703e61147eae93671a694ebea6e7f9c9e63e9869d9cf8dc9c",
+        "size_bytes": 2311
+      },
+      {
+        "path": "tests/test_goal_alignment_contract_enforcement.py",
+        "sha256": "f98815666171ccde0a19448fabd90451f6aa3d900fec9581abd42c20ba7630c2",
+        "size_bytes": 4215
+      },
+      {
+        "path": "tests/test_goal_alignment_gate.py",
+        "sha256": "0fc423c182f1795f83b935d62cd4a45ef48ecc381b6d8ebd55645d6c21727ec2",
+        "size_bytes": 3911
+      },
+      {
+        "path": "tests/test_goal_preflight.py",
+        "sha256": "28a3459ff324f4c3fd0fd7b5eac990595e5ff083d5a5f3ee0c38ba2c6a5564cb",
+        "size_bytes": 5581
+      },
+      {
+        "path": "tests/test_guards_and_context.py",
+        "sha256": "a7a79e5dff1db4104c640dba88a6a613f2f670883f3294b11ec5b3a5b544943f",
+        "size_bytes": 6313
+      },
+      {
+        "path": "tests/test_hierarchical_config_invariants.py",
+        "sha256": "8b64f1984f18ee66350618644f5046aac30cd3f099c60de9f2477cd61c4e6d7c",
+        "size_bytes": 528
+      },
+      {
+        "path": "tests/test_hierarchical_legacy_dependency_gate.py",
+        "sha256": "e462df8a71f4039cf3676146990c3d46b52cc0171c62ccd4932bc673669120e5",
+        "size_bytes": 2026
+      },
+      {
+        "path": "tests/test_induction_measure_activation.py",
+        "sha256": "62f9f54226f9bd47d8dab2ccd0a6b824db654dfe41834ebfd4c31f3038948a13",
+        "size_bytes": 8106
+      },
+      {
+        "path": "tests/test_induction_measure_selector.py",
+        "sha256": "a687efd8c05eda8a26cf3f248641ad1aaacece1e841135263b02fa6e5baa8381",
+        "size_bytes": 1391
+      },
+      {
+        "path": "tests/test_inference_risk_taxonomy.py",
+        "sha256": "fdec25a798f3ea0e467a479122ee1ef962b4881055193e2a38276a3de2ed167d",
+        "size_bytes": 4380
+      },
+      {
+        "path": "tests/test_inspiration_advanced_mechanisms.py",
+        "sha256": "e3a4d0b8e2a961eb30975facbaf9316eb03d0f06025cc2d2a5fbb9c7c36394ef",
+        "size_bytes": 18561
+      },
+      {
+        "path": "tests/test_inspiration_budget_reservation.py",
+        "sha256": "3efb44c529f890e30dcf94ed4371f89738e98011e1e469786d37f2ee0d5ddd51",
+        "size_bytes": 4901
+      },
+      {
+        "path": "tests/test_inspiration_candidate_population.py",
+        "sha256": "c3eae348e6bbe00880dd656bc6fd7d1a9e7b34d3facc143efe26b39cd8d40192",
+        "size_bytes": 13141
+      },
+      {
+        "path": "tests/test_inspiration_credit_attribution.py",
+        "sha256": "17945e6be6738f14f95a88257e5ed780c8d968dec38129dd6f0ff4700bfb529a",
+        "size_bytes": 11996
+      },
+      {
+        "path": "tests/test_inspiration_fair_rotation.py",
+        "sha256": "e6209c8ab34268356716f57aec612ed064977ef40c1138897cd3c9ba9343a091",
+        "size_bytes": 1756
+      },
+      {
+        "path": "tests/test_inspiration_outcome_learning.py",
+        "sha256": "a261f2bdb799acc35682c7cf3f6cf753eda2d40e4ccebe8089d70487e5579418",
+        "size_bytes": 3988
+      },
+      {
+        "path": "tests/test_inspiration_policy_controls.py",
+        "sha256": "f5616ba2f6bfe5c74b01b10df6088029f194e3490c77bb54fd25497c8880b26f",
+        "size_bytes": 5752
+      },
+      {
+        "path": "tests/test_inspiration_proposer_assignment.py",
+        "sha256": "9a9036a84b78bc0372692eef4ee64e468a9dd3773434eb4be985af1b1125eb92",
+        "size_bytes": 4415
+      },
+      {
+        "path": "tests/test_inspiration_review_defer_and_chain_dedup.py",
+        "sha256": "1888a9a054beebe3757565713870193703b48881eeec3ed693c3083084a6133d",
+        "size_bytes": 7299
+      },
+      {
+        "path": "tests/test_inspiration_triggers.py",
+        "sha256": "19d0b9ed2e93e98f0394cd10153088a85304be4289503dfb2faa2dcd0d81c949",
+        "size_bytes": 1943
+      },
+      {
+        "path": "tests/test_json_and_tools.py",
+        "sha256": "58f97f8598b89146430c53aa9ef126724aac2a8ad3ca9a848d9e009173a880b5",
+        "size_bytes": 1805
+      },
+      {
+        "path": "tests/test_legacy_checkpoint_claim_quarantine.py",
+        "sha256": "ff2c58a6feb2d3ba02bb2060b6c99b1bbdcac2cba475ced6e0955ce256a8c2c2",
+        "size_bytes": 3702
+      },
+      {
+        "path": "tests/test_legacy_checkpoint_resume_uses_hierarchical_route_pipeline.py",
+        "sha256": "dacf074bc4c2485864ae1b3551a0f08ca479db7a188da6f84302a7d8e58b76ac",
+        "size_bytes": 4821
+      },
+      {
+        "path": "tests/test_legacy_mode_context_compatibility.py",
+        "sha256": "1cae4a664ecc6a6c37e5e0988e38a416f3f4f539e9374ee7f22840fde1b7cbbf",
+        "size_bytes": 2428
+      },
+      {
+        "path": "tests/test_mechanism_ontology.py",
+        "sha256": "250dc999e067c266151093505bb7871011cec432aabd8d495e27e0bc291eb2cf",
+        "size_bytes": 2740
+      },
+      {
+        "path": "tests/test_memory.py",
+        "sha256": "3cc16af990225e0ac7c8e18a55e64e76c42e4018f1b5a559979d40401dba9bcc",
+        "size_bytes": 4888
+      },
+      {
+        "path": "tests/test_message_broker.py",
+        "sha256": "812aa5644a9ebf7705f7a110e862fdd49971a484ae5afb899dee0f5d6a4ecf9c",
+        "size_bytes": 12316
+      },
+      {
+        "path": "tests/test_message_liveness_and_priority.py",
+        "sha256": "8c654a05ccddc6fcd864c65e70ae683946b0ed224d05e025001b5319b6bd4178",
+        "size_bytes": 6290
+      },
+      {
+        "path": "tests/test_message_protocol.py",
+        "sha256": "8f9cc783b968cefef9cf99af5c8dca4db5bd9a39e0bf7e6e8fd44a9804c2b995",
+        "size_bytes": 2637
+      },
+      {
+        "path": "tests/test_message_utility_contract.py",
+        "sha256": "d196a3544b9ad876966393008215cc6626a99915b0856779401ae8a819d0503e",
+        "size_bytes": 4675
+      },
+      {
+        "path": "tests/test_meta_directive_control.py",
+        "sha256": "e8c8dfdd910dee3aae08691e8a89709153d7e085d4c66bf72af05f109204cf4b",
+        "size_bytes": 6273
+      },
+      {
+        "path": "tests/test_meta_pivot_effectiveness.py",
+        "sha256": "d379d75bc082b997e8c3d825e57c8c0fa36994d4ea250c7c24d240ca993fc4a9",
+        "size_bytes": 4754
+      },
+      {
+        "path": "tests/test_meta_pivot_state_machine.py",
+        "sha256": "e4e722a22e381a06a6d45edaef0d4a72d1dbd1fd93702bed29baea92a6c27e92",
+        "size_bytes": 8070
+      },
+      {
+        "path": "tests/test_meta_strategist.py",
+        "sha256": "8d8317382d96a725d03a49cf89c3f01f516a5184e3c3dfd7c5756f2b54a2b1be",
+        "size_bytes": 1700
+      },
+      {
+        "path": "tests/test_minimal_sufficiency.py",
+        "sha256": "69ef645b53b93b08b5503502c2fe5a8885edb013402fd7c9cde1abacbe9f0b47",
+        "size_bytes": 1766
+      },
+      {
+        "path": "tests/test_near_miss_ledger.py",
+        "sha256": "3623bcd6c66f1125a6525f42122196f0ae9bdbc5f2eb1a34c04c633f98af6198",
+        "size_bytes": 2552
+      },
+      {
+        "path": "tests/test_near_miss_semantic_quality.py",
+        "sha256": "61f1e8c602b58aac5f7c7d809c5bcd809460056ff685025b3b6cffc0d4aabb44",
+        "size_bytes": 6117
+      },
+      {
+        "path": "tests/test_no_direct_legacy_global_context_calls.py",
+        "sha256": "05a8889617c671baf5202472210df2b94433aa930d7083d7fbb01ba7bafc04af",
+        "size_bytes": 1287
+      },
+      {
+        "path": "tests/test_no_legacy_claim_blind_review_bypass.py",
+        "sha256": "586de18e95490efbdbdbe8252e05b82437e5a9969ded909d66c1c6e322d8588d",
+        "size_bytes": 2102
+      },
+      {
+        "path": "tests/test_no_legacy_claim_broker_bypass.py",
+        "sha256": "6b3bbf690230f626597c596918abdcae3d1abcdcc730d0bd5e76eb8d13d92ed3",
+        "size_bytes": 6868
+      },
+      {
+        "path": "tests/test_no_legacy_claim_revision_bypass.py",
+        "sha256": "e4c0778a9e9c2e8e77e2936d2db2e5350bc5f502600ca892f5a2dadae26c4a1d",
+        "size_bytes": 4219
+      },
+      {
+        "path": "tests/test_no_legacy_claim_synthesis_bypass.py",
+        "sha256": "87934f0b6346cf35f8b3da47b9920f657b402f2548096faaae7af5df614056aa",
+        "size_bytes": 4197
+      },
+      {
+        "path": "tests/test_no_legacy_claim_verifier_bypass.py",
+        "sha256": "0ff1942f802ab3119158ac6c2d8834e529f92b3f75f51486c13ce0614975f2d0",
+        "size_bytes": 6354
+      },
+      {
+        "path": "tests/test_no_proof_control_fact_bypass.py",
+        "sha256": "37d2ff3793e9470e16f31b3b8fa0477bc1c8feb1302df93afc1c814b2d9537aa",
+        "size_bytes": 4500
+      },
+      {
+        "path": "tests/test_no_proof_control_hash_regression.py",
+        "sha256": "af0dab65b5c3c10a88b2ece07950d34f9b4e01bef00eb50f770d7e49e47dd5f4",
+        "size_bytes": 3010
+      },
+      {
+        "path": "tests/test_novelty_signature.py",
+        "sha256": "966b364e2e664389cbde83d41ac8631c3aca91bbec79f1622d53df21140690b7",
+        "size_bytes": 1103
+      },
+      {
+        "path": "tests/test_obligation_domain_separation.py",
+        "sha256": "35c321bbdddac28ff7fa97ccf58f38718746c1db29248a24925032f942ac6615",
+        "size_bytes": 3633
+      },
+      {
+        "path": "tests/test_obligation_domains_and_clusters.py",
+        "sha256": "a8d4612c75105cdb7b2fb787b110f67f265977f4156d27bdc9b39843e32859ca",
+        "size_bytes": 6724
+      },
+      {
+        "path": "tests/test_obligation_semantic_quality.py",
+        "sha256": "159c94017a1e4f1a4f3d7cc5e0137c282b3ef9ef74d9be3fe4f48ae2915c2abd",
+        "size_bytes": 6408
+      },
+      {
+        "path": "tests/test_pool.py",
+        "sha256": "010be1aa9e99c4ffacc6a2f17d0e06b516905c0997c5a6d29559b41d09a4203a",
+        "size_bytes": 2545
+      },
+      {
+        "path": "tests/test_post_failure_bottleneck.py",
+        "sha256": "26066bac6d3de45365bc44ec99ac720389ca42843c669cbc915ca81f3ee875c6",
+        "size_bytes": 14647
+      },
+      {
+        "path": "tests/test_problem_semantic_view.py",
+        "sha256": "e7a3c724bdf978260c6bc7fca58456d0993fd389ad554fb0c9a0ef9503cb8f2a",
+        "size_bytes": 6017
+      },
+      {
+        "path": "tests/test_proof_control_config.py",
+        "sha256": "39c174f680bf62252bf26fe6be5e4ca20097d1112a7139100e61f5b6a1fcf94c",
+        "size_bytes": 2006
+      },
+      {
+        "path": "tests/test_proof_control_does_not_change_reasoning_token_limits.py",
+        "sha256": "5c1b91cbaa726c1fa9c928af5a7a6607cdbd020d20ce05b5c75cc8dca2b2d8ae",
+        "size_bytes": 2512
+      },
+      {
+        "path": "tests/test_proof_control_end_to_end.py",
+        "sha256": "dd87f8800f632eb77d873e7af62105ba6035d75c044bdab7456e0e75cf6fa421",
+        "size_bytes": 8414
+      },
+      {
+        "path": "tests/test_proof_control_logic_traps.py",
+        "sha256": "549d34eacd21a3c218296a78adc306fb7c46f7d9c679d0be4b2aa94e809cdd1a",
+        "size_bytes": 1097
+      },
+      {
+        "path": "tests/test_proof_control_resume.py",
+        "sha256": "c383e2ef7a6853b4784eeb8105e279822116dc484d783d30597caee9b3b662e1",
+        "size_bytes": 5456
+      },
+      {
+        "path": "tests/test_proof_control_state.py",
+        "sha256": "1e555f81d433492513e07b36cca8b2c7f4ee064e599c719c6abb41c6c5970025",
+        "size_bytes": 2064
+      },
+      {
+        "path": "tests/test_proof_graph.py",
+        "sha256": "17372be1dbec48df80ec9940544cb35d2e51b4de8c6855cf6f389483bdad3f6f",
+        "size_bytes": 2228
+      },
+      {
+        "path": "tests/test_proof_identity_and_stagnation.py",
+        "sha256": "23699e6b83fff8d33c86429b6efc8e63bde47c2bad59af100ec58c9f95144783",
+        "size_bytes": 10894
+      },
+      {
+        "path": "tests/test_proof_role_classification.py",
+        "sha256": "b35c869ed023acad937b76f28b47002439bf66c2bd3ffac7d5ec912c4402e3bc",
+        "size_bytes": 2206
+      },
+      {
+        "path": "tests/test_property_strengthening_risks.py",
+        "sha256": "6fa99706091dbc63546515a2bd54fe383cae9edfbbaa05819e9bb7dd138ced50",
+        "size_bytes": 6454
+      },
+      {
+        "path": "tests/test_realizer_repair.py",
+        "sha256": "c567498834ab63f8e78f3483f0ddd932fb558cc98a5784c5709db11a50f17269",
+        "size_bytes": 4010
+      },
+      {
+        "path": "tests/test_reasoning_first_sequence_tools.py",
+        "sha256": "8d5449e0d410e75aa7cda660798e1a142b6819dfff05972d1913f059b44957de",
+        "size_bytes": 9740
+      },
+      {
+        "path": "tests/test_reasoning_trace.py",
+        "sha256": "15541cc0555b4ceee42b707c5db85d43f8cb2146aa1170fce5e9f52b422c962d",
+        "size_bytes": 8503
+      },
+      {
+        "path": "tests/test_referee_claim_ledger_propagation.py",
+        "sha256": "0621c078bfe492151d6068207890715f086311d30df834522bcf390614ea9ac1",
+        "size_bytes": 4625
+      },
+      {
+        "path": "tests/test_representation_switchboard.py",
+        "sha256": "47fcd69219fc0270c46a0226b5a6cbe8939eec7a8f36f16bd39dc438e798ab64",
+        "size_bytes": 2197
+      },
+      {
+        "path": "tests/test_research_progress_reporting.py",
+        "sha256": "2aa0190c01febb50daed396a18c72c0004be5b558bc4ea02ffa8ae3273bf3c01",
+        "size_bytes": 2339
+      },
+      {
+        "path": "tests/test_rewrite_semantic_quality.py",
+        "sha256": "d1c99b2158a53e00a0e23a5807a26a3b065d926998d519074acb985a9a5e44e7",
+        "size_bytes": 4343
+      },
+      {
+        "path": "tests/test_route_admission_gate.py",
+        "sha256": "a3208e9dc83ea04a9d3297210e4d4e22f1b0faa6da191baa1191790b81e447f5",
+        "size_bytes": 3228
+      },
+      {
+        "path": "tests/test_route_admission_intermediate_lemmas.py",
+        "sha256": "e69257cde490f9808c8d6085d3c322b94ab7886bbef478e6bfc8cada9b4101d4",
+        "size_bytes": 5295
+      },
+      {
+        "path": "tests/test_route_registry.py",
+        "sha256": "fce26fe442b53006c5bc577d197e951fe04279ec101e75884b3c5e7cf6dd5ca3",
+        "size_bytes": 3842
+      },
+      {
+        "path": "tests/test_route_teams.py",
+        "sha256": "8b9dc81759c5458be2c34db5995ba9d2edc866325f8e305ceb7918f9b6cfb85e",
+        "size_bytes": 3723
+      },
+      {
+        "path": "tests/test_route_waiting_and_wake.py",
+        "sha256": "cf86830513611c8a9732e0025ad7a7a730f3eb33693bcec712591c643dac3653",
+        "size_bytes": 3930
+      },
+      {
+        "path": "tests/test_run_reliability_recovery.py",
+        "sha256": "558faaa5f92e9d0d8934531fd21aaff3155a060d4e932b7928a64db23ada7e17",
+        "size_bytes": 13851
+      },
+      {
+        "path": "tests/test_scheduler_graph_signals.py",
+        "sha256": "548377346965d6bca91ac0f90936d03ae6367aec35fecb313fc32be10b7d11d9",
+        "size_bytes": 2273
+      },
+      {
+        "path": "tests/test_scheduler_route_failure_propagation.py",
+        "sha256": "aa41433d6b56b00f2e458c6e7dbebf1f92684e8e285a1aff4efc7df12ae923cd",
+        "size_bytes": 5652
+      },
+      {
+        "path": "tests/test_schemas.py",
+        "sha256": "df28de4999fa455c482271151578699a5895fbde6853e4adf4dc669082722131",
+        "size_bytes": 2065
+      },
+      {
+        "path": "tests/test_scope_guard.py",
+        "sha256": "dede0912adb325fc5edbe2d7c35feffcda4f8d342bcf3831ec9ef6f40b1284ba",
+        "size_bytes": 2831
+      },
+      {
+        "path": "tests/test_scoped_claim_promotion.py",
+        "sha256": "c48544ee554557a868ae71e3b212a4e363c392548d0c0f98dc4bb221990ddcaf",
+        "size_bytes": 4790
+      },
+      {
+        "path": "tests/test_server.py",
+        "sha256": "b8ebd737aca644aad107c0e1eb0b8a93b0b8ca6ef8dc9e613ae58efa190cc2ab",
+        "size_bytes": 1849
+      },
+      {
+        "path": "tests/test_sparse_cross_route.py",
+        "sha256": "da90221de5e7db102fc5094035cd541299f1421a18fe807ba200e67e18d38650",
+        "size_bytes": 1750
+      },
+      {
+        "path": "tests/test_store.py",
+        "sha256": "252b34c47047ef70a2ab4fc0c9168857a390543116681cb489d7a5b2e7a42893",
+        "size_bytes": 3213
+      },
+      {
+        "path": "tests/test_strategy_blueprint_before_admission.py",
+        "sha256": "86907dd8ce7f932588aeed818dc3d8e340847639dba94ed9b51488e7f723e723",
+        "size_bytes": 3541
+      },
+      {
+        "path": "tests/test_structured_payload_normalization.py",
+        "sha256": "dfd56df70ad3811fbba56d95b236fab76c8feed924eafcef393ece658d6f1645",
+        "size_bytes": 6298
+      },
+      {
+        "path": "tests/test_surprise_budget.py",
+        "sha256": "5f431ed0b3227d53f0cd48463f47d74424e54892300eafcfb2556c26bffdfa3b",
+        "size_bytes": 2448
+      },
+      {
+        "path": "tests/test_synthesis_readiness_gate.py",
+        "sha256": "085e2daaa02da3ee1d3d8acd02073eba34506c06574980885193b11177ed873f",
+        "size_bytes": 5543
+      },
+      {
+        "path": "tests/test_task_contracts.py",
+        "sha256": "2f9e2ac169ab7a94fe72add07b790192264c9a0652618c387efeada377e31dd1",
+        "size_bytes": 2651
+      },
+      {
+        "path": "tests/test_terminal_resume_policy.py",
+        "sha256": "2f44c4e92169ec63497a5cf633869c8e50558c016859973581dea5033bc36ab0",
+        "size_bytes": 2748
+      },
+      {
+        "path": "tests/test_topology.py",
+        "sha256": "980e5e08173bc06c42abb8127925562973392f74b241bf2949d4d5a9cb8b6de0",
+        "size_bytes": 2183
+      },
+      {
+        "path": "tests/test_topology_benchmark.py",
+        "sha256": "0315239eff832c1587031a2f862602742b94b27bea35dc77d94eba49d2725c5f",
+        "size_bytes": 837
+      },
+      {
+        "path": "tests/test_topology_resume.py",
+        "sha256": "ddce6e27b95eb3ce9ce6fb5a4b738679e0ab5a42b3fafbaf6a65f441933e82cb",
+        "size_bytes": 8026
+      },
+      {
+        "path": "tests/test_typed_memory.py",
+        "sha256": "764fec02a6e1a591e62fa4f21436533e6177dfe199e7f1f5ffed69c54654ca48",
+        "size_bytes": 2745
+      },
+      {
+        "path": "tests/test_typed_prompt_serialization.py",
+        "sha256": "3c54e88e9dd11080ff3f9c6ec29d32c8ed77a54883d1ff339e7ef13dc3698963",
+        "size_bytes": 5397
+      },
+      {
+        "path": "tests/test_v07_end_to_end.py",
+        "sha256": "46dca7300bd7e60fdc95c28d5518cb74dc84eb77757c7b6e392bdbdc7cf2376c",
+        "size_bytes": 1504
+      },
+      {
+        "path": "tests/test_v081_resume_exactly_once.py",
+        "sha256": "cf11ee42b713a7440359d4fceb9b6ddc0738b8dbfa9cf197ab622a63d82a3f0b",
+        "size_bytes": 4876
+      },
+      {
+        "path": "tests/test_v081_semantic_control_end_to_end.py",
+        "sha256": "a5ad7d638fda44196ba65a44e93c3156dadd1457327abd11279440f98e1d5b64",
+        "size_bytes": 2973
+      },
+      {
+        "path": "tests/test_v082_checkpoint_migration.py",
+        "sha256": "2b3ed6553461d360354ef5dd9f3623eddbca2ad4cd7a78db50b24fb8b01a8b98",
+        "size_bytes": 2400
+      },
+      {
+        "path": "tests/test_v082_end_to_end.py",
+        "sha256": "d8631997ded00a7270028cbd0724b04e80e11394de34b0ab7c2e357cf0dcd7b0",
+        "size_bytes": 5547
+      },
+      {
+        "path": "tests/test_v082_static_no_specialization.py",
+        "sha256": "4be430d5a0e2e65f1e5a8924820fad5b293dccb2d5f572b37ef93db09b298f88",
+        "size_bytes": 2768
+      },
+      {
+        "path": "tests/test_v083_route_admission_recovery.py",
+        "sha256": "cff75a7972ab259ff614af4c21e70c698551adebfe62e8a931ccb74f0355c04d",
+        "size_bytes": 9638
+      },
+      {
+        "path": "tests/test_v083_semantic_repair.py",
+        "sha256": "0e152ae30b7b9b0b7146b0b2014fecb59e3dcdf5886dc71fa2221e57142a0c27",
+        "size_bytes": 11147
+      },
+      {
+        "path": "tests/test_v084_evidence_semantics.py",
+        "sha256": "766148ea81cd677236f7c554d15f49f3ab10907b0692656c26301197892ceac3",
+        "size_bytes": 8786
+      },
+      {
+        "path": "tests/test_v084_state_machine.py",
+        "sha256": "afc00528e1940d12851047903142a01bc1f4edf3e9cc7b59b6a52ff38c613055",
+        "size_bytes": 6701
+      },
+      {
+        "path": "tests/test_v084_truncation_guard.py",
+        "sha256": "fa067cdc2da21962675031a2c19539d1f043a8446a62b811119b1c0de3582d60",
+        "size_bytes": 4466
+      },
+      {
+        "path": "tests/test_v09_computation_channel.py",
+        "sha256": "5b7599f214123aaef5766f80c6db913e36cc8381c0b9a3732a6585c8d762943d",
+        "size_bytes": 4707
+      },
+      {
+        "path": "tests/test_v09_continuity_and_tree.py",
+        "sha256": "3174e6b04dc56707e7b6d23e0a10f1783bece376124db2e6f3f5c3095271bf0e",
+        "size_bytes": 10540
+      },
+      {
+        "path": "tests/test_v09_math_similarity.py",
+        "sha256": "7e31289891b017f0c877f287c1a0bbd252b1ec1699a6232f6834f573677a06f3",
+        "size_bytes": 5011
+      },
+      {
+        "path": "tests/test_v09_toolbox.py",
+        "sha256": "c701859b169c6b51824a839d24b930949bea4d567a285e4530e02a87be69f036",
+        "size_bytes": 21182
+      },
+      {
+        "path": "tests/test_v09_two_phase.py",
+        "sha256": "8a241bcbae720383cd7e9daffa8654719e2a032fec72b9a799fa83f14e9e3f4f",
+        "size_bytes": 10423
+      },
+      {
+        "path": "tests/test_validation_escalation.py",
+        "sha256": "5515548eee9bacd7a74078aa789662639e4b021cb93c093684ce0d499b6bb9ca",
+        "size_bytes": 2552
+      },
+      {
+        "path": "tests/test_verified_experience_distillation.py",
+        "sha256": "7dad63440c806e820d2ca0c205feb7f70b66a50f85d535620e3f7a46f005b214",
+        "size_bytes": 8142
+      },
+      {
+        "path": "tests/test_verifier_issue_risk_mapping.py",
+        "sha256": "68c27aa39f8544e2ef8816b188b3e48ceaab910b417c67b8859a1cdcb01de7b7",
+        "size_bytes": 3965
+      },
+      {
+        "path": "tests/test_working_checkpoint_and_metrics.py",
+        "sha256": "1641c502af1e446ca3d96687f01d13fb57187e1b55c4139c257e2d0cc3bb78a5",
+        "size_bytes": 6688
+      },
+      {
+        "path": "tests/test_zero_utility_broadcast_gate.py",
+        "sha256": "f729808d3d65c5b79edce94afe761a2ebb2bca015123f0bed786427905ba8b9b",
+        "size_bytes": 6240
+      },
+      {
+        "path": "tests/v07_helpers.py",
+        "sha256": "edd3a54dcc304f3ffac166201f76eed7d9ea178b51b168498fb793584e6a60dc",
+        "size_bytes": 7007
+      },
+      {
+        "path": "tests/v082_helpers.py",
+        "sha256": "5d9835c8ded38fe352d81862e273bfd3b0daade9d1122a09e464eac2a041399e",
+        "size_bytes": 2317
+      }
+    ],
+    "path": "C:\\Users\\yanxinyu\\Desktop\\JavaMathProofMeshMigration\\Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control\\JavaMathProofMesh-0.8.0\\SOURCE_SNAPSHOT_SHA256SUMS.txt",
+    "sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770"
+  },
+  "source_zip": {
+    "path": "C:\\Users\\yanxinyu\\Desktop\\JavaMathProofMeshMigration\\Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control\\JavaMathProofMesh-0.8.0\\migration\\input\\Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2"
+  },
+  "specification_sha256": {
+    "CODEX_MASTER_INSTRUCTIONS.md": "549aea286cbc86a77f90f2839e83c13a782b632242b716e55441c8211862c7b1",
+    "CODEX_START_HERE.md": "f2031ed702324de90c895d24b9a3f2aeee05f7666049503d6c2425ca13c2c4db",
+    "MIGRATION_PLAN.md": "2e2509395c55e0965936f382de10b12072c77d0dd2c595a50f8a481b0d2ead5b",
+    "OPS_CONFIG_DOC_MIGRATION_MAP.csv": "e4dc4aa2e3d5b656bead57c489d83bc66085340b49b69de1f901ecdd432ce098",
+    "PHASE_GATES.yaml": "b3b134441e8445a417d4d08350c9a8b7a9f475807c3fbcf70b2f3ddd5789b56a",
+    "PYTHON_SOURCE_MIGRATION_MAP.csv": "0a03fec07c6b1880f655da3b99a9fc92f9dc029684def026591796c94824fb10",
+    "PYTHON_TEST_MIGRATION_MAP.csv": "8d1ab4eda0a52436a1921da2c267a03106b73b32217198fce6826f114eca504a",
+    "SHA256SUMS.txt": "fe2503a183b0adf9036f6475f4397711e33b34778f57a68b6a76fcdd19f66a12",
+    "SOURCE_SNAPSHOT_SHA256SUMS.txt": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770"
+  },
+  "target_root": "C:\\Users\\yanxinyu\\Desktop\\JavaMathProofMeshMigration\\Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control\\JavaMathProofMesh-0.8.0"
+}
