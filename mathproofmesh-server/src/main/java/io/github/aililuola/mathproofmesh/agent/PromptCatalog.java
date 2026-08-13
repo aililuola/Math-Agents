@@ -44,7 +44,11 @@ public final class PromptCatalog {
   private static Map<String, String> instructions() {
     Map<String, String> stages = new LinkedHashMap<>();
     stages.put("goal_normalization", "Inspect ambiguity without solving or silently rewriting the goal.");
-    stages.put("triage", "Classify the immutable problem and recommend a cost-aware proof mode without solving it.");
+    stages.put(
+        "triage",
+        "Classify the immutable problem and recommend a cost-aware proof mode without solving it. "
+            + "For a CJK source, return a non-authoritative English semantic_view_candidate; "
+            + "its preserves_* flags are self-reports and never authorize changing the root goal.");
     stages.put("statement_normalization", "Restate each proposition explicitly without changing its mathematics.");
     stages.put("strategy_generation", "Generate genuinely distinct mechanisms and expose each load-bearing claim and falsification test. estimated_success and estimated_cost are normalized scores from 0.0 to 1.0, never percentages or token counts. calculation_checks accepts only typed ToolRequest kinds from its schema; sandboxed_python belongs in computation_hints and a later ExperimentSpec, never in calculation_checks.");
     stages.put("independent_exploration", "Develop only the assigned isolated route and report honest partial progress or a complete proof. Prefer registered typed computation methods. sandboxed_python is a last resort: arguments must contain exactly one input field whose value is the complete bounded JSON object supplied to run(data), domains must be empty, and typed_tool_gap must state why no typed method applies.");

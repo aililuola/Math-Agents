@@ -101,7 +101,7 @@ public final class SemanticProfileService {
     Profile left = extract(source);
     Profile right = extract(translation);
     List<SemanticInvariantAudit> findings = new ArrayList<>();
-    findings.add(compare("task_intent", sorted(left.taskIntents()), sorted(right.taskIntents())));
+    findings.add(taskIntentAudit(left.taskIntents(), right.taskIntents()));
     findings.add(compare("polarity", sorted(left.polarities()), sorted(right.polarities())));
     findings.add(compare("quantifier", left.quantifiers(), right.quantifiers()));
     findings.add(compare("domain", sorted(left.domains()), sorted(right.domains())));
@@ -219,9 +219,56 @@ public final class SemanticProfileService {
     addIf(result, "exists_unique", text, "存在唯一", "唯一存在", "there exists a unique", "exactly one");
     addIf(result, "at_least", text, "至少", "at least");
     addIf(result, "at_most", text, "至多", "at most");
-    addIf(result, "universal", text, "每个", "任意", "所有", "every", "each", "for all");
-    addIf(result, "existential", text, "存在", "某个", "there exists", "there is", "some");
+    addIf(
+        result,
+        "universal",
+        text,
+        "每一个",
+        "每个",
+        "任意",
+        "所有",
+        "对所有",
+        "every",
+        "each",
+        "for all",
+        "\\forall",
+        "∀");
+    addIf(
+        result,
+        "existential",
+        text,
+        "存在",
+        "某个",
+        "there exists",
+        "there exist",
+        "there is",
+        "some",
+        "\\exists",
+        "∃");
     return List.copyOf(result);
+  }
+
+  private static SemanticInvariantAudit taskIntentAudit(
+      Set<String> source, Set<String> target) {
+    List<String> sourceValues = sorted(source);
+    List<String> targetValues = sorted(target);
+    if (sourceValues.equals(targetValues)) {
+      return compare("task_intent", sourceValues, targetValues);
+    }
+    if (source.equals(Set.of("prove")) && target.isEmpty()) {
+      return new SemanticInvariantAudit(
+          "a declarative theorem statement preserves the requested proof task",
+          "task_intent",
+          sourceValues,
+          "pass",
+          targetValues);
+    }
+    return new SemanticInvariantAudit(
+        "task_intent differs between source and translation",
+        "task_intent",
+        sourceValues,
+        "fail",
+        targetValues);
   }
 
   private static void addIf(

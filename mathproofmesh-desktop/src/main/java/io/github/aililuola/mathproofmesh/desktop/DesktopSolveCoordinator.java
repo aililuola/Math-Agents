@@ -133,12 +133,15 @@ import io.github.aililuola.mathproofmesh.orchestration.teams.RouteTeamFactory;
 import io.github.aililuola.mathproofmesh.orchestration.teams.RouteTeamPlan;
 import io.github.aililuola.mathproofmesh.orchestration.teams.RouteTeamResult;
 import io.github.aililuola.mathproofmesh.proofcontrol.DependencyResolver;
+import io.github.aililuola.mathproofmesh.proofcontrol.ExactGoalContractChecker;
 import io.github.aililuola.mathproofmesh.proofcontrol.FailureControlService;
 import io.github.aililuola.mathproofmesh.proofcontrol.MetaPivotController;
 import io.github.aililuola.mathproofmesh.proofcontrol.NearMissLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlFacade;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlModels;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofIdentity;
+import io.github.aililuola.mathproofmesh.proofcontrol.ProblemSemanticViewService;
+import io.github.aililuola.mathproofmesh.proofcontrol.RootGoalContract;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyArchive;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyBlueprintCompiler;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphPolicy;
@@ -253,6 +256,7 @@ final class DesktopSolveCoordinator {
   private String workflowCursor = CURSOR_FREEZE;
   private DesktopSolveCheckpoint.InspirationRoundProgress inspirationProgress;
   private MetaReview pendingMetaReview;
+  private RootGoalContract rootGoal;
   private DesktopSolveCheckpoint.SchedulerStop schedulerStop;
   private FinalProof finalProof;
   private VerificationReport finalReview;
@@ -270,6 +274,10 @@ final class DesktopSolveCoordinator {
   private TypedMemory typedMemory;
   private ProofGraphStore proofGraph;
   private final ProofControlFacade proofControl = ProofControlFacade.createDefault();
+  private final ExactGoalContractChecker exactGoalContractChecker =
+      new ExactGoalContractChecker(proofControl.scopeGuard());
+  private final ProblemSemanticViewService semanticViewService =
+      new ProblemSemanticViewService(exactGoalContractChecker);
   private final FailureControlService failureControl = new FailureControlService();
   private final NearMissLedger nearMisses = new NearMissLedger();
   private final StrategyArchive strategyArchive = new StrategyArchive();
@@ -512,6 +520,7 @@ final class DesktopSolveCoordinator {
                     0,
                     "auto_assumed"));
     frozenProblem = outcome.problem();
+    rootGoal = RootGoalContract.freeze(frozenProblem.exactStatement(), exactGoalContractChecker);
     event(
         "problem_frozen",
         "freeze_problem",
@@ -544,6 +553,21 @@ final class DesktopSolveCoordinator {
                 "breadth",
                 "Classifying the problem")
             .value();
+    if (triage.semanticViewCandidate() != null) {
+      ProblemSemanticViewService.Attachment attachment =
+          semanticViewService.attach(
+              rootGoal(), frozenProblem, triage.semanticViewCandidate());
+      frozenProblem = attachment.authoritativeProblem();
+      event(
+          "semantic_view_audited",
+          "triage",
+          planner.id(),
+          attachment.auditedView().status(),
+          attachment.candidateAttached()
+              ? "Attached a deterministically audited non-authoritative English sidecar"
+              : "Rejected the English sidecar and retained the authoritative root goal",
+          "problem://" + rootGoal().sourceStatementHash());
+    }
     complete(RoutePipelineFunctions.RunStage.TRIAGE);
     workflowCursor = CURSOR_STRATEGY;
     persistUnchecked("triage", false);
@@ -601,7 +625,9 @@ final class DesktopSolveCoordinator {
     Set<String> mechanisms = new HashSet<>();
     ProofControlModels.Obligation goal = controlGoal();
     ProofControlModels.ScopeSignature scope =
-        proofControl.scopeGuard().extract("goal-scope", request.problem(), List.of(), 1.0d);
+        proofControl
+            .scopeGuard()
+            .extract("goal-scope", rootGoal().sourceStatement(), List.of(), 1.0d);
     ProofControlModels.Mode mode = proofControlMode();
     for (StrategyCard strategy : diverse) {
       if (strategyDependsOnNegative(strategy)) {
@@ -624,7 +650,7 @@ final class DesktopSolveCoordinator {
               .goalAlignment()
               .assess(
                   controlStrategy.id(),
-                  request.problem(),
+                  rootGoal().sourceStatement(),
                   scope,
                   goal,
                   scope,
@@ -5064,6 +5090,11 @@ final class DesktopSolveCoordinator {
     currentStage = checkpoint.currentStage();
     roundIndex.set(checkpoint.roundIndex());
     frozenProblem = checkpoint.problem();
+    rootGoal =
+        frozenProblem == null
+            ? null
+            : RootGoalContract.freeze(
+                frozenProblem.exactStatement(), exactGoalContractChecker);
     triage = checkpoint.triage();
     strategySet = checkpoint.strategySet();
     admittedStrategies = checkpoint.admittedStrategies();
@@ -5949,6 +5980,7 @@ final class DesktopSolveCoordinator {
         .anyMatch(obligation -> MAIN_GOAL_ID.equals(obligation.obligationId()))) {
       return;
     }
+    String authoritativeGoal = rootGoal().sourceStatement();
     proofGraph.addObligation(
         new ProofObligation(
             List.of(),
@@ -5959,13 +5991,13 @@ final class DesktopSolveCoordinator {
             List.of(),
             null,
             ObligationKind.MAIN_GOAL,
-            topology.mathNormalize(frozenProblem.normalizedStatement()),
+            topology.mathNormalize(authoritativeGoal),
             MAIN_GOAL_ID,
             1.0d,
             problemHash,
             List.of(),
             List.of("run"),
-            frozenProblem.normalizedStatement(),
+            authoritativeGoal,
             "open"));
   }
 
@@ -6152,10 +6184,17 @@ final class DesktopSolveCoordinator {
         : ProofControlModels.Mode.OFF;
   }
 
+  private RootGoalContract rootGoal() {
+    if (rootGoal == null) {
+      throw new IllegalStateException("root goal has not been frozen");
+    }
+    return rootGoal;
+  }
+
   private ProofControlModels.Obligation controlGoal() {
     return new ProofControlModels.Obligation(
         MAIN_GOAL_ID,
-        frozenProblem.normalizedStatement(),
+        rootGoal().sourceStatement(),
         ProofControlModels.ObligationKind.MAIN_GOAL,
         ProofControlModels.ObligationStatus.OPEN,
         frozenProblem.hardConstraints(),

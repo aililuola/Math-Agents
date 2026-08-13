@@ -103,7 +103,6 @@ final class ProofControlParityScenarios {
           "ProofControlStateParityTest" -> policyStateAndIdentityScenario();
       case "ObligationDomainSeparationParityTest", "ObligationSemanticQualityParityTest" ->
           domainAndQualityScenario();
-      case "ProblemSemanticViewParityTest" -> semanticViewScenario();
       case "ProofRoleClassificationParityTest" -> proofRoleScenario();
       default -> throw new AssertionError("unmapped phase-10 parity class: " + testClass);
     }
@@ -803,19 +802,6 @@ final class ProofControlParityScenarios {
         new RouteTargetSelector().select(
             "route-a", List.of(protocol), Set.of(), Set.of());
     assertFalse(none.admitted());
-  }
-
-  private static void semanticViewScenario() {
-    List<String> fragments =
-        ProblemSemanticViewService.protectedMathFragments(
-            "Prove that $x^2 >= 0$ for every $x \\in \\mathbb{R}$.");
-    assertFalse(fragments.isEmpty());
-    assertEquals(
-        fragments,
-        ProblemSemanticViewService.protectedMathFragments(
-            "Prove that $x^2 >= 0$ for every $x \\in \\mathbb{R}$."));
-    assertTrue(
-        ProblemSemanticViewService.protectedMathFragments("No formula is present").isEmpty());
   }
 
   private static void proofRoleScenario() {

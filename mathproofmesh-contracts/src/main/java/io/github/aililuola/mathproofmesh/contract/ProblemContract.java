@@ -146,6 +146,36 @@ public record ProblemContract(
         requirements);
   }
 
+  public ProblemContract withSemanticView(ProblemSemanticView auditedSemanticView) {
+    if (auditedSemanticView != null
+        && !goalHash.equals(auditedSemanticView.sourceStatementHash())) {
+      throw new ContractValidationException(
+          "semantic_view source_statement_hash must equal the frozen goal_hash");
+    }
+    return new ProblemContract(
+        allowedTools,
+        canonicalStatement,
+        createdAt,
+        definitions,
+        deliverables,
+        exactStatement,
+        goalHash,
+        hardConstraints,
+        integrityHash,
+        interpretationAgentId,
+        interpretationConfidence,
+        interpretationRawRef,
+        interpretationReasons,
+        interpretationSource,
+        normalizedStatement,
+        originalStatement,
+        outputLanguage,
+        problemId,
+        problemKind,
+        auditedSemanticView,
+        taskRequirements);
+  }
+
   // BEGIN GENERATED DEFENSIVE ACCESSORS
   public List<String> allowedTools() {
     return allowedTools == null ? null : List.copyOf(allowedTools);
