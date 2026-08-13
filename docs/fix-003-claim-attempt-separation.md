@@ -15,6 +15,8 @@
 | 第 1 个问题回归 | PASS，15 tests |
 | 第 2 个问题回归 | PASS，29 tests |
 | 全模块非 Docker `clean verify` | PASS，2055 tests |
+| Docker/Testcontainers `clean verify` | PASS，2081 tests |
+| 5 个 PostgreSQL IT | PASS，21 tests |
 | 修改范围 | 只处理 Attempt、Route 与 Claim 的独立审理、投影和恢复 |
 
 本记录所在提交的最终 hash 由 `git show HEAD` 给出。提交 hash 不能写入它自身而保持同一
@@ -378,23 +380,32 @@ RESULT=PASS
 Core JaCoCo branch coverage 为 `75.089487%`，高于既有 `75%` 门槛；没有放宽覆盖率或
 Python Sidecar 性能门。
 
-`verify-all.ps1 -Offline` 的正常执行已经到达既有 PostgreSQL Testcontainers IT，但当前机器
-没有可用 Docker，因此以下 5 个 IT 在容器环境探测阶段失败：
+随后使用 Docker Desktop 4.83.0 / Engine 29.6.2 执行：
 
-- `JdbcMessageRepositoryIT`
-- `MemoryProofGraphPostgresIT`
-- `PersistencePostgresIT`
-- `Phase17CheckpointOutboxPerformanceIT`
-- `ProviderCallPostgresIT`
+```powershell
+.\scripts\verify-all.ps1 -Offline
+```
 
-因此不把 `verify-all` 记作 PASS，也没有启动 Docker、绕过测试或降低门槛。跳过环境依赖 IT
-后的完整六模块验证全部通过。覆盖率报告的全部数值门通过，仅两个需要 PostgreSQL IT report
-的 critical scenarios 因上述环境条件显示 missing。
+Maven `clean verify`、全部 Testcontainers IT、覆盖率、安全和许可门均通过。包含 IT 的报告
+合计为 `2081` tests、0 failures、0 errors、4 conditional skips；server 模块为 `860` tests。
+完整运行的 Core JaCoCo branch coverage 为 `75.102744%`，仍高于未调整的 `75%` 门槛。
+本问题要求核验的 5 个 PostgreSQL 测试结果为：
 
-在合并到 `java` 前，完整 `verify-all.ps1 -Offline` 仍是 Docker-capable CI/机器上的环境级
-合并门，尤其需要确认 `PersistencePostgresIT`、`Phase17CheckpointOutboxPerformanceIT` 和
-`MemoryProofGraphPostgresIT`。当前 Docker 缺失不代表 Claim salvage 或 v6 continuity 功能
-失败，也没有因此放宽任何 PostgreSQL、覆盖率或性能门。
+| PostgreSQL IT | Tests | Failures | Errors | Skipped |
+| --- | ---: | ---: | ---: | ---: |
+| `JdbcMessageRepositoryIT` | 4 | 0 | 0 | 0 |
+| `MemoryProofGraphPostgresIT` | 4 | 0 | 0 | 0 |
+| `PersistencePostgresIT` | 9 | 0 | 0 | 0 |
+| `Phase17CheckpointOutboxPerformanceIT` | 1 | 0 | 0 | 0 |
+| `ProviderCallPostgresIT` | 3 | 0 | 0 | 0 |
+| 合计 | 21 | 0 | 0 | 0 |
+
+工作 clone 位于 `.publish/Math-Agents`，而 immutable-source 脚本按设计把目标仓库的父目录
+当作冻结原始源码目录。该 clone 的父目录 `.publish` 不包含 401 个原始文件，因此同一次脚本
+在所有构建、IT 和质量门通过后，最后以 `Current source file count is 0; expected 401` 退出，
+没有打印字面上的 `FULL VERIFICATION: PASS`。这不是测试失败，也不是 Docker 失败。
+
+同一个 immutable-source 检查已在仓库规定的标准父子目录拓扑中独立执行并通过：
 
 冻结原始源码在仓库的标准父子目录拓扑中单独检查通过：
 
@@ -404,8 +415,9 @@ files=401
 manifest_sha256=9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770
 ```
 
-工作 clone 位于 `.publish/Math-Agents`，直接从该 clone 运行脚本时其父目录没有那 401 个原始
-源文件，因此会报告布局不满足；这不是源码 hash 变化。标准拓扑中的检查结果如上。
+因此，`verify-all.ps1 -Offline` 所包含的所有实际代码、PostgreSQL、覆盖率、安全、许可和源码
+不可变门均已验证通过；唯一未出现的是由工作 clone 非标准父目录布局造成的单进程最终 PASS
+字符串。没有绕过测试、修改脚本、提交运行报告或降低 PostgreSQL、覆盖率和性能门。
 
 ## 11. 验收结论
 
