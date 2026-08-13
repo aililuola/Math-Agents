@@ -46,6 +46,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -191,6 +192,23 @@ final class DesktopNegativeKnowledgeTestHarness implements AutoCloseable {
             revision,
             "REVISE",
             StrategyArchive.RevisionReason.PLAN_FAILURE);
+  }
+
+  WideningAttempt attemptWidening(int round, String statement) throws Exception {
+    List<StrategyCard> queued = new ArrayList<>(admittedStrategies());
+    StrategyCard candidate = invalidStrategy("invalid-widening-" + round, statement);
+    queued.add(candidate);
+    setField("admittedStrategies", List.copyOf(queued));
+    field("nextStrategyIndex", AtomicInteger.class).set(queued.size() - 1);
+    ProductionState before = state();
+
+    boolean widened = (boolean) invoke("widenRoutes");
+    ProductionState after = state();
+    boolean candidateRouted =
+        routes().stream()
+            .map(DesktopNegativeKnowledgeTestHarness::routeStrategyId)
+            .anyMatch(candidate.strategyId()::equals);
+    return new WideningAttempt(widened, candidateRouted, before, after);
   }
 
   void attemptInspiration(int round, String statement) throws Exception {
@@ -452,7 +470,7 @@ final class DesktopNegativeKnowledgeTestHarness implements AutoCloseable {
         List.of(),
         0.2d,
         0.9d,
-        List.of("Establish bounded gaps without assuming finite prime support."),
+        List.of("Establish bounded gaps directly from the recurrence."),
         "Test the bridge on the first exact recurrence states.",
         "The recurrence and the bridge are explicit independent obligations.",
         null,
@@ -652,4 +670,10 @@ final class DesktopNegativeKnowledgeTestHarness implements AutoCloseable {
       int pendingTaskCount,
       int checkpointBranchCount,
       int factCount) {}
+
+  record WideningAttempt(
+      boolean widened,
+      boolean candidateRouted,
+      ProductionState before,
+      ProductionState after) {}
 }

@@ -44,7 +44,7 @@ state，或者在 checkpoint 恢复后重新参与调度。
 | 可信确定性种子 | `addDeterministicGuardrail(...)` + `DeterministicNegativeSeed` |
 | 可信反例 | `applyVerifiedCounterexample(...)` + `VerifiedCounterexampleAuthority` |
 | Initial Strategy | Blueprint 编译后、archive/route/graph mutation 之前批量 Gate |
-| Route Widening | `NegativeKnowledgeSurface.ROUTE_WIDENING` |
+| Route Widening | `NegativeKnowledgeSurface.ROUTE_WIDENING`；`DesktopPermanentNegativeKnowledgeProductionTest#blockedNegativeCandidateCannotEnterThroughRealWidenRoutes` 直接调用真实 `widenRoutes()` |
 | Route Revision | revision 与 blueprint 全部预检后再原子修改状态 |
 | Proof Obligation / Claim Node | `NegativeAwareProofGraphWriter` |
 | Inspiration Materialization | 所有 draft 先预检，再一次性提交 |
@@ -97,6 +97,19 @@ state，或者在 checkpoint 恢复后重新参与调度。
 
 只有 `EXACT` 和由可信代码/可信验证流程写入的 `TRUSTED_ALIAS` 会硬阻断。
 `POSSIBLE_EQUIVALENT` 只返回 quarantine，不会由字符串相似度直接宣布数学等价。
+
+匹配边界专项测试的实际统计为：
+
+```text
+NEGATIVE KNOWLEDGE MATCH BOUNDARY DIAGNOSTIC
+TRUSTED_ALIAS_PERMANENT_BLOCKS=7
+POSSIBLE_EQUIVALENT_QUARANTINES=1
+POSSIBLE_EQUIVALENT_PERMANENT_BLOCKS=0
+RESULT=PASS
+```
+
+其中 7 次 trusted-alias hard block 分别覆盖 7 个正向生产 surface；高相似但未经可信流程
+确认等价的候选只 quarantine，不会扩散成永久数学否定。
 
 ### 4.3 可信边界与单调合并
 
@@ -198,7 +211,7 @@ strategy、open obligation、pending task 和 fact candidate 会被重审、阻�
 - `DesktopNegativeKnowledgeTestHarness.java`
 - `GreedyGcdStrategyGuardrailsTest.java`：改为验证统一 Registry 种子，不再验证已删除的旁路。
 
-## 8. 测试优先与修复前失败
+## 8. 测试优先与修复前架构缺失证据
 
 生产实现加入前先编写新测试。首次 test compile 明确失败，主要错误为：
 
@@ -210,7 +223,11 @@ cannot find symbol: class NegativeKnowledgeSnapshot
 cannot find symbol: method negativeKnowledgeRegistry()
 ```
 
-该失败直接暴露：
+该结果是“修复前架构缺失证据”：它直接证明基准代码没有类型化 kind、永久 Registry、
+Snapshot 字段和统一 Gate API。它不等同于一份可独立运行的“修复前行为回归失败”，也不据此
+声称已经在基准 commit 上量出了某个具体 active-state leak。
+
+架构缺失证据直接对应：
 
 - `NEGATIVE_KIND_DISTINCTION_MISSING`
 - `LEGACY_SNAPSHOT_HAS_NO_PERMANENT_REGISTRY`
@@ -282,6 +299,28 @@ RESULT=PASS
 Inspiration materialization、pending proof task 和实际 checkpoint JSON round trip，不调用
 DeepSeek、外部网络、Docker、PostgreSQL 或 Python Sidecar。
 
+### 10.1 Route Widening 小回归
+
+30 轮主诊断保持原定义的 5 个入口、每轮 5 次、合计 150 次重入。Route Widening 另用一个
+10 轮小测试直接调用真实 `DesktopSolveCoordinator.widenRoutes()`，避免改变主诊断口径：
+
+```text
+ROUTE WIDENING NEGATIVE KNOWLEDGE DIAGNOSTIC
+ROUNDS=10
+ROUTE_WIDENING_BLOCK_TESTS=10
+WIDENING_BLOCKS=10
+ROUTE_LEAKS=0
+ADMITTED_STRATEGY_LEAKS=0
+LINEAGE_LEAKS=0
+OBLIGATION_LEAKS=0
+RESULT=PASS
+```
+
+测试场景是：候选已经处于 widening 的待选 admitted queue，随后统一 Gate 使用轮换 trusted
+alias 在创建 route 前拒绝。计数比较的是进入和退出真实 `widenRoutes()` 之间的生产状态；
+除审计和候选游标外，route、admitted strategy、archive lineage 与 proof obligation 均未发生
+新增或替换。架构测试还精确断言 Gate 位于 `addRoute(candidate, ...)` 之前。
+
 ## 11. 测试命令与结果
 
 ### 11.1 Core 专项
@@ -327,7 +366,7 @@ post-resume main-goal leaks 均为 0；第 1 个问题的生产链实现未被�
 | contracts | 44 | 0 | 0 | 0 |
 | core | 945 | 0 | 0 | 0 |
 | server | 860 | 0 | 0 | 3 |
-| desktop | 62 | 0 | 0 | 1 |
+| desktop | 63 | 0 | 0 | 1 |
 
 条件性 skipped tests 属于仓库原有环境门；所有执行的测试均通过。
 
@@ -341,6 +380,12 @@ post-resume main-goal leaks 均为 0；第 1 个问题的生产链实现未被�
 检查、Phase 17 coverage 和原始源码不可变检查。由于当前 Git clone 位于 `.publish`，最终
 执行使用临时目录还原脚本期望的“401 个冻结源文件 + Java target”父子拓扑；临时目录已删除，
 未提交任何运行产物。
+
+上述完整 PASS 对应实现提交 `4904985d033b87ef778d033ec55bc3c1a9fe2bee`。本次 widening
+与匹配边界补丁只修改测试和本文档；补丁后重新执行 `core,desktop -am test` 以及
+`core,desktop -am -DskipITs verify` 均为 PASS。另一次不带 `-DskipITs` 的 verify 尝试中，
+当前机器的 Docker Desktop 不可用，5 个既有 PostgreSQL Testcontainers IT 在容器环境探测
+阶段失败；没有启动 Docker、没有修改集成测试，也没有把该环境失败记作代码 PASS。
 
 覆盖率门没有放宽：
 

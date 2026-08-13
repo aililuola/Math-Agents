@@ -16,6 +16,7 @@ import org.junit.jupiter.api.io.TempDir;
 final class DesktopPermanentNegativeKnowledgeProductionTest {
   private static final int ROUNDS = 30;
   private static final int RESTORE_ROUND = 15;
+  private static final int WIDENING_ROUNDS = 10;
 
   @TempDir Path temporaryDirectory;
 
@@ -226,6 +227,63 @@ final class DesktopPermanentNegativeKnowledgeProductionTest {
     System.out.println("PERMANENT_DOWNGRADES=" + permanentDowngrades);
     System.out.println("PRE_RESTORE_REGISTRY_HASH=" + preRestoreHash);
     System.out.println("POST_RESTORE_REGISTRY_HASH=" + postRestoreHash);
+    System.out.println("RESULT=PASS");
+  }
+
+  @Test
+  void blockedNegativeCandidateCannotEnterThroughRealWidenRoutes() throws Exception {
+    Path runDirectory = temporaryDirectory.resolve("widening-run");
+    int wideningBlocks = 0;
+    int routeLeaks = 0;
+    int admittedStrategyLeaks = 0;
+    int lineageLeaks = 0;
+    int obligationLeaks = 0;
+
+    try (DesktopNegativeKnowledgeTestHarness harness =
+        DesktopNegativeKnowledgeTestHarness.open(
+            runDirectory, "desktop-negative-widening")) {
+      harness.freezeAndCreateValidRoute();
+      for (int round = 0; round < WIDENING_ROUNDS; round++) {
+        harness.setRound(round);
+        int auditStart = auditSize(harness);
+        DesktopNegativeKnowledgeTestHarness.WideningAttempt attempt =
+            harness.attemptWidening(round, DesktopNegativeKnowledgeTestHarness.alias(round));
+
+        assertThat(attempt.widened()).isFalse();
+        assertThat(attempt.candidateRouted()).isFalse();
+        assertBlockedSince(harness, auditStart, NegativeKnowledgeSurface.ROUTE_WIDENING);
+        wideningBlocks++;
+        if (attempt.after().routeCount() != attempt.before().routeCount()
+            || attempt.candidateRouted()) {
+          routeLeaks++;
+        }
+        if (attempt.after().admittedStrategyCount()
+            != attempt.before().admittedStrategyCount()) {
+          admittedStrategyLeaks++;
+        }
+        if (attempt.after().lineageCount() != attempt.before().lineageCount()) {
+          lineageLeaks++;
+        }
+        if (attempt.after().obligationCount() != attempt.before().obligationCount()) {
+          obligationLeaks++;
+        }
+      }
+    }
+
+    assertThat(wideningBlocks).isEqualTo(WIDENING_ROUNDS);
+    assertThat(routeLeaks).isZero();
+    assertThat(admittedStrategyLeaks).isZero();
+    assertThat(lineageLeaks).isZero();
+    assertThat(obligationLeaks).isZero();
+
+    System.out.println("ROUTE WIDENING NEGATIVE KNOWLEDGE DIAGNOSTIC");
+    System.out.println("ROUNDS=" + WIDENING_ROUNDS);
+    System.out.println("ROUTE_WIDENING_BLOCK_TESTS=" + wideningBlocks);
+    System.out.println("WIDENING_BLOCKS=" + wideningBlocks);
+    System.out.println("ROUTE_LEAKS=" + routeLeaks);
+    System.out.println("ADMITTED_STRATEGY_LEAKS=" + admittedStrategyLeaks);
+    System.out.println("LINEAGE_LEAKS=" + lineageLeaks);
+    System.out.println("OBLIGATION_LEAKS=" + obligationLeaks);
     System.out.println("RESULT=PASS");
   }
 

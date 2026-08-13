@@ -25,10 +25,12 @@ final class NegativeKnowledgeNoBypassArchitectureTest {
       throws IOException {
     String source = coordinatorSource();
     String initial = methodBody(source, "private void generateAndAdmitStrategies()", "private void ensureInitialRoutes()");
+    String widening = methodBody(source, "private boolean widenRoutes()", "private boolean deepenRoute(");
     String revision = methodBody(source, "private boolean prepareRouteRevision(", "private void archiveCurrentAttempt(");
     String inspiration = methodBody(source, "private void materializeInspiration(", "private StrategyCard inspiredStrategy(");
 
     assertBefore(initial, "negativeKnowledgeGate.requireAllAllowed", "strategyArchive.archive");
+    assertBefore(widening, "negativeKnowledgeGate.requireAllAllowed", "addRoute(candidate");
     assertBefore(revision, "negativeKnowledgeGate.requireAllAllowed", "strategyArchive.registerChild");
     assertBefore(inspiration, "negativeKnowledgeGate.requireAllAllowed", "admittedStrategies =");
     assertBefore(inspiration, "negativeKnowledgeGate.requireAllAllowed", "typedMemory.addInsight");

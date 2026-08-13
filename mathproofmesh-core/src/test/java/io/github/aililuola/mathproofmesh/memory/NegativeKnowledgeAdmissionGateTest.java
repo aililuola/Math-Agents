@@ -15,6 +15,7 @@ class NegativeKnowledgeAdmissionGateTest {
         0);
     NegativeKnowledgeAdmissionGate gate = new NegativeKnowledgeAdmissionGate(registry);
 
+    int trustedAliasPermanentBlocks = 0;
     for (NegativeKnowledgeSurface surface :
         List.of(
             NegativeKnowledgeSurface.STRATEGY_ADMISSION,
@@ -35,6 +36,7 @@ class NegativeKnowledgeAdmissionGateTest {
               4);
       assertThat(decision.code()).isEqualTo(NegativeKnowledgeDecisionCode.BLOCK_PERMANENT);
       assertThat(decision.matchStrength()).isEqualTo(NegativeMatchStrength.TRUSTED_ALIAS);
+      trustedAliasPermanentBlocks++;
     }
 
     NegativeKnowledgeDecision falsification =
@@ -49,6 +51,10 @@ class NegativeKnowledgeAdmissionGateTest {
     assertThat(falsification.code())
         .isEqualTo(NegativeKnowledgeDecisionCode.ALLOW_FALSIFICATION_ONLY);
     assertThat(falsification.allowed()).isTrue();
+    assertThat(trustedAliasPermanentBlocks).isEqualTo(7);
+
+    System.out.println("NEGATIVE KNOWLEDGE MATCH BOUNDARY DIAGNOSTIC");
+    System.out.println("TRUSTED_ALIAS_PERMANENT_BLOCKS=" + trustedAliasPermanentBlocks);
   }
 
   @Test
@@ -72,5 +78,16 @@ class NegativeKnowledgeAdmissionGateTest {
     assertThat(decision.code())
         .isEqualTo(NegativeKnowledgeDecisionCode.QUARANTINE_POSSIBLE_EQUIVALENT);
     assertThat(decision.matchStrength()).isEqualTo(NegativeMatchStrength.POSSIBLE_EQUIVALENT);
+    int possibleEquivalentQuarantines =
+        decision.code() == NegativeKnowledgeDecisionCode.QUARANTINE_POSSIBLE_EQUIVALENT ? 1 : 0;
+    int possibleEquivalentPermanentBlocks =
+        decision.code() == NegativeKnowledgeDecisionCode.BLOCK_PERMANENT ? 1 : 0;
+    assertThat(possibleEquivalentQuarantines).isEqualTo(1);
+    assertThat(possibleEquivalentPermanentBlocks).isZero();
+
+    System.out.println("POSSIBLE_EQUIVALENT_QUARANTINES=" + possibleEquivalentQuarantines);
+    System.out.println(
+        "POSSIBLE_EQUIVALENT_PERMANENT_BLOCKS=" + possibleEquivalentPermanentBlocks);
+    System.out.println("RESULT=PASS");
   }
 }
