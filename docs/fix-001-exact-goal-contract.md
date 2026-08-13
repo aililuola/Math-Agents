@@ -433,3 +433,129 @@ Python Sidecar 或验证脚本，也没有把验证生成的报告文件提交�
 | 专项测试通过 | 通过 |
 | core 全回归通过 | 通过 |
 | 未修改本次范围外的其他架构问题 | 通过 |
+
+## 12. Desktop 生产 Prompt 链补充回归
+
+新增测试：
+
+`mathproofmesh-desktop/src/test/java/io/github/aililuola/mathproofmesh/desktop/DesktopSolveCoordinatorRootGoalPropagationTest.java`
+
+### 12.1 实际生产调用路径
+
+测试没有伪造主目标状态，也没有只调用 `ProblemSemanticViewService.attach(...)`。它实际执行：
+
+```text
+SolveRequest
+  -> DesktopSolveCoordinator.freezeProblem()
+  -> GoalPreflightService 生成 ProblemContract
+  -> RootGoalContract.freeze(problem.exactStatement())
+  -> DesktopSolveCoordinator.runTriage()
+  -> Fake Provider 返回 ProblemSemanticViewCandidate
+  -> ProblemSemanticViewService.attach(...)
+  -> DesktopSolveCoordinator.generateAndAdmitStrategies()
+  -> PromptFactory + StructuredAgentRunner
+  -> CapturingPromptSink 捕获 strategy_generation Prompt
+  -> scope analysis
+  -> goal alignment
+  -> main-goal obligation
+  -> proof-control goal
+```
+
+生产代码中涉及原题文本或 semantic view 的选择点检查结果：
+
+| 生产位置 | 权威目标来源或用途 |
+| --- | --- |
+| `DesktopSolveCoordinator.freezeProblem()` | 从 `ProblemContract.exactStatement()` 冻结一次 `RootGoalContract` |
+| `DesktopSolveCoordinator.runTriage()` | 用同一 `RootGoalContract` 调用 `ProblemSemanticViewService.attach(...)` |
+| `generateAndAdmitStrategies()` 的 scope analysis | `rootGoal.sourceStatement()` |
+| `generateAndAdmitStrategies()` 的 goal alignment | `rootGoal.sourceStatement()` |
+| `strategy_generation` Prompt 的 `immutable_problem` | `ProblemContract` 的四个权威 statement 字段均保持原始中文题目 |
+| 后续 route、computation、review、meta、inspiration、synthesis Prompt | 统一传递已经审计过的 `frozenProblem`，没有从 `englishStatement()` 选择主目标 |
+| `addMainGoalObligation()` | `rootGoal.sourceStatement()` |
+| `controlGoal()` | `rootGoal.sourceStatement()` |
+| `restore(...)` | 从 checkpoint 的 `ProblemContract.exactStatement()` 重新冻结 `RootGoalContract` |
+| `ProblemSemanticViewService` 与 `ExactGoalContractChecker` | `englishStatement()` 仅用于确定性审计和非权威 sidecar |
+| `BlindReviewPacketFactory` | blind review 的 `exact_statement` 来自 `ProblemContract.exactStatement()` |
+| `TaskContractsFunctions` | task requirement 推断读取 `ProblemContract.exactStatement()` |
+| `PromptCatalog` | 只提供阶段指令，不选择或替换主目标文本 |
+
+因此，生产链中的 authoritative main goal 始终来自冻结根目标；英文 semantic view 不参与主目标选择。
+
+### 12.2 20 轮和 checkpoint 恢复
+
+20 轮通过 Fake Provider 循环返回：
+
+```text
+正确翻译
+-> sufficiently large n
+-> arithmetic progression
+-> forall n exists T,L
+-> T(n),L(n)
+-> 正确公式附加错误 arithmetic progression 解释
+```
+
+所有候选均把四个 `preserves_*` 字段设为 `true`。第 10 轮前读取生产路径实际写出的
+`structured/desktop-solve-state.json`，反序列化为 `DesktopSolveCheckpoint`，再次序列化和反序列化，
+然后在新的 `DesktopSolveCoordinator` 实例中调用生产 `restore(...)` 并继续第 10 至 19 轮。
+
+恢复前后根目标哈希完全一致：
+
+```text
+PRE_RESUME_ROOT_HASH=04d75f1e2ec72aad7e95dd51e6e68ec0dbbb02ad08ea56511e8b17e1f6569bda
+POST_RESUME_ROOT_HASH=04d75f1e2ec72aad7e95dd51e6e68ec0dbbb02ad08ea56511e8b17e1f6569bda
+```
+
+控制台诊断：
+
+```text
+PRODUCTION ROOT-GOAL PROPAGATION DIAGNOSTIC
+ROUNDS=20
+PROMPT_PATHS_CHECKED=5
+ROOT_HASH_CHANGES=0
+ROOT_GOAL_REPLACEMENTS=0
+REJECTED_MAIN_GOAL_LEAKS=0
+REJECTED_SIDECAR_PERSISTENCE=0
+POST_RESUME_ROOT_HASH_CHANGES=0
+POST_RESUME_MAIN_GOAL_LEAKS=0
+PRE_RESUME_ROOT_HASH=04d75f1e2ec72aad7e95dd51e6e68ec0dbbb02ad08ea56511e8b17e1f6569bda
+POST_RESUME_ROOT_HASH=04d75f1e2ec72aad7e95dd51e6e68ec0dbbb02ad08ea56511e8b17e1f6569bda
+CAPTURED_DOWNSTREAM_PROMPT_TYPES=[strategy_generation]
+PRODUCTION_PATHS=[scope_analysis, goal_alignment, strategy_generation, main_goal_obligation, proof_control_goal]
+RESULT=PASS
+```
+
+其中只有 `strategy_generation` 是该生产阶段实际发送给 Agent 的下游 Prompt 类型；另外四项是同一生产方法中实际执行并被断言的确定性目标路径。测试逐轮解析 Prompt 的 `SANITIZED CONTEXT`，精确检查
+`immutable_problem.exact_statement`、`canonical_statement`、`normalized_statement` 和
+`original_statement`，并检查 `immutable_problem.semantic_view` 没有保存当前 rejected candidate，
+而不是只对整个 Prompt 做模糊字符串匹配。Triage 审计元数据可以记录被拒绝的输入，但它不属于
+authoritative main goal；测试明确检查所有实际权威目标载体均未采用该输入。
+
+### 12.3 补充测试结果
+
+Desktop 专项：
+
+```text
+Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
+
+原第 1 个问题 core 专项复跑：
+
+```text
+Tests run: 14, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
+
+`mathproofmesh-core,mathproofmesh-desktop -am test`：
+
+```text
+mathproofmesh-contracts tests=44 failures=0 errors=0 skipped=0
+mathproofmesh-core      tests=928 failures=0 errors=0 skipped=0
+mathproofmesh-server    tests=860 failures=0 errors=0 skipped=3
+mathproofmesh-desktop   tests=52 failures=0 errors=0 skipped=1
+BUILD SUCCESS
+```
+
+本补充测试使用内存 Provider、内存 Provider 调用仓库和 Java-only computation broker，没有调用
+DeepSeek API、外部网络、Docker 或 PostgreSQL。没有修改 Python sidecar 性能阈值，也没有修改
+Negative Memory、Claim、Proof Graph、Pivot、Broker、并发、预算或其余 12 个问题。
