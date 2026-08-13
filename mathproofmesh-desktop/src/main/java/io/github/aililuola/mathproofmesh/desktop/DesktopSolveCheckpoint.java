@@ -37,6 +37,7 @@ import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlModels;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyBlueprintCompiler;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyArchive;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphSnapshot;
+import io.github.aililuola.mathproofmesh.research.ResearchCheckpointSnapshot;
 import io.github.aililuola.mathproofmesh.provider.UsageTotals;
 import io.github.aililuola.mathproofmesh.inspiration.InspirationSnapshot;
 import io.github.aililuola.mathproofmesh.verification.EscalationPlan;
@@ -67,6 +68,7 @@ record DesktopSolveCheckpoint(
     ProofGraphSnapshot proofGraph,
     AttemptArtifactSnapshot attemptArtifacts,
     ClaimLifecycleSnapshot claimLifecycle,
+    ResearchCheckpointSnapshot researchCheckpoints,
     MessageStoreSnapshot messageStore,
     List<Double> proofDebtHistory,
     StrategyArchive.Snapshot strategyArchive,
@@ -88,7 +90,7 @@ record DesktopSolveCheckpoint(
     List<String> completedStages,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 7;
+  static final int CURRENT_SCHEMA_VERSION = 8;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {
@@ -105,6 +107,8 @@ record DesktopSolveCheckpoint(
         attemptArtifacts == null ? AttemptArtifactSnapshot.empty() : attemptArtifacts;
     claimLifecycle =
         claimLifecycle == null ? ClaimLifecycleSnapshot.empty() : claimLifecycle;
+    researchCheckpoints =
+        researchCheckpoints == null ? ResearchCheckpointSnapshot.empty() : researchCheckpoints;
     proofDebtHistory = proofDebtHistory == null ? List.of() : List.copyOf(proofDebtHistory);
     strategyBlueprints = strategyBlueprints == null ? Map.of() : Map.copyOf(strategyBlueprints);
     goalLinks = goalLinks == null ? Map.of() : Map.copyOf(goalLinks);
@@ -218,6 +222,11 @@ record DesktopSolveCheckpoint(
       List<AttemptRevisionCheckpoint> revisionHistory,
       String focusObligationId,
       String focusSource,
+      String latestResearchCheckpointId,
+      List<String> activeResearchFindingIds,
+      String lastCheckpointedProviderCallId,
+      Integer checkpointRecoveryCount,
+      Boolean pendingFindingReconciliation,
       boolean reviewComplete,
       boolean checkpointProcessed,
       boolean integrated) {
@@ -234,6 +243,19 @@ record DesktopSolveCheckpoint(
       revisionHistory = revisionHistory == null ? List.of() : List.copyOf(revisionHistory);
       focusObligationId = focusObligationId == null ? "" : focusObligationId.strip();
       focusSource = focusSource == null ? "" : focusSource.strip();
+      latestResearchCheckpointId =
+          latestResearchCheckpointId == null ? "" : latestResearchCheckpointId.strip();
+      activeResearchFindingIds =
+          activeResearchFindingIds == null ? List.of() : List.copyOf(activeResearchFindingIds);
+      lastCheckpointedProviderCallId =
+          lastCheckpointedProviderCallId == null ? "" : lastCheckpointedProviderCallId.strip();
+      if (checkpointRecoveryCount == null) {
+        checkpointRecoveryCount = Integer.valueOf(0);
+      }
+      if (checkpointRecoveryCount < 0) {
+        throw new IllegalArgumentException("checkpointRecoveryCount must be nonnegative");
+      }
+      pendingFindingReconciliation = Boolean.TRUE.equals(pendingFindingReconciliation);
     }
 
     @Override
@@ -264,6 +286,11 @@ record DesktopSolveCheckpoint(
     @Override
     public List<String> uncertainClaimIds() {
       return List.copyOf(uncertainClaimIds);
+    }
+
+    @Override
+    public List<String> activeResearchFindingIds() {
+      return List.copyOf(activeResearchFindingIds);
     }
 
     @Override

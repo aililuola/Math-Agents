@@ -6,7 +6,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.api.ReasoningTraceBinding;
 import io.github.aililuola.mathproofmesh.api.ReasoningTraceStore;
+import io.github.aililuola.mathproofmesh.contract.CheckpointedResearchEnvelope;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
+import io.github.aililuola.mathproofmesh.contract.ResearchFindingUpdateBatch;
 import io.github.aililuola.mathproofmesh.contract.StructuredPayloadNormalizer;
 import io.github.aililuola.mathproofmesh.contract.UsageRecord;
 import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
@@ -25,6 +27,8 @@ import io.github.aililuola.mathproofmesh.provider.ProviderCircuitOpenError;
 import io.github.aililuola.mathproofmesh.provider.ProviderErrorKind;
 import io.github.aililuola.mathproofmesh.provider.ProviderException;
 import io.github.aililuola.mathproofmesh.provider.ProviderRequest;
+import io.github.aililuola.mathproofmesh.research.ResearchCheckpointFrameParser;
+import io.github.aililuola.mathproofmesh.research.ResearchCheckpointTraceSpan;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -131,8 +135,8 @@ public final class StructuredAgentRunner {
       PromptBundle<T> bundle,
       AgentRuntime fixedAgent,
       String budgetBucket,
-      Boolean thinkingEnabled,
-      String reasoningEffort) {
+        Boolean thinkingEnabled,
+        String reasoningEffort) {
     AgentRuntime agent =
         fixedAgent == null
             ? pool.select(role, Set.of(), List.of(), null, false)
@@ -146,7 +150,162 @@ public final class StructuredAgentRunner {
         List.of(agent.id()),
         thinkingEnabled,
         reasoningEffort,
-        parseRetries);
+        parseRetries,
+        null);
+  }
+
+  public <T> CheckpointedStructuredCallResult<T> callCheckpointed(
+      String runId,
+      String idempotencyKey,
+      String role,
+      CheckpointedPromptBundle<T> bundle,
+      AgentRuntime fixedAgent,
+      String budgetBucket,
+      Boolean thinkingEnabled,
+      String reasoningEffort,
+      ResearchCheckpointSink sink) {
+    return callCheckpointed(
+        runId,
+        idempotencyKey,
+        role,
+        bundle,
+        fixedAgent,
+        budgetBucket,
+        thinkingEnabled,
+        reasoningEffort,
+        sink,
+        null);
+  }
+
+  public <T> CheckpointedStructuredCallResult<T> callCheckpointed(
+      String runId,
+      String idempotencyKey,
+      String role,
+      CheckpointedPromptBundle<T> bundle,
+      AgentRuntime fixedAgent,
+      String budgetBucket,
+      Boolean thinkingEnabled,
+      String reasoningEffort,
+      ResearchCheckpointSink sink,
+      ResearchCheckpointFallbackEvidence fallbackEvidence) {
+    Objects.requireNonNull(bundle, "bundle");
+    AgentRuntime agent =
+        fixedAgent == null
+            ? pool.select(role, Set.of(), List.of(), null, false)
+            : fixedAgent;
+    CheckpointContext context =
+        new CheckpointContext(
+            bundle.resultType(),
+            Objects.requireNonNullElseGet(sink, ResearchCheckpointSink::noOp),
+            fallbackEvidence);
+    StructuredCallResult<CheckpointedResearchEnvelope> envelopeResult =
+        callSingle(
+            runId,
+            idempotencyKey,
+            bundle.promptBundle(),
+            agent,
+            budgetBucket,
+            List.of(agent.id()),
+            thinkingEnabled,
+            reasoningEffort,
+            parseRetries,
+            context);
+    CheckpointedResearchEnvelope envelope = context.validatedEnvelope(envelopeResult.value());
+    StructuredCallResult<T> mapped;
+    try {
+      T value = parseCheckpointResult(envelope.result(), bundle.resultType());
+      mapped = mapCheckpointed(envelopeResult, value, envelopeResult.repaired());
+    } catch (StructuredOutputError failure) {
+      StructuredCallResult<T> repairedResult =
+          callSingle(
+              runId,
+              idempotencyKey + ":result-json-repair:1",
+              resultRepairBundle(bundle, envelope.result(), failure),
+              agent,
+              budgetBucket,
+              envelopeResult.attemptedAgents(),
+              false,
+              null,
+              0,
+              null);
+      mapped =
+          new StructuredCallResult<>(
+              repairedResult.value(),
+              repairedResult.runId(),
+              repairedResult.callId(),
+              repairedResult.agentId(),
+              repairedResult.provider(),
+              repairedResult.model(),
+              repairedResult.promptArtifactRef(),
+              repairedResult.responseArtifactRef(),
+              sumUsage(envelopeResult.usage(), repairedResult.usage()),
+              true,
+              repairedResult.attemptedAgents());
+    }
+    return new CheckpointedStructuredCallResult<>(
+        mapped,
+        context.primaryProviderCallId(),
+        context.traceFrames(),
+        envelope.publicCheckpoint(),
+        envelope.findingUpdates());
+  }
+
+  private static <T> StructuredCallResult<T> mapCheckpointed(
+      StructuredCallResult<CheckpointedResearchEnvelope> envelope,
+      T value,
+      boolean repaired) {
+    return new StructuredCallResult<>(
+        value,
+        envelope.runId(),
+        envelope.callId(),
+        envelope.agentId(),
+        envelope.provider(),
+        envelope.model(),
+        envelope.promptArtifactRef(),
+        envelope.responseArtifactRef(),
+        envelope.usage(),
+        repaired,
+        envelope.attemptedAgents());
+  }
+
+  private static <T> T parseCheckpointResult(JsonNode result, Class<T> resultType) {
+    try {
+      JsonNode copy = result.deepCopy();
+      if (copy instanceof ObjectNode object) {
+        StructuredPayloadNormalizer.stripServerOwnedHashes(object);
+        StructuredPayloadNormalizer.normalize(object, resultType);
+      }
+      return ContractObjectMapper.read(ContractObjectMapper.write(copy), resultType);
+    } catch (RuntimeException exception) {
+      throw new StructuredOutputError(
+          "checkpoint envelope result failed its original strict contract", exception);
+    }
+  }
+
+  private <T> PromptBundle<T> resultRepairBundle(
+      CheckpointedPromptBundle<T> source, JsonNode malformed, StructuredOutputError failure) {
+    PromptBundle<T> original = source.originalBundle();
+    String user =
+        ("[STAGE:"
+                + original.stage()
+                + "_json_repair]\nRepair only the malformed nested result below. Return one JSON "
+                + "object matching the original result schema. The already committed public research "
+                + "checkpoints are immutable and must not be repeated or removed.\n\nJSON SCHEMA:\n"
+                + ContractObjectMapper.write(source.resultSchema())
+                + "\n\nMALFORMED RESULT:\n"
+                + ContractObjectMapper.write(malformed)
+                + "\n\nVALIDATION ERROR:\n"
+                + rootMessage(failure))
+            .strip();
+    return new PromptBundle<>(
+        original.stage() + "_json_repair",
+        "You repair malformed structured output without inventing mathematical content.",
+        user,
+        original.responseType(),
+        0.0d,
+        Math.min(original.maxOutputTokens(), jsonRepairMaxOutputTokens),
+        false,
+        source.resultSchema());
   }
 
   public <T> StructuredCallResult<T> callWithFailover(
@@ -191,7 +350,8 @@ public final class StructuredAgentRunner {
             List.copyOf(attempted),
             null,
             null,
-            parseRetries);
+            parseRetries,
+            null);
       } catch (ProviderCircuitOpenError error) {
         throw error;
       } catch (AgentCallFailure error) {
@@ -225,6 +385,14 @@ public final class StructuredAgentRunner {
     return calls.markApplied(runId, result.callId(), applicationKey);
   }
 
+  public java.util.Optional<ReasoningTraceStore.CallArchive> reasoningTrace(
+      String providerCallId) {
+    if (reasoningTraces == null) {
+      return java.util.Optional.empty();
+    }
+    return reasoningTraces.findByProviderCallId(providerCallId);
+  }
+
   @SuppressFBWarnings(
       value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
       justification =
@@ -239,7 +407,8 @@ public final class StructuredAgentRunner {
       List<String> attemptedAgents,
       Boolean thinkingEnabled,
       String reasoningEffort,
-      int remainingParseRetries) {
+      int remainingParseRetries,
+      CheckpointContext checkpointContext) {
     String safeSystem = redactor.redact(bundle.system());
     String safeUser = redactor.redact(bundle.user());
     String promptRef =
@@ -286,6 +455,9 @@ public final class StructuredAgentRunner {
                 requestArtifactHash));
     if (!planned.callId().equals(generatedCallId)) {
       budget.release(reservation.id());
+      if (checkpointContext != null) {
+        checkpointContext.bindPrimaryProviderCallId(planned.callId());
+      }
       return replayExisting(
           planned,
           idempotencyKey,
@@ -294,7 +466,12 @@ public final class StructuredAgentRunner {
           budgetBucket,
           promptRef,
           attemptedAgents,
-          remainingParseRetries);
+          remainingParseRetries,
+          checkpointContext);
+    }
+
+    if (checkpointContext != null) {
+      checkpointContext.bindPrimaryProviderCallId(generatedCallId);
     }
 
     ProviderCallState activeState = ProviderCallState.DISPATCHED;
@@ -322,7 +499,9 @@ public final class StructuredAgentRunner {
               bundle.temperature(),
               bundle.maxOutputTokens(),
               true,
-              bundle.responseType().getSimpleName(),
+              checkpointContext == null
+                  ? bundle.responseType().getSimpleName()
+                  : checkpointContext.providerSchemaName(),
               bundle.responseSchema(),
               thinkingEnabled,
               reasoningEffort,
@@ -338,7 +517,8 @@ public final class StructuredAgentRunner {
                 reasoningTraces,
                 ReasoningTraceBinding.agentTaskId(bundle.stage(), agent.id()),
                 agent.id(),
-                bundle.stage());
+                bundle.stage(),
+                generatedCallId);
         ReasoningTraceBinding.Scope scope = binding.bind();
         try {
           response = agent.call(request);
@@ -404,7 +584,8 @@ public final class StructuredAgentRunner {
           safeResponseText,
           cost,
           attemptedAgents,
-          remainingParseRetries);
+          remainingParseRetries,
+          checkpointContext);
     } catch (AgentCallFailure failure) {
       completeFailure(
           runId,
@@ -504,7 +685,8 @@ public final class StructuredAgentRunner {
       String budgetBucket,
       String promptRef,
       List<String> attemptedAgents,
-      int remainingParseRetries) {
+      int remainingParseRetries,
+      CheckpointContext checkpointContext) {
     if (existing.state() != ProviderCallState.SUCCEEDED
         || existing.responseArtifactHash() == null) {
       throw new IllegalStateException(
@@ -541,7 +723,8 @@ public final class StructuredAgentRunner {
         text,
         existing.costUsd(),
         attemptedAgents,
-        remainingParseRetries);
+        remainingParseRetries,
+        checkpointContext);
   }
 
   private <T> StructuredCallResult<T> parseOrRepair(
@@ -557,14 +740,27 @@ public final class StructuredAgentRunner {
       String safeResponseText,
       BigDecimal cost,
       List<String> attemptedAgents,
-      int remainingParseRetries) {
+      int remainingParseRetries,
+      CheckpointContext checkpointContext) {
+    if (checkpointContext != null) {
+      checkpointContext.capture(
+          callId, responseRef, safeResponseText, reasoningTraces, redactor, bundle.responseType());
+    }
     if (reasoningBudgetExhausted(response, bundle.maxOutputTokens())) {
       throw reasoningBudgetExhaustedError(
-          agent.id(), response, bundle.maxOutputTokens(), cost);
+          agent.id(),
+          response,
+          bundle.maxOutputTokens(),
+          cost,
+          callId,
+          responseRef,
+          reasoningTraces);
     }
     UsageRecord currentUsage = usage(response, cost);
     try {
-      Parsed<T> parsed = parse(safeResponseText, bundle.responseType());
+      Parsed<T> parsed =
+          parseCheckpointedOrLegacy(
+              safeResponseText, bundle.responseType(), checkpointContext);
       return new StructuredCallResult<>(
           parsed.value(),
           runId,
@@ -592,7 +788,8 @@ public final class StructuredAgentRunner {
               attemptedAgents,
               false,
               null,
-              remainingParseRetries - 1);
+              remainingParseRetries - 1,
+              checkpointContext);
       return new StructuredCallResult<>(
           repaired.value(),
           repaired.runId(),
@@ -738,6 +935,25 @@ public final class StructuredAgentRunner {
     }
   }
 
+  @SuppressWarnings("unchecked")
+  private <T> Parsed<T> parseCheckpointedOrLegacy(
+      String raw, Class<T> responseType, CheckpointContext checkpointContext) {
+    if (checkpointContext == null || responseType != CheckpointedResearchEnvelope.class) {
+      return parse(raw, responseType);
+    }
+    try {
+      return parse(raw, responseType);
+    } catch (StructuredOutputError envelopeFailure) {
+      Parsed<?> legacy = parse(raw, checkpointContext.resultType());
+      CheckpointedResearchEnvelope envelope =
+          new CheckpointedResearchEnvelope(
+              null,
+              ResearchFindingUpdateBatch.empty(),
+              ContractObjectMapper.toTree(legacy.value()));
+      return new Parsed<>((T) envelope, legacy.repaired());
+    }
+  }
+
   private static <T> Parsed<T> parseNormalized(
       String json, Class<T> responseType, boolean representationRepaired) {
     JsonNode parsed = ContractObjectMapper.parseTree(json);
@@ -773,7 +989,10 @@ public final class StructuredAgentRunner {
       String agentId,
       LLMResponse response,
       int requestedOutputTokens,
-      BigDecimal cost) {
+      BigDecimal cost,
+      String providerCallId,
+      String responseArtifactRef,
+      ReasoningTraceStore reasoningTraces) {
     Map<String, Object> progress = new LinkedHashMap<>();
     progress.put("output_tokens", response.outputTokens());
     progress.put("max_output_tokens", requestedOutputTokens);
@@ -781,6 +1000,19 @@ public final class StructuredAgentRunner {
     progress.put(
         "reasoning_characters",
         response.metadata().path("reasoning").path("characters").asLong(0L));
+    progress.put("provider_call_id", providerCallId);
+    progress.put("response_artifact_ref", responseArtifactRef);
+    if (reasoningTraces != null) {
+      reasoningTraces
+          .findByProviderCallId(providerCallId)
+          .ifPresent(
+              trace -> {
+                progress.put("reasoning_trace_call_id", trace.reasoningTraceCallId());
+                progress.put("reasoning_trace_task_id", trace.taskId());
+                progress.put("reasoning_trace_sha256", trace.sha256());
+                progress.put("reasoning_trace_characters", trace.characters());
+              });
+    }
     return new ReasoningBudgetExhaustedError(
         agentId + " exhausted the output budget in reasoning without returning a public artifact",
         usage(response, cost),
@@ -803,6 +1035,164 @@ public final class StructuredAgentRunner {
                   .digest(value.getBytes(StandardCharsets.UTF_8)));
     } catch (NoSuchAlgorithmException exception) {
       throw new IllegalStateException("SHA-256 is required by the JDK", exception);
+    }
+  }
+
+  private static final class CheckpointContext {
+    private final Class<?> resultType;
+    private final ResearchCheckpointSink sink;
+    private final ResearchCheckpointFrameParser parser = new ResearchCheckpointFrameParser();
+    private final List<ResearchCheckpointTraceSpan> traceFrames = new ArrayList<>();
+    private final Set<String> committedKeys = new java.util.LinkedHashSet<>();
+    private final ResearchCheckpointFallbackEvidence fallbackEvidence;
+    private String primaryProviderCallId;
+
+    private CheckpointContext(
+        Class<?> resultType,
+        ResearchCheckpointSink sink,
+        ResearchCheckpointFallbackEvidence fallbackEvidence) {
+      this.resultType = Objects.requireNonNull(resultType, "resultType");
+      this.sink = Objects.requireNonNull(sink, "sink");
+      this.fallbackEvidence = fallbackEvidence;
+    }
+
+    private String providerSchemaName() {
+      return resultType.getSimpleName();
+    }
+
+    private Class<?> resultType() {
+      return resultType;
+    }
+
+    private void capture(
+        String providerCallId,
+        String responseArtifactRef,
+        String safeResponseText,
+        ReasoningTraceStore reasoningTraces,
+        PromptRedactor redactor,
+        Class<?> responseType) {
+      ReasoningTraceStore.CallArchive trace =
+          reasoningTraces == null
+              ? null
+              : reasoningTraces.findByProviderCallId(providerCallId).orElse(null);
+      List<ResearchCheckpointTraceSpan> spans =
+          trace == null ? List.of() : parser.parse(trace.text(), trace.sha256());
+      if (!spans.isEmpty()) {
+        traceFrames.addAll(spans);
+      }
+      CheckpointedResearchEnvelope partial = parseCompleteEnvelope(safeResponseText);
+      if (partial != null
+          && partial.publicCheckpoint() != null
+          && fallbackEvidence != null
+          && !validFallbackFrame(partial.publicCheckpoint(), fallbackEvidence)) {
+        partial = null;
+      }
+      ResearchCheckpointCapture capture =
+          new ResearchCheckpointCapture(
+              providerCallId,
+              responseArtifactRef,
+              trace == null ? null : trace.reasoningTraceCallId(),
+              trace == null ? null : trace.taskId(),
+              trace == null ? null : trace.sha256(),
+              trace == null ? 0L : trace.characters(),
+              spans,
+              partial == null ? null : partial.publicCheckpoint(),
+              partial == null
+                  ? ResearchFindingUpdateBatch.empty()
+                  : partial.findingUpdates());
+      if (!spans.isEmpty()
+          || capture.envelopeFrame() != null
+          || !capture.findingUpdates().dispositions().isEmpty()) {
+        commit(capture);
+      }
+    }
+
+    private void commit(ResearchCheckpointCapture capture) {
+      String key =
+          CanonicalCheckpointKey.value(capture, resultType);
+      if (committedKeys.add(key)) {
+        sink.commit(capture);
+      }
+    }
+
+    private String primaryProviderCallId() {
+      if (primaryProviderCallId == null) {
+        throw new IllegalStateException("checkpointed provider call was not captured");
+      }
+      return primaryProviderCallId;
+    }
+
+    private void bindPrimaryProviderCallId(String providerCallId) {
+      if (primaryProviderCallId == null) {
+        primaryProviderCallId = Objects.requireNonNull(providerCallId, "providerCallId");
+      }
+    }
+
+    private List<ResearchCheckpointTraceSpan> traceFrames() {
+      return List.copyOf(traceFrames);
+    }
+
+    private CheckpointedResearchEnvelope validatedEnvelope(
+        CheckpointedResearchEnvelope envelope) {
+      if (fallbackEvidence == null
+          || envelope.publicCheckpoint() == null
+          || validFallbackFrame(envelope.publicCheckpoint(), fallbackEvidence)) {
+        return envelope;
+      }
+      return new CheckpointedResearchEnvelope(
+          null, ResearchFindingUpdateBatch.empty(), envelope.result());
+    }
+
+    private static CheckpointedResearchEnvelope parseCompleteEnvelope(String text) {
+      try {
+        String object = JsonObjectExtractor.firstBalancedObject(text);
+        return ContractObjectMapper.read(object, CheckpointedResearchEnvelope.class);
+      } catch (RuntimeException ignored) {
+        return null;
+      }
+    }
+
+    private static boolean validFallbackFrame(
+        io.github.aililuola.mathproofmesh.contract.ResearchCheckpointFrame frame,
+        ResearchCheckpointFallbackEvidence evidence) {
+      return frame.findings().stream()
+          .allMatch(
+              finding ->
+                  finding.sourceQuote() != null
+                      && ResearchCheckpointTraceSpan.validatesExactQuote(
+                          evidence.trace(),
+                          finding.quoteStart(),
+                          finding.quoteEnd(),
+                          finding.sourceQuote(),
+                          finding.quoteSha256()));
+    }
+  }
+
+  private static final class CanonicalCheckpointKey {
+    private CanonicalCheckpointKey() {}
+
+    private static String value(ResearchCheckpointCapture capture, Class<?> resultType) {
+      List<String> frames =
+          capture.traceFrames().stream()
+              .map(ResearchCheckpointTraceSpan::markerSha256)
+              .sorted()
+              .toList();
+      String envelope =
+          capture.envelopeFrame() == null
+              ? ""
+              : io.github.aililuola.mathproofmesh.contract.CanonicalJson.stableHash(
+                  capture.envelopeFrame());
+      String updates =
+          io.github.aililuola.mathproofmesh.contract.CanonicalJson.stableHash(
+              capture.findingUpdates());
+      return io.github.aililuola.mathproofmesh.contract.CanonicalJson.stableHash(
+          List.of(
+              capture.providerCallId(),
+              capture.responseArtifactRef(),
+              resultType.getName(),
+              frames,
+              envelope,
+              updates));
     }
   }
 

@@ -6,7 +6,11 @@ import java.util.Optional;
 
 /** Scoped provider-to-trace association; the binding itself contains no reasoning text. */
 public record ReasoningTraceBinding(
-    ReasoningTraceStore store, String taskId, String agentId, String stage) {
+    ReasoningTraceStore store,
+    String taskId,
+    String agentId,
+    String stage,
+    String providerCallId) {
   private static final InheritableThreadLocal<ReasoningTraceBinding> CURRENT =
       new InheritableThreadLocal<>();
 
@@ -15,6 +19,16 @@ public record ReasoningTraceBinding(
     taskId = ActivitySanitizer.identifier(taskId, 240);
     agentId = ActivitySanitizer.identifier(agentId, 160);
     stage = ActivitySanitizer.identifier(stage, 160);
+    providerCallId = ActivitySanitizer.identifier(providerCallId, 160);
+    if (providerCallId.isBlank()) {
+      throw new IllegalArgumentException("providerCallId is required");
+    }
+  }
+
+  /** Compatibility constructor for callers that do not own a provider-call record. */
+  public ReasoningTraceBinding(
+      ReasoningTraceStore store, String taskId, String agentId, String stage) {
+    this(store, taskId, agentId, stage, "unbound-provider-call");
   }
 
   public Scope bind() {

@@ -15,6 +15,7 @@ public final class ReasoningTraceCall {
 
   private final ReasoningTraceStore store;
   private final String taskId;
+  private final String providerCallId;
   private final String callId = "reasoning_" + UUID.randomUUID().toString().replace("-", "");
   private final int callIndex;
   private final StringBuilder pending = new StringBuilder();
@@ -30,9 +31,11 @@ public final class ReasoningTraceCall {
   private boolean started;
   private boolean finished;
 
-  ReasoningTraceCall(ReasoningTraceStore store, String taskId, int callIndex) {
+  ReasoningTraceCall(
+      ReasoningTraceStore store, String taskId, String providerCallId, int callIndex) {
     this.store = store;
     this.taskId = taskId;
+    this.providerCallId = providerCallId;
     this.callIndex = callIndex;
   }
 
@@ -141,9 +144,22 @@ public final class ReasoningTraceCall {
     result.put("run_id", store.runId());
     result.put("task_id", taskId);
     result.put("call_id", callId);
+    result.put("provider_call_id", providerCallId);
     result.put("call_index", callIndex);
     result.put("type", type);
     return result;
+  }
+
+  public String callId() {
+    return callId;
+  }
+
+  public String taskId() {
+    return taskId;
+  }
+
+  public String providerCallId() {
+    return providerCallId;
   }
 
   private static MessageDigest sha256() {

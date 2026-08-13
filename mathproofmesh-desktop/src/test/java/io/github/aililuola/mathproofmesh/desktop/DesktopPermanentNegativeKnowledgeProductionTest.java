@@ -46,7 +46,7 @@ final class DesktopPermanentNegativeKnowledgeProductionTest {
       harness.addVerifiedAndTemporaryFixtures();
       NegativeKnowledgeRegistry initialRegistry =
           harness.typedMemory().negativeKnowledgeRegistry();
-      assertThat(DesktopSolveCheckpoint.CURRENT_SCHEMA_VERSION).isEqualTo(7);
+      assertThat(DesktopSolveCheckpoint.CURRENT_SCHEMA_VERSION).isEqualTo(8);
       assertThat(initialRegistry.records())
           .filteredOn(
               record ->

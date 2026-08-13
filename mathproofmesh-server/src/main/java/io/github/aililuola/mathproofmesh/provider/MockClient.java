@@ -2,6 +2,8 @@ package io.github.aililuola.mathproofmesh.provider;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import io.github.aililuola.mathproofmesh.api.ReasoningTraceBinding;
+import io.github.aililuola.mathproofmesh.api.ReasoningTraceCall;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -41,7 +43,28 @@ public class MockClient implements LLMClient {
           request.streaming(),
           JsonNodeFactory.instance.objectNode());
     }
-    return Objects.requireNonNull(responder.respond(request), "mock response");
+    LLMResponse response = Objects.requireNonNull(responder.respond(request), "mock response");
+    String publicReasoning =
+        response.metadata().path("reasoning").path("public_checkpoint_text").asText("");
+    if (!publicReasoning.isEmpty()) {
+      ReasoningTraceBinding.current()
+          .ifPresent(
+              binding -> {
+                ReasoningTraceCall trace =
+                    binding
+                        .store()
+                        .beginCall(
+                            binding.taskId(),
+                            binding.agentId(),
+                            binding.stage(),
+                            binding.providerCallId(),
+                            Boolean.TRUE.equals(request.thinkingEnabled()),
+                            request.reasoningEffort());
+                trace.append(publicReasoning);
+                trace.finish(ReasoningTraceCall.Status.COMPLETED);
+              });
+    }
+    return response;
   }
 
   public long calls() {

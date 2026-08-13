@@ -366,6 +366,7 @@ abstract class AbstractHttpProvider implements LLMClient {
                         binding.taskId(),
                         binding.agentId(),
                         binding.stage(),
+                        binding.providerCallId(),
                         Boolean.TRUE.equals(request.thinkingEnabled()),
                         Boolean.TRUE.equals(request.thinkingEnabled())
                             ? request.reasoningEffort()

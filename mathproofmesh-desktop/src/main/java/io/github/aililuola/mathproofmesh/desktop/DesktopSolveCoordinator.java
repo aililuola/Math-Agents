@@ -5,7 +5,12 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.agent.CallLedger;
+import io.github.aililuola.mathproofmesh.agent.CheckpointedPromptBundle;
+import io.github.aililuola.mathproofmesh.agent.CheckpointedStructuredCallResult;
 import io.github.aililuola.mathproofmesh.agent.PromptFactory;
+import io.github.aililuola.mathproofmesh.agent.ResearchCheckpointCapture;
+import io.github.aililuola.mathproofmesh.agent.ResearchCheckpointFallbackEvidence;
+import io.github.aililuola.mathproofmesh.agent.ResearchCheckpointedPromptFactory;
 import io.github.aililuola.mathproofmesh.agent.ReasoningBudgetExhaustedError;
 import io.github.aililuola.mathproofmesh.agent.StructuredAgentRunner;
 import io.github.aililuola.mathproofmesh.agent.StructuredCallResult;
@@ -87,6 +92,8 @@ import io.github.aililuola.mathproofmesh.contract.ProofGraphEdge;
 import io.github.aililuola.mathproofmesh.contract.ProofObligation;
 import io.github.aililuola.mathproofmesh.contract.ProofStep;
 import io.github.aililuola.mathproofmesh.contract.ReceiptStatus;
+import io.github.aililuola.mathproofmesh.contract.ResearchFindingDispositionAction;
+import io.github.aililuola.mathproofmesh.contract.ResearchFindingUpdateBatch;
 import io.github.aililuola.mathproofmesh.contract.RouteDescriptor;
 import io.github.aililuola.mathproofmesh.contract.RouteRole;
 import io.github.aililuola.mathproofmesh.contract.RouteStatus;
@@ -164,6 +171,10 @@ import io.github.aililuola.mathproofmesh.proofcontrol.StrategyBlueprintCompiler;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphPolicy;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphServices;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
+import io.github.aililuola.mathproofmesh.research.ResearchCheckpointLedger;
+import io.github.aililuola.mathproofmesh.research.ResearchCheckpointRecord;
+import io.github.aililuola.mathproofmesh.research.ResearchFindingRecord;
+import io.github.aililuola.mathproofmesh.research.ResearchFindingStatus;
 import io.github.aililuola.mathproofmesh.provider.UsageTotals;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphSnapshot;
 import io.github.aililuola.mathproofmesh.provider.AgentPool;
@@ -241,6 +252,8 @@ final class DesktopSolveCoordinator {
   private final SystemConfig config;
   private final StructuredAgentRunner runner;
   private final PromptFactory prompts;
+  private final ResearchCheckpointedPromptFactory checkpointedPrompts =
+      new ResearchCheckpointedPromptFactory();
   private final AgentPool pool;
   private final CallLedger ledger;
   private final ComputationBroker computation;
@@ -291,6 +304,7 @@ final class DesktopSolveCoordinator {
   private final AttemptArtifactHarvester attemptArtifactHarvester =
       new AttemptArtifactHarvester();
   private AttemptArtifactLedger attemptArtifacts = new AttemptArtifactLedger();
+  private ResearchCheckpointLedger researchCheckpoints = new ResearchCheckpointLedger();
   private TypedMemory typedMemory;
   private ProofGraphStore proofGraph;
   private NegativeKnowledgeRegistry negativeKnowledgeRegistry;
@@ -953,6 +967,14 @@ final class DesktopSolveCoordinator {
         segmentContext.put("verified_facts", typedMemory.factsForRoute(route.routeId));
         segmentContext.put("negative_memory", typedMemory.negativesForRoute(route.routeId));
         segmentContext.put(
+            "active_research_findings", researchCheckpoints.activeFindings(route.routeId));
+        segmentContext.put(
+            "completed_checkpoint_frames", researchCheckpoints.checkpointsForRoute(route.routeId));
+        segmentContext.put(
+            "finding_accounting_rule",
+            "Every active research finding remains active unless explicitly deferred, promoted to "
+                + "an issue-003 attempt candidate, rejected with a reason, or superseded.");
+        segmentContext.put(
             "continuation_rule",
             "Continue only from the committed checkpoint. Return a complete auditable attempt, "
                 + "request one bounded computation, or explicitly abandon; never invent a result.");
@@ -979,6 +1001,9 @@ final class DesktopSolveCoordinator {
                   route.strategy.strategyId(),
                   problemHash,
                   roundIndex.get());
+          route.pendingFindingReconciliation =
+              !researchCheckpoints.activeFindings(route.routeId).isEmpty();
+          reconcileSubmittedAttemptFindings(route);
           route.status = "submitted";
           artifactProduced = true;
           break;
@@ -1020,6 +1045,8 @@ final class DesktopSolveCoordinator {
           }
           continue;
         }
+        researchCheckpoints.deferRouteEnd(route.routeId);
+        refreshRouteResearchProjection(route);
         route.status = "abandoned";
         route.failureReason = "prover abandoned the current strategy after bounded exploration";
         break;
@@ -5715,6 +5742,7 @@ final class DesktopSolveCoordinator {
       proofGraph = ProofGraphStore.restore(checkpoint.proofGraph(), ProofGraphPolicy.defaults());
     }
     attemptArtifacts = AttemptArtifactLedger.restore(checkpoint.attemptArtifacts());
+    researchCheckpoints = ResearchCheckpointLedger.restore(checkpoint.researchCheckpoints());
     proofControl.claims().load(checkpoint.claimLifecycle());
     installNegativeKnowledgeRuntime();
     typedMemory.revalidateFactsAgainstNegativeKnowledge(roundIndex.get());
@@ -5797,6 +5825,12 @@ final class DesktopSolveCoordinator {
       route.revisionHistory.addAll(saved.revisionHistory());
       route.focusObligationId = saved.focusObligationId();
       route.focusSource = saved.focusSource();
+      route.latestResearchCheckpointId = saved.latestResearchCheckpointId();
+      route.activeResearchFindingIds.addAll(saved.activeResearchFindingIds());
+      route.lastCheckpointedProviderCallId = saved.lastCheckpointedProviderCallId();
+      route.checkpointRecoveryCount = saved.checkpointRecoveryCount();
+      route.pendingFindingReconciliation = saved.pendingFindingReconciliation();
+      refreshRouteResearchProjection(route);
       route.reviewComplete = saved.reviewComplete();
       route.checkpointProcessed = saved.checkpointProcessed();
       route.integrated = saved.integrated();
@@ -6161,6 +6195,11 @@ final class DesktopSolveCoordinator {
                         route.revisionHistory,
                         route.focusObligationId,
                         route.focusSource,
+                        route.latestResearchCheckpointId,
+                        route.activeResearchFindingIds,
+                        route.lastCheckpointedProviderCallId,
+                        route.checkpointRecoveryCount,
+                        route.pendingFindingReconciliation,
                         route.reviewComplete,
                         route.checkpointProcessed,
                         route.integrated))
@@ -6201,6 +6240,7 @@ final class DesktopSolveCoordinator {
             proofGraph.snapshot(),
             attemptArtifacts.snapshot(),
             proofControl.claims().snapshot(),
+            researchCheckpoints.snapshot(),
             messageRepository.snapshot(),
             proofDebtHistory,
             strategyArchive.snapshot(),
@@ -6231,6 +6271,11 @@ final class DesktopSolveCoordinator {
         structured.resolve("attempt-artifacts.json"), checkpoint.attemptArtifacts());
     writeJsonAtomically(
         structured.resolve("claim-lifecycle.json"), checkpoint.claimLifecycle());
+    writeJsonAtomically(
+        structured.resolve("research-checkpoints.json"), checkpoint.researchCheckpoints());
+    writeJsonAtomically(
+        structured.resolve("research-finding-audit.json"),
+        checkpoint.researchCheckpoints().audit());
     writeJsonAtomically(structured.resolve("message-store.json"), checkpoint.messageStore());
     writeJsonAtomically(structured.resolve("strategy-archive.json"), checkpoint.strategyArchive());
     writeJsonAtomically(
@@ -7254,21 +7299,17 @@ final class DesktopSolveCoordinator {
     StructuredCallResult<T> result;
     try {
       result =
-          runner.call(
-              runId,
+          callStageOnce(
               idempotencyKey,
-              roleForStage(stage, agent),
-              prompts.typedStage(
-                  promptStage(stage),
-                  responseType,
-                  context,
-                  0.0d,
-                  outputLimit,
-                  false),
+              stage,
+              responseType,
+              context,
               agent,
               budgetBucket,
+              outputLimit,
               thinking.enabled(),
-              thinking.effort());
+              thinking.effort(),
+              null);
     } catch (ReasoningBudgetExhaustedError exhausted) {
       event(
           "reasoning_budget_exhausted",
@@ -7279,22 +7320,64 @@ final class DesktopSolveCoordinator {
           null);
       int recoveryLimit = recoveryOutputTokens(config, stage, outputLimit);
       try {
+        Map<String, Object> recoveryContext = new LinkedHashMap<>(context);
+        ResearchCheckpointFallbackEvidence fallbackEvidence = null;
+        if (ResearchCheckpointedPromptFactory.isAllowedResearchStage(promptStage(stage))) {
+          String routeId = checkpointRouteId(context);
+          recoveryContext.put(
+              "active_research_findings", researchCheckpoints.activeFindings(routeId));
+          recoveryContext.put(
+              "completed_checkpoint_frames", researchCheckpoints.checkpointsForRoute(routeId));
+          recoveryContext.put("reasoning_progress", exhausted.progress());
+          recoveryContext.put(
+              "reasoning_trace_sha256",
+              Objects.toString(exhausted.progress().get("reasoning_trace_sha256"), ""));
+          var recoveryTrace =
+              runner
+                  .reasoningTrace(
+                      Objects.toString(exhausted.progress().get("provider_call_id"), ""))
+                  .orElse(null);
+          if (recoveryTrace != null) {
+            int excerptStart = Math.max(0, recoveryTrace.text().length() - 2_000);
+            recoveryContext.put(
+                "bounded_trace_excerpt",
+                recoveryTrace.text().substring(excerptStart));
+            recoveryContext.put("bounded_trace_excerpt_start", excerptStart);
+            String exhaustedProviderCallId =
+                Objects.toString(exhausted.progress().get("provider_call_id"), "");
+            boolean completeFrameAlreadyCommitted =
+                researchCheckpoints.checkpointsForRoute(routeId).stream()
+                    .anyMatch(
+                        checkpoint ->
+                            exhaustedProviderCallId.equals(checkpoint.providerCallId())
+                                && "reasoning_trace".equals(checkpoint.source()));
+            if (!completeFrameAlreadyCommitted) {
+              fallbackEvidence =
+                  new ResearchCheckpointFallbackEvidence(
+                      recoveryTrace.text(), recoveryTrace.sha256());
+            }
+          }
+          recoveryContext.put(
+              "finding_accounting_rule",
+              "Account for every active finding; omission never deletes a finding. If the prior "
+                  + "trace had no complete public marker, every recovered finding must include an "
+                  + "exact source_quote with quote_start and quote_end measured against the full "
+                  + "original trace plus its quote_sha256.");
+          incrementCheckpointRecovery(routeId);
+          persistUnchecked("research_checkpoint_recovery", false);
+        }
         result =
-            runner.call(
-                runId,
+            callStageOnce(
                 idempotencyKey + ":artifact-recovery",
-                roleForStage(stage, agent),
-                prompts.typedStage(
-                    promptStage(stage),
-                    responseType,
-                    context,
-                    0.0d,
-                    recoveryLimit,
-                    false),
+                stage,
+                responseType,
+                recoveryContext,
                 agent,
                 budgetBucket,
+                recoveryLimit,
                 false,
-                null);
+                null,
+                fallbackEvidence);
       } catch (RuntimeException failure) {
         event(
             "agent_failed",
@@ -7324,6 +7407,250 @@ final class DesktopSolveCoordinator {
         summary + " completed",
         result.responseArtifactRef());
     return result;
+  }
+
+  private <T> StructuredCallResult<T> callStageOnce(
+      String idempotencyKey,
+      String stage,
+      Class<T> responseType,
+      Map<String, ?> context,
+      AgentRuntime agent,
+      String budgetBucket,
+      int outputLimit,
+      Boolean thinkingEnabled,
+      String reasoningEffort,
+      ResearchCheckpointFallbackEvidence fallbackEvidence) {
+    var prompt =
+        prompts.typedStage(
+            promptStage(stage), responseType, context, 0.0d, outputLimit, false);
+    if (!ResearchCheckpointedPromptFactory.isAllowedResearchStage(prompt.stage())) {
+      return runner.call(
+          runId,
+          idempotencyKey,
+          roleForStage(stage, agent),
+          prompt,
+          agent,
+          budgetBucket,
+          thinkingEnabled,
+          reasoningEffort);
+    }
+    String routeId = checkpointRouteId(context);
+    CheckpointedPromptBundle<T> checkpointed = checkpointedPrompts.checkpoint(prompt);
+    CheckpointedStructuredCallResult<T> result =
+        runner.callCheckpointed(
+            runId,
+            idempotencyKey,
+            roleForStage(stage, agent),
+            checkpointed,
+            agent,
+            budgetBucket,
+            thinkingEnabled,
+            reasoningEffort,
+            capture -> commitResearchCheckpoint(routeId, stage, capture),
+            fallbackEvidence);
+    return result.result();
+  }
+
+  private synchronized void commitResearchCheckpoint(
+      String routeId, String stage, ResearchCheckpointCapture capture) {
+    ResearchCheckpointLedger staged =
+        ResearchCheckpointLedger.restore(researchCheckpoints.snapshot());
+    List<ResearchCheckpointRecord> committed =
+        staged.appendTraceFrames(
+            problemHash,
+            routeId,
+            stage,
+            capture.providerCallId(),
+            capture.reasoningTraceCallId(),
+            capture.reasoningTraceTaskId(),
+            capture.traceFrames());
+    if (capture.envelopeFrame() != null) {
+      committed =
+          append(
+              committed,
+              staged.appendEnvelopeFrame(
+                  problemHash,
+                  routeId,
+                  stage,
+                  capture.providerCallId(),
+                  capture.envelopeFrame()));
+    }
+    staged.applyUpdates(routeId, capture.findingUpdates());
+    researchCheckpoints = staged;
+    RouteState route = findRouteState(routeId).orElse(null);
+    if (route != null) {
+      if (!committed.isEmpty()) {
+        route.latestResearchCheckpointId = committed.getLast().checkpointId();
+      }
+      route.lastCheckpointedProviderCallId = capture.providerCallId();
+      refreshRouteResearchProjection(route);
+    }
+    persistUnchecked("research_checkpoint", false);
+  }
+
+  private static List<ResearchCheckpointRecord> append(
+      List<ResearchCheckpointRecord> values, ResearchCheckpointRecord value) {
+    List<ResearchCheckpointRecord> result = new ArrayList<>(values);
+    result.add(value);
+    return List.copyOf(result);
+  }
+
+  private Optional<RouteState> findRouteState(String routeId) {
+    return routes.stream().filter(route -> route.routeId.equals(routeId)).findFirst();
+  }
+
+  private static String checkpointRouteId(Map<String, ?> context) {
+    Object explicit = context.get("route_id");
+    if (explicit != null && !explicit.toString().isBlank()) {
+      return explicit.toString();
+    }
+    Object task = context.get("task");
+    if (task instanceof InspirationTask inspiration && !inspiration.targetRouteIds().isEmpty()) {
+      return inspiration.targetRouteIds().getFirst();
+    }
+    return "campaign-research";
+  }
+
+  private void incrementCheckpointRecovery(String routeId) {
+    findRouteState(routeId).ifPresent(route -> route.checkpointRecoveryCount++);
+  }
+
+  private void refreshRouteResearchProjection(RouteState route) {
+    route.activeResearchFindingIds.clear();
+    route.activeResearchFindingIds.addAll(
+        researchCheckpoints.activeFindings(route.routeId).stream()
+            .map(ResearchFindingRecord::findingId)
+            .toList());
+  }
+
+  private void reconcileSubmittedAttemptFindings(RouteState route) {
+    if (route.attempt == null || !route.pendingFindingReconciliation) {
+      return;
+    }
+    Map<String, ClaimCard> existing = new LinkedHashMap<>();
+    for (ClaimCard claim : route.attempt.proposedLemmas()) {
+      existing.put(claim.claimId(), claim);
+    }
+    boolean changed = false;
+    for (ResearchFindingRecord finding : researchCheckpoints.activeFindings(route.routeId)) {
+      if (finding.status() != ResearchFindingStatus.ACTIVE) {
+        continue;
+      }
+      if (finding.kind()
+          == io.github.aililuola.mathproofmesh.contract.ResearchFindingKind.CANDIDATE_LEMMA) {
+        ClaimCard claim = proposedResearchClaim(finding, route.attempt);
+        existing.putIfAbsent(claim.claimId(), claim);
+        researchCheckpoints.applyUpdates(
+            route.routeId,
+            new ResearchFindingUpdateBatch(
+                List.of(
+                    new io.github.aililuola.mathproofmesh.contract.ResearchFindingDisposition(
+                        finding.findingId(),
+                        ResearchFindingDispositionAction.PROMOTE_TO_PROPOSED_LEMMA,
+                        "bounded submit-attempt reconciliation",
+                        null))));
+        changed = true;
+      } else if (finding.kind()
+              == io.github.aililuola.mathproofmesh.contract.ResearchFindingKind
+                  .COUNTEREXAMPLE_CANDIDATE
+          && finding.targetObligationId() != null) {
+        ClaimCard claim = proposedResearchCounterexample(finding, route.attempt);
+        existing.putIfAbsent(claim.claimId(), claim);
+        researchCheckpoints.applyUpdates(
+            route.routeId,
+            new ResearchFindingUpdateBatch(
+                List.of(
+                    new io.github.aililuola.mathproofmesh.contract.ResearchFindingDisposition(
+                        finding.findingId(),
+                        ResearchFindingDispositionAction.PROMOTE_TO_COUNTEREXAMPLE_CANDIDATE,
+                        "bounded submit-attempt reconciliation",
+                        null))));
+        changed = true;
+      }
+    }
+    if (changed) {
+      route.attempt = withProposedResearchClaims(route.attempt, List.copyOf(existing.values()));
+    }
+    route.pendingFindingReconciliation = false;
+    refreshRouteResearchProjection(route);
+  }
+
+  private static ClaimCard proposedResearchClaim(
+      ResearchFindingRecord finding, ProofAttempt attempt) {
+    return new ClaimCard(
+        finding.assumptions(),
+        "research-claim-" + finding.findingId().substring("research_finding_".length()),
+        finding.statement(),
+        "",
+        "Requires independent issue-003 claim review.",
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        finding.scopeLimitations(),
+        0.5d,
+        attempt.agentId(),
+        attempt.attemptId(),
+        null,
+        finding.statement(),
+        ClaimStatus.PROPOSED,
+        List.of("source-research-finding:" + finding.findingId()),
+        null);
+  }
+
+  private static ClaimCard proposedResearchCounterexample(
+      ResearchFindingRecord finding, ProofAttempt attempt) {
+    ClaimCard base = proposedResearchClaim(finding, attempt);
+    return new ClaimCard(
+        base.assumptions(),
+        base.claimId(),
+        base.conclusion(),
+        "",
+        base.counterexampleRisk(),
+        base.dependencies(),
+        base.dependencyRefs(),
+        base.evidenceRefs(),
+        base.proofSteps(),
+        base.scopeLimitations(),
+        base.selfConfidence(),
+        base.sourceAgentId(),
+        base.sourceAttemptId(),
+        base.sourceDeltaId(),
+        base.statement(),
+        ClaimStatus.PROPOSED,
+        List.of(
+            "artifact:counterexample",
+            "counterexample-target:" + finding.targetObligationId(),
+            "source-research-finding:" + finding.findingId()),
+        null);
+  }
+
+  private static ProofAttempt withProposedResearchClaims(
+      ProofAttempt source, List<ClaimCard> proposedLemmas) {
+    return new ProofAttempt(
+        source.agentId(),
+        source.attemptId(),
+        source.candidateConjectures(),
+        source.checkpointIds(),
+        source.deadEnds(),
+        source.failoverChain(),
+        source.falsificationChecks(),
+        source.finalAnswer(),
+        source.latestCheckpointId(),
+        source.pathId(),
+        source.problemHash(),
+        source.proofSketch(),
+        source.proofSteps(),
+        proposedLemmas,
+        source.rawArtifactRef(),
+        source.resumedFromCheckpointId(),
+        source.roundIndex(),
+        source.segmentCount(),
+        source.selfConfidence(),
+        source.status(),
+        source.strategyId(),
+        source.unresolvedGaps(),
+        source.usage());
   }
 
   private static String roleForStage(String stage, AgentRuntime agent) {
@@ -7541,6 +7868,11 @@ final class DesktopSolveCoordinator {
     private String metaControlReason = "";
     private String focusObligationId = "";
     private String focusSource = "";
+    private String latestResearchCheckpointId = "";
+    private final List<String> activeResearchFindingIds = new ArrayList<>();
+    private String lastCheckpointedProviderCallId = "";
+    private int checkpointRecoveryCount;
+    private boolean pendingFindingReconciliation;
     private boolean reviewComplete;
     private boolean checkpointProcessed;
     private boolean integrated;

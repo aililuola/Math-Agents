@@ -26,7 +26,7 @@ import java.util.function.Consumer;
 public final class ReasoningTraceStore {
   public static final String FILE_NAME = "reasoning_traces.txt";
   public static final String LIVE_DIRECTORY_NAME = "reasoning_live";
-  static final int FORMAT_VERSION = 2;
+  static final int FORMAT_VERSION = 3;
   private static final int READ_BUFFER_BYTES = 64 * 1024;
 
   private final String runId;
@@ -58,9 +58,30 @@ public final class ReasoningTraceStore {
       String stage,
       boolean thinkingEnabled,
       String reasoningEffort) {
+    return beginCall(
+        taskId,
+        agentId,
+        stage,
+        "unbound-provider-call",
+        thinkingEnabled,
+        reasoningEffort);
+  }
+
+  public synchronized ReasoningTraceCall beginCall(
+      String taskId,
+      String agentId,
+      String stage,
+      String providerCallId,
+      boolean thinkingEnabled,
+      String reasoningEffort) {
     String safeTask = ActivitySanitizer.identifier(taskId, 240);
+    String safeProviderCall = ActivitySanitizer.identifier(providerCallId, 160);
+    if (safeProviderCall.isBlank()) {
+      throw new IllegalArgumentException("providerCallId is required");
+    }
     int callIndex = callCounts.merge(safeTask, 1, Integer::sum);
-    ReasoningTraceCall call = new ReasoningTraceCall(this, safeTask, callIndex);
+    ReasoningTraceCall call =
+        new ReasoningTraceCall(this, safeTask, safeProviderCall, callIndex);
     call.start(agentId, stage, thinkingEnabled, reasoningEffort);
     return call;
   }
@@ -71,6 +92,60 @@ public final class ReasoningTraceStore {
 
   public Path path() {
     return path;
+  }
+
+  public synchronized java.util.Optional<CallArchive> findByProviderCallId(
+      String providerCallId) {
+    String expected = ActivitySanitizer.identifier(providerCallId, 160);
+    if (expected.isBlank() || !Files.isRegularFile(path)) {
+      return java.util.Optional.empty();
+    }
+    List<Map<String, Object>> matching = new ArrayList<>();
+    try {
+      scanRecords(
+          path,
+          0L,
+          record -> {
+            if (expected.equals(string(record.get("provider_call_id")))) {
+              matching.add(record);
+            }
+          });
+    } catch (IOException exception) {
+      return java.util.Optional.empty();
+    }
+    if (matching.isEmpty()) {
+      return java.util.Optional.empty();
+    }
+    Map<String, Object> snapshot = buildSnapshot(matching);
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> calls = (List<Map<String, Object>>) snapshot.get("calls");
+    List<Map<String, Object>> completed =
+        calls.stream()
+            .filter(call -> "completed".equals(string(call.get("status"))))
+            .toList();
+    if (completed.size() != 1) {
+      return java.util.Optional.empty();
+    }
+    Map<String, Object> call = completed.getFirst();
+    return java.util.Optional.of(
+        new CallArchive(
+            expected,
+            string(matching.getFirst().get("task_id")),
+            string(call.get("call_id")),
+            string(call.get("agent_id")),
+            string(call.get("stage")),
+            string(call.get("status")),
+            string(call.get("text")),
+            string(call.get("sha256")),
+            number(call.get("characters"))));
+  }
+
+  public synchronized CallArchive readCall(String providerCallId) {
+    return findByProviderCallId(providerCallId)
+        .orElseThrow(
+            () ->
+                new IllegalArgumentException(
+                    "reasoning trace provider call was not found: " + providerCallId));
   }
 
   synchronized void appendRecord(Map<String, Object> record) {
@@ -240,6 +315,7 @@ public final class ReasoningTraceStore {
               ignored -> {
                 Map<String, Object> initial = new LinkedHashMap<>();
                 initial.put("call_id", callId);
+                initial.put("provider_call_id", string(record.get("provider_call_id")));
                 initial.put("call_index", number(record.get("call_index")));
                 initial.put("agent_id", "");
                 initial.put("stage", "");
@@ -428,6 +504,30 @@ public final class ReasoningTraceStore {
     public ReadResult {
       records = List.copyOf(records);
       nextOffset = Math.max(0L, nextOffset);
+    }
+  }
+
+  public record CallArchive(
+      String providerCallId,
+      String taskId,
+      String reasoningTraceCallId,
+      String agentId,
+      String stage,
+      String status,
+      String text,
+      String sha256,
+      long characters) {
+
+    public CallArchive {
+      providerCallId = string(providerCallId);
+      taskId = string(taskId);
+      reasoningTraceCallId = string(reasoningTraceCallId);
+      agentId = string(agentId);
+      stage = string(stage);
+      status = string(status);
+      text = string(text);
+      sha256 = string(sha256);
+      characters = Math.max(0L, characters);
     }
   }
 }
