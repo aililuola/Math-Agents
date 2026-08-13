@@ -9,6 +9,8 @@ import io.github.aililuola.mathproofmesh.contract.MessageEnvelope;
 import io.github.aililuola.mathproofmesh.contract.ObligationKind;
 import io.github.aililuola.mathproofmesh.contract.ProofGraphEdge;
 import io.github.aililuola.mathproofmesh.contract.ProofObligation;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeAdmissionGate;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeRegistry;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -20,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.IntSupplier;
 import org.jgrapht.Graph;
 import org.jgrapht.graph.DefaultEdge;
 import org.jgrapht.graph.DirectedMultigraph;
@@ -53,6 +56,7 @@ public final class ProofGraphStore {
       new DirectedMultigraph<>(DefaultEdge.class);
   private String problemHash;
   private boolean frozen;
+  private NegativeAwareProofGraphWriter negativeAwareWriter;
 
   public ProofGraphStore(String problemHash) {
     this(problemHash, ProofGraphPolicy.defaults());
@@ -61,9 +65,23 @@ public final class ProofGraphStore {
   public ProofGraphStore(String problemHash, ProofGraphPolicy policy) {
     this.problemHash = problemHash == null ? "" : problemHash;
     this.policy = java.util.Objects.requireNonNull(policy, "policy");
+    configureNegativeKnowledge(new NegativeKnowledgeRegistry(), () -> 0, List.of());
   }
 
   public synchronized ProofObligation addObligation(ProofObligation obligation) {
+    return negativeAwareWriter.addObligation(obligation);
+  }
+
+  public synchronized ProofObligation addRootGoalObligation(ProofObligation obligation) {
+    return negativeAwareWriter.addRootGoalObligation(
+        obligation, NegativeAwareProofGraphWriter.IMMUTABLE_ROOT_GOAL);
+  }
+
+  public synchronized ProofObligation addFalsificationObligation(ProofObligation obligation) {
+    return negativeAwareWriter.addFalsificationObligation(obligation);
+  }
+
+  synchronized ProofObligation addObligationUnchecked(ProofObligation obligation) {
     ensureMutable();
     validateProblemHash(obligation.problemHash(), "obligation");
     ProofObligation existing = obligations.get(resolve(obligation.obligationId()));
@@ -137,6 +155,14 @@ public final class ProofGraphStore {
   }
 
   public synchronized MessageEnvelope addClaimNode(MessageEnvelope message) {
+    return negativeAwareWriter.addClaimNode(message);
+  }
+
+  public synchronized MessageEnvelope addFalsificationClaimNode(MessageEnvelope message) {
+    return negativeAwareWriter.addFalsificationClaimNode(message);
+  }
+
+  synchronized MessageEnvelope addClaimNodeUnchecked(MessageEnvelope message) {
     ensureMutable();
     validateProblemHash(message.problemHash(), "claim");
     MessageEnvelope existing = claimNodes.get(message.messageId());
@@ -344,7 +370,7 @@ public final class ProofGraphStore {
     if (message.evidenceType() != EvidenceType.COUNTEREXAMPLE) {
       return List.of();
     }
-    addClaimNode(message);
+    addFalsificationClaimNode(message);
     List<String> affected = new ArrayList<>();
     for (ProofObligation obligation : List.copyOf(obligations.values())) {
       String conclusion = MathTextSimilarity.normalize(message.conclusion());
@@ -595,6 +621,45 @@ public final class ProofGraphStore {
         needsReverify,
         versions,
         audit);
+  }
+
+  public synchronized void configureNegativeKnowledge(
+      NegativeKnowledgeRegistry registry,
+      IntSupplier currentRound,
+      List<String> defaultScope) {
+    negativeAwareWriter =
+        new NegativeAwareProofGraphWriter(
+            this,
+            new NegativeKnowledgeAdmissionGate(
+                java.util.Objects.requireNonNull(registry, "registry")),
+            currentRound,
+            defaultScope);
+  }
+
+  public synchronized List<String> revalidateNegativeKnowledge() {
+    return negativeAwareWriter.revalidateOpenObligations();
+  }
+
+  public synchronized List<String> blockRouteObligationsForNegativeKnowledge(String routeId) {
+    if (routeId == null || routeId.isBlank()) {
+      throw new IllegalArgumentException("routeId is required");
+    }
+    List<String> blocked = new ArrayList<>();
+    for (ProofObligation obligation : List.copyOf(obligations.values())) {
+      if (obligation.kind() == ObligationKind.MAIN_GOAL
+          || !obligation.routeIds().contains(routeId)
+          || (!"open".equals(obligation.status())
+              && !"tentative".equals(obligation.status()))) {
+        continue;
+      }
+      markBlocked(obligation.obligationId(), "negative_knowledge_route_revalidation");
+      blocked.add(obligation.obligationId());
+    }
+    return List.copyOf(blocked);
+  }
+
+  synchronized void blockObligationUnchecked(String obligationId, String reason) {
+    markBlocked(obligationId, reason);
   }
 
   public static ProofGraphStore restore(

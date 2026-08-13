@@ -30,7 +30,8 @@ public final class MemoryPromotionPolicy {
       String refereeAgentId,
       double confidence,
       Collection<MessageEnvelope> facts,
-      Collection<MessageEnvelope> negatives) {
+      NegativeKnowledgeAdmissionGate negativeKnowledgeGate,
+      int currentRound) {
     if (refereeAgentId == null || refereeAgentId.isBlank()) {
       throw new IllegalArgumentException("facts require an independent referee");
     }
@@ -52,9 +53,12 @@ public final class MemoryPromotionPolicy {
     if (wouldCreateCycle(candidate.messageId(), candidate.dependencies(), facts)) {
       throw new IllegalArgumentException("fact dependency cycle detected");
     }
-    if (hasCounterexample(candidate.normalizedStatement(), negatives)) {
-      throw new IllegalArgumentException("known counterexample blocks fact promotion");
-    }
+    negativeKnowledgeGate.requireAllowed(
+        NegativeKnowledgeRegistry.candidateFromMessage(
+            candidate,
+            NegativeKnowledgeSurface.FACT_PROMOTION,
+            NegativeCandidateIntent.FACT_PROMOTION),
+        currentRound);
   }
 
   private static boolean dependenciesResolved(
@@ -100,12 +104,4 @@ public final class MemoryPromotionPolicy {
         .anyMatch(next -> reaches(next, target, graph, seen));
   }
 
-  private static boolean hasCounterexample(
-      String normalizedStatement, Collection<MessageEnvelope> negatives) {
-    return negatives.stream()
-        .anyMatch(
-            item ->
-                item.evidenceType() == EvidenceType.COUNTEREXAMPLE
-                    && item.normalizedStatement().equals(normalizedStatement));
-  }
 }

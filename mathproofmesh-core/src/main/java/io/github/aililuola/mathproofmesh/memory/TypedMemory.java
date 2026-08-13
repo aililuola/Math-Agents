@@ -2,6 +2,7 @@ package io.github.aililuola.mathproofmesh.memory;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatus;
+import io.github.aililuola.mathproofmesh.contract.EvidenceType;
 import io.github.aililuola.mathproofmesh.contract.MemoryTier;
 import io.github.aililuola.mathproofmesh.contract.MessageEnvelope;
 import java.util.ArrayList;
@@ -21,6 +22,8 @@ public final class TypedMemory {
   private final MemoryPolicy policy;
   private final MemoryPromotionPolicy promotionPolicy;
   private final MemoryInvalidationService invalidationService;
+  private NegativeKnowledgeRegistry negativeKnowledgeRegistry;
+  private NegativeKnowledgeAdmissionGate negativeKnowledgeGate;
   private final Map<String, MessageEnvelope> messages = new LinkedHashMap<>();
   private final Map<String, MemoryTier> tiers = new LinkedHashMap<>();
   private final Map<String, String> contentIndex = new LinkedHashMap<>();
@@ -38,10 +41,15 @@ public final class TypedMemory {
     this.policy = java.util.Objects.requireNonNull(policy, "policy");
     promotionPolicy = new MemoryPromotionPolicy(policy);
     invalidationService = new MemoryInvalidationService();
+    negativeKnowledgeRegistry = new NegativeKnowledgeRegistry();
+    negativeKnowledgeGate = new NegativeKnowledgeAdmissionGate(negativeKnowledgeRegistry);
   }
 
   public synchronized MessageEnvelope addMessage(
       MessageEnvelope message, String refereeAgentId) {
+    if (message.memoryTier() == MemoryTier.NEGATIVE) {
+      return addNegative(message, "");
+    }
     String existingId = contentIndex.get(message.contentHash());
     if (existingId != null) {
       provenance
@@ -56,7 +64,7 @@ public final class TypedMemory {
     return switch (message.memoryTier()) {
       case FACT -> addFact(message, refereeAgentId);
       case INSIGHT -> addInsight(message);
-      case NEGATIVE -> addNegative(message, "");
+      case NEGATIVE -> throw new IllegalStateException("negative message dispatch failed");
     };
   }
 
@@ -72,6 +80,22 @@ public final class TypedMemory {
   public synchronized MessageEnvelope addNegative(
       MessageEnvelope message, String reason) {
     requireTier(message, MemoryTier.NEGATIVE, "addNegative");
+    negativeKnowledgeRegistry.registerTemporaryRejection(
+        NegativeKnowledgeRegistry.candidateFromMessage(
+            message,
+            NegativeKnowledgeSurface.STRATEGY_ADMISSION,
+            NegativeCandidateIntent.POSITIVE_DEPENDENCY),
+        message.messageId(),
+        message.roundCreated(),
+        message.ttlRounds());
+    String existingId = contentIndex.get(message.contentHash());
+    if (existingId != null) {
+      provenance
+          .computeIfAbsent(existingId, ignored -> new LinkedHashSet<>())
+          .add(message.sourceAgentId());
+      record("memory_duplicate_merged", existingId, Map.of("duplicate_id", message.messageId()));
+      return messages.get(existingId);
+    }
     MessageEnvelope stored = store(message, MemoryTier.NEGATIVE, "negative_added");
     if (reason != null && !reason.isBlank()) {
       invalidations.put(stored.messageId(), reason);
@@ -85,6 +109,11 @@ public final class TypedMemory {
 
   public synchronized MessageEnvelope addFact(
       MessageEnvelope message, String refereeAgentId) {
+    return addFact(message, refereeAgentId, message.roundCreated());
+  }
+
+  public synchronized MessageEnvelope addFact(
+      MessageEnvelope message, String refereeAgentId, int currentRound) {
     requireTier(message, MemoryTier.FACT, "addFact");
     if (message.verificationStatus() != ClaimStatus.VERIFIED) {
       throw new IllegalArgumentException("facts must be independently verified");
@@ -94,15 +123,21 @@ public final class TypedMemory {
         refereeAgentId,
         message.verificationConfidence(),
         facts(),
-        negatives());
+        negativeKnowledgeGate,
+        currentRound);
     return store(message, MemoryTier.FACT, "fact_promoted");
   }
 
   public synchronized MessageEnvelope promote(
       String messageId, String refereeAgentId, double confidence) {
+    return promote(messageId, refereeAgentId, confidence, requireMessage(messageId).roundCreated());
+  }
+
+  public synchronized MessageEnvelope promote(
+      String messageId, String refereeAgentId, double confidence, int currentRound) {
     MessageEnvelope candidate = requireMessage(messageId);
     promotionPolicy.validate(
-        candidate, refereeAgentId, confidence, facts(), negatives());
+        candidate, refereeAgentId, confidence, facts(), negativeKnowledgeGate, currentRound);
     MessageEnvelope promoted = MemoryEnvelopeTransitions.toFact(candidate, confidence);
     replace(candidate, promoted);
     record(
@@ -128,6 +163,48 @@ public final class TypedMemory {
       addNegative(counterexample, "counterexample");
     }
     return invalidationService.applyCounterexample(counterexample, this);
+  }
+
+  public synchronized NegativeKnowledgeRecord addDeterministicGuardrail(
+      String problemHash, DeterministicNegativeSeed seed, int currentRound) {
+    return negativeKnowledgeRegistry.registerDeterministicGuardrail(
+        problemHash, seed, currentRound);
+  }
+
+  public synchronized List<String> applyVerifiedCounterexample(
+      MessageEnvelope counterexample, VerifiedCounterexampleAuthority authority) {
+    negativeKnowledgeRegistry.registerVerifiedCounterexample(counterexample, authority);
+    if (!messages.containsKey(counterexample.messageId())) {
+      addNegative(counterexample, "verified counterexample");
+    }
+    return invalidationService.applyCounterexample(counterexample, this);
+  }
+
+  public synchronized NegativeKnowledgeRegistry negativeKnowledgeRegistry() {
+    return negativeKnowledgeRegistry;
+  }
+
+  public synchronized NegativeKnowledgeAdmissionGate negativeKnowledgeAdmissionGate() {
+    return negativeKnowledgeGate;
+  }
+
+  public synchronized List<String> revalidateFactsAgainstNegativeKnowledge(int currentRound) {
+    List<String> demoted = new ArrayList<>();
+    for (MessageEnvelope fact : List.copyOf(facts())) {
+      NegativeKnowledgeDecision decision =
+          negativeKnowledgeGate.evaluate(
+              NegativeKnowledgeRegistry.candidateFromMessage(
+                  fact,
+                  NegativeKnowledgeSurface.RESTORE_REVALIDATION,
+                  NegativeCandidateIntent.FACT_PROMOTION),
+              currentRound);
+      if (!decision.allowed()
+          && demoteForInvalidation(
+              fact.messageId(), "negative knowledge restore revalidation: " + decision.code())) {
+        demoted.add(fact.messageId());
+      }
+    }
+    return List.copyOf(demoted);
   }
 
   public synchronized List<String> invalidate(
@@ -214,7 +291,8 @@ public final class TypedMemory {
         invalidations,
         counterexampleBatches,
         versions,
-        audit);
+        audit,
+        negativeKnowledgeRegistry.snapshot());
   }
 
   public static TypedMemory restore(
@@ -231,6 +309,14 @@ public final class TypedMemory {
       memory.counterexampleBatches.putAll(snapshot.counterexampleBatches());
       memory.versions.putAll(snapshot.versions());
       memory.audit.addAll(snapshot.audit());
+      if (snapshot.negativeKnowledge().records().isEmpty()) {
+        memory.migrateLegacyNegativeKnowledge();
+      } else {
+        memory.negativeKnowledgeRegistry =
+            NegativeKnowledgeRegistry.restore(snapshot.negativeKnowledge());
+        memory.negativeKnowledgeGate =
+            new NegativeKnowledgeAdmissionGate(memory.negativeKnowledgeRegistry);
+      }
     }
     return memory;
   }
@@ -344,6 +430,74 @@ public final class TypedMemory {
       throw new IllegalArgumentException(
           operation + " requires memory_tier=" + expected.value());
     }
+  }
+
+  private void migrateLegacyNegativeKnowledge() {
+    NegativeKnowledgeRegistry migrated = new NegativeKnowledgeRegistry();
+    messages.values().stream()
+        .filter(message -> tiers.get(message.messageId()) == MemoryTier.NEGATIVE)
+        .forEach(message -> migrateLegacyNegative(message, migrated));
+    negativeKnowledgeRegistry = migrated;
+    negativeKnowledgeGate = new NegativeKnowledgeAdmissionGate(negativeKnowledgeRegistry);
+  }
+
+  private static void migrateLegacyNegative(
+      MessageEnvelope message, NegativeKnowledgeRegistry registry) {
+    String raw = message.rawSourceRef() == null ? "" : message.rawSourceRef();
+    if ("deterministic-preflight".equals(message.sourceAgentId())
+        && raw.startsWith("deterministic://greedy-gcd-guardrails/")) {
+      String seedId = raw.substring(raw.lastIndexOf('/') + 1);
+      DeterministicNegativeSeed seed =
+          GreedyGcdNegativeKnowledgeSeeds.byId(seedId)
+              .orElseGet(
+                  () ->
+                      DeterministicNegativeSeed.trustedCodeSeed(
+                          seedId,
+                          NegativeKnowledgeTargetType.INFERENCE_PATTERN,
+                          message.normalizedStatement(),
+                          List.of(),
+                          message.assumptions(),
+                          message.quantifiers(),
+                          message.variableBindings(),
+                          message.scopeLimitations(),
+                          "Migrated deterministic preflight guardrail."));
+      registry.registerDeterministicGuardrail(message.problemHash(), seed, message.roundCreated());
+      return;
+    }
+    boolean trustedLegacyCounterexample =
+        message.evidenceType() == EvidenceType.COUNTEREXAMPLE
+            && "independent-computation-replay".equals(message.sourceAgentId())
+            && message.artifactRefs().stream().anyMatch(ref -> ref.startsWith("experiment://"))
+            && Double.compare(message.verificationConfidence(), 1.0d) == 0
+            && message.rawSourceRef() != null
+            && !message.rawSourceRef().isBlank();
+    if (trustedLegacyCounterexample) {
+      String artifact =
+          message.artifactRefs().stream()
+              .filter(ref -> ref.startsWith("experiment://"))
+              .findFirst()
+              .orElseThrow();
+      registry.registerVerifiedCounterexample(
+          message,
+          VerifiedCounterexampleAuthority.independentReplay(
+              true,
+              true,
+              io.github.aililuola.mathproofmesh.computation.ComputationEvidenceGate
+                  .EvidenceAuthority.REFUTED,
+              artifact,
+              message.normalizedStatement(),
+              message.rawSourceRef(),
+              List.of()));
+      return;
+    }
+    registry.registerTemporaryRejection(
+        NegativeKnowledgeRegistry.candidateFromMessage(
+            message,
+            NegativeKnowledgeSurface.RESTORE_REVALIDATION,
+            NegativeCandidateIntent.AUDIT_ONLY),
+        message.messageId(),
+        message.roundCreated(),
+        message.ttlRounds());
   }
 
 }

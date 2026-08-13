@@ -1,87 +1,68 @@
 package io.github.aililuola.mathproofmesh.desktop;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.aililuola.mathproofmesh.contract.StrategyCard;
+import io.github.aililuola.mathproofmesh.memory.GreedyGcdNegativeKnowledgeSeeds;
+import io.github.aililuola.mathproofmesh.memory.NegativeCandidateIntent;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeCandidate;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeRegistry;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeSurface;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeTargetType;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 final class GreedyGcdStrategyGuardrailsTest {
+  private static final String PROBLEM_HASH = "8".repeat(64);
+
   @Test
   void rejectsRoutesWhoseLoadBearingStepIsFinitePrimeSupport() {
-    assertTrue(
-        GreedyGcdStrategyGuardrails.violates(
-            strategy(
-                "限制素数集合并利用模M周期性",
-                "证明P有限需要精细论证。",
-                List.of("prime_factors", "finiteness"))));
-    assertTrue(
-        GreedyGcdStrategyGuardrails.violates(
-            strategy(
-                "Potential-function proof",
-                "Prove that the sequence has finite prime support.",
-                List.of("prime_finiteness"))));
+    assertBlocked("Prove that the sequence has finite prime support.");
+    assertBlocked("Only finitely many primes divide terms of the sequence.");
   }
 
   @Test
   void rejectsTheOtherPersistedNegativeMemoryPatterns() {
-    assertTrue(
-        GreedyGcdStrategyGuardrails.violates(
-            strategy(
-                "Universal divisor",
-                "Assume one prime divides every term and derive periodicity.",
-                List.of())));
-    assertTrue(
-        GreedyGcdStrategyGuardrails.violates(
-            strategy(
-                "Residue nesting",
-                "Use containment of residue classes for different moduli.",
-                List.of())));
-    assertTrue(
-        GreedyGcdStrategyGuardrails.violates(
-            strategy(
-                "Finite experiment",
-                "A bounded search proves eventual translation periodicity.",
-                List.of())));
+    assertBlocked("Assume one prime divides every term and derive periodicity.");
+    assertBlocked("Use containment of residue classes for different moduli.");
+    assertBlocked("A bounded search proves the sequence is eventually periodic.");
   }
 
   @Test
   void allowsTheTwoSoundFoundationLemmasAndTheExplicitBridgeObligation() {
-    assertFalse(
-        GreedyGcdStrategyGuardrails.violates(
-            strategy(
-                "Bounded gaps",
-                "Let Q = rad(a_1); every multiple of Q is admissible, so a_{n+1}-a_n <= Q.",
-                List.of("bounded_gaps"))));
-    assertFalse(
-        GreedyGcdStrategyGuardrails.violates(
-            strategy(
-                "Finite-state bridge",
-                "Define an explicit finite state and prove separately that state recurrence implies translation periodicity.",
-                List.of("bridge", "finite_state"))));
+    assertAllowed("Let Q=rad(a_1); every multiple of Q is admissible, so the gaps are bounded.");
+    assertAllowed(
+        "Define an explicit finite state and prove separately that recurrence implies translation periodicity.");
   }
 
-  private static StrategyCard strategy(String title, String bottleneck, List<String> tags) {
-    return new StrategyCard(
-        null,
-        bottleneck,
-        List.of(),
-        List.of(),
-        List.of(),
-        "Use the stated mechanism without importing another unproved dependency.",
-        List.of(),
-        0.2d,
-        0.6d,
-        List.of(),
-        "Search for the smallest counterexample.",
-        "The dependency graph is explicit.",
-        null,
-        null,
-        List.of(),
-        List.of(),
-        null,
-        tags,
-        title);
+  private static void assertBlocked(String statement) {
+    assertThat(decisions(statement)).anyMatch(decision -> !decision.allowed());
+  }
+
+  private static void assertAllowed(String statement) {
+    assertThat(decisions(statement)).allMatch(io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeDecision::allowed);
+  }
+
+  private static List<io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeDecision> decisions(
+      String statement) {
+    NegativeKnowledgeRegistry registry = new NegativeKnowledgeRegistry();
+    GreedyGcdNegativeKnowledgeSeeds.all()
+        .forEach(seed -> registry.registerDeterministicGuardrail(PROBLEM_HASH, seed, 0));
+    return java.util.Arrays.stream(NegativeKnowledgeTargetType.values())
+        .map(
+            targetType ->
+                registry.decide(
+                    new NegativeKnowledgeCandidate(
+                        PROBLEM_HASH,
+                        targetType,
+                        statement,
+                        "",
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        GreedyGcdNegativeKnowledgeSeeds.problemScope(),
+                        NegativeKnowledgeSurface.STRATEGY_ADMISSION,
+                        NegativeCandidateIntent.POSITIVE_DEPENDENCY),
+                    0))
+        .toList();
   }
 }

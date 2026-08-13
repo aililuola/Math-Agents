@@ -19,7 +19,8 @@ public record TypedMemorySnapshot(
     Map<String, String> invalidations,
     Map<String, List<String>> counterexampleBatches,
     Map<String, Long> versions,
-    List<MemoryAuditEvent> audit) {
+    List<MemoryAuditEvent> audit,
+    NegativeKnowledgeSnapshot negativeKnowledge) {
 
   public TypedMemorySnapshot {
     messages = copy(messages);
@@ -30,6 +31,29 @@ public record TypedMemorySnapshot(
     counterexampleBatches = copyLists(counterexampleBatches);
     versions = copy(versions);
     audit = audit == null ? List.of() : List.copyOf(audit);
+    negativeKnowledge =
+        negativeKnowledge == null ? NegativeKnowledgeSnapshot.empty() : negativeKnowledge;
+  }
+
+  public TypedMemorySnapshot(
+      Map<String, MessageEnvelope> messages,
+      Map<String, MemoryTier> tiers,
+      Map<String, String> contentIndex,
+      Map<String, List<String>> provenance,
+      Map<String, String> invalidations,
+      Map<String, List<String>> counterexampleBatches,
+      Map<String, Long> versions,
+      List<MemoryAuditEvent> audit) {
+    this(
+        messages,
+        tiers,
+        contentIndex,
+        provenance,
+        invalidations,
+        counterexampleBatches,
+        versions,
+        audit,
+        NegativeKnowledgeSnapshot.empty());
   }
 
   private static <K, V> Map<K, V> copy(Map<K, V> value) {

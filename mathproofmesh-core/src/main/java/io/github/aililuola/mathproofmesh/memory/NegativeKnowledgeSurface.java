@@ -1,0 +1,11 @@
+package io.github.aililuola.mathproofmesh.memory;
+
+public enum NegativeKnowledgeSurface {
+  STRATEGY_ADMISSION,
+  ROUTE_WIDENING,
+  ROUTE_REVISION,
+  PROOF_OBLIGATION_CREATION,
+  INSPIRATION_MATERIALIZATION,
+  FACT_PROMOTION,
+  RESTORE_REVALIDATION
+}

@@ -83,7 +83,7 @@ record DesktopSolveCheckpoint(
     List<String> completedStages,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 5;
+  static final int CURRENT_SCHEMA_VERSION = 6;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {

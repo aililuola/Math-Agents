@@ -109,7 +109,17 @@ import io.github.aililuola.mathproofmesh.inspiration.PersistentMetaStrategist;
 import io.github.aililuola.mathproofmesh.inspiration.TriggerPolicy;
 import io.github.aililuola.mathproofmesh.memory.LemmaMemory;
 import io.github.aililuola.mathproofmesh.memory.LemmaMemorySnapshot;
+import io.github.aililuola.mathproofmesh.memory.GreedyGcdNegativeKnowledgeSeeds;
 import io.github.aililuola.mathproofmesh.memory.MemoryPolicy;
+import io.github.aililuola.mathproofmesh.memory.NegativeCandidateIntent;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeAdmissionGate;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeBlockedException;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeCandidate;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeDecision;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeRegistry;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeSurface;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeTargetType;
+import io.github.aililuola.mathproofmesh.memory.VerifiedCounterexampleAuthority;
 import io.github.aililuola.mathproofmesh.memory.TypedMemory;
 import io.github.aililuola.mathproofmesh.memory.TypedMemorySnapshot;
 import io.github.aililuola.mathproofmesh.orchestration.AdaptiveBudgetManager;
@@ -273,6 +283,8 @@ final class DesktopSolveCoordinator {
   private LemmaMemory lemmaMemory = new LemmaMemory();
   private TypedMemory typedMemory;
   private ProofGraphStore proofGraph;
+  private NegativeKnowledgeRegistry negativeKnowledgeRegistry;
+  private NegativeKnowledgeAdmissionGate negativeKnowledgeGate;
   private final ProofControlFacade proofControl = ProofControlFacade.createDefault();
   private final ExactGoalContractChecker exactGoalContractChecker =
       new ExactGoalContractChecker(proofControl.scopeGuard());
@@ -336,6 +348,7 @@ final class DesktopSolveCoordinator {
                 config.topology().typedMemory().maxInsightContext(),
                 config.topology().typedMemory().maxNegativeContext()));
     this.proofGraph = new ProofGraphStore(problemHash, ProofGraphPolicy.defaults());
+    installNegativeKnowledgeRuntime();
     this.routeRegistry =
         new RouteRegistry(
             problemHash,
@@ -630,19 +643,8 @@ final class DesktopSolveCoordinator {
             .extract("goal-scope", rootGoal().sourceStatement(), List.of(), 1.0d);
     ProofControlModels.Mode mode = proofControlMode();
     for (StrategyCard strategy : diverse) {
-      if (strategyDependsOnNegative(strategy)) {
-        event(
-            "route_rejected",
-            "route_admission_and_team",
-            null,
-            "rejected",
-            strategy.title() + ": required dependency conflicts with Negative Memory",
-            "strategy://" + strategy.strategyId());
-        continue;
-      }
       String routeId = "route-" + (accepted.size() + 1);
       ProofControlModels.Strategy controlStrategy = controlStrategy(strategy, routeId);
-      strategyArchive.archive(controlStrategy, "strategy://" + strategy.strategyId(), 0);
       StrategyBlueprintCompiler.Compilation blueprint =
           proofControl.blueprintCompiler().compile(problemHash, controlStrategy, goal);
       ProofControlModels.GoalLink link =
@@ -656,10 +658,24 @@ final class DesktopSolveCoordinator {
                   scope,
                   proofControl.scopeGuard(),
                   (source, target) -> source.equals(target));
+      try {
+        negativeKnowledgeGate.requireAllAllowed(
+            negativeKnowledgeCandidates(
+                strategy, blueprint, NegativeKnowledgeSurface.STRATEGY_ADMISSION),
+            roundIndex.get());
+      } catch (NegativeKnowledgeBlockedException exception) {
+        recordNegativeKnowledgeRejection(
+            "route_rejected",
+            "route_admission_and_team",
+            strategy.title(),
+            exception);
+        continue;
+      }
+      strategyArchive.archive(controlStrategy, "strategy://" + strategy.strategyId(), 0);
       strategyBlueprints.put(strategy.strategyId(), blueprint);
       goalLinks.put(strategy.strategyId(), link);
       String signature = topology.mathNormalize(topology.strategyText(strategy));
-      boolean duplicate = !mechanisms.add(signature);
+      boolean duplicate = mechanisms.contains(signature);
       boolean commonMode =
           accepted.stream()
               .anyMatch(
@@ -683,6 +699,7 @@ final class DesktopSolveCoordinator {
               + (decision.reasons().isEmpty() ? "" : ": " + String.join("; ", decision.reasons())),
           "strategy://" + strategy.strategyId());
       if (admitted) {
+        mechanisms.add(signature);
         accepted.add(strategy);
       }
     }
@@ -699,13 +716,33 @@ final class DesktopSolveCoordinator {
     }
     int initial = Math.min(config.budget().initialPaths(), admittedStrategies.size());
     for (int index = 0; index < initial; index++) {
-      addRoute(admittedStrategies.get(nextStrategyIndex.getAndIncrement()), 0);
+      StrategyCard candidate = admittedStrategies.get(nextStrategyIndex.getAndIncrement());
+      try {
+        addRoute(candidate, 0);
+      } catch (NegativeKnowledgeBlockedException exception) {
+        recordNegativeKnowledgeRejection(
+            "initial_route_rejected",
+            "initial_routes",
+            candidate.title(),
+            exception);
+      }
     }
     recomputeNeighbors();
     persistUnchecked("route_admission_and_team", false);
   }
 
   private void addRoute(StrategyCard strategy, int revisionCount) {
+    addRoute(strategy, revisionCount, NegativeKnowledgeSurface.STRATEGY_ADMISSION);
+  }
+
+  private void addRoute(
+      StrategyCard strategy,
+      int revisionCount,
+      NegativeKnowledgeSurface surface) {
+    negativeKnowledgeGate.requireAllAllowed(
+        negativeKnowledgeCandidates(
+            strategy, strategyBlueprints.get(strategy.strategyId()), surface),
+        roundIndex.get());
     String routeId = "route-" + (routes.size() + 1);
     List<AgentRuntime> explorers =
         pool.agents().stream().filter(agent -> agent.supportsRole("explorer")).toList();
@@ -1367,7 +1404,16 @@ final class DesktopSolveCoordinator {
 
   private void applyComputationCounterexample(RouteState route, ComputationTrace trace) {
     MessageEnvelope counterexample = computationCounterexampleMessage(route, trace);
-    typedMemory.applyCounterexample(counterexample);
+    typedMemory.applyVerifiedCounterexample(
+        counterexample,
+        VerifiedCounterexampleAuthority.independentReplay(
+            trace.result() != null,
+            trace.replayValid(),
+            trace.authority(),
+            "experiment://" + trace.result().experimentId(),
+            trace.result().targetClaim(),
+            trace.result().resultHash(),
+            List.of()));
     Set<String> affected = new LinkedHashSet<>(proofGraph.applyCounterexample(counterexample));
     findObligation(trace.targetObligationId())
         .filter(obligation -> !"refuted".equals(obligation.status()))
@@ -1445,7 +1491,7 @@ final class DesktopSolveCoordinator {
         result.resultHash(),
         roundIndex.get(),
         "1",
-        List.of("The authority is refutation only; it does not prove any stronger claim."),
+        negativeKnowledgeScope(),
         "independent-computation-replay",
         RouteRole.TOOL_SPECIALIST,
         route.routeId,
@@ -1532,7 +1578,8 @@ final class DesktopSolveCoordinator {
             ClaimStatus.VERIFIED);
     try {
       MessageEnvelope admitted =
-          typedMemory.addFact(certificate, "independent-computation-replay");
+          typedMemory.addFact(
+              certificate, "independent-computation-replay", roundIndex.get());
       proofGraph.addClaimNode(admitted);
       findObligation(trace.targetObligationId())
           .filter(
@@ -2617,7 +2664,7 @@ final class DesktopSolveCoordinator {
         continue;
       }
       MessageEnvelope fact = factMessage(claim, route);
-      MessageEnvelope admitted = typedMemory.addFact(fact, refereeId);
+      MessageEnvelope admitted = typedMemory.addFact(fact, refereeId, roundIndex.get());
       proofControl.claims().observeExternalAdmission(claim.claimId(), admitted.messageId());
       proofGraph.addClaimNode(admitted);
       closeClaimObligations(claim, route, admitted);
@@ -2801,7 +2848,9 @@ final class DesktopSolveCoordinator {
         route.attempt.rawArtifactRef(),
         roundIndex.get(),
         "1",
-        claim.scopeLimitations(),
+        claim.scopeLimitations().isEmpty()
+            ? negativeKnowledgeScope()
+            : claim.scopeLimitations(),
         route.author.id(),
         RouteRole.PROVER,
         route.routeId,
@@ -3635,7 +3684,7 @@ final class DesktopSolveCoordinator {
         && nextStrategyIndex.get() < admittedStrategies.size()
         && routes.size() < config.budget().maxPaths()) {
       StrategyCard candidate = admittedStrategies.get(nextStrategyIndex.getAndIncrement());
-      if (strategyDependsOnNegative(candidate) || duplicatesActiveDependency(candidate)) {
+      if (duplicatesActiveDependency(candidate)) {
         event(
             "widen_candidate_rejected",
             "scheduler_decision",
@@ -3645,7 +3694,22 @@ final class DesktopSolveCoordinator {
             "strategy://" + candidate.strategyId());
         continue;
       }
-      addRoute(candidate, 0);
+      try {
+        negativeKnowledgeGate.requireAllAllowed(
+            negativeKnowledgeCandidates(
+                candidate,
+                strategyBlueprints.get(candidate.strategyId()),
+                NegativeKnowledgeSurface.ROUTE_WIDENING),
+            roundIndex.get());
+        addRoute(candidate, 0, NegativeKnowledgeSurface.ROUTE_WIDENING);
+      } catch (NegativeKnowledgeBlockedException exception) {
+        recordNegativeKnowledgeRejection(
+            "widen_candidate_rejected",
+            "scheduler_decision",
+            candidate.title(),
+            exception);
+        continue;
+      }
       added++;
     }
     return added > 0;
@@ -3709,10 +3773,6 @@ final class DesktopSolveCoordinator {
       StrategyCard revision,
       String action,
       StrategyArchive.RevisionReason reason) {
-    if (strategyDependsOnNegative(revision)) {
-      eventSchedulerAction(action, false, "revision still depends on Negative Memory");
-      return false;
-    }
     ProofControlModels.Strategy control = controlStrategy(revision, target.routeId);
     ProofControlModels.Obligation goal = controlGoal();
     StrategyBlueprintCompiler.Compilation blueprint =
@@ -3730,6 +3790,20 @@ final class DesktopSolveCoordinator {
                 scope,
                 proofControl.scopeGuard(),
                 (source, destination) -> source.equals(destination));
+    try {
+      negativeKnowledgeGate.requireAllAllowed(
+          negativeKnowledgeCandidates(
+              revision, blueprint, NegativeKnowledgeSurface.ROUTE_REVISION),
+          roundIndex.get());
+    } catch (NegativeKnowledgeBlockedException exception) {
+      recordNegativeKnowledgeRejection(
+          "revision_rejected",
+          "scheduler_decision",
+          revision.title(),
+          exception);
+      eventSchedulerAction(action, false, "revision conflicts with permanent Negative Knowledge");
+      return false;
+    }
     boolean duplicate =
         routes.stream()
             .filter(route -> route != target)
@@ -4371,31 +4445,29 @@ final class DesktopSolveCoordinator {
   private void materializeInspiration(InspirationEngine.ExecutionResult result) {
     InspirationProposal proposal = result.proposal();
     String action = result.materialization().action();
-    RouteState targetRoute = null;
+    StrategyCard inspired = null;
+    ProofControlModels.Strategy inspiredControl = null;
+    StrategyBlueprintCompiler.Compilation inspiredBlueprint = null;
     if ("route_created".equals(action) && routes.size() < config.budget().maxPaths()) {
-      StrategyCard inspired = inspiredStrategy(proposal);
-      admittedStrategies =
-          java.util.stream.Stream.concat(admittedStrategies.stream(), java.util.stream.Stream.of(inspired))
-              .toList();
-      addRoute(inspired, 0);
-      targetRoute = routes.getLast();
+      inspired = inspiredStrategy(proposal);
+      inspiredControl = controlStrategy(inspired, "route-" + (routes.size() + 1));
+      inspiredBlueprint =
+          proofControl.blueprintCompiler().compile(problemHash, inspiredControl, controlGoal());
     }
-    if (targetRoute == null) {
-      targetRoute =
-          proposal.targetRouteIds().stream()
-              .flatMap(routeId -> routes.stream().filter(route -> route.routeId.equals(routeId)))
-              .filter(this::routeEligibleForWork)
-              .filter(route -> !"verified".equals(route.status))
-              .findFirst()
-              .orElseGet(
-                  () ->
-                      routes.stream()
-                          .filter(this::routeEligibleForWork)
-                          .filter(route -> !"verified".equals(route.status))
-                          .findFirst()
-                          .orElse(null));
-    }
-    typedMemory.addInsight(inspirationMessage(proposal));
+    RouteState targetRoute =
+        proposal.targetRouteIds().stream()
+            .flatMap(routeId -> routes.stream().filter(route -> route.routeId.equals(routeId)))
+            .filter(this::routeEligibleForWork)
+            .filter(route -> !"verified".equals(route.status))
+            .findFirst()
+            .orElseGet(
+                () ->
+                    routes.stream()
+                        .filter(this::routeEligibleForWork)
+                        .filter(route -> !"verified".equals(route.status))
+                        .findFirst()
+                        .orElse(null));
+    MessageEnvelope insight = inspirationMessage(proposal);
     String statement =
         proposal.generatedObligations().stream()
             .filter(value -> value != null && !value.isBlank())
@@ -4404,26 +4476,74 @@ final class DesktopSolveCoordinator {
                     .thenComparing(java.util.Comparator.naturalOrder()))
             .orElse(proposal.statement());
     String id = proposal.proposalId() + "-obligation-1";
+    List<NegativeKnowledgeCandidate> drafts = new ArrayList<>();
+    if (inspired != null) {
+      drafts.addAll(
+          negativeKnowledgeCandidates(
+              inspired,
+              inspiredBlueprint,
+              NegativeKnowledgeSurface.INSPIRATION_MATERIALIZATION));
+    }
+    for (String draft :
+        java.util.stream.Stream.concat(
+                java.util.stream.Stream.of(proposal.statement(), statement),
+                proposal.generatedObligations().stream())
+            .filter(value -> value != null && !value.isBlank())
+            .distinct()
+            .toList()) {
+      for (NegativeKnowledgeTargetType targetType : NegativeKnowledgeTargetType.values()) {
+        drafts.add(
+            negativeKnowledgeCandidate(
+                draft,
+                targetType,
+                NegativeKnowledgeSurface.INSPIRATION_MATERIALIZATION,
+                NegativeCandidateIntent.POSITIVE_DEPENDENCY));
+      }
+    }
+    try {
+      negativeKnowledgeGate.requireAllAllowed(drafts, roundIndex.get());
+    } catch (NegativeKnowledgeBlockedException exception) {
+      recordNegativeKnowledgeRejection(
+          "inspiration_materialization_rejected",
+          "scheduler_inspiration",
+          proposal.proposalId(),
+          exception);
+      return;
+    }
+
+    if (inspired != null) {
+      strategyArchive.archive(
+          inspiredControl, "inspiration://" + proposal.proposalId(), roundIndex.get());
+      strategyBlueprints.put(inspired.strategyId(), inspiredBlueprint);
+      admittedStrategies =
+          java.util.stream.Stream.concat(
+                  admittedStrategies.stream(), java.util.stream.Stream.of(inspired))
+              .toList();
+      addRoute(inspired, 0, NegativeKnowledgeSurface.INSPIRATION_MATERIALIZATION);
+      targetRoute = routes.getLast();
+    }
+    typedMemory.addInsight(insight);
     List<String> routeIds = targetRoute == null ? List.of("run") : List.of(targetRoute.routeId);
+    ProofObligation inspirationObligation =
+        new ProofObligation(
+            List.of(),
+            0.5d,
+            "",
+            List.of(),
+            List.of(),
+            List.of(),
+            null,
+            ObligationKind.SUBGOAL,
+            topology.mathNormalize(statement),
+            id,
+            0.6d,
+            problemHash,
+            List.of(),
+            routeIds,
+            statement,
+            "open");
     if (findObligation(id).isEmpty()) {
-      proofGraph.addObligation(
-          new ProofObligation(
-              List.of(),
-              0.5d,
-              "",
-              List.of(),
-              List.of(),
-              List.of(),
-              null,
-              ObligationKind.SUBGOAL,
-              topology.mathNormalize(statement),
-              id,
-              0.6d,
-              problemHash,
-              List.of(),
-              routeIds,
-              statement,
-              "open"));
+      proofGraph.addObligation(inspirationObligation);
     }
     if (targetRoute != null) {
       enqueueProofTask(
@@ -5154,6 +5274,29 @@ final class DesktopSolveCoordinator {
     if (checkpoint.proofGraph() != null) {
       proofGraph = ProofGraphStore.restore(checkpoint.proofGraph(), ProofGraphPolicy.defaults());
     }
+    installNegativeKnowledgeRuntime();
+    typedMemory.revalidateFactsAgainstNegativeKnowledge(roundIndex.get());
+    Set<String> restoreBlockedObligations =
+        new LinkedHashSet<>(proofGraph.revalidateNegativeKnowledge());
+    pendingProofTasks.removeIf(
+        task -> restoreBlockedObligations.contains(task.obligationId()));
+    Set<String> restoreBlockedStrategyIds = new LinkedHashSet<>();
+    admittedStrategies =
+        admittedStrategies.stream()
+            .filter(
+                strategy -> {
+                  boolean blocked =
+                      negativeKnowledgeBlocksStrategy(
+                          strategy,
+                          strategyBlueprints.get(strategy.strategyId()),
+                          NegativeKnowledgeSurface.RESTORE_REVALIDATION);
+                  if (blocked) {
+                    restoreBlockedStrategyIds.add(strategy.strategyId());
+                  }
+                  return !blocked;
+                })
+            .toList();
+    nextStrategyIndex.set(Math.min(nextStrategyIndex.get(), admittedStrategies.size()));
     if (checkpoint.messageStore() != null) {
       messageRepository = new InMemoryMessageRepository(checkpoint.messageStore());
       messageBroker = createMessageBroker(messageRepository);
@@ -5208,7 +5351,11 @@ final class DesktopSolveCoordinator {
       route.reviewComplete = saved.reviewComplete();
       route.checkpointProcessed = saved.checkpointProcessed();
       route.integrated = saved.integrated();
-      if (!"verified".equals(route.status) && strategyDependsOnNegative(route.strategy)) {
+      if (!"verified".equals(route.status)
+          && negativeKnowledgeBlocksStrategy(
+              route.strategy,
+              strategyBlueprints.get(route.strategy.strategyId()),
+              NegativeKnowledgeSurface.RESTORE_REVALIDATION)) {
         route.status = "abandoned";
         route.failureReason =
             "restored route was closed because its required dependency conflicts with Negative Memory";
@@ -5216,6 +5363,7 @@ final class DesktopSolveCoordinator {
         route.reviewComplete = false;
         route.checkpointProcessed = false;
         route.integrated = false;
+        restoreBlockedStrategyIds.add(route.strategy.strategyId());
         event(
             "restored_route_invalidated",
             "committed_checkpoint",
@@ -5257,7 +5405,26 @@ final class DesktopSolveCoordinator {
       }
       routes.add(route);
     }
+    Set<String> restoreBlockedRouteIds =
+        routes.stream()
+            .filter(route -> restoreBlockedStrategyIds.contains(route.strategy.strategyId()))
+            .map(route -> route.routeId)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    restoreBlockedRouteIds.stream()
+        .map(proofGraph::blockRouteObligationsForNegativeKnowledge)
+        .flatMap(List::stream)
+        .forEach(restoreBlockedObligations::add);
+    pendingProofTasks.removeIf(
+        task ->
+            restoreBlockedRouteIds.contains(task.routeId())
+                || restoreBlockedObligations.contains(task.obligationId()));
     restoreStrategyArchive(checkpoint);
+    restoreBlockedStrategyIds.stream()
+        .filter(strategyArchive.lineage()::containsKey)
+        .forEach(
+            strategyId ->
+                strategyArchive.rejectChild(
+                    strategyId, "negative-knowledge://restore-revalidation"));
     rebuildRouteRegistry();
     MessageStoreSnapshot store = messageRepository.snapshot();
     for (RouteState route : routes) {
@@ -5885,26 +6052,11 @@ final class DesktopSolveCoordinator {
     if (!isGreedyGcdSequenceProblem()) {
       return;
     }
-    Map<String, String> rejected = new LinkedHashMap<>();
-    rejected.put(
-        "finite-prime-support",
-        "The entire sequence contains only finitely many prime divisors.");
-    rejected.put(
-        "universal-prefix-prime",
-        "There is one prime that divides every term, or all terms of every prefix.");
-    rejected.put(
-        "cross-modulus-containment",
-        "Residue-class sets for distinct moduli may be compared using ordinary set containment.");
-    rejected.put(
-        "finite-sample-periodicity",
-        "A finite computation that finds no counterexample proves eventual translation periodicity.");
-    rejected.forEach(
-        (id, claim) -> {
-          MessageEnvelope negative = reasoningGuardrailMessage(id, claim);
-          typedMemory.addNegative(
-              negative,
-              "Rejected deterministic reasoning pattern; a route must supply a new independently verified lemma instead.");
-        });
+    GreedyGcdNegativeKnowledgeSeeds.all()
+        .forEach(
+            seed ->
+                typedMemory.addDeterministicGuardrail(
+                    problemHash, seed, roundIndex.get()));
     event(
         "negative_memory_seeded",
         "freeze_problem",
@@ -5912,56 +6064,6 @@ final class DesktopSolveCoordinator {
         "completed",
         "Seeded four known-invalid inference patterns for the greedy gcd sequence family",
         "memory://negative/greedy-gcd-guardrails");
-  }
-
-  private MessageEnvelope reasoningGuardrailMessage(String id, String claim) {
-    return new MessageEnvelope(
-        List.of(),
-        List.of(),
-        claim,
-        "",
-        null,
-        List.of(),
-        List.of(),
-        EvidenceType.UNVERIFIED_IDEA,
-        MemoryTier.NEGATIVE,
-        "guardrail-" + id,
-        MessageType.FAILURE_RECORD,
-        1.0d,
-        topology.mathNormalize(claim),
-        problemHash,
-        List.of(),
-        "deterministic://greedy-gcd-guardrails/" + id,
-        roundIndex.get(),
-        "1",
-        List.of("forbidden inference; not reusable evidence"),
-        "deterministic-preflight",
-        RouteRole.SKEPTIC,
-        "run",
-        "Rejected inference: " + claim,
-        List.of(),
-        config.topology().crossRoute().messageTtlRounds(),
-        List.of(),
-        1.0d,
-        ClaimStatus.REJECTED);
-  }
-
-  private boolean strategyDependsOnNegative(StrategyCard strategy) {
-    if (isGreedyGcdSequenceProblem() && GreedyGcdStrategyGuardrails.violates(strategy)) {
-      return true;
-    }
-    String dependencyText = topology.dependencyText(strategy);
-    if (dependencyText.isBlank()) {
-      return false;
-    }
-    return typedMemory.negatives().stream()
-        .filter(
-            negative ->
-                negative.evidenceType() == EvidenceType.COUNTEREXAMPLE
-                    || "deterministic-preflight".equals(negative.sourceAgentId()))
-        .anyMatch(
-            negative ->
-                topology.mathSimilarity(dependencyText, negative.conclusion()) >= 0.68d);
   }
 
   private boolean duplicatesActiveDependency(StrategyCard candidate) {
@@ -5975,13 +6077,94 @@ final class DesktopSolveCoordinator {
                     Math.max(0.82d, config.topology().strategySimilarityThreshold())));
   }
 
+  private List<NegativeKnowledgeCandidate> negativeKnowledgeCandidates(
+      StrategyCard strategy,
+      StrategyBlueprintCompiler.Compilation blueprint,
+      NegativeKnowledgeSurface surface) {
+    LinkedHashSet<String> statements = new LinkedHashSet<>();
+    statements.add(strategy.coreIdea());
+    statements.add(strategy.bottleneck());
+    statements.addAll(strategy.expectedLemmas());
+    statements.addAll(strategy.prerequisites());
+    strategy.criticalClaims().stream()
+        .map(io.github.aililuola.mathproofmesh.contract.CriticalClaim::statement)
+        .forEach(statements::add);
+    if (blueprint != null) {
+      blueprint.blueprint().nodes().stream()
+          .filter(node -> node.kind() != ProofControlModels.BlueprintNodeKind.TARGET)
+          .map(StrategyBlueprintCompiler.Node::statement)
+          .forEach(statements::add);
+    }
+    List<NegativeKnowledgeCandidate> candidates = new ArrayList<>();
+    for (String statement : statements) {
+      if (statement == null || statement.isBlank()) {
+        continue;
+      }
+      for (NegativeKnowledgeTargetType targetType : NegativeKnowledgeTargetType.values()) {
+        candidates.add(
+            negativeKnowledgeCandidate(
+                statement,
+                targetType,
+                surface,
+                NegativeCandidateIntent.POSITIVE_DEPENDENCY));
+      }
+    }
+    return List.copyOf(candidates);
+  }
+
+  private NegativeKnowledgeCandidate negativeKnowledgeCandidate(
+      String statement,
+      NegativeKnowledgeTargetType targetType,
+      NegativeKnowledgeSurface surface,
+      NegativeCandidateIntent intent) {
+    return new NegativeKnowledgeCandidate(
+        problemHash,
+        targetType,
+        statement,
+        topology.mathNormalize(statement),
+        List.of(),
+        List.of(),
+        List.of(),
+        negativeKnowledgeScope(),
+        surface,
+        intent);
+  }
+
+  private void recordNegativeKnowledgeRejection(
+      String eventType,
+      String stage,
+      String subject,
+      NegativeKnowledgeBlockedException exception) {
+    NegativeKnowledgeDecision decision = exception.decision();
+    event(
+        eventType,
+        stage,
+        null,
+        "rejected",
+        subject + ": " + decision.code() + " " + decision.matchedNegativeIds(),
+        decision.matchedNegativeIds().isEmpty()
+            ? "negative-knowledge://quarantine"
+            : "negative-knowledge://" + decision.matchedNegativeIds().getFirst());
+  }
+
+  private boolean negativeKnowledgeBlocksStrategy(
+      StrategyCard strategy,
+      StrategyBlueprintCompiler.Compilation blueprint,
+      NegativeKnowledgeSurface surface) {
+    return negativeKnowledgeGate
+        .evaluateAll(
+            negativeKnowledgeCandidates(strategy, blueprint, surface), roundIndex.get())
+        .stream()
+        .anyMatch(decision -> !decision.allowed());
+  }
+
   private void addMainGoalObligation() {
     if (proofGraph.obligations().stream()
         .anyMatch(obligation -> MAIN_GOAL_ID.equals(obligation.obligationId()))) {
       return;
     }
     String authoritativeGoal = rootGoal().sourceStatement();
-    proofGraph.addObligation(
+    proofGraph.addRootGoalObligation(
         new ProofObligation(
             List.of(),
             1.0d,
@@ -6088,6 +6271,19 @@ final class DesktopSolveCoordinator {
         memory.maxFactContext(),
         memory.maxInsightContext(),
         memory.maxNegativeContext());
+  }
+
+  private void installNegativeKnowledgeRuntime() {
+    negativeKnowledgeRegistry = typedMemory.negativeKnowledgeRegistry();
+    negativeKnowledgeGate = typedMemory.negativeKnowledgeAdmissionGate();
+    proofGraph.configureNegativeKnowledge(
+        negativeKnowledgeRegistry, roundIndex::get, negativeKnowledgeScope());
+  }
+
+  private List<String> negativeKnowledgeScope() {
+    return isGreedyGcdSequenceProblem()
+        ? GreedyGcdNegativeKnowledgeSeeds.problemScope()
+        : List.of();
   }
 
   private static InspirationPolicy inspirationPolicy(SystemConfig config) {
