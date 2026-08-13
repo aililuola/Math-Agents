@@ -5720,6 +5720,7 @@ final class DesktopSolveCoordinator {
     typedMemory.revalidateFactsAgainstNegativeKnowledge(roundIndex.get());
     Set<String> restoreBlockedObligations =
         new LinkedHashSet<>(proofGraph.revalidateNegativeKnowledge());
+    rebuildVersionSixClaimLifecycle(checkpoint);
     pendingProofTasks.removeIf(
         task -> restoreBlockedObligations.contains(task.obligationId()));
     Set<String> restoreBlockedStrategyIds = new LinkedHashSet<>();
@@ -5998,6 +5999,90 @@ final class DesktopSolveCoordinator {
         addDistinct(route.salvagedVerifiedClaimIds, artifact.claimId());
       }
     }
+  }
+
+  private void rebuildVersionSixClaimLifecycle(DesktopSolveCheckpoint checkpoint) {
+    if (checkpoint.schemaVersion() >= 7 || !proofControl.claims().entries().isEmpty()) {
+      return;
+    }
+    Map<String, MessageEnvelope> facts =
+        typedMemory.facts().stream()
+            .collect(
+                java.util.stream.Collectors.toMap(
+                    MessageEnvelope::messageId,
+                    java.util.function.Function.identity(),
+                    (left, right) -> left,
+                    LinkedHashMap::new));
+    Map<String, MessageEnvelope> graphClaims =
+        proofGraph.claimNodes().stream()
+            .collect(
+                java.util.stream.Collectors.toMap(
+                    MessageEnvelope::messageId,
+                    java.util.function.Function.identity(),
+                    (left, right) -> left,
+                    LinkedHashMap::new));
+    Map<String, DesktopSolveCheckpoint.RouteCheckpoint> routesById =
+        checkpoint.routes().stream()
+            .collect(
+                java.util.stream.Collectors.toMap(
+                    DesktopSolveCheckpoint.RouteCheckpoint::routeId,
+                    java.util.function.Function.identity(),
+                    (left, right) -> left,
+                    LinkedHashMap::new));
+    for (ClaimCard claim : lemmaMemory.verified()) {
+      MessageEnvelope fact = facts.get(claim.claimId());
+      MessageEnvelope graphClaim = graphClaims.get(claim.claimId());
+      if (fact == null
+          || !problemHash.equals(fact.problemHash())
+          || !matchingLegacyAuthority(claim, fact, graphClaim)) {
+        continue;
+      }
+      DesktopSolveCheckpoint.RouteCheckpoint route = routesById.get(fact.sourceRouteId());
+      AttemptStatus sourceAttemptStatus =
+          route == null || route.attempt() == null
+              ? AttemptStatus.PARTIAL
+              : route.attempt().status();
+      String sourceRouteStatus =
+          route == null || route.status() == null || route.status().isBlank()
+              ? "legacy_verified_fact"
+              : route.status();
+      AttemptArtifactKind kind =
+          fact.messageType() == MessageType.COUNTEREXAMPLE
+              ? AttemptArtifactKind.COUNTEREXAMPLE
+              : claim.tags().contains("route_theorem")
+                  ? AttemptArtifactKind.ROUTE_THEOREM
+                  : AttemptArtifactKind.LOCAL_LEMMA;
+      String sourceAttemptId =
+          claim.sourceAttemptId() == null || claim.sourceAttemptId().isBlank()
+              ? "legacy-attempt-" + claim.claimId()
+              : claim.sourceAttemptId();
+      proofControl
+          .claims()
+          .restoreLegacyVerifiedFact(
+              claim.claimId(),
+              sourceAttemptId,
+              claim.sourceDeltaId(),
+              List.of(),
+              kind,
+              sourceAttemptStatus,
+              sourceRouteStatus,
+              fact.messageId());
+    }
+  }
+
+  private static boolean matchingLegacyAuthority(
+      ClaimCard claim, MessageEnvelope fact, MessageEnvelope graphClaim) {
+    return fact != null
+        && graphClaim != null
+        && fact.problemHash().equals(graphClaim.problemHash())
+        && fact.statement().equals(claim.statement())
+        && fact.assumptions().equals(claim.assumptions())
+        && fact.conclusion().equals(claim.conclusion())
+        && fact.memoryTier() == MemoryTier.FACT
+        && fact.verificationStatus() == ClaimStatus.VERIFIED
+        && graphClaim.memoryTier() == MemoryTier.FACT
+        && graphClaim.verificationStatus() == ClaimStatus.VERIFIED
+        && fact.contentHash().equals(graphClaim.contentHash());
   }
 
   private static String inferWorkflowCursor(DesktopSolveCheckpoint checkpoint) {

@@ -10,6 +10,7 @@ import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeSurface;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactKind;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactRecord;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactStatus;
+import io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleController;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -250,7 +251,7 @@ final class DesktopClaimSalvageMultiRoundRestoreTest {
   }
 
   @Test
-  void versionSixCheckpointDefaultsNewClaimSnapshotsWithoutChangingNegativeMemory()
+  void versionSixCheckpointRebuildsVerifiedFactLifecycleWithoutChangingNegativeMemory()
       throws Exception {
     Path runDirectory = temporaryDirectory.resolve("v6-migration");
     String runId = "claim-salvage-v6-migration";
@@ -277,7 +278,14 @@ final class DesktopClaimSalvageMultiRoundRestoreTest {
         DesktopClaimSalvageTestHarness.open(runDirectory, runId)) {
       restored.restore(versionSix);
       assertThat(restored.attemptArtifacts().records()).isEmpty();
-      assertThat(restored.claimLifecycle().entries()).isEmpty();
+      assertThat(restored.claimLifecycle().entries())
+          .extracting(ClaimLifecycleController.Entry::claimId)
+          .containsExactlyInAnyOrder("correct-local-0", "counterexample-0");
+      assertThat(restored.claimLifecycle().entries())
+          .allMatch(
+              entry ->
+                  entry.state()
+                      == ClaimLifecycleController.State.EXTERNALLY_ADMITTED_FACT);
       assertThat(restored.negativeRegistryHash()).isEqualTo(negativeHash);
       assertThat(restored.exactStatement()).isEqualTo(DesktopClaimSalvageTestHarness.SOURCE);
     }

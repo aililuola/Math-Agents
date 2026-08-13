@@ -10,11 +10,11 @@
 | 基准 commit | `31e1cc4ef28f4327c048c7a5ba36d631543275dd` |
 | 提交信息 | `fix(claims): preserve verified local claims from failed attempts` |
 | Core 专项测试 | PASS，13 tests |
-| Desktop 生产链专项测试 | PASS，6 tests |
+| Desktop 生产链专项测试 | PASS，7 tests |
 | 20 轮恢复测试 | PASS |
 | 第 1 个问题回归 | PASS，15 tests |
 | 第 2 个问题回归 | PASS，29 tests |
-| 全模块非 Docker `clean verify` | PASS，2054 tests |
+| 全模块非 Docker `clean verify` | PASS，2055 tests |
 | 修改范围 | 只处理 Attempt、Route 与 Claim 的独立审理、投影和恢复 |
 
 本记录所在提交的最终 hash 由 `git show HEAD` 给出。提交 hash 不能写入它自身而保持同一
@@ -145,9 +145,16 @@ Routes
 projection reconciliation
 ```
 
-v6 缺失的新字段默认 empty；恢复后重建 Route 投影。原 v5 -> v6 Negative Knowledge 迁移
-未修改。专项测试断言 v6 checkpoint 恢复前后 Negative Registry hash 相同，Root Goal 文本
-仍为冻结 exact statement。
+v6 JSON 缺失的新字段在反序列化时默认 empty。进入生产恢复链后，Coordinator 对旧版已验证
+Fact 执行一次确定性兼容迁移：只有同一个 Claim ID 同时存在于 `LemmaMemory VERIFIED`、
+`TypedMemory FACT` 和 `ProofGraph` verified Claim Node，且 problem hash、statement、assumptions、
+conclusion、tier、status 与 content hash 精确一致时，才重建最小
+`EXTERNALLY_ADMITTED_FACT` lifecycle 投影。迁移不调用 Claim Review、不再次晋升 Fact，也不伪造
+`AttemptArtifactLedger` 记录；不满足三方精确匹配的旧数据不会获得权威。
+
+随后恢复 Route 投影。原 v5 -> v6 Negative Knowledge 迁移未修改。专项测试断言 v6 checkpoint
+恢复前后 Negative Registry hash 相同，Root Goal 文本仍为冻结 exact statement；保存为 v7 并
+再次恢复后，旧 Fact 的可见性、数量和 lifecycle 权威仍保持一致。
 
 ## 5. 修改文件与目的
 
@@ -165,7 +172,7 @@ v6 缺失的新字段默认 empty；恢复后重建 Route 投影。原 v5 -> v6 
 - `AttemptArtifactLedger.java`：执行单调 transition、batch 校验、snapshot/restore 和稳定 hash。
 - `AttemptArtifactHarvester.java`：确定性分类 proposed lemmas、精确 counterexample target 和内部 route theorem。
 - `ClaimLifecycleSnapshot.java`：持久化 Claim lifecycle authority projection。
-- `ClaimLifecycleController.java`：增加 artifact/source 状态，允许 incomplete local Claim，阻止不合格 route theorem，并支持 snapshot/load。
+- `ClaimLifecycleController.java`：增加 artifact/source 状态，允许 incomplete local Claim，阻止不合格 route theorem，支持 snapshot/load，并提供受三方持久投影校验约束的 v6 Fact 权威重建入口。
 - `LemmaMemory.java`：增加 claim-scoped decision；停止由 Attempt PASS 批量授予 Claim 权威。
 - `TypedMemory.java`：让已验证的失败路线局部 Fact 对后续 Route 可见。
 - `MemoryPromotionPolicy.java`：允许经独立 Claim review 和现有 Fact Gate 的 counterexample evidence 投影为 Fact。
@@ -173,7 +180,7 @@ v6 缺失的新字段默认 empty；恢复后重建 Route 投影。原 v5 -> v6 
 ### 5.3 Server 与 Desktop 生产代码
 
 - `PromptCatalog.java`：新增隔离的 `claim_salvage_review` provider stage。
-- `DesktopSolveCoordinator.java`：接入 harvest/review/integration/failure 生产链，精确应用反例，并恢复 artifact/lifecycle 投影。
+- `DesktopSolveCoordinator.java`：接入 harvest/review/integration/failure 生产链，精确应用反例，恢复 artifact/lifecycle 投影，并从精确匹配的 v6 Lemma/Fact/Graph 投影重建最小 Claim lifecycle。
 - `DesktopSolveCheckpoint.java`：schema v7、artifact/lifecycle snapshots 和 Route salvage fields。
 
 ### 5.4 Core 测试
@@ -198,6 +205,7 @@ v6 缺失的新字段默认 empty；恢复后重建 Route 投影。原 v5 -> v6 
 - `DesktopClaimSalvageNoMainGoalClosureTest.java`：salvaged local Claim 不关闭主目标。
 - `ClaimSalvageProjectionAtomicityTest.java`：blocked/invalid artifact 不产生部分投影。
 - `DesktopClaimSalvageMultiRoundRestoreTest.java`：20 轮、真实 checkpoint JSON、v6 恢复与全诊断。
+- `DesktopV6VerifiedClaimContinuityTest.java`：验证真实 v6 缺失新 snapshots 时，旧 VERIFIED Claim/FACT/Graph Node 无 Review、无重复晋升地恢复权威，并在 v7 二次恢复后继续可见。
 - `DesktopLiveRunExecutionBackendTest.java`：Fake backend 支持新 stage，并覆盖重复 canonical Fact 的生产去重。
 - `DesktopPermanentNegativeKnowledgeProductionTest.java`：仅把 checkpoint schema 期望值从 6 更新为 7。
 
@@ -215,8 +223,15 @@ v6 缺失的新字段默认 empty；恢复后重建 Route 投影。原 v5 -> v6 
    真实 `DesktopSolveCoordinator` 处理整体失败 Route 后，独立正确的
    `salvageable-local` 没有出现在 `LemmaMemory.verified()`，也没有形成 TypedMemory Fact。
 
-这些失败分别直接复现“Attempt-level PASS 覆盖 Claim review”和“失败 Route 丢弃已成立局部
-Claim”。修复没有删除或弱化旧断言。
+3. `DesktopV6VerifiedClaimContinuityTest`
+
+   在加入兼容迁移前，真实 v6 JSON 中的 Lemma VERIFIED、TypedMemory FACT 和 ProofGraph Claim
+   Node 虽然都能恢复，但访问新 lifecycle 投影时报
+   `IllegalArgumentException: unknown claim: legacy-local-claim`。这是旧 Fact 权威连续性缺失的
+   行为失败，不是“新 API 不存在”造成的编译失败。
+
+这些失败分别直接复现“Attempt-level PASS 覆盖 Claim review”、“失败 Route 丢弃已成立局部
+Claim”和“v6 旧 Fact 缺少 v7 lifecycle 权威投影”。修复没有删除或弱化旧断言。
 
 ## 7. 专项测试结果
 
@@ -235,12 +250,12 @@ Claim”。修复没有删除或弱化旧断言。
 
 ```powershell
 .\mvnw.cmd -pl mathproofmesh-desktop -am `
-  "-Dtest=DesktopFailedRouteClaimSalvageProductionTest,DesktopClaimReviewPromptIsolationTest,DesktopClaimSalvageNoMainGoalClosureTest,ClaimSalvageProjectionAtomicityTest,DesktopClaimSalvageMultiRoundRestoreTest" `
+  "-Dtest=DesktopFailedRouteClaimSalvageProductionTest,DesktopClaimReviewPromptIsolationTest,DesktopClaimSalvageNoMainGoalClosureTest,ClaimSalvageProjectionAtomicityTest,DesktopClaimSalvageMultiRoundRestoreTest,DesktopV6VerifiedClaimContinuityTest" `
   "-Dsurefire.failIfNoSpecifiedTests=false" `
   test
 ```
 
-结果：`Tests run: 6, Failures: 0, Errors: 0, Skipped: 0`。专项不调用 DeepSeek、网络、
+结果：`Tests run: 7, Failures: 0, Errors: 0, Skipped: 0`。专项不调用 DeepSeek、网络、
 Docker、PostgreSQL 或 Python Sidecar。
 
 ## 8. 20 轮生产链诊断
@@ -285,6 +300,30 @@ RESULT=PASS
 ```
 
 所有数字均由断言所检查的实际状态计算，不是固定打印。
+
+### 8.1 v6 旧 VERIFIED Claim 连续性诊断
+
+```text
+V6 VERIFIED CLAIM CONTINUITY DIAGNOSTIC
+LEGACY_VERIFIED_FACTS_BEFORE=1
+LEGACY_VERIFIED_FACTS_AFTER=1
+LEGACY_FACT_VISIBILITY_FAILURES=0
+LEGACY_FACT_DUPLICATES=0
+LEGACY_FACT_REVIEW_CALLS=0
+LEGACY_FACT_REPROMOTIONS=0
+LEGACY_PROOFGRAPH_NODE_LOSSES=0
+LEGACY_LEMMA_STATUS_CHANGES=0
+SECOND_RESTORE_FACT_LOSSES=0
+SECOND_RESTORE_DUPLICATES=0
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+RESULT=PASS
+```
+
+该测试经过真实 `DesktopSolveCoordinator` checkpoint JSON 恢复链，并创建后续 Route，捕获
+`InitialExplorationTurn` 生产 Prompt 中的 `verified_facts`。第一次恢复把 v6 旧 Fact 重建为
+`EXTERNALLY_ADMITTED_FACT`；再保存为 v7 并第二次恢复后，不发生复审、重复晋升、Fact 丢失或
+重复。`AttemptArtifactSnapshot` 对该旧 Fact 仍为空，迁移没有伪造 Attempt 历史。
 
 ## 9. 前两个问题回归
 
@@ -331,12 +370,12 @@ RESULT=PASS
 | contracts | 44 | 0 | 0 | 0 |
 | core | 958 | 0 | 0 | 0 |
 | server | 834 | 0 | 0 | 3 |
-| desktop | 69 | 0 | 0 | 1 |
+| desktop | 70 | 0 | 0 | 1 |
 | compatibility | 149 | 0 | 0 | 0 |
-| 合计 | 2054 | 0 | 0 | 4 |
+| 合计 | 2055 | 0 | 0 | 4 |
 
 所有模块编译、Enforcer、duplicate-class gate 和 SpotBugs 通过，SpotBugs findings 为 0。
-Core JaCoCo branch coverage 为 `75.102744%`，高于既有 `75%` 门槛；没有放宽覆盖率或
+Core JaCoCo branch coverage 为 `75.089487%`，高于既有 `75%` 门槛；没有放宽覆盖率或
 Python Sidecar 性能门。
 
 `verify-all.ps1 -Offline` 的正常执行已经到达既有 PostgreSQL Testcontainers IT，但当前机器
@@ -351,6 +390,11 @@ Python Sidecar 性能门。
 因此不把 `verify-all` 记作 PASS，也没有启动 Docker、绕过测试或降低门槛。跳过环境依赖 IT
 后的完整六模块验证全部通过。覆盖率报告的全部数值门通过，仅两个需要 PostgreSQL IT report
 的 critical scenarios 因上述环境条件显示 missing。
+
+在合并到 `java` 前，完整 `verify-all.ps1 -Offline` 仍是 Docker-capable CI/机器上的环境级
+合并门，尤其需要确认 `PersistencePostgresIT`、`Phase17CheckpointOutboxPerformanceIT` 和
+`MemoryProofGraphPostgresIT`。当前 Docker 缺失不代表 Claim salvage 或 v6 continuity 功能
+失败，也没有因此放宽任何 PostgreSQL、覆盖率或性能门。
 
 冻结原始源码在仓库的标准父子目录拓扑中单独检查通过：
 
@@ -373,6 +417,6 @@ manifest_sha256=9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770
 - counterexample 只 refute 精确 target；
 - route theorem 仍要求完整、验证通过的成功 Route；
 - 第 10 轮恢复前后三类 hash 完全一致；
-- v6 -> v7 缺省新 snapshots，不改变 Negative Registry；
+- v6 -> v7 反序列化缺省新 snapshots；精确匹配的旧 VERIFIED Fact 无复审、无重复晋升地重建最小 lifecycle，且不改变 Negative Registry；
 - 第 1、2 个问题的受保护实现零差异，所有专项回归通过；
 - 没有修改其余 10 个问题。

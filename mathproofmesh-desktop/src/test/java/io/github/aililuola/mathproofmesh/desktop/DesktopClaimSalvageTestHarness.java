@@ -22,6 +22,8 @@ import io.github.aililuola.mathproofmesh.contract.ClaimReviewBatch;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewDecision;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatus;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
+import io.github.aililuola.mathproofmesh.contract.InitialExplorationAction;
+import io.github.aililuola.mathproofmesh.contract.InitialExplorationTurn;
 import io.github.aililuola.mathproofmesh.contract.ObligationKind;
 import io.github.aililuola.mathproofmesh.contract.ProofAttempt;
 import io.github.aililuola.mathproofmesh.contract.ProofObligation;
@@ -172,6 +174,23 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
         round,
         List.of(claim("forced-pass-" + round, statement, List.of())));
     invoke("integrateCommittedRoutes");
+  }
+
+  void runSingleLegacyClaimRound(int round, String claimId, String statement) throws Exception {
+    installFailedAttempt(round, List.of(claim(claimId, statement, List.of("local_lemma"))));
+    invoke("integrateCommittedRoutes");
+  }
+
+  List<String> exploreSubsequentRouteAndCaptureVerifiedFacts() throws Exception {
+    invoke(
+        "addRoute",
+        new Class<?>[] {StrategyCard.class, int.class},
+        new Object[] {validStrategy("claim-salvage-followup"), 0});
+    invoke(
+        "exploreUnstartedRoutes",
+        new Class<?>[] {boolean.class},
+        new Object[] {false});
+    return responder.lastExplorationVerifiedFacts();
   }
 
   private void installFailedAttempt(int round, List<ClaimCard> claims)
@@ -451,6 +470,10 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
   }
 
   private static StrategyCard validStrategy() {
+    return validStrategy("claim-salvage-strategy");
+  }
+
+  private static StrategyCard validStrategy(String strategyId) {
     return new StrategyCard(
         null,
         "Prove the exact target through independently checked local lemmas.",
@@ -468,7 +491,7 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
         null,
         List.of(),
         List.of(),
-        "claim-salvage-strategy",
+        strategyId,
         List.of("claim_scoped_review"),
         "Claim salvage route");
   }
@@ -525,9 +548,24 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
   private static final class ClaimReviewResponder implements MockResponder {
     private final List<ProviderRequest> requests = new ArrayList<>();
     private final Map<String, Integer> reviewCalls = new LinkedHashMap<>();
+    private final List<List<String>> explorationVerifiedFacts = new ArrayList<>();
 
     @Override
     public LLMResponse respond(ProviderRequest request) {
+      if ("InitialExplorationTurn".equals(request.schemaName())) {
+        JsonNode context = sanitizedContext(request);
+        List<String> facts = new ArrayList<>();
+        context.path("verified_facts").forEach(fact -> facts.add(fact.path("statement").asText()));
+        explorationVerifiedFacts.add(List.copyOf(facts));
+        InitialExplorationTurn turn =
+            new InitialExplorationTurn(
+                InitialExplorationAction.ABANDON,
+                null,
+                null,
+                null,
+                "verified facts captured for the next route");
+        return response(request, ContractObjectMapper.write(turn));
+      }
       if (!"ClaimReviewBatch".equals(request.schemaName())) {
         throw new AssertionError("unexpected claim-salvage schema: " + request.schemaName());
       }
@@ -573,8 +611,12 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
               decisions,
               "artifact://claim-review/" + attemptId,
               new UsageRecord());
+      return response(request, ContractObjectMapper.write(batch));
+    }
+
+    private static LLMResponse response(ProviderRequest request, String body) {
       return new LLMResponse(
-          ContractObjectMapper.write(batch),
+          body,
           "claim-review-model",
           "mock",
           10,
@@ -592,6 +634,12 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
 
     int reviewCalls(String attemptId) {
       return reviewCalls.getOrDefault(attemptId, 0);
+    }
+
+    List<String> lastExplorationVerifiedFacts() {
+      return explorationVerifiedFacts.isEmpty()
+          ? List.of()
+          : explorationVerifiedFacts.getLast();
     }
 
     private static JsonNode sanitizedContext(ProviderRequest request) {

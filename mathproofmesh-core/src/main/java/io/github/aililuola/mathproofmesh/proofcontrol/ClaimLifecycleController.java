@@ -212,6 +212,40 @@ public final class ClaimLifecycleController {
     return entry.snapshot();
   }
 
+  /**
+   * Reconstructs the minimal authority projection for a Fact already admitted by a pre-v7
+   * checkpoint. The caller must first verify matching LemmaMemory, TypedMemory, and ProofGraph
+   * projections; this method never performs a new review or Fact promotion.
+   */
+  public Entry restoreLegacyVerifiedFact(
+      String claimId,
+      String sourceAttemptId,
+      String sourceDeltaId,
+      List<ProofControlModels.DependencyRef> dependencies,
+      AttemptArtifactKind claimKind,
+      AttemptStatus sourceAttemptStatus,
+      String sourceRouteStatus,
+      String authorityEvidenceId) {
+    String evidence =
+        ProofControlModels.required(authorityEvidenceId, "authorityEvidenceId");
+    register(
+        claimId,
+        sourceAttemptId,
+        sourceDeltaId,
+        dependencies,
+        claimKind,
+        sourceAttemptStatus,
+        sourceRouteStatus);
+    MutableEntry entry = entry(claimId);
+    entry.add(entry.localReports, "legacy-lemma-memory://" + claimId);
+    entry.add(entry.independentReports, "legacy-typed-memory://" + evidence);
+    entry.add(entry.refereeReviews, "legacy-proof-graph://" + evidence);
+    entry.advance(
+        State.EXTERNALLY_ADMITTED_FACT,
+        "v6 verified Fact authority reconstructed from matching durable projections " + evidence);
+    return entry.snapshot();
+  }
+
   public Entry invalidate(String claimId, String reason, String evidenceId) {
     MutableEntry entry = entry(claimId);
     entry.invalidationReason = ProofControlModels.required(reason, "reason");
