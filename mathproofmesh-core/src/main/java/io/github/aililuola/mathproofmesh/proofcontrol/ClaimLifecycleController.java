@@ -1,6 +1,7 @@
 package io.github.aililuola.mathproofmesh.proofcontrol;
 
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
+import io.github.aililuola.mathproofmesh.contract.AttemptStatus;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -33,6 +34,9 @@ public final class ClaimLifecycleController {
       List<String> independentReportIds,
       List<String> refereeReviewIds,
       boolean sourceAttemptIncomplete,
+      AttemptArtifactKind claimKind,
+      AttemptStatus sourceAttemptStatus,
+      String sourceRouteStatus,
       String invalidationReason,
       List<String> invalidatingEvidenceIds,
       List<String> history) {
@@ -67,6 +71,24 @@ public final class ClaimLifecycleController {
       String sourceDeltaId,
       List<ProofControlModels.DependencyRef> dependencies,
       boolean attemptIncomplete) {
+    return register(
+        claimId,
+        sourceAttemptId,
+        sourceDeltaId,
+        dependencies,
+        AttemptArtifactKind.LOCAL_LEMMA,
+        attemptIncomplete ? AttemptStatus.PARTIAL : AttemptStatus.COMPLETE,
+        "unknown");
+  }
+
+  public Entry register(
+      String claimId,
+      String sourceAttemptId,
+      String sourceDeltaId,
+      List<ProofControlModels.DependencyRef> dependencies,
+      AttemptArtifactKind claimKind,
+      AttemptStatus sourceAttemptStatus,
+      String sourceRouteStatus) {
     entries.computeIfAbsent(
         ProofControlModels.required(claimId, "claimId"),
         ignored ->
@@ -75,7 +97,9 @@ public final class ClaimLifecycleController {
                 ProofControlModels.required(sourceAttemptId, "sourceAttemptId"),
                 ProofControlModels.blankToNull(sourceDeltaId),
                 dependencies,
-                attemptIncomplete));
+                claimKind,
+                sourceAttemptStatus,
+                sourceRouteStatus));
     return entries.get(claimId).snapshot();
   }
 
@@ -142,6 +166,11 @@ public final class ClaimLifecycleController {
     if (risks.stream().anyMatch(ProofControlModels.InferenceRisk::blocksFactPromotion)) {
       reasons.add("open inference risk blocks promotion");
     }
+    if (entry.kind == AttemptArtifactKind.ROUTE_THEOREM
+        && (entry.sourceAttemptStatus != AttemptStatus.COMPLETE
+            || !"verified".equals(entry.sourceRouteStatus))) {
+      reasons.add("route theorem requires a complete attempt and verified route");
+    }
     boolean eligible = reasons.isEmpty();
     if (eligible) {
       entry.advance(State.FACT_CANDIDATE, "promotion proposal passed advisory gates");
@@ -166,6 +195,12 @@ public final class ClaimLifecycleController {
 
   public Entry observeExternalAdmission(String claimId, String authorityEvidenceId) {
     MutableEntry entry = entry(claimId);
+    if (entry.state == State.EXTERNALLY_ADMITTED_FACT) {
+      entry.history.add(
+          "external authority reaffirmed "
+              + ProofControlModels.required(authorityEvidenceId, "authorityEvidenceId"));
+      return entry.snapshot();
+    }
     if (entry.state != State.FACT_CANDIDATE) {
       throw new IllegalStateException(
           "external Fact admission may only be observed from fact-candidate state");
@@ -209,6 +244,25 @@ public final class ClaimLifecycleController {
         .toList();
   }
 
+  public ClaimLifecycleSnapshot snapshot() {
+    Map<String, Entry> snapshot = new LinkedHashMap<>();
+    entries.forEach((claimId, entry) -> snapshot.put(claimId, entry.snapshot()));
+    return new ClaimLifecycleSnapshot(snapshot);
+  }
+
+  public void load(ClaimLifecycleSnapshot snapshot) {
+    entries.clear();
+    ClaimLifecycleSnapshot source =
+        snapshot == null ? ClaimLifecycleSnapshot.empty() : snapshot;
+    source.entries().forEach(
+        (claimId, entry) -> {
+          if (!claimId.equals(entry.claimId())) {
+            throw new IllegalArgumentException("claim lifecycle snapshot key mismatch");
+          }
+          entries.put(claimId, new MutableEntry(entry));
+        });
+  }
+
   private MutableEntry entry(String claimId) {
     MutableEntry value = entries.get(claimId);
     if (value == null) {
@@ -227,6 +281,9 @@ public final class ClaimLifecycleController {
     private final List<String> independentReports = new ArrayList<>();
     private final List<String> refereeReviews = new ArrayList<>();
     private final boolean attemptIncomplete;
+    private final AttemptArtifactKind kind;
+    private final AttemptStatus sourceAttemptStatus;
+    private final String sourceRouteStatus;
     private String invalidationReason;
     private final List<String> invalidatingEvidence = new ArrayList<>();
     private final List<String> history = new ArrayList<>(List.of("registered:proposed"));
@@ -236,12 +293,38 @@ public final class ClaimLifecycleController {
         String sourceAttemptId,
         String sourceDeltaId,
         List<ProofControlModels.DependencyRef> dependencies,
-        boolean attemptIncomplete) {
+        AttemptArtifactKind kind,
+        AttemptStatus sourceAttemptStatus,
+        String sourceRouteStatus) {
       this.claimId = claimId;
       this.sourceAttemptId = sourceAttemptId;
       this.sourceDeltaId = sourceDeltaId;
       this.dependencies = dependencies == null ? List.of() : List.copyOf(dependencies);
-      this.attemptIncomplete = attemptIncomplete;
+      this.kind = java.util.Objects.requireNonNull(kind, "claimKind");
+      this.sourceAttemptStatus =
+          java.util.Objects.requireNonNull(sourceAttemptStatus, "sourceAttemptStatus");
+      this.sourceRouteStatus =
+          ProofControlModels.required(sourceRouteStatus, "sourceRouteStatus");
+      this.attemptIncomplete = sourceAttemptStatus != AttemptStatus.COMPLETE;
+    }
+
+    private MutableEntry(Entry entry) {
+      this.claimId = entry.claimId();
+      this.sourceAttemptId = entry.sourceAttemptId();
+      this.sourceDeltaId = entry.sourceDeltaId();
+      this.state = entry.state();
+      this.dependencies = entry.dependencies();
+      this.localReports.addAll(entry.localReportIds());
+      this.independentReports.addAll(entry.independentReportIds());
+      this.refereeReviews.addAll(entry.refereeReviewIds());
+      this.attemptIncomplete = entry.sourceAttemptIncomplete();
+      this.kind = entry.claimKind();
+      this.sourceAttemptStatus = entry.sourceAttemptStatus();
+      this.sourceRouteStatus = entry.sourceRouteStatus();
+      this.invalidationReason = entry.invalidationReason();
+      this.invalidatingEvidence.addAll(entry.invalidatingEvidenceIds());
+      this.history.clear();
+      this.history.addAll(entry.history());
     }
 
     private void advance(State next, String event) {
@@ -249,7 +332,12 @@ public final class ClaimLifecycleController {
         throw new IllegalStateException("terminal claim authority cannot advance");
       }
       if (next.ordinal() < state.ordinal()) {
-        throw new IllegalStateException("claim authority cannot silently regress");
+        history.add(
+            "late "
+                + event
+                + ":authority_preserved_"
+                + state.name().toLowerCase(java.util.Locale.ROOT));
+        return;
       }
       if (next.ordinal() > state.ordinal()) {
         state = next;
@@ -282,6 +370,9 @@ public final class ClaimLifecycleController {
           independentReports,
           refereeReviews,
           attemptIncomplete,
+          kind,
+          sourceAttemptStatus,
+          sourceRouteStatus,
           invalidationReason,
           invalidatingEvidence,
           history);

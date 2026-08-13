@@ -10,6 +10,7 @@ import io.github.aililuola.mathproofmesh.contract.VerificationVerdict;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
+@SuppressWarnings("deprecation")
 class LemmaMemoryParityTest {
 
   @Test
@@ -79,9 +80,9 @@ class LemmaMemoryParityTest {
   }
 
   @Test
-  void attemptFailureOnlyRejectsExplicitlyTargetedChildClaim() {
+  void attemptFailureCannotRejectVerifiedChildAndLeavesUnreviewedProposalOpen() {
     LemmaMemory memory = new LemmaMemory();
-    ClaimCard rejected =
+    ClaimCard verifiedChild =
         MemoryFixtures.claim(
             "bad-child", List.of(), ClaimStatus.VERIFIED, "attempt", 0.9);
     ClaimCard unresolved =
@@ -91,7 +92,7 @@ class LemmaMemoryParityTest {
             ClaimStatus.PROPOSED,
             "attempt",
             null);
-    memory.addMany(List.of(rejected, unresolved));
+    memory.addMany(List.of(verifiedChild, unresolved));
     VerificationIssue issue =
         new VerificationIssue(
             "bad-child",
@@ -111,7 +112,8 @@ class LemmaMemoryParityTest {
         MemoryFixtures.report(
             "attempt", "attempt", VerificationVerdict.FAIL, List.of(issue)));
 
-    assertThat(memory.rejected())
+    assertThat(memory.rejected()).isEmpty();
+    assertThat(memory.verified())
         .extracting(ClaimCard::claimId)
         .containsExactly("bad-child");
     assertThat(memory.uncertain())

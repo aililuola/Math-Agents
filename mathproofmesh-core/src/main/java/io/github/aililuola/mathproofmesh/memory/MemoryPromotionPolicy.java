@@ -17,7 +17,8 @@ public final class MemoryPromotionPolicy {
           EvidenceType.EXACT_SYMBOLIC_IDENTITY,
           EvidenceType.COMPLETE_FINITE_ENUMERATION,
           EvidenceType.SAT_SMT_CERTIFICATE,
-          EvidenceType.FORMAL_KERNEL_CERTIFICATE);
+          EvidenceType.FORMAL_KERNEL_CERTIFICATE,
+          EvidenceType.COUNTEREXAMPLE);
 
   private final MemoryPolicy policy;
 

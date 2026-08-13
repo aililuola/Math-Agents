@@ -2,11 +2,11 @@ package io.github.aililuola.mathproofmesh.memory;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.contract.ClaimCard;
+import io.github.aililuola.mathproofmesh.contract.ClaimReviewDecision;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatus;
 import io.github.aililuola.mathproofmesh.contract.Severity;
 import io.github.aililuola.mathproofmesh.contract.VerificationIssue;
 import io.github.aililuola.mathproofmesh.contract.VerificationReport;
-import io.github.aililuola.mathproofmesh.contract.VerificationVerdict;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -88,6 +88,51 @@ public final class LemmaMemory {
     return claims.get(claimId);
   }
 
+  /** Applies exactly one independently authored decision to exactly one claim. */
+  public synchronized ClaimCard applyClaimReviewDecision(
+      String claimId, ClaimReviewDecision decision) {
+    String resolvedId = resolveClaimId(claimId);
+    String decisionId = resolveClaimId(decision.claimId());
+    if (!resolvedId.equals(decisionId)) {
+      throw new IllegalArgumentException("claim review decision targets a different claim");
+    }
+    ClaimCard claim = claims.get(resolvedId);
+    if (claim == null) {
+      return null;
+    }
+    if (claim.status() == ClaimStatus.VERIFIED
+        || claim.status() == ClaimStatus.REJECTED) {
+      record(
+          "claim_review_terminal_status_preserved",
+          claim.claimId(),
+          Map.of("status", claim.status().value()));
+      return claim;
+    }
+    ClaimStatus status =
+        switch (decision.verdict()) {
+          case PASS ->
+              decision.authorityDimensionsValid()
+                  ? ClaimStatus.VERIFIED
+                  : ClaimStatus.UNCERTAIN;
+          case FAIL -> ClaimStatus.REJECTED;
+          case UNCERTAIN, SKIPPED -> ClaimStatus.UNCERTAIN;
+        };
+    Double confidence =
+        status == ClaimStatus.VERIFIED
+            ? decision.confidence()
+            : claim.verificationConfidence();
+    replace(
+        copy(claim, status, confidence, claim.scopeLimitations()),
+        "claim_scoped_review_applied");
+    reconcileDependencies();
+    return claims.get(resolvedId);
+  }
+
+  /**
+   * Legacy attempt reconciliation. Attempt PASS no longer grants claim authority; only explicit
+   * claim-scoped errors can reject an unverified proposal.
+   */
+  @Deprecated(forRemoval = false)
   public synchronized List<ClaimCard> markAttemptVerified(
       String attemptId, VerificationReport report) {
     Set<String> explicitlyRejected =
@@ -103,20 +148,13 @@ public final class LemmaMemory {
         continue;
       }
       ClaimCard updated = claim;
-      if (explicitlyRejected.contains(claim.claimId())) {
+      if (explicitlyRejected.contains(claim.claimId())
+          && claim.status() != ClaimStatus.VERIFIED) {
         updated =
             copy(
                 claim,
                 ClaimStatus.REJECTED,
                 claim.verificationConfidence(),
-                claim.scopeLimitations());
-      } else if (report.verdict() == VerificationVerdict.PASS
-          && claim.status() != ClaimStatus.VERIFIED) {
-        updated =
-            copy(
-                claim,
-                ClaimStatus.VERIFIED,
-                report.confidence(),
                 claim.scopeLimitations());
       }
       if (updated != claim) {

@@ -411,6 +411,7 @@ public final class TypedMemory {
             item ->
                 global
                     || item.sourceRouteId().equals(routeId)
+                    || item.targetRouteIds().contains("*")
                     || item.targetRouteIds().contains(routeId))
         .limit(maxItems)
         .toList();

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.aililuola.mathproofmesh.contract.ClaimCard;
+import io.github.aililuola.mathproofmesh.contract.ClaimReviewDecision;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatus;
 import io.github.aililuola.mathproofmesh.contract.Severity;
 import io.github.aililuola.mathproofmesh.contract.VerificationIssue;
@@ -11,6 +12,7 @@ import io.github.aililuola.mathproofmesh.contract.VerificationVerdict;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
+@SuppressWarnings("deprecation")
 class Phase17LemmaMemoryHardeningTest {
 
   @Test
@@ -102,7 +104,22 @@ class Phase17LemmaMemoryHardeningTest {
                 MemoryFixtures.report(
                     "pass-attempt", "attempt", VerificationVerdict.PASS, List.of())))
         .singleElement()
-        .satisfies(claim -> assertThat(claim.status()).isEqualTo(ClaimStatus.VERIFIED));
+        .satisfies(claim -> assertThat(claim.status()).isEqualTo(ClaimStatus.PROPOSED));
+    memory.applyClaimReviewDecision(
+        "pass",
+        new ClaimReviewDecision(
+            "pass",
+            VerificationVerdict.PASS,
+            0.95d,
+            List.of(),
+            true,
+            true,
+            true,
+            true,
+            false,
+            List.of(),
+            "claim-scoped review passed"));
+    assertThat(memory.verified()).extracting(ClaimCard::claimId).contains("pass");
     assertThat(memory.markAttemptVerified(
             "absent",
             MemoryFixtures.report("absent", "attempt", VerificationVerdict.PASS, List.of())))

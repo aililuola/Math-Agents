@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.aililuola.mathproofmesh.api.RunExecutionBackend;
@@ -17,6 +18,8 @@ import io.github.aililuola.mathproofmesh.config.AgentConfig;
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
 import io.github.aililuola.mathproofmesh.contract.AttemptStatus;
 import io.github.aililuola.mathproofmesh.contract.BlindVerificationReport;
+import io.github.aililuola.mathproofmesh.contract.ClaimReviewBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimReviewDecision;
 import io.github.aililuola.mathproofmesh.contract.ComputationContractRepair;
 import io.github.aililuola.mathproofmesh.contract.ComputationContractRepairAction;
 import io.github.aililuola.mathproofmesh.contract.ComputationMethod;
@@ -485,6 +488,7 @@ final class DesktopLiveRunExecutionBackendTest {
           case "StrategySet" -> strategies();
           case "InitialExplorationTurn" -> exploration(user, mode);
           case "ComputationContractRepair" -> computationRepair(mode);
+          case "ClaimReviewBatch" -> claimReview(user);
           case "VerificationReport" -> review(user, mode);
           case "BlindVerificationReport" -> blindReview(user, mode);
           case "ToolAuditReport" -> toolAudit(mode);
@@ -504,6 +508,45 @@ final class DesktopLiveRunExecutionBackendTest {
         "stop",
         false,
         JsonNodeFactory.instance.objectNode());
+  }
+
+  private static ClaimReviewBatch claimReview(String prompt) {
+    String startMarker = "SANITIZED CONTEXT:\n";
+    String endMarker = "\n\nOUTPUT LANGUAGE:";
+    int start = prompt.indexOf(startMarker);
+    if (start < 0) {
+      throw new AssertionError("claim review prompt has no sanitized context");
+    }
+    start += startMarker.length();
+    int end = prompt.indexOf(endMarker, start);
+    if (end <= start) {
+      throw new AssertionError("claim review prompt has no context terminator");
+    }
+    JsonNode context = ContractObjectMapper.parseTree(prompt.substring(start, end));
+    List<ClaimReviewDecision> decisions = new ArrayList<>();
+    for (JsonNode artifact : context.path("candidate_artifacts")) {
+      decisions.add(
+          new ClaimReviewDecision(
+              artifact.path("claimId").asText(),
+              VerificationVerdict.PASS,
+              0.99d,
+              List.of(),
+              true,
+              true,
+              true,
+              true,
+              "COUNTEREXAMPLE".equals(artifact.path("kind").asText()),
+              List.of(),
+              "scripted claim-scoped review passed"));
+    }
+    return new ClaimReviewBatch(
+        null,
+        "scripted-claim-reviewer",
+        context.path("route_id").asText(),
+        context.path("attempt_id").asText(),
+        decisions,
+        null,
+        new UsageRecord());
   }
 
   private static TriageResult triage() {

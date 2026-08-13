@@ -42,6 +42,8 @@ import io.github.aililuola.mathproofmesh.contract.BudgetDecision;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
 import io.github.aililuola.mathproofmesh.contract.CandidateAssessment;
 import io.github.aililuola.mathproofmesh.contract.ClaimCard;
+import io.github.aililuola.mathproofmesh.contract.ClaimReviewBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimReviewDecision;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatus;
 import io.github.aililuola.mathproofmesh.contract.ComputationDecision;
 import io.github.aililuola.mathproofmesh.contract.ComputationDecisionStatus;
@@ -143,6 +145,11 @@ import io.github.aililuola.mathproofmesh.orchestration.teams.RouteTeamFactory;
 import io.github.aililuola.mathproofmesh.orchestration.teams.RouteTeamPlan;
 import io.github.aililuola.mathproofmesh.orchestration.teams.RouteTeamResult;
 import io.github.aililuola.mathproofmesh.proofcontrol.DependencyResolver;
+import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactHarvester;
+import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactKind;
+import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactLedger;
+import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactRecord;
+import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactStatus;
 import io.github.aililuola.mathproofmesh.proofcontrol.ExactGoalContractChecker;
 import io.github.aililuola.mathproofmesh.proofcontrol.FailureControlService;
 import io.github.aililuola.mathproofmesh.proofcontrol.MetaPivotController;
@@ -281,6 +288,9 @@ final class DesktopSolveCoordinator {
       new ContinuationFunctions.CheckpointLedger();
   private final DeepExplorationRegistry deepExploration = new DeepExplorationRegistry();
   private LemmaMemory lemmaMemory = new LemmaMemory();
+  private final AttemptArtifactHarvester attemptArtifactHarvester =
+      new AttemptArtifactHarvester();
+  private AttemptArtifactLedger attemptArtifacts = new AttemptArtifactLedger();
   private TypedMemory typedMemory;
   private ProofGraphStore proofGraph;
   private NegativeKnowledgeRegistry negativeKnowledgeRegistry;
@@ -2042,8 +2052,11 @@ final class DesktopSolveCoordinator {
         RoutePipelineFunctions.RunStage.CLAIM_MEMORY_GRAPH,
         "Extracting claims and updating lemma memory, typed memory, and proof graph");
     for (RouteState route : submitted) {
+      List<AttemptArtifactRecord> harvested = harvestAttemptArtifacts(route);
+      List<AttemptArtifactRecord> reviewed = reviewAttemptArtifacts(route, harvested);
+      integrateVerifiedAttemptArtifacts(route, reviewed);
       if ("verified".equals(route.status)) {
-        integrateRouteClaims(route);
+        integrateRouteTheorem(route, reviewed);
       } else {
         recordRouteFailure(route);
       }
@@ -2569,163 +2582,572 @@ final class DesktopSolveCoordinator {
     route.pendingDeliveries.clear();
   }
 
-  private void integrateRouteClaims(RouteState route) {
-    List<String> committedSteps =
-        route.attempt.proofSteps().stream().map(ProofStep::stepId).toList();
-    lemmaMemory.registerCommittedStepIds(committedSteps);
-    List<ClaimCard> candidates = new ArrayList<>();
-    for (ClaimCard source : route.attempt.proposedLemmas()) {
-      candidates.add(bindClaim(source, route));
-    }
-    candidates.add(routeTheoremClaim(route));
-    lemmaMemory.addMany(candidates);
-    List<ClaimCard> verified =
-        lemmaMemory.markAttemptVerified(route.attempt.attemptId(), route.detailedReview);
-    Set<String> localSteps = new LinkedHashSet<>(committedSteps);
-    Set<String> localClaims =
-        candidates.stream().map(ClaimCard::claimId).collect(java.util.stream.Collectors.toSet());
-    Set<String> brokerFacts =
-        typedMemory.facts().stream()
-            .map(MessageEnvelope::messageId)
-            .collect(java.util.stream.Collectors.toSet());
+  private List<AttemptArtifactRecord> harvestAttemptArtifacts(RouteState route) {
     Set<String> obligationIds =
         proofGraph.obligations().stream()
             .map(ProofObligation::obligationId)
-            .collect(java.util.stream.Collectors.toSet());
-    DependencyResolver dependencies = new DependencyResolver();
-    String refereeId = route.plan.referee().agentId();
-
-    for (ClaimCard claim : verified) {
-      if (claim.status() != ClaimStatus.VERIFIED) {
-        continue;
-      }
-      DependencyResolver.MigrationResult migration =
-          dependencies.migrateLegacy(
-              claim.dependencies(),
-              route.attempt.attemptId(),
-              route.deltaId,
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    List<ClaimCard> claims =
+        route.attempt.proposedLemmas().stream().map(source -> bindClaim(source, route)).toList();
+    lemmaMemory.addMany(claims);
+    List<AttemptArtifactRecord> harvested =
+        new ArrayList<>(
+            attemptArtifactHarvester.harvest(
+                problemHash,
+                route.routeId,
+                route.deltaId,
+                route.status,
+                route.attempt,
+                obligationIds));
+    if ("verified".equals(route.status)) {
+      ClaimCard theorem = routeTheoremClaim(route);
+      attemptArtifactHarvester
+          .harvestRouteTheorem(
+              problemHash,
               route.routeId,
-              localSteps,
-              localClaims,
-              brokerFacts);
-      DependencyResolver.Resolution resolution =
-          dependencies.resolve(
-              migration.refs(),
-              new DependencyResolver.ResolutionContext(
-                  route.attempt.attemptId(),
-                  route.deltaId,
-                  localSteps,
-                  localClaims,
-                  brokerFacts,
-                  brokerFacts,
-                  obligationIds,
-                  computationCertificateIds(route.routeId),
-                  Set.of(),
-                  Set.of()));
-      proofControl
-          .claims()
-          .register(
-              claim.claimId(),
-              route.attempt.attemptId(),
               route.deltaId,
-              migration.refs(),
-              route.attempt.status() != AttemptStatus.COMPLETE);
-      proofControl
-          .claims()
-          .recordLocalVerification(claim.claimId(), evidenceId(route.structuralReview));
-      proofControl
-          .claims()
-          .recordIndependentVerification(
-              claim.claimId(),
-              route.detailedReview.agentId(),
-              route.author.id(),
-              evidenceId(route.detailedReview));
-      proofControl
-          .claims()
-          .recordRefereeAcceptance(
-              claim.claimId(),
-              refereeId,
-              route.author.id(),
-              evidenceId(route.detailedReview),
-              resolution.resolved(),
-              route.detailedReview.problemIntegrityOk(),
-              route.detailedReview.problemIntegrityOk(),
-              true);
-      var promotion =
-          proofControl.claims().proposePromotion(claim.claimId(), resolution, true, List.of());
-      if (!promotion.eligible()) {
-        event(
-            "claim_kept_local",
-            "claim_memory_graph",
-            route.author.id(),
-            "warning",
-            "Claim retained without Fact authority: " + String.join("; ", promotion.reasons()),
-            claim.claimId());
-        continue;
-      }
-      MessageEnvelope fact = factMessage(claim, route);
-      MessageEnvelope admitted = typedMemory.addFact(fact, refereeId, roundIndex.get());
-      proofControl.claims().observeExternalAdmission(claim.claimId(), admitted.messageId());
-      proofGraph.addClaimNode(admitted);
-      closeClaimObligations(claim, route, admitted);
-      route.claimIds.add(admitted.messageId());
-      event(
-          "claim_promoted",
-          "claim_memory_graph",
-          refereeId,
-          "verified",
-          "Claim passed lifecycle, memory, and proof-graph authority gates",
-          admitted.messageId());
+              route.status,
+              route.attempt,
+              theorem,
+              route.validationExecution != null && route.validationExecution.passed(),
+              route.validationExecution != null
+                  && route.validationExecution.factPromotionAllowed())
+          .ifPresent(
+              artifact -> {
+                lemmaMemory.addMany(List.of(theorem));
+                harvested.add(artifact);
+              });
     }
+    List<AttemptArtifactRecord> stored = attemptArtifacts.addAll(harvested);
+    stored.stream().map(AttemptArtifactRecord::artifactId).forEach(route.artifactIds::add);
+    return stored;
   }
 
-  private void closeClaimObligations(
-      ClaimCard claim, RouteState route, MessageEnvelope admitted) {
-    boolean routeTheorem = claim.tags().contains("route_theorem");
-    if (routeTheorem) {
-      boolean dependencyClosureVerified =
-          route.attempt.status() == AttemptStatus.COMPLETE
-              && route.validationExecution != null
-              && route.validationExecution.passed()
-              && route.validationExecution.factPromotionAllowed();
-      List<ProofObligation> closable =
-          proofGraph.obligations().stream()
-              .filter(
-                  obligation ->
-                      MAIN_GOAL_ID.equals(obligation.obligationId())
-                          || obligation.routeIds().contains(route.routeId))
-              .filter(obligation -> obligation.kind() != ObligationKind.COMPUTATION_QUESTION)
-              .filter(obligation -> "open".equals(obligation.status()))
-              .filter(
-                  obligation ->
-                      dependencyClosureVerified
-                          || routeObligationId(route.routeId).equals(obligation.obligationId()))
-              .toList();
-      for (ProofObligation obligation : closable) {
-        proofGraph.closeObligation(
-            obligation.obligationId(),
-            admitted.messageId(),
-            route.detailedReview.confidence());
+  private List<AttemptArtifactRecord> reviewAttemptArtifacts(
+      RouteState route, List<AttemptArtifactRecord> harvested) {
+    List<AttemptArtifactRecord> pending =
+        harvested.stream()
+            .filter(record -> record.status() == AttemptArtifactStatus.HARVESTED)
+            .toList();
+    pending.stream()
+        .skip(ClaimReviewBatch.MAX_DECISIONS)
+        .map(
+            record ->
+                attemptArtifacts.markUncertain(
+                    record.artifactId(), "claim review batch capacity exceeded"))
+        .forEach(
+            record -> {
+              applyClaimDecision(
+                  record,
+                  uncertainDecision(record.claimId(), "claim review batch capacity exceeded"));
+              addDistinct(route.uncertainClaimIds, record.claimId());
+            });
+    List<AttemptArtifactRecord> reviewable =
+        pending.stream().limit(ClaimReviewBatch.MAX_DECISIONS).toList();
+    harvested.stream()
+        .filter(record -> record.status() == AttemptArtifactStatus.UNCERTAIN)
+        .forEach(
+            record -> {
+              applyClaimDecision(record, uncertainDecision(record.claimId(), "invalid artifact targeting"));
+              addDistinct(route.uncertainClaimIds, record.claimId());
+            });
+    if (reviewable.isEmpty() || attemptArtifacts.reviewed(route.attempt.attemptId())) {
+      return attemptArtifacts.recordsForAttempt(route.attempt.attemptId());
+    }
+
+    attemptArtifacts.markReviewPending(route.attempt.attemptId());
+    AgentRuntime reviewer = claimReviewer(route);
+    StructuredCallResult<ClaimReviewBatch> call =
+        callStage(
+            "claim-salvage-review-" + route.attempt.attemptId(),
+            "claim_salvage_review",
+            ClaimReviewBatch.class,
+            Map.ofEntries(
+                Map.entry("immutable_problem", frozenProblem),
+                Map.entry("problem_hash", problemHash),
+                Map.entry("route_id", route.routeId),
+                Map.entry("attempt_id", route.attempt.attemptId()),
+                Map.entry("attempt_status", route.attempt.status().value()),
+                Map.entry("route_status", route.status),
+                Map.entry("candidate_artifacts", reviewable),
+                Map.entry("candidate_claims", candidateClaims(route, reviewable)),
+                Map.entry(
+                    "required_claim_ids",
+                    reviewable.stream().map(AttemptArtifactRecord::claimId).toList()),
+                Map.entry("author_excluded", route.attempt.agentId()),
+                Map.entry(
+                    "review_rule",
+                    "Judge every claim independently; route failure and attempt PASS are not claim verdicts.")),
+            reviewer,
+            "verification",
+            "Independently reviewing bounded claims from " + route.routeId);
+    ClaimReviewBatch source = call.value();
+    ClaimReviewBatch bound =
+        new ClaimReviewBatch(
+            source.reportId(),
+            reviewer.id(),
+            route.routeId,
+            route.attempt.attemptId(),
+            source.decisions(),
+            call.responseArtifactRef(),
+            call.usage());
+    ClaimReviewBatch audited = applyNegativeKnowledgeBoundary(route, bound, reviewable);
+    route.claimReview = audited;
+    List<AttemptArtifactRecord> reviewed =
+        attemptArtifacts.applyReviewBatch(
+            audited, config.budget().verificationPassThreshold());
+    Map<String, ClaimReviewDecision> decisions = decisionsByClaim(audited);
+    for (AttemptArtifactRecord record : reviewed) {
+      ClaimReviewDecision decision = decisions.get(record.claimId());
+      applyClaimDecision(
+          record,
+          decisionForArtifactStatus(
+              record,
+              decision == null
+                  ? uncertainDecision(record.claimId(), "claim review decision missing")
+                  : decision));
+      switch (record.status()) {
+        case VERIFIED_LOCAL -> {
+          if (record.kind() == AttemptArtifactKind.COUNTEREXAMPLE) {
+            addDistinct(route.salvagedCounterexampleIds, record.claimId());
+          } else if (record.kind() == AttemptArtifactKind.LOCAL_LEMMA) {
+            addDistinct(route.salvagedVerifiedClaimIds, record.claimId());
+          }
+        }
+        case REJECTED -> addDistinct(route.rejectedClaimIds, record.claimId());
+        case UNCERTAIN -> addDistinct(route.uncertainClaimIds, record.claimId());
+        default -> {
+          // REVIEW_PENDING is resolved atomically by applyReviewBatch.
+        }
       }
+    }
+    return attemptArtifacts.recordsForAttempt(route.attempt.attemptId());
+  }
+
+  private void integrateVerifiedAttemptArtifacts(
+      RouteState route, List<AttemptArtifactRecord> reviewed) {
+    reviewed.stream()
+        .filter(record -> record.status() == AttemptArtifactStatus.VERIFIED_LOCAL)
+        .filter(record -> record.kind() != AttemptArtifactKind.ROUTE_THEOREM)
+        .forEach(
+            record -> {
+              if (record.kind() == AttemptArtifactKind.COUNTEREXAMPLE) {
+                integrateVerifiedCounterexample(route, record);
+              } else {
+                integrateVerifiedLocalClaim(route, record);
+              }
+            });
+  }
+
+  private void integrateVerifiedLocalClaim(RouteState route, AttemptArtifactRecord artifact) {
+    MessageEnvelope admitted = admitArtifactFact(route, artifact, false);
+    if (admitted == null) {
       return;
     }
-    proofGraph.obligations().stream()
-        .filter(obligation -> obligation.routeIds().contains(route.routeId))
-        .filter(obligation -> obligation.kind() != ObligationKind.MAIN_GOAL)
-        .filter(obligation -> !"closed".equals(obligation.status()))
-        .filter(
-            obligation ->
-                topology.mathSimilarity(claim.statement(), obligation.statement()) >= 0.72d)
-        .max(
-            java.util.Comparator.comparingDouble(
-                obligation -> topology.mathSimilarity(claim.statement(), obligation.statement())))
-        .ifPresent(
-            obligation ->
-                proofGraph.closeObligation(
-                    obligation.obligationId(),
-                    admitted.messageId(),
-                    route.detailedReview.confidence()));
+    attemptArtifacts.markPromoted(artifact.artifactId(), admitted.messageId());
+    addDistinct(route.claimIds, admitted.messageId());
+    event(
+        "local_claim_salvaged",
+        "claim_memory_graph",
+        reviewerId(route),
+        "verified",
+        "Independently verified local claim survived its route verdict",
+        admitted.messageId());
   }
+
+  private void integrateVerifiedCounterexample(
+      RouteState route, AttemptArtifactRecord artifact) {
+    if (artifact.targetObligationId() == null
+        || proofGraph.obligations().stream()
+            .noneMatch(
+                obligation ->
+                    obligation.obligationId().equals(artifact.targetObligationId()))) {
+      throw new IllegalStateException("verified counterexample lost its exact target obligation");
+    }
+    MessageEnvelope admitted = admitArtifactFact(route, artifact, true);
+    if (admitted == null) {
+      return;
+    }
+    proofGraph.refuteObligation(artifact.targetObligationId(), admitted.messageId());
+    attemptArtifacts.markCounterexampleApplied(artifact.artifactId(), admitted.messageId());
+    addDistinct(route.claimIds, admitted.messageId());
+    event(
+        "counterexample_salvaged",
+        "claim_memory_graph",
+        reviewerId(route),
+        "verified",
+        "Independently checked counterexample refuted only its exact target obligation",
+        admitted.messageId());
+  }
+
+  private void integrateRouteTheorem(
+      RouteState route, List<AttemptArtifactRecord> reviewed) {
+    reviewed.stream()
+        .filter(record -> record.kind() == AttemptArtifactKind.ROUTE_THEOREM)
+        .filter(record -> record.status() == AttemptArtifactStatus.VERIFIED_LOCAL)
+        .findFirst()
+        .ifPresent(
+            artifact -> {
+              lemmaMemory.registerCommittedStepIds(
+                  route.attempt.proofSteps().stream().map(ProofStep::stepId).toList());
+              MessageEnvelope admitted = admitArtifactFact(route, artifact, false);
+              if (admitted == null) {
+                return;
+              }
+              attemptArtifacts.markPromoted(artifact.artifactId(), admitted.messageId());
+              addDistinct(route.claimIds, admitted.messageId());
+              closeRouteTheoremObligations(route, admitted, claimDecision(route, artifact).confidence());
+              event(
+                  "route_theorem_promoted",
+                  "claim_memory_graph",
+                  reviewerId(route),
+                  "verified",
+                  "Complete verified route theorem passed claim-scoped review",
+                  admitted.messageId());
+            });
+  }
+
+  private MessageEnvelope admitArtifactFact(
+      RouteState route, AttemptArtifactRecord artifact, boolean counterexample) {
+    ClaimCard claim = claimForArtifact(artifact);
+    ClaimReviewDecision decision = claimDecision(route, artifact);
+    ArtifactDependencyResolution dependency = resolveArtifactDependencies(route, claim);
+    proofControl
+        .claims()
+        .register(
+            claim.claimId(),
+            artifact.sourceAttemptId(),
+            artifact.sourceDeltaId(),
+            dependency.migration().refs(),
+            artifact.kind(),
+            artifact.sourceAttemptStatus(),
+            artifact.sourceRouteStatus());
+    proofControl
+        .claims()
+        .recordLocalVerification(claim.claimId(), "claim-proof://" + artifact.artifactId());
+    proofControl
+        .claims()
+        .recordIndependentVerification(
+            claim.claimId(), reviewerId(route), artifact.authorAgentId(), decisionReportId(route));
+    proofControl
+        .claims()
+        .recordRefereeAcceptance(
+            claim.claimId(),
+            reviewerId(route),
+            artifact.authorAgentId(),
+            decisionReportId(route),
+            dependency.resolution().resolved(),
+            decision.scopeValid(),
+            decision.quantifiersValid(),
+            decision.evidenceTypeValid());
+    var promotion =
+        proofControl
+            .claims()
+            .proposePromotion(
+                claim.claimId(), dependency.resolution(), true, List.of());
+    if (!promotion.eligible()) {
+      event(
+          "claim_kept_local",
+          "claim_memory_graph",
+          reviewerId(route),
+          "warning",
+          "Claim retained without Fact authority: " + String.join("; ", promotion.reasons()),
+          claim.claimId());
+      return null;
+    }
+
+    MessageEnvelope candidate = factMessage(claim, route, artifact, decision, counterexample);
+    MessageEnvelope admitted =
+        typedMemory
+            .find(claim.claimId())
+            .filter(existing -> existing.memoryTier() == MemoryTier.FACT)
+            .map(existing -> requireSameClaim(existing, candidate))
+            .orElseGet(
+                () ->
+                    typedMemory.facts().stream()
+                        .filter(existing -> existing.contentHash().equals(candidate.contentHash()))
+                        .findFirst()
+                        .orElseGet(
+                            () ->
+                                typedMemory.addFact(
+                                    candidate, reviewerId(route), roundIndex.get())));
+    proofControl.claims().observeExternalAdmission(claim.claimId(), admitted.messageId());
+    proofGraph.addClaimNode(admitted);
+    return admitted;
+  }
+
+  private static MessageEnvelope requireSameClaim(
+      MessageEnvelope existing, MessageEnvelope candidate) {
+    if (!existing.normalizedStatement().equals(candidate.normalizedStatement())
+        || !existing.assumptions().equals(candidate.assumptions())
+        || !existing.conclusion().equals(candidate.conclusion())
+        || !existing.quantifiers().equals(candidate.quantifiers())) {
+      throw new IllegalArgumentException(
+          "claim Fact ID collision for non-equivalent statements: " + candidate.messageId());
+    }
+    return existing;
+  }
+
+  private ArtifactDependencyResolution resolveArtifactDependencies(
+      RouteState route, ClaimCard claim) {
+    Set<String> localSteps =
+        claim.proofSteps().stream()
+            .map(ProofStep::stepId)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    Set<String> localClaims =
+        lemmaMemory.verified().stream()
+            .map(ClaimCard::claimId)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    localClaims.add(claim.claimId());
+    Set<String> brokerFacts =
+        typedMemory.facts().stream()
+            .map(MessageEnvelope::messageId)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    Set<String> obligationIds =
+        proofGraph.obligations().stream()
+            .map(ProofObligation::obligationId)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    DependencyResolver resolver = new DependencyResolver();
+    DependencyResolver.MigrationResult migration =
+        resolver.migrateLegacy(
+            claim.dependencies(),
+            route.attempt.attemptId(),
+            route.deltaId,
+            route.routeId,
+            localSteps,
+            localClaims,
+            brokerFacts);
+    DependencyResolver.Resolution resolution =
+        resolver.resolve(
+            migration.refs(),
+            new DependencyResolver.ResolutionContext(
+                route.attempt.attemptId(),
+                route.deltaId,
+                localSteps,
+                localClaims,
+                brokerFacts,
+                brokerFacts,
+                obligationIds,
+                computationCertificateIds(route.routeId),
+                Set.of(),
+                Set.of()));
+    return new ArtifactDependencyResolution(migration, resolution);
+  }
+
+  private void closeRouteTheoremObligations(
+      RouteState route, MessageEnvelope admitted, double confidence) {
+    List<ProofObligation> closable =
+        proofGraph.obligations().stream()
+            .filter(
+                obligation ->
+                    MAIN_GOAL_ID.equals(obligation.obligationId())
+                        || obligation.routeIds().contains(route.routeId))
+            .filter(obligation -> obligation.kind() != ObligationKind.COMPUTATION_QUESTION)
+            .filter(obligation -> "open".equals(obligation.status()))
+            .toList();
+    for (ProofObligation obligation : closable) {
+      proofGraph.closeObligation(obligation.obligationId(), admitted.messageId(), confidence);
+    }
+  }
+
+  private AgentRuntime claimReviewer(RouteState route) {
+    if (route.plan.referee() != null
+        && route.plan.referee().assigned()
+        && !route.plan.referee().agentId().equals(route.attempt.agentId())) {
+      return requireAgent(route.plan.referee().agentId());
+    }
+    return selectIndependentAgent(Set.of(route.attempt.agentId()), "detailed_verifier");
+  }
+
+  private List<ClaimCard> candidateClaims(
+      RouteState route, List<AttemptArtifactRecord> artifacts) {
+    Set<String> claimIds =
+        artifacts.stream()
+            .map(AttemptArtifactRecord::claimId)
+            .collect(java.util.stream.Collectors.toSet());
+    List<ClaimCard> candidates = new ArrayList<>();
+    route.attempt.proposedLemmas().stream()
+        .map(source -> bindClaim(source, route))
+        .filter(claim -> claimIds.contains(claim.claimId()))
+        .forEach(candidates::add);
+    artifacts.stream()
+        .filter(artifact -> artifact.kind() == AttemptArtifactKind.ROUTE_THEOREM)
+        .findFirst()
+        .ifPresent(ignored -> candidates.add(routeTheoremClaim(route)));
+    return List.copyOf(candidates);
+  }
+
+  private ClaimReviewBatch applyNegativeKnowledgeBoundary(
+      RouteState route,
+      ClaimReviewBatch batch,
+      List<AttemptArtifactRecord> artifacts) {
+    Map<String, AttemptArtifactRecord> byClaim =
+        artifacts.stream()
+            .collect(
+                java.util.stream.Collectors.toMap(
+                    AttemptArtifactRecord::claimId,
+                    java.util.function.Function.identity(),
+                    (left, right) -> left,
+                    LinkedHashMap::new));
+    List<ClaimReviewDecision> audited = new ArrayList<>();
+    for (ClaimReviewDecision decision : batch.decisions()) {
+      AttemptArtifactRecord artifact = byClaim.get(decision.claimId());
+      if (artifact == null || decision.verdict() != VerificationVerdict.PASS) {
+        audited.add(decision);
+        continue;
+      }
+      ClaimCard claim = claimForArtifact(artifact);
+      MessageEnvelope prospective =
+          factMessage(
+              claim,
+              route,
+              artifact,
+              decision,
+              artifact.kind() == AttemptArtifactKind.COUNTEREXAMPLE);
+      NegativeKnowledgeDecision boundary =
+          negativeKnowledgeGate.evaluate(
+              new NegativeKnowledgeCandidate(
+                  prospective.problemHash(),
+                  NegativeKnowledgeTargetType.CLAIM,
+                  prospective.statement(),
+                  prospective.normalizedStatement(),
+                  prospective.assumptions(),
+                  prospective.quantifiers(),
+                  prospective.variableBindings(),
+                  prospective.scopeLimitations(),
+                  NegativeKnowledgeSurface.FACT_PROMOTION,
+                  artifact.kind() == AttemptArtifactKind.COUNTEREXAMPLE
+                      ? NegativeCandidateIntent.FALSIFICATION_ONLY
+                      : NegativeCandidateIntent.FACT_PROMOTION),
+              roundIndex.get());
+      if (boundary.allowed()) {
+        audited.add(decision);
+      } else {
+        audited.add(
+            new ClaimReviewDecision(
+                decision.claimId(),
+                VerificationVerdict.FAIL,
+                decision.confidence(),
+                decision.checkedDependencies(),
+                decision.problemIntegrityOk(),
+                decision.scopeValid(),
+                decision.quantifiersValid(),
+                decision.evidenceTypeValid(),
+                decision.witnessChecked(),
+                decision.issues(),
+                "deterministic negative-knowledge boundary: " + boundary.code().name()));
+      }
+    }
+    return new ClaimReviewBatch(
+        batch.reportId(),
+        batch.agentId(),
+        batch.routeId(),
+        batch.attemptId(),
+        audited,
+        batch.rawArtifactRef(),
+        batch.usage());
+  }
+
+  private void applyClaimDecision(
+      AttemptArtifactRecord artifact, ClaimReviewDecision decision) {
+    ClaimCard claim = claimForArtifact(artifact);
+    lemmaMemory.applyClaimReviewDecision(claim.claimId(), decision);
+  }
+
+  private ClaimCard claimForArtifact(AttemptArtifactRecord artifact) {
+    String claimId = lemmaMemory.resolveClaimId(artifact.claimId());
+    return lemmaMemory.claims().stream()
+        .filter(claim -> claim.claimId().equals(claimId))
+        .findFirst()
+        .orElseThrow(
+            () ->
+                new IllegalStateException(
+                    "attempt artifact has no lemma-memory projection: " + artifact.artifactId()));
+  }
+
+  private ClaimReviewDecision claimDecision(
+      RouteState route, AttemptArtifactRecord artifact) {
+    if (route.claimReview == null) {
+      throw new IllegalStateException("claim-scoped review is required before promotion");
+    }
+    return route.claimReview.decisions().stream()
+        .filter(decision -> decision.claimId().equals(artifact.claimId()))
+        .findFirst()
+        .orElseThrow(
+            () ->
+                new IllegalStateException(
+                    "claim-scoped decision is missing for " + artifact.claimId()));
+  }
+
+  private static Map<String, ClaimReviewDecision> decisionsByClaim(
+      ClaimReviewBatch batch) {
+    Map<String, ClaimReviewDecision> decisions = new LinkedHashMap<>();
+    batch.decisions().forEach(decision -> decisions.put(decision.claimId(), decision));
+    return Map.copyOf(decisions);
+  }
+
+  private static ClaimReviewDecision decisionForArtifactStatus(
+      AttemptArtifactRecord artifact, ClaimReviewDecision source) {
+    VerificationVerdict verdict =
+        switch (artifact.status()) {
+          case VERIFIED_LOCAL -> VerificationVerdict.PASS;
+          case REJECTED -> VerificationVerdict.FAIL;
+          default -> VerificationVerdict.UNCERTAIN;
+        };
+    if (source.verdict() == verdict) {
+      return source;
+    }
+    return new ClaimReviewDecision(
+        source.claimId(),
+        verdict,
+        source.confidence(),
+        source.checkedDependencies(),
+        source.problemIntegrityOk(),
+        source.scopeValid(),
+        source.quantifiersValid(),
+        source.evidenceTypeValid(),
+        source.witnessChecked(),
+        source.issues(),
+        source.conciseFeedback());
+  }
+
+  private static ClaimReviewDecision uncertainDecision(String claimId, String feedback) {
+    return new ClaimReviewDecision(
+        claimId,
+        VerificationVerdict.UNCERTAIN,
+        0.0d,
+        List.of(),
+        false,
+        false,
+        false,
+        false,
+        false,
+        List.of(),
+        feedback);
+  }
+
+  private static void addDistinct(List<String> values, String value) {
+    if (value != null && !value.isBlank() && !values.contains(value)) {
+      values.add(value);
+    }
+  }
+
+  private String reviewerId(RouteState route) {
+    return route.claimReview == null
+        ? claimReviewer(route).id()
+        : route.claimReview.agentId();
+  }
+
+  private String decisionReportId(RouteState route) {
+    if (route.claimReview == null) {
+      throw new IllegalStateException("claim review report is unavailable");
+    }
+    return route.claimReview.reportId();
+  }
+
+  private record ArtifactDependencyResolution(
+      DependencyResolver.MigrationResult migration,
+      DependencyResolver.Resolution resolution) {}
 
   private Set<String> computationCertificateIds(String routeId) {
     return computationTraces.stream()
@@ -2828,37 +3250,50 @@ final class DesktopSolveCoordinator {
         null);
   }
 
-  private MessageEnvelope factMessage(ClaimCard claim, RouteState route) {
+  private MessageEnvelope factMessage(
+      ClaimCard claim,
+      RouteState route,
+      AttemptArtifactRecord artifact,
+      ClaimReviewDecision decision,
+      boolean counterexample) {
+    List<String> artifactRefs = new ArrayList<>(artifact.evidenceRefs());
+    if (route.claimReview != null
+        && route.claimReview.rawArtifactRef() != null
+        && !route.claimReview.rawArtifactRef().isBlank()) {
+      addDistinct(artifactRefs, route.claimReview.rawArtifactRef());
+    }
     return new MessageEnvelope(
-        List.of(),
+        artifactRefs,
         claim.assumptions(),
         claim.conclusion(),
         "",
         null,
         claim.dependencies(),
         claim.dependencyRefs(),
-        EvidenceType.NATURAL_PROOF_AUDITED,
+        counterexample ? EvidenceType.COUNTEREXAMPLE : EvidenceType.NATURAL_PROOF_AUDITED,
         MemoryTier.FACT,
         claim.claimId(),
-        MessageType.VERIFIED_LEMMA,
+        counterexample ? MessageType.COUNTEREXAMPLE : MessageType.VERIFIED_LEMMA,
         1.0d,
         topology.mathNormalize(claim.statement()),
         problemHash,
         List.of(),
-        route.attempt.rawArtifactRef(),
+        route.claimReview == null
+            ? route.attempt.rawArtifactRef()
+            : route.claimReview.rawArtifactRef(),
         roundIndex.get(),
         "1",
         claim.scopeLimitations().isEmpty()
             ? negativeKnowledgeScope()
             : claim.scopeLimitations(),
-        route.author.id(),
-        RouteRole.PROVER,
+        artifact.authorAgentId(),
+        counterexample ? RouteRole.SKEPTIC : RouteRole.PROVER,
         route.routeId,
         claim.statement(),
-        List.of(),
+        List.of("*"),
         config.topology().crossRoute().messageTtlRounds(),
         List.of(),
-        route.detailedReview.confidence(),
+        decision.confidence(),
         ClaimStatus.VERIFIED);
   }
 
@@ -2967,8 +3402,13 @@ final class DesktopSolveCoordinator {
 
   private MessageEnvelope failureMessage(
       RouteState route, FailureControlService.Failure failure) {
+    List<String> salvagedArtifacts = new ArrayList<>();
+    salvagedArtifacts.addAll(route.salvagedVerifiedClaimIds);
+    salvagedArtifacts.addAll(route.salvagedCounterexampleIds);
+    salvagedArtifacts.addAll(route.rejectedClaimIds);
+    salvagedArtifacts.addAll(route.uncertainClaimIds);
     return new MessageEnvelope(
-        List.of(),
+        salvagedArtifacts.stream().distinct().toList(),
         List.of(),
         failure.recommendedAction(),
         "",
@@ -5265,15 +5705,17 @@ final class DesktopSolveCoordinator {
                     value.authority(),
                     value.replayValid())));
 
-    if (checkpoint.lemmaMemory() != null) {
-      lemmaMemory = LemmaMemory.restore(checkpoint.lemmaMemory());
-    }
     if (checkpoint.typedMemory() != null) {
       typedMemory = TypedMemory.restore(checkpoint.typedMemory(), memoryPolicy());
+    }
+    if (checkpoint.lemmaMemory() != null) {
+      lemmaMemory = LemmaMemory.restore(checkpoint.lemmaMemory());
     }
     if (checkpoint.proofGraph() != null) {
       proofGraph = ProofGraphStore.restore(checkpoint.proofGraph(), ProofGraphPolicy.defaults());
     }
+    attemptArtifacts = AttemptArtifactLedger.restore(checkpoint.attemptArtifacts());
+    proofControl.claims().load(checkpoint.claimLifecycle());
     installNegativeKnowledgeRuntime();
     typedMemory.revalidateFactsAgainstNegativeKnowledge(roundIndex.get());
     Set<String> restoreBlockedObligations =
@@ -5340,6 +5782,12 @@ final class DesktopSolveCoordinator {
       route.deltaId = saved.deltaId();
       route.failure = saved.failure();
       route.claimIds.addAll(saved.claimIds());
+      route.artifactIds.addAll(saved.artifactIds());
+      route.salvagedVerifiedClaimIds.addAll(saved.salvagedVerifiedClaimIds());
+      route.salvagedCounterexampleIds.addAll(saved.salvagedCounterexampleIds());
+      route.rejectedClaimIds.addAll(saved.rejectedClaimIds());
+      route.uncertainClaimIds.addAll(saved.uncertainClaimIds());
+      route.claimReview = saved.claimReview();
       route.segmentCount = saved.segmentCount();
       route.noProgressSegments = saved.noProgressSegments();
       route.cooldownUntilRound = saved.cooldownUntilRound();
@@ -5405,6 +5853,7 @@ final class DesktopSolveCoordinator {
       }
       routes.add(route);
     }
+    reconcileClaimSalvageProjections();
     Set<String> restoreBlockedRouteIds =
         routes.stream()
             .filter(route -> restoreBlockedStrategyIds.contains(route.strategy.strategyId()))
@@ -5511,6 +5960,46 @@ final class DesktopSolveCoordinator {
     }
   }
 
+  private void reconcileClaimSalvageProjections() {
+    Map<String, RouteState> byRoute =
+        routes.stream()
+            .collect(
+                java.util.stream.Collectors.toMap(
+                    route -> route.routeId,
+                    java.util.function.Function.identity(),
+                    (left, right) -> left,
+                    LinkedHashMap::new));
+    for (AttemptArtifactRecord artifact : attemptArtifacts.records()) {
+      if (artifact.status() != AttemptArtifactStatus.PROMOTED_FACT
+          && artifact.status() != AttemptArtifactStatus.APPLIED_COUNTEREXAMPLE) {
+        continue;
+      }
+      MessageEnvelope fact =
+          typedMemory
+              .find(artifact.promotedMessageId())
+              .orElseThrow(
+                  () ->
+                      new IllegalStateException(
+                          "restored promoted artifact is missing its Fact projection"));
+      if (fact.memoryTier() != MemoryTier.FACT
+          || fact.verificationStatus() != ClaimStatus.VERIFIED) {
+        throw new IllegalStateException(
+            "restored promoted artifact has a non-authoritative Fact projection");
+      }
+      RouteState route = byRoute.get(artifact.routeId());
+      if (route == null) {
+        continue;
+      }
+      addDistinct(route.artifactIds, artifact.artifactId());
+      addDistinct(route.claimIds, fact.messageId());
+      if (artifact.status() == AttemptArtifactStatus.APPLIED_COUNTEREXAMPLE) {
+        addDistinct(route.salvagedCounterexampleIds, artifact.claimId());
+      } else if (artifact.kind() == AttemptArtifactKind.LOCAL_LEMMA) {
+        addDistinct(route.salvagedVerifiedClaimIds, artifact.claimId());
+      }
+    }
+  }
+
   private static String inferWorkflowCursor(DesktopSolveCheckpoint checkpoint) {
     if (checkpoint.terminal()) {
       return CURSOR_TERMINAL;
@@ -5572,6 +6061,12 @@ final class DesktopSolveCoordinator {
                         route.failure,
                         nearMissFor(route),
                         route.claimIds,
+                        route.artifactIds,
+                        route.salvagedVerifiedClaimIds,
+                        route.salvagedCounterexampleIds,
+                        route.rejectedClaimIds,
+                        route.uncertainClaimIds,
+                        route.claimReview,
                         route.segmentCount,
                         route.noProgressSegments,
                         route.revisionCount,
@@ -5619,6 +6114,8 @@ final class DesktopSolveCoordinator {
             lemmaMemory.snapshot(),
             typedMemory.snapshot(),
             proofGraph.snapshot(),
+            attemptArtifacts.snapshot(),
+            proofControl.claims().snapshot(),
             messageRepository.snapshot(),
             proofDebtHistory,
             strategyArchive.snapshot(),
@@ -5645,6 +6142,10 @@ final class DesktopSolveCoordinator {
     writeJsonAtomically(structured.resolve("proof-graph.json"), checkpoint.proofGraph());
     writeJsonAtomically(structured.resolve("lemma-memory.json"), checkpoint.lemmaMemory());
     writeJsonAtomically(structured.resolve("typed-memory.json"), checkpoint.typedMemory());
+    writeJsonAtomically(
+        structured.resolve("attempt-artifacts.json"), checkpoint.attemptArtifacts());
+    writeJsonAtomically(
+        structured.resolve("claim-lifecycle.json"), checkpoint.claimLifecycle());
     writeJsonAtomically(structured.resolve("message-store.json"), checkpoint.messageStore());
     writeJsonAtomically(structured.resolve("strategy-archive.json"), checkpoint.strategyArchive());
     writeJsonAtomically(
@@ -5785,9 +6286,8 @@ final class DesktopSolveCoordinator {
   }
 
   private List<String> verifiedClaimIds() {
-    return routes.stream()
-        .filter(route -> "verified".equals(route.status))
-        .flatMap(route -> route.claimIds.stream())
+    return typedMemory.facts().stream()
+        .map(MessageEnvelope::messageId)
         .distinct()
         .toList();
   }
@@ -6760,7 +7260,7 @@ final class DesktopSolveCoordinator {
                   "structural_verifier");
           case "structural_verification" ->
               List.of("structural_verifier", "route_referee", "detailed_verifier");
-          case "detailed_verification", "inspiration_referee" ->
+          case "detailed_verification", "claim_salvage_review", "inspiration_referee" ->
               List.of("detailed_verifier", "route_referee", "inspiration_referee");
           case "inspiration_proposal" ->
               List.of(
@@ -6924,6 +7424,11 @@ final class DesktopSolveCoordinator {
     private RouteTeamPlan plan;
     private int revisionCount;
     private final List<String> claimIds = new ArrayList<>();
+    private final List<String> artifactIds = new ArrayList<>();
+    private final List<String> salvagedVerifiedClaimIds = new ArrayList<>();
+    private final List<String> salvagedCounterexampleIds = new ArrayList<>();
+    private final List<String> rejectedClaimIds = new ArrayList<>();
+    private final List<String> uncertainClaimIds = new ArrayList<>();
     private final List<DesktopSolveCheckpoint.AttemptRevisionCheckpoint> revisionHistory =
         new ArrayList<>();
     private final List<MessageDelivery> pendingDeliveries = new ArrayList<>();
@@ -6933,6 +7438,7 @@ final class DesktopSolveCoordinator {
     private VerificationReport structuralReview;
     private VerificationReport detailedReview;
     private VerificationReport crossProviderReview;
+    private ClaimReviewBatch claimReview;
     private RouteTeamResult teamResult;
     private EscalationPlan escalation;
     private ValidationExecution validationExecution;

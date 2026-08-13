@@ -1,10 +1,11 @@
 package io.github.aililuola.mathproofmesh.desktop;
 
-import io.github.aililuola.mathproofmesh.contract.FinalProof;
+import io.github.aililuola.mathproofmesh.contract.ClaimReviewBatch;
 import io.github.aililuola.mathproofmesh.contract.ComputationDecision;
 import io.github.aililuola.mathproofmesh.contract.ExperimentProgram;
 import io.github.aililuola.mathproofmesh.contract.ExperimentResult;
 import io.github.aililuola.mathproofmesh.contract.ExperimentSpec;
+import io.github.aililuola.mathproofmesh.contract.FinalProof;
 import io.github.aililuola.mathproofmesh.contract.FormalizationCoverageReport;
 import io.github.aililuola.mathproofmesh.contract.InspirationOutcome;
 import io.github.aililuola.mathproofmesh.contract.InspirationProposal;
@@ -27,6 +28,8 @@ import io.github.aililuola.mathproofmesh.memory.TypedMemorySnapshot;
 import io.github.aililuola.mathproofmesh.orchestration.ContinuationFunctions.Checkpoint;
 import io.github.aililuola.mathproofmesh.orchestration.ContinuationFunctions.Delta;
 import io.github.aililuola.mathproofmesh.orchestration.teams.RouteTeamResult;
+import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactSnapshot;
+import io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleSnapshot;
 import io.github.aililuola.mathproofmesh.proofcontrol.FailureControlService;
 import io.github.aililuola.mathproofmesh.proofcontrol.MetaPivotController;
 import io.github.aililuola.mathproofmesh.proofcontrol.NearMissLedger;
@@ -62,6 +65,8 @@ record DesktopSolveCheckpoint(
     LemmaMemorySnapshot lemmaMemory,
     TypedMemorySnapshot typedMemory,
     ProofGraphSnapshot proofGraph,
+    AttemptArtifactSnapshot attemptArtifacts,
+    ClaimLifecycleSnapshot claimLifecycle,
     MessageStoreSnapshot messageStore,
     List<Double> proofDebtHistory,
     StrategyArchive.Snapshot strategyArchive,
@@ -83,7 +88,7 @@ record DesktopSolveCheckpoint(
     List<String> completedStages,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 6;
+  static final int CURRENT_SCHEMA_VERSION = 7;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {
@@ -96,6 +101,10 @@ record DesktopSolveCheckpoint(
     inspirationOutcomes =
         inspirationOutcomes == null ? List.of() : List.copyOf(inspirationOutcomes);
     computations = computations == null ? List.of() : List.copyOf(computations);
+    attemptArtifacts =
+        attemptArtifacts == null ? AttemptArtifactSnapshot.empty() : attemptArtifacts;
+    claimLifecycle =
+        claimLifecycle == null ? ClaimLifecycleSnapshot.empty() : claimLifecycle;
     proofDebtHistory = proofDebtHistory == null ? List.of() : List.copyOf(proofDebtHistory);
     strategyBlueprints = strategyBlueprints == null ? Map.of() : Map.copyOf(strategyBlueprints);
     goalLinks = goalLinks == null ? Map.of() : Map.copyOf(goalLinks);
@@ -194,6 +203,12 @@ record DesktopSolveCheckpoint(
       FailureControlService.Failure failure,
       NearMissLedger.NearMiss nearMiss,
       List<String> claimIds,
+      List<String> artifactIds,
+      List<String> salvagedVerifiedClaimIds,
+      List<String> salvagedCounterexampleIds,
+      List<String> rejectedClaimIds,
+      List<String> uncertainClaimIds,
+      ClaimReviewBatch claimReview,
       int segmentCount,
       int noProgressSegments,
       int revisionCount,
@@ -208,6 +223,13 @@ record DesktopSolveCheckpoint(
       boolean integrated) {
     RouteCheckpoint {
       claimIds = claimIds == null ? List.of() : List.copyOf(claimIds);
+      artifactIds = artifactIds == null ? List.of() : List.copyOf(artifactIds);
+      salvagedVerifiedClaimIds =
+          salvagedVerifiedClaimIds == null ? List.of() : List.copyOf(salvagedVerifiedClaimIds);
+      salvagedCounterexampleIds =
+          salvagedCounterexampleIds == null ? List.of() : List.copyOf(salvagedCounterexampleIds);
+      rejectedClaimIds = rejectedClaimIds == null ? List.of() : List.copyOf(rejectedClaimIds);
+      uncertainClaimIds = uncertainClaimIds == null ? List.of() : List.copyOf(uncertainClaimIds);
       metaControlReason = metaControlReason == null ? "" : metaControlReason.strip();
       revisionHistory = revisionHistory == null ? List.of() : List.copyOf(revisionHistory);
       focusObligationId = focusObligationId == null ? "" : focusObligationId.strip();
@@ -217,6 +239,31 @@ record DesktopSolveCheckpoint(
     @Override
     public List<String> claimIds() {
       return List.copyOf(claimIds);
+    }
+
+    @Override
+    public List<String> artifactIds() {
+      return List.copyOf(artifactIds);
+    }
+
+    @Override
+    public List<String> salvagedVerifiedClaimIds() {
+      return List.copyOf(salvagedVerifiedClaimIds);
+    }
+
+    @Override
+    public List<String> salvagedCounterexampleIds() {
+      return List.copyOf(salvagedCounterexampleIds);
+    }
+
+    @Override
+    public List<String> rejectedClaimIds() {
+      return List.copyOf(rejectedClaimIds);
+    }
+
+    @Override
+    public List<String> uncertainClaimIds() {
+      return List.copyOf(uncertainClaimIds);
     }
 
     @Override

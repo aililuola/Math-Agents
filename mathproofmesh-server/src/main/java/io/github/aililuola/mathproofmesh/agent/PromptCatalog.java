@@ -58,6 +58,11 @@ public final class PromptCatalog {
     stages.put("claim_extraction", "Extract only reusable claims whose proofs are present. Dependency kinds are exactly \"local_claim\", \"local_step\", and \"external_result\". Never emit the legacy kind \"external\".");
     stages.put("structural_verification", "Check problem integrity, completeness, dependencies, theorem admission, and hidden steps first.");
     stages.put("detailed_verification", "Audit every inference and mount a concrete falsification attempt against the weakest key step.");
+    stages.put(
+        "claim_salvage_review",
+        "Review each bounded candidate claim independently of its attempt and route verdict. "
+            + "Return exactly one decision per supplied claim, verify scope and quantifiers, and "
+            + "check an explicit witness before accepting a counterexample.");
     stages.put("final_verification", "Independently audit the final proof against the immutable problem.");
     stages.put("blind_structural_verification", "Use only the supplied packet and independently audit proof structure.");
     stages.put("blind_detailed_verification", "Audit every step using only the blind packet and admitted evidence.");
