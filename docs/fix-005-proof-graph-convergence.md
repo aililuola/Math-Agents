@@ -532,10 +532,11 @@ Temporal concurrency, or Python-sidecar performance thresholds.
 ### Patch identity and audited production paths
 
 This final issue-005 patch remains on `fix/005-proof-graph-convergence` and is based on
-`47f1784127fb76a719bd4cf1da97c96da9bf3f03`. Its commit message is
-`fix(control): bind recovery tasks and reactivate deferred targets`; the resulting Git
-hash is reported in the final delivery report because a commit cannot contain its own
-hash.
+`47f1784127fb76a719bd4cf1da97c96da9bf3f03`. Its implementation commit is
+`a043a6e92f06fe8dc725daad4afebe7fe0dca67c`:
+`fix(control): bind recovery tasks and reactivate deferred targets`. This provenance line
+is recorded by a documentation-only follow-up so the implementation commit does not
+need to contain its own hash.
 
 The production audit covered these paths before implementation:
 
