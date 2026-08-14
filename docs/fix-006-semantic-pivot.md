@@ -9,6 +9,8 @@
 - Baseline checkpoint schema: `11`
 - Resulting checkpoint schema: `12`
 - Implementation commit: `14303bcbfd5f5e80395ccb5d47807505d4f9a643`.
+- Claim materialization and checkpoint atomicity follow-up commit:
+  `9e77ad374d2e4313354e330b8245fc2877f2fea2`.
 - Issue 005 prerequisite: `CLOSED` at the baseline.
 
 The work remained on `fix/006-semantic-pivot`. It did not modify `main` or commit directly
@@ -205,8 +207,8 @@ frontier.
 The 20-round checkpoint at round 10 reported:
 
 ```text
-PIVOT_LEDGER_HASH_BEFORE_RESTORE=fa7596c492e7a78e04405ce060808f31e793d57efb816b3266f148722e0e1e30
-PIVOT_LEDGER_HASH_AFTER_RESTORE=fa7596c492e7a78e04405ce060808f31e793d57efb816b3266f148722e0e1e30
+PIVOT_LEDGER_HASH_BEFORE_RESTORE=3dbb909e6203fee7331a41c4b5e9015338fda13f47177f08e875c90c371bbed8
+PIVOT_LEDGER_HASH_AFTER_RESTORE=3dbb909e6203fee7331a41c4b5e9015338fda13f47177f08e875c90c371bbed8
 ```
 
 ## 10. Twenty-round diagnostic
@@ -324,9 +326,9 @@ Issue 006 specialized tests:
 
 | Suite | Tests | Failures | Errors | Skipped | Result |
 |---|---:|---:|---:|---:|---|
-| Contracts/Core Pivot suite | 32 | 0 | 0 | 0 | PASS |
+| Core Pivot and Checkpoint suite | 48 | 0 | 0 | 0 | PASS |
 | Server Pivot suite | 4 | 0 | 0 | 0 | PASS |
-| Desktop production suite | 18 | 0 | 0 | 0 | PASS |
+| Desktop production suite | 21 | 0 | 0 | 0 | PASS |
 
 Explicit issue 001-005 regression suites:
 
@@ -346,10 +348,10 @@ Final module regression:
 | Module | Tests | Failures | Errors | Skipped | Result |
 |---|---:|---:|---:|---:|---|
 | Contracts | 48 | 0 | 0 | 0 | PASS |
-| Core | 1064 | 0 | 0 | 0 | PASS |
+| Core | 1068 | 0 | 0 | 0 | PASS |
 | Server unit | 847 | 0 | 0 | 3 | PASS |
 | Server integration | 26 | 0 | 0 | 0 | PASS |
-| Desktop | 129 | 0 | 0 | 1 | PASS |
+| Desktop | 134 | 0 | 0 | 1 | PASS |
 | Compatibility | 149 | 0 | 0 | 0 | PASS |
 
 The final `verify-all.ps1 -Offline` run completed through the project's expected source layout
@@ -382,13 +384,14 @@ FULL_VERIFICATION=PASS
 ```
 
 The new fail-closed boundary tests keep core aggregate branch coverage above the unchanged
-75% gate. The final clean verification measured `75.377644%` core branch coverage. No Python
+75% gate. The final clean verification measured `75.294622%` core branch coverage. No Python
 Sidecar performance or coverage/security/license threshold was changed.
 
 Implementation diff stat:
 
 ```text
-implementation=91 files/8778 insertions/43 deletions; branch_with_record=92 files/9235 insertions/43 deletions
+initial_implementation=91 files/8778 insertions/43 deletions
+claim_and_checkpoint_follow_up=27 files/1019 insertions/17 deletions
 ```
 
 ## 13. Protected files and scope
@@ -455,3 +458,177 @@ WORKTREE_CLEAN=true
 ISSUE_006_STATUS=CLOSED
 ================================================================
 ```
+
+## 15. Final proposed-Claim and checkpoint-branch follow-up
+
+This follow-up closes two production branches that were not covered by the initial issue 006
+implementation. It remains part of issue 006 and does not start issue 007.
+
+### 15.1 Pre-fix behavioral evidence
+
+The tests were added and executed before the production changes. They exposed behavior, not
+merely missing Java types:
+
+```text
+PivotClaimStatementHashBindingTest
+  expected CLAIM_STATEMENT_HASH_MISMATCH, but the deterministic audit returned no failure
+  expected UNMATERIALIZABLE_PROPOSED_CLAIM, but the deterministic audit returned no failure
+
+DesktopPivotProposedClaimMaterializationTest
+  pivot status=APPLIED
+  proposed Claim present after apply=false
+```
+
+The old path could therefore count an `ADD_AS_PROPOSED_CLAIM` entry in the structural
+signature without creating any mathematical Claim state. It also had no rollback snapshot for
+the global `ContinuationFunctions.CheckpointLedger` after `branchForStrategy` mutated it.
+
+### 15.2 Authoritative statement-hash binding and materialization
+
+`SemanticPivotProposal.ClaimUseChangeDraft` now accepts a complete optional
+`ProposedClaimDraft`. `ADD_AS_PROPOSED_CLAIM` requires that payload; the old four-field JSON
+shape remains valid for every non-add action.
+
+The deterministic authority projection now carries `claimId -> authoritative statement hash`.
+The server recomputes each proposed statement hash from
+`CanonicalJson.stableHash(ProofIdentity.normalizeText(statement))` and rejects:
+
+- an existing Claim referenced with a different hash;
+- an add action without a complete materializable draft;
+- an outer Claim ID or hash that differs from its nested draft;
+- duplicate known or same-Pivot statement hashes;
+- self-dependencies or dependencies absent from both the authoritative state and this Pivot.
+
+The stable failure codes are `CLAIM_STATEMENT_HASH_MISMATCH` and
+`UNMATERIALIZABLE_PROPOSED_CLAIM`.
+
+An admitted draft is now atomically materialized through the existing issue 003 owners as:
+
+```text
+ClaimCard(status=PROPOSED)
+-> LemmaMemory
+-> ClaimLifecycleController(state=PROPOSED)
+-> route pending proposed-Claim projection
+-> next real ProofAttempt.proposedLemmas
+-> AttemptArtifactHarvester
+-> independent claim_salvage_review
+```
+
+The Pivot cannot directly create `VERIFIED`, `FACT`, or `EXTERNALLY_ADMITTED_FACT` authority.
+The pending projection is persisted in schema 12; older schema 12 JSON that lacks the optional
+field restores it as empty. Once harvested, the route projection is removed exactly once.
+
+### 15.3 Checkpoint-ledger transaction boundary
+
+`ContinuationFunctions.CheckpointLedger` now exposes an immutable snapshot containing all
+checkpoints, `latestByBranch`, audit history, version, and a stable hash. Pivot apply snapshots
+and restores this global owner together with Route, Strategy Archive, Proof Graph, convergence,
+deferred expansion, pending tasks, admitted strategies, blueprints, goal links, Lemma Memory,
+Claim Lifecycle, and the Semantic Pivot ledger.
+
+The tested failure points now include:
+
+```text
+AFTER_CHECKPOINT_BRANCH
+DURING_CHECKPOINT_PERSIST
+AFTER_CHECKPOINT_PERSIST_BEFORE_APPLY_RECEIPT
+```
+
+If persistence has started, rollback writes a compensating checkpoint from the restored state.
+No receipt is committed until the staged checkpoint has been persisted. A retry then creates
+one Pivot application and one checkpoint branch, while a duplicate retry creates neither.
+
+### 15.4 Follow-up diagnostics
+
+```text
+PROPOSED CLAIM BINDING AND MATERIALIZATION
+KNOWN_CLAIM_WRONG_HASH_REJECTIONS=1
+GHOST_PROPOSED_CLAIM_REJECTIONS=1
+VALID_PROPOSED_CLAIMS_CREATED=1
+PROPOSED_CLAIM_DIRECT_VERIFICATIONS=0
+PROPOSED_CLAIM_DIRECT_FACT_PROMOTIONS=0
+PROPOSED_CLAIM_ROLLBACK_LEAKS=0
+POST_RESTORE_PROPOSED_CLAIM_LOSSES=0
+POST_RESTORE_DUPLICATE_PROPOSED_CLAIMS=0
+
+CHECKPOINT BRANCH AND PERSISTENCE ATOMICITY
+AFTER_CHECKPOINT_BRANCH_ROLLBACKS=1
+CHECKPOINT_LEDGER_HASH_CHANGES=0
+CHECKPOINT_BRANCH_LEAKS=0
+LATEST_BRANCH_POINTER_LEAKS=0
+CHECKPOINT_AUDIT_LEAKS=0
+TASK_LEASE_LEAKS=0
+PENDING_TASK_LEAKS=0
+PARTIAL_PIVOT_RECEIPTS=0
+POST_RETRY_PIVOT_APPLIES=1
+POST_RETRY_CHECKPOINT_BRANCHES=1
+POST_RETRY_DUPLICATE_BRANCHES=0
+RESULT=PASS
+```
+
+The existing 20-round production test also remained green through round 10 restore:
+
+```text
+ROUNDS=20
+RESTORE_ROUND=10
+PIVOT_LEDGER_HASH_BEFORE_RESTORE=3dbb909e6203fee7331a41c4b5e9015338fda13f47177f08e875c90c371bbed8
+PIVOT_LEDGER_HASH_AFTER_RESTORE=3dbb909e6203fee7331a41c4b5e9015338fda13f47177f08e875c90c371bbed8
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+POST_RESTORE_PIVOT_LOSSES=0
+POST_RESTORE_DUPLICATE_APPLIES=0
+RESULT=PASS
+```
+
+### 15.5 Follow-up tests and final gates
+
+The six new test classes contain nine tests:
+
+- `PivotClaimStatementHashBindingTest`: three statement-binding/materializability cases.
+- `ContinuationCheckpointLedgerSnapshotTest`: one complete snapshot/restore case.
+- `DesktopPivotProposedClaimMaterializationTest`: one production materialization case and one
+  rollback case.
+- `DesktopPivotProposedClaimRestoreExactlyOnceTest`: one schema 12 restore case.
+- `DesktopSemanticPivotCheckpointBranchAtomicityTest`: one post-branch rollback case.
+- `DesktopSemanticPivotPersistFailureRecoveryTest`: one production scenario that iterates both
+  persistence failure windows, followed by retry and duplicate retry.
+
+The final clean reactor executed `2272` tests with zero failures and zero errors. Four expected
+tests were skipped. The module split was Contracts 48, Core 1068, Server unit 847, Server
+integration 26, Desktop 134, and Compatibility 149. All 21 Docker-backed PostgreSQL integration
+tests passed.
+
+The unmodified `verify-all.ps1 -Offline` completed from the repository's required source-layout
+projection and reported:
+
+```text
+MAVEN_CLEAN_VERIFY=PASS
+POSTGRESQL_INTEGRATION_TESTS=PASS
+DEPENDENCY_CHECK_PATH_NORMALIZATION=PASS
+PHASE_17_COVERAGE=PASS
+PHASE_17_SECURITY=PASS
+SOURCE_IMMUTABILITY=PASS
+SOURCE_FILES=401
+SOURCE_MANIFEST_SHA256=9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770
+SPOTBUGS_OR_SECURITY_BUGS=0
+FULL_VERIFICATION=PASS
+```
+
+The first full verification found seven SpotBugs findings in the new snapshot/hash code. They
+were fixed with defensive collection accessors and constant-time hash comparison; no
+suppression, threshold, performance gate, or old test was weakened.
+
+### 15.6 Follow-up file purpose and scope
+
+- `SemanticPivotProposal`, `PivotClaimUseChange`, `PivotProposedClaimDraft`, compiler,
+  authority context, and deterministic auditor: complete draft contract and trusted hash gate.
+- `ContinuationFunctions.CheckpointLedger`: immutable full-ledger snapshot and rollback.
+- `DesktopSolveCoordinator`, `DesktopSolveCheckpoint`, and `SemanticPivotFailurePoint`:
+  production materialization, persistence, restore, compensation, and failure windows.
+- `PromptCatalog`: proposer instruction for the complete non-authoritative draft.
+- The six new Core/Desktop test files and focused fixture updates: black-box behavior,
+  exactly-once restore, atomicity, and real-state counters.
+
+The follow-up implementation commit changed 27 files with 1019 insertions and 17 deletions.
+It did not modify issue 001-005-specific implementation, Provider selection, concurrency,
+Temporal, budget/token handling, Python Sidecar thresholds, or any issue 007-013 behavior.
