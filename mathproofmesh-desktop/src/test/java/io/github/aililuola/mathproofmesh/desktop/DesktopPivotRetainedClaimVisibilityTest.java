@@ -23,7 +23,7 @@ class DesktopPivotRetainedClaimVisibilityTest {
               List.of(
                   new PivotClaimUseChange(
                       claimId,
-                      "verified-claim-hash",
+                      harness.authoritativeClaimStatementHash(claimId),
                       PivotClaimUsageAction.RETAIN_AS_VERIFIED_FACT,
                       "This independently admitted equivalence remains usable.")));
       harness.apply(delta);

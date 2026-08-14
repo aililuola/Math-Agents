@@ -23,6 +23,10 @@ public final class SemanticPivotDeterministicAuditor {
   public static final String ROOT_GOAL_MISMATCH = "ROOT_GOAL_MISMATCH";
   public static final String UNAUTHORIZED_CLAIM_RETIREMENT =
       "UNAUTHORIZED_CLAIM_RETIREMENT";
+  public static final String CLAIM_STATEMENT_HASH_MISMATCH =
+      "CLAIM_STATEMENT_HASH_MISMATCH";
+  public static final String UNMATERIALIZABLE_PROPOSED_CLAIM =
+      "UNMATERIALIZABLE_PROPOSED_CLAIM";
   public static final String UNAUTHORIZED_OBLIGATION_CLOSURE =
       "UNAUTHORIZED_OBLIGATION_CLOSURE";
   public static final String PERMANENT_NEGATIVE_CONFLICT = "PERMANENT_NEGATIVE_CONFLICT";
@@ -137,7 +141,21 @@ public final class SemanticPivotDeterministicAuditor {
 
   private static void auditClaims(
       PivotDelta delta, PivotAuthorityContext authority, Set<String> failures) {
+    Set<String> proposedIds =
+        delta.claimUseChanges().stream()
+            .filter(change -> change.action() == PivotClaimUsageAction.ADD_AS_PROPOSED_CLAIM)
+            .map(PivotClaimUseChange::claimId)
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    Set<String> proposedStatementHashes = new LinkedHashSet<>();
     for (PivotClaimUseChange change : delta.claimUseChanges()) {
+      String authoritativeHash = authority.knownClaimStatementHashes().get(change.claimId());
+      if (change.action() != PivotClaimUsageAction.ADD_AS_PROPOSED_CLAIM
+          && (!authority.knownClaimIds().contains(change.claimId())
+              || authoritativeHash == null
+              || !PivotProposedClaimDraft.hashesEqual(
+                  authoritativeHash, change.claimStatementHash()))) {
+        failures.add(CLAIM_STATEMENT_HASH_MISMATCH);
+      }
       if (change.action() == PivotClaimUsageAction.RETAIN_AS_VERIFIED_FACT
           && !authority.verifiedClaimIds().contains(change.claimId())) {
         failures.add(UNAUTHORIZED_CLAIM_RETIREMENT);
@@ -152,6 +170,26 @@ public final class SemanticPivotDeterministicAuditor {
       if (change.action() == PivotClaimUsageAction.ADD_AS_PROPOSED_CLAIM
           && authority.knownClaimIds().contains(change.claimId())) {
         failures.add(UNAUTHORIZED_CLAIM_RETIREMENT);
+      }
+      if (change.action() == PivotClaimUsageAction.ADD_AS_PROPOSED_CLAIM) {
+        PivotProposedClaimDraft draft = change.proposedClaim();
+        if (draft == null
+            || !draft.claimId().equals(change.claimId())
+            || !PivotProposedClaimDraft.hashesEqual(
+                draft.statementHash(), change.claimStatementHash())
+            || !draft.hashMatches()
+            || !proposedStatementHashes.add(draft.statementHash())
+            || authority.knownClaimStatementHashes().containsValue(draft.statementHash())
+            || draft.dependencyClaimIds().contains(change.claimId())
+            || draft.dependencyClaimIds().stream()
+                .anyMatch(
+                    dependency ->
+                        !authority.knownClaimIds().contains(dependency)
+                            && !proposedIds.contains(dependency))) {
+          failures.add(UNMATERIALIZABLE_PROPOSED_CLAIM);
+        }
+      } else if (change.proposedClaim() != null) {
+        failures.add(UNMATERIALIZABLE_PROPOSED_CLAIM);
       }
     }
   }

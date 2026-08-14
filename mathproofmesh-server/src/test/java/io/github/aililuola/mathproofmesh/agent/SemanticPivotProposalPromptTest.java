@@ -29,6 +29,8 @@ class SemanticPivotProposalPromptTest {
         .contains("trusted_obstruction_refs")
         .contains("claimed_pivot_id")
         .contains("non-authoritative draft")
+        .contains("ADD_AS_PROPOSED_CLAIM")
+        .contains("complete proposed_claim")
         .doesNotContain("chain_of_thought");
   }
 }

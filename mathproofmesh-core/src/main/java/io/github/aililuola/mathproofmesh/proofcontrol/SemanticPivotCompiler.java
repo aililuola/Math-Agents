@@ -75,7 +75,17 @@ public final class SemanticPivotCompiler {
                         change.claimId(),
                         change.claimStatementHash(),
                         enumValue(PivotClaimUsageAction.class, change.action(), "claim use action"),
-                        change.reason()))
+                        change.reason(),
+                        change.proposedClaim() == null
+                            ? null
+                            : new PivotProposedClaimDraft(
+                                change.proposedClaim().claimId(),
+                                change.proposedClaim().statement(),
+                                change.proposedClaim().statementHash(),
+                                change.proposedClaim().assumptions(),
+                                change.proposedClaim().proofStepRefs(),
+                                change.proposedClaim().dependencyClaimIds(),
+                                change.proposedClaim().tags())))
             .toList(),
         proposal.obligationChanges().stream()
             .map(

@@ -119,7 +119,7 @@ class DesktopSemanticPivotMultiRoundRestoreTest {
                     List.of(
                         new PivotClaimUseChange(
                             retainedClaimId,
-                            "verified-claim-hash",
+                            harness.authoritativeClaimStatementHash(retainedClaimId),
                             PivotClaimUsageAction.RETIRE_FROM_ACTIVE_DEPENDENCY,
                             "This verified claim is false.")));
             expectedFailure =
@@ -172,7 +172,7 @@ class DesktopSemanticPivotMultiRoundRestoreTest {
                 List.of(
                     new PivotClaimUseChange(
                         retainedClaimId,
-                        "verified-claim-hash",
+                        harness.authoritativeClaimStatementHash(retainedClaimId),
                         PivotClaimUsageAction.RETAIN_AS_VERIFIED_FACT,
                         "The previously verified equivalence remains applicable.")));
         sourceEpochs.add(delta.sourceStrategyId());

@@ -2,9 +2,11 @@ package io.github.aililuola.mathproofmesh.orchestration;
 
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /** Bounded continuation and committed-checkpoint CAS semantics. */
 public final class ContinuationFunctions {
@@ -41,13 +43,17 @@ public final class ContinuationFunctions {
     private final Map<String, Checkpoint> checkpoints = new LinkedHashMap<>();
     private final Map<String, String> latestByBranch = new LinkedHashMap<>();
     private final List<AuditEvent> audit = new ArrayList<>();
+    private long version;
 
     public synchronized void seed(Checkpoint checkpoint) {
       if (!checkpoint.committed()) {
         throw new IllegalArgumentException("seed checkpoint must be committed");
       }
-      checkpoints.putIfAbsent(checkpoint.checkpointId(), checkpoint);
-      latestByBranch.putIfAbsent(checkpoint.branchId(), checkpoint.checkpointId());
+      boolean changed = checkpoints.putIfAbsent(checkpoint.checkpointId(), checkpoint) == null;
+      changed |= latestByBranch.putIfAbsent(checkpoint.branchId(), checkpoint.checkpointId()) == null;
+      if (changed) {
+        version++;
+      }
     }
 
     public synchronized CommitResult commit(String branchId, Delta delta) {
@@ -59,6 +65,7 @@ public final class ContinuationFunctions {
       }
       if (!delta.reviewAccepted()) {
         audit.add(new AuditEvent(delta.deltaId(), "rejected", latestId));
+        version++;
         return new CommitResult(false, parent, "independent review rejected delta");
       }
       if (delta.authorAgentId().equals(delta.reviewerAgentId())) {
@@ -96,6 +103,7 @@ public final class ContinuationFunctions {
       checkpoints.put(id, committed);
       latestByBranch.put(branch, id);
       audit.add(new AuditEvent(delta.deltaId(), "committed", id));
+      version++;
       return new CommitResult(true, committed, "reviewed delta committed");
     }
 
@@ -108,6 +116,7 @@ public final class ContinuationFunctions {
       String branch = required(newBranchId, "newBranchId");
       latestByBranch.putIfAbsent(branch, parent.checkpointId());
       audit.add(new AuditEvent(parentCheckpointId, "branched", branch));
+      version++;
       return parent;
     }
 
@@ -156,6 +165,7 @@ public final class ContinuationFunctions {
       checkpoints.put(id, revision);
       latestByBranch.put(branch, id);
       audit.add(new AuditEvent(parentCheckpointId, "strategy_branched", id));
+      version++;
       return revision;
     }
 
@@ -165,6 +175,69 @@ public final class ContinuationFunctions {
 
     public synchronized List<AuditEvent> audit() {
       return List.copyOf(audit);
+    }
+
+    public synchronized CheckpointLedgerSnapshot snapshot() {
+      return new CheckpointLedgerSnapshot(checkpoints, latestByBranch, audit, version);
+    }
+
+    public synchronized void restore(CheckpointLedgerSnapshot snapshot) {
+      CheckpointLedgerSnapshot source = Objects.requireNonNull(snapshot, "snapshot");
+      checkpoints.clear();
+      checkpoints.putAll(source.checkpoints());
+      latestByBranch.clear();
+      latestByBranch.putAll(source.latestByBranch());
+      audit.clear();
+      audit.addAll(source.audit());
+      version = source.version();
+    }
+  }
+
+  /** Complete rollback boundary for the globally shared continuation checkpoint ledger. */
+  public record CheckpointLedgerSnapshot(
+      Map<String, Checkpoint> checkpoints,
+      Map<String, String> latestByBranch,
+      List<AuditEvent> audit,
+      long version) {
+    public CheckpointLedgerSnapshot {
+      checkpoints = immutableMap(checkpoints);
+      latestByBranch = immutableMap(latestByBranch);
+      audit = audit == null ? List.of() : List.copyOf(audit);
+      if (version < 0L) {
+        throw new IllegalArgumentException("version must be nonnegative");
+      }
+      for (Map.Entry<String, String> entry : latestByBranch.entrySet()) {
+        if (!checkpoints.containsKey(entry.getValue())) {
+          throw new IllegalArgumentException(
+              "latest branch pointer references an unknown checkpoint: " + entry.getKey());
+        }
+      }
+    }
+
+    public String stableHash() {
+      return CanonicalJson.stableHash(this);
+    }
+
+    @Override
+    public Map<String, Checkpoint> checkpoints() {
+      return Map.copyOf(checkpoints);
+    }
+
+    @Override
+    public Map<String, String> latestByBranch() {
+      return Map.copyOf(latestByBranch);
+    }
+
+    @Override
+    public List<AuditEvent> audit() {
+      return List.copyOf(audit);
+    }
+
+    private static <K, V> Map<K, V> immutableMap(Map<K, V> values) {
+      if (values == null || values.isEmpty()) {
+        return Map.of();
+      }
+      return Collections.unmodifiableMap(new LinkedHashMap<>(values));
     }
   }
 

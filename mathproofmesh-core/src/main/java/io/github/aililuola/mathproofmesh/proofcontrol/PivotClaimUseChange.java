@@ -6,7 +6,16 @@ public record PivotClaimUseChange(
     String claimId,
     String claimStatementHash,
     PivotClaimUsageAction action,
-    String reason) {
+    String reason,
+    PivotProposedClaimDraft proposedClaim) {
+  public PivotClaimUseChange(
+      String claimId,
+      String claimStatementHash,
+      PivotClaimUsageAction action,
+      String reason) {
+    this(claimId, claimStatementHash, action, reason, null);
+  }
+
   public PivotClaimUseChange {
     claimId = PivotValues.required(claimId, "claimId");
     claimStatementHash = PivotValues.required(claimStatementHash, "claimStatementHash");

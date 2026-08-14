@@ -93,7 +93,9 @@ public final class PromptCatalog {
         "Propose one bounded, non-authoritative draft of a structural strategy-state delta from "
             + "the supplied immutable root, "
             + "trusted obstruction references, and authority projections. Do not claim a pivot ID, "
-            + "hash, verified claim, Fact, refutation, or permanent negative authority.");
+            + "hash, verified claim, Fact, refutation, or permanent negative authority. "
+            + "ADD_AS_PROPOSED_CLAIM requires a complete proposed_claim payload whose normalized "
+            + "statement matches its server-checkable hash; it never grants Claim or Fact authority.");
     stages.put(
         "semantic_pivot_review",
         "Independently review exactly one compiled semantic pivot for obstruction binding, real "

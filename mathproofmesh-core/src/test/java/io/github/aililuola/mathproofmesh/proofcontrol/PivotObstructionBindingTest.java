@@ -72,6 +72,7 @@ class PivotObstructionBindingTest {
         source.knownObligationIds(),
         source.verifiedClaimIds(),
         source.knownClaimIds(),
+        source.knownClaimStatementHashes(),
         source.permanentNegativeConflicts(),
         source.selectedFamilyId(),
         source.selectedCanonicalTargetIds(),

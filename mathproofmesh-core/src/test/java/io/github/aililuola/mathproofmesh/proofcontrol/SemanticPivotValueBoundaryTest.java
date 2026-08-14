@@ -49,6 +49,7 @@ class SemanticPivotValueBoundaryTest {
             null,
             null,
             null,
+            null,
             " ",
             null,
             false,

@@ -1,5 +1,6 @@
 package io.github.aililuola.mathproofmesh.desktop;
 
+import io.github.aililuola.mathproofmesh.contract.ClaimCard;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewBatch;
 import io.github.aililuola.mathproofmesh.contract.ComputationDecision;
 import io.github.aililuola.mathproofmesh.contract.ExperimentProgram;
@@ -251,6 +252,7 @@ record DesktopSolveCheckpoint(
       List<String> semanticPivotIds,
       String activeStrategyEpochId,
       List<String> retiredActiveClaimIds,
+      List<ClaimCard> pendingPivotProposedClaims,
       List<String> retiredStrategyFocusObligationIds,
       List<String> activeMathematicalObjectIds,
       String activeDirectionSignature) {
@@ -293,6 +295,10 @@ record DesktopSolveCheckpoint(
               : activeStrategyEpochId.strip();
       retiredActiveClaimIds =
           retiredActiveClaimIds == null ? List.of() : List.copyOf(retiredActiveClaimIds);
+      pendingPivotProposedClaims =
+          pendingPivotProposedClaims == null
+              ? List.of()
+              : List.copyOf(pendingPivotProposedClaims);
       retiredStrategyFocusObligationIds =
           retiredStrategyFocusObligationIds == null
               ? List.of()
@@ -355,6 +361,11 @@ record DesktopSolveCheckpoint(
     @Override
     public List<String> retiredActiveClaimIds() {
       return List.copyOf(retiredActiveClaimIds);
+    }
+
+    @Override
+    public List<ClaimCard> pendingPivotProposedClaims() {
+      return List.copyOf(pendingPivotProposedClaims);
     }
 
     @Override

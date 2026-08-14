@@ -1,6 +1,7 @@
 package io.github.aililuola.mathproofmesh.desktop;
 
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
+import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
 import io.github.aililuola.mathproofmesh.contract.ObligationKind;
 import io.github.aililuola.mathproofmesh.contract.ProofObligation;
 import io.github.aililuola.mathproofmesh.contract.SemanticPivotReviewBatch;
@@ -18,16 +19,19 @@ import io.github.aililuola.mathproofmesh.proofcontrol.PivotObjectDisposition;
 import io.github.aililuola.mathproofmesh.proofcontrol.PivotObligationAction;
 import io.github.aililuola.mathproofmesh.proofcontrol.PivotObligationChange;
 import io.github.aililuola.mathproofmesh.proofcontrol.PivotObstructionRef;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotProposedClaimDraft;
 import io.github.aililuola.mathproofmesh.proofcontrol.PivotTransformationType;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlFacade;
 import io.github.aililuola.mathproofmesh.proofcontrol.SemanticPivotController;
 import io.github.aililuola.mathproofmesh.proofcontrol.SemanticPivotRecord;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyArchive;
+import io.github.aililuola.mathproofmesh.orchestration.ContinuationFunctions;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphConvergenceMonitor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -261,6 +265,66 @@ final class DesktopSemanticPivotTestHarness implements AutoCloseable {
         .anyMatch(message -> message.messageId().equals(claimId));
   }
 
+  String authoritativeClaimStatementHash(String claimId) {
+    return coordinatorField(
+            "typedMemory", io.github.aililuola.mathproofmesh.memory.TypedMemory.class)
+        .facts()
+        .stream()
+        .filter(fact -> fact.messageId().equals(claimId))
+        .map(fact -> PivotProposedClaimDraft.statementHash(fact.statement()))
+        .findFirst()
+        .orElseThrow(() -> new IllegalArgumentException("unknown authoritative Claim: " + claimId));
+  }
+
+  boolean proposedClaimExists(String claimId) {
+    return proposedClaimCount(claimId) == 1L;
+  }
+
+  long proposedClaimCount(String claimId) {
+    return coordinatorField(
+            "lemmaMemory", io.github.aililuola.mathproofmesh.memory.LemmaMemory.class)
+        .claims()
+        .stream()
+        .filter(claim -> claim.claimId().equals(claimId))
+        .count();
+  }
+
+  long proposedClaimLifecycleCount(String claimId) {
+    return coordinatorField("proofControl", ProofControlFacade.class).claims().entries().stream()
+        .filter(entry -> entry.claimId().equals(claimId))
+        .filter(
+            entry ->
+                entry.state()
+                    == io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleController.State.PROPOSED)
+        .count();
+  }
+
+  long pendingPivotProposedClaimCount(String claimId) throws Exception {
+    @SuppressWarnings("unchecked")
+    List<io.github.aililuola.mathproofmesh.contract.ClaimCard> pending =
+        (List<io.github.aililuola.mathproofmesh.contract.ClaimCard>)
+            rawField(route(), "pendingPivotProposedClaims");
+    return pending.stream().filter(claim -> claim.claimId().equals(claimId)).count();
+  }
+
+  boolean proposedClaimDirectlyVerified(String claimId) {
+    ProofControlFacade facade = coordinatorField("proofControl", ProofControlFacade.class);
+    return facade.claims().entries().stream()
+        .filter(entry -> entry.claimId().equals(claimId))
+        .anyMatch(
+            entry ->
+                entry.state()
+                    != io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleController.State.PROPOSED);
+  }
+
+  boolean proposedClaimDirectlyPromoted(String claimId) {
+    return coordinatorField(
+            "typedMemory", io.github.aililuola.mathproofmesh.memory.TypedMemory.class)
+        .facts()
+        .stream()
+        .anyMatch(fact -> fact.messageId().equals(claimId));
+  }
+
   void enterFocusedRecovery() {
     ProofGraphConvergenceMonitor monitor =
         coordinatorField("proofGraphConvergence", ProofGraphConvergenceMonitor.class);
@@ -413,6 +477,34 @@ final class DesktopSemanticPivotTestHarness implements AutoCloseable {
                     || record.status()
                         == io.github.aililuola.mathproofmesh.proofcontrol.PivotDeltaStatus.EVALUATED)
         .count();
+  }
+
+  long pivotApplyReceiptCount() {
+    return semanticPivots().ledger().records().stream()
+        .filter(record -> record.applyReceipt() != null)
+        .count();
+  }
+
+  ContinuationFunctions.CheckpointLedgerSnapshot checkpointLedgerSnapshot() {
+    return coordinatorField("checkpoints", ContinuationFunctions.CheckpointLedger.class)
+        .snapshot();
+  }
+
+  int taskLeaseCount() {
+    return coordinatorField("proofGraphConvergence", ProofGraphConvergenceMonitor.class)
+        .snapshot()
+        .focusedTaskLeases()
+        .size();
+  }
+
+  int pendingTaskCount() throws Exception {
+    return pendingTasks().size();
+  }
+
+  DesktopSolveCheckpoint persistedCheckpoint() throws Exception {
+    Path runDirectory = (Path) rawField(coordinator, "runDirectory");
+    Path state = runDirectory.resolve("structured").resolve("desktop-solve-state.json");
+    return ContractObjectMapper.read(Files.readString(state), DesktopSolveCheckpoint.class);
   }
 
   void failurePoint(SemanticPivotFailurePoint point) {

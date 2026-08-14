@@ -32,6 +32,7 @@ class DesktopSemanticPivotAtomicityTest {
           DesktopSemanticPivotTestHarness.open(run, "semantic-pivot-atomic-" + ordinal)) {
         var delta = harness.validDelta(ordinal);
         var before = harness.state();
+        int taskLeasesBefore = harness.taskLeaseCount();
         harness.failurePoint(point);
         assertThatThrownBy(() -> harness.apply(delta))
             .isInstanceOf(IllegalStateException.class)
@@ -44,7 +45,7 @@ class DesktopSemanticPivotAtomicityTest {
         partialCanonicalWrites +=
             rolledBack.canonicalOccurrences() == before.canonicalOccurrences() ? 0 : 1;
         pendingTaskLeaks += rolledBack.pendingTasks() == before.pendingTasks() ? 0 : 1;
-        taskLeaseLeaks += 0;
+        taskLeaseLeaks += harness.taskLeaseCount() == taskLeasesBefore ? 0 : 1;
 
         harness.failurePoint(SemanticPivotFailurePoint.NONE);
         assertThat(harness.apply(delta).applyReceipt()).isNotNull();

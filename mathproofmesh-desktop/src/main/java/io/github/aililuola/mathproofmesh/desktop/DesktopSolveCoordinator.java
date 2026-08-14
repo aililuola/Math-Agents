@@ -57,6 +57,7 @@ import io.github.aililuola.mathproofmesh.contract.ComputationContractRepairActio
 import io.github.aililuola.mathproofmesh.contract.ComputationContractRepairStatus;
 import io.github.aililuola.mathproofmesh.contract.ComputationMethod;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
+import io.github.aililuola.mathproofmesh.contract.EvidenceRef;
 import io.github.aililuola.mathproofmesh.contract.EvidenceType;
 import io.github.aililuola.mathproofmesh.contract.ExperimentProgram;
 import io.github.aililuola.mathproofmesh.contract.ExperimentResult;
@@ -179,6 +180,7 @@ import io.github.aililuola.mathproofmesh.proofcontrol.PivotObjectDisposition;
 import io.github.aililuola.mathproofmesh.proofcontrol.PivotObligationAction;
 import io.github.aililuola.mathproofmesh.proofcontrol.PivotObligationChange;
 import io.github.aililuola.mathproofmesh.proofcontrol.PivotObstructionRef;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotProposedClaimDraft;
 import io.github.aililuola.mathproofmesh.proofcontrol.PivotStructuralSignature;
 import io.github.aililuola.mathproofmesh.proofcontrol.PivotStructuralSignatureFactory;
 import io.github.aililuola.mathproofmesh.proofcontrol.PivotTransformationType;
@@ -1079,6 +1081,7 @@ final class DesktopSolveCoordinator {
           route.pendingFindingReconciliation =
               !researchCheckpoints.activeFindings(route.routeId).isEmpty();
           reconcileSubmittedAttemptFindings(route);
+          attachPendingPivotProposedClaims(route);
           route.status = "submitted";
           artifactProduced = true;
           break;
@@ -3059,6 +3062,12 @@ final class DesktopSolveCoordinator {
     }
     List<AttemptArtifactRecord> stored = attemptArtifacts.addAll(harvested);
     stored.stream().map(AttemptArtifactRecord::artifactId).forEach(route.artifactIds::add);
+    Set<String> harvestedClaimIds =
+        stored.stream()
+            .map(AttemptArtifactRecord::claimId)
+            .collect(java.util.stream.Collectors.toSet());
+    route.pendingPivotProposedClaims.removeIf(
+        claim -> harvestedClaimIds.contains(claim.claimId()));
     return stored;
   }
 
@@ -5383,13 +5392,18 @@ final class DesktopSolveCoordinator {
               "semantic-pivot-review://" + review.reportId());
     }
     SemanticPivotRecord applied;
+    SemanticPivotSnapshot pivotBeforeApply = semanticPivots.ledger().snapshot();
     try {
       applied =
           semanticPivots.apply(
               preparation.plan(),
               plan ->
                   applySemanticPivotAtomically(
-                      route, plan, proposedBlueprint, proposedGoalLink));
+                      route,
+                      plan,
+                      proposedBlueprint,
+                      proposedGoalLink,
+                      pivotBeforeApply));
     } catch (RuntimeException exception) {
       if (metaPivotIntentId != null) {
         proofControl.metaPivot().restore(metaBefore);
@@ -5598,7 +5612,9 @@ final class DesktopSolveCoordinator {
         "authority_rule",
         "Return a non-authoritative draft. Leave claimed_pivot_id and "
             + "claimed_structural_delta_hash empty; never change the immutable root goal or "
-            + "claim verified/fact/refutation/permanent-negative authority.");
+            + "claim verified/fact/refutation/permanent-negative authority. "
+            + "ADD_AS_PROPOSED_CLAIM requires a complete proposed_claim payload with a normalized "
+            + "statement hash and still enters issue-003 review only as PROPOSED.");
     return Map.copyOf(context);
   }
 
@@ -5770,18 +5786,24 @@ final class DesktopSolveCoordinator {
       RouteState route,
       SemanticPivotApplyPlan plan,
       StrategyBlueprintCompiler.Compilation blueprint,
-      ProofControlModels.GoalLink goalLink) {
+      ProofControlModels.GoalLink goalLink,
+      SemanticPivotSnapshot pivotBeforeApply) {
     PivotRouteSnapshot routeBefore = PivotRouteSnapshot.capture(route);
     StrategyArchive.Snapshot archiveBefore = strategyArchive.snapshot();
     ProofGraphSnapshot graphBefore = proofGraph.snapshot();
     var convergenceBefore = proofGraphConvergence.snapshot();
     var deferredBefore = deferredExpansions.snapshot();
+    ContinuationFunctions.CheckpointLedgerSnapshot checkpointsBefore = checkpoints.snapshot();
+    LemmaMemorySnapshot lemmaMemoryBefore = lemmaMemory.snapshot();
+    var claimLifecycleBefore = proofControl.claims().snapshot();
     List<DesktopSolveCheckpoint.ScheduledProofTask> tasksBefore =
         List.copyOf(pendingProofTasks);
     List<StrategyCard> admittedBefore = admittedStrategies;
     Map<String, StrategyBlueprintCompiler.Compilation> blueprintsBefore =
         Map.copyOf(strategyBlueprints);
     Map<String, ProofControlModels.GoalLink> goalLinksBefore = Map.copyOf(goalLinks);
+    String stageBefore = currentStage;
+    boolean checkpointPersistAttempted = false;
     try {
       failSemanticPivotAt(SemanticPivotFailurePoint.AFTER_LEDGER_STAGED);
       PivotDelta delta = plan.delta();
@@ -5801,6 +5823,7 @@ final class DesktopSolveCoordinator {
       route.activeSemanticPivotId = delta.pivotId();
       route.semanticPivotIds.add(delta.pivotId());
       applyPivotRouteProjection(route, delta);
+      materializePivotProposedClaims(route, delta);
       resetRouteForSemanticPivot(route);
       failSemanticPivotAt(SemanticPivotFailurePoint.AFTER_ROUTE_SWITCH);
 
@@ -5851,6 +5874,11 @@ final class DesktopSolveCoordinator {
               routeBefore.checkpoint().checkpointId(),
               route.routeId + "-pivot-" + route.semanticPivotIds.size(),
               delta.proposedStrategyId());
+      failSemanticPivotAt(SemanticPivotFailurePoint.AFTER_CHECKPOINT_BRANCH);
+      checkpointPersistAttempted = true;
+      persistUnchecked("semantic_pivot_checkpoint_branch", false);
+      failSemanticPivotAt(
+          SemanticPivotFailurePoint.AFTER_CHECKPOINT_PERSIST_BEFORE_APPLY_RECEIPT);
       SemanticPivotApplyReceipt receipt =
           SemanticPivotApplyReceipt.applied(
               delta, addedObligations, taskIds, roundIndex.get());
@@ -5872,7 +5900,20 @@ final class DesktopSolveCoordinator {
       strategyBlueprints.putAll(blueprintsBefore);
       goalLinks.clear();
       goalLinks.putAll(goalLinksBefore);
+      checkpoints.restore(checkpointsBefore);
+      lemmaMemory = LemmaMemory.restore(lemmaMemoryBefore);
+      proofControl.claims().load(claimLifecycleBefore);
+      semanticPivots.ledger().restore(pivotBeforeApply);
       installNegativeKnowledgeRuntime();
+      if (checkpointPersistAttempted) {
+        try {
+          persistUnchecked(stageBefore, false);
+        } catch (RuntimeException rollbackFailure) {
+          exception.addSuppressed(rollbackFailure);
+        }
+      } else {
+        currentStage = stageBefore;
+      }
       throw exception;
     }
   }
@@ -5908,6 +5949,75 @@ final class DesktopSolveCoordinator {
         route.retiredStrategyFocusObligationIds.add(change.obligationId());
       } else {
         route.retiredStrategyFocusObligationIds.remove(change.obligationId());
+      }
+    }
+  }
+
+  private void materializePivotProposedClaims(RouteState route, PivotDelta delta) {
+    for (var change : delta.claimUseChanges()) {
+      if (change.action() != PivotClaimUsageAction.ADD_AS_PROPOSED_CLAIM) {
+        continue;
+      }
+      PivotProposedClaimDraft draft =
+          Objects.requireNonNull(change.proposedClaim(), "audited proposed Claim draft");
+      String sourceAttemptId = "semantic-pivot-attempt-" + delta.pivotId();
+      List<ProofControlModels.DependencyRef> dependencyRefs =
+          draft.dependencyClaimIds().stream()
+              .map(
+                  dependency ->
+                      new ProofControlModels.DependencyRef(
+                          ProofControlModels.DependencyKind.LOCAL_CLAIM,
+                          dependency,
+                          sourceAttemptId,
+                          delta.pivotId(),
+                          route.routeId,
+                          null,
+                          null))
+              .toList();
+      LinkedHashSet<String> tags = new LinkedHashSet<>(draft.tags());
+      tags.add("source-semantic-pivot:" + delta.pivotId());
+      ClaimCard claim =
+          new ClaimCard(
+              draft.assumptions(),
+              draft.claimId(),
+              draft.statement(),
+              "",
+              "Requires independent issue-003 Claim review.",
+              draft.dependencyClaimIds(),
+              List.of(),
+              draft.proofStepRefs().stream()
+                  .map(
+                      reference ->
+                          new EvidenceRef(
+                              reference,
+                              null,
+                              null,
+                              "Support reference supplied by the non-authoritative Pivot draft."))
+                  .toList(),
+              List.of(),
+              List.of(),
+              0.5d,
+              route.author.id(),
+              sourceAttemptId,
+              delta.pivotId(),
+              draft.statement(),
+              ClaimStatus.PROPOSED,
+              List.copyOf(tags),
+              null);
+      lemmaMemory.addMany(List.of(claim));
+      proofControl
+          .claims()
+          .register(
+              claim.claimId(),
+              sourceAttemptId,
+              delta.pivotId(),
+              dependencyRefs,
+              AttemptArtifactKind.LOCAL_LEMMA,
+              AttemptStatus.PARTIAL,
+              "semantic-pivot-proposed");
+      if (route.pendingPivotProposedClaims.stream()
+          .noneMatch(existing -> existing.claimId().equals(claim.claimId()))) {
+        route.pendingPivotProposedClaims.add(claim);
       }
     }
   }
@@ -6082,9 +6192,23 @@ final class DesktopSolveCoordinator {
         proofGraph.obligations().stream()
             .map(ProofObligation::obligationId)
             .collect(java.util.stream.Collectors.toSet());
+    Map<String, String> knownClaimStatementHashes = new LinkedHashMap<>();
+    typedMemory
+        .facts()
+        .forEach(
+            fact ->
+                putAuthoritativeClaimStatementHash(
+                    knownClaimStatementHashes, fact.messageId(), fact.statement()));
+    lemmaMemory
+        .claims()
+        .forEach(
+            claim ->
+                putAuthoritativeClaimStatementHash(
+                    knownClaimStatementHashes, claim.claimId(), claim.statement()));
     Set<String> knownClaims =
-        proofControl.claims().entries().stream()
-            .map(entry -> entry.claimId())
+        java.util.stream.Stream.concat(
+                proofControl.claims().entries().stream().map(entry -> entry.claimId()),
+                knownClaimStatementHashes.keySet().stream())
             .collect(java.util.stream.Collectors.toSet());
     Set<String> verifiedClaims =
         proofControl.claims().entries().stream()
@@ -6162,11 +6286,21 @@ final class DesktopSolveCoordinator {
         knownObligations,
         verifiedClaims,
         knownClaims,
+        knownClaimStatementHashes,
         negativeConflicts,
         focused == null ? null : focused.selectedFamilyId(),
         focused == null ? Set.of() : focused.selectedCanonicalTargetIds(),
         proofGraphConvergence.controlMode() == ProofGraphControlMode.FOCUSED_RECOVERY,
         capacityAvailable);
+  }
+
+  private static void putAuthoritativeClaimStatementHash(
+      Map<String, String> hashes, String claimId, String statement) {
+    String statementHash = PivotProposedClaimDraft.statementHash(statement);
+    hashes.merge(
+        claimId,
+        statementHash,
+        (left, right) -> PivotProposedClaimDraft.hashesEqual(left, right) ? left : "");
   }
 
   private Map<String, PivotObstructionRef> pivotObstructionReferences(RouteState route) {
@@ -6329,6 +6463,7 @@ final class DesktopSolveCoordinator {
 
   private void failSemanticPivotAt(SemanticPivotFailurePoint point) {
     if (semanticPivotFailurePoint == point) {
+      semanticPivotFailurePoint = SemanticPivotFailurePoint.NONE;
       throw new IllegalStateException("injected semantic pivot failure: " + point);
     }
   }
@@ -7962,6 +8097,7 @@ final class DesktopSolveCoordinator {
       route.semanticPivotIds.addAll(saved.semanticPivotIds());
       route.activeStrategyEpochId = saved.activeStrategyEpochId();
       route.retiredActiveClaimIds.addAll(saved.retiredActiveClaimIds());
+      route.pendingPivotProposedClaims.addAll(saved.pendingPivotProposedClaims());
       route.retiredStrategyFocusObligationIds.addAll(
           saved.retiredStrategyFocusObligationIds());
       if (!saved.activeMathematicalObjectIds().isEmpty()) {
@@ -8380,6 +8516,7 @@ final class DesktopSolveCoordinator {
                         new ArrayList<>(route.semanticPivotIds),
                         route.activeStrategyEpochId,
                         new ArrayList<>(route.retiredActiveClaimIds),
+                        new ArrayList<>(route.pendingPivotProposedClaims),
                         new ArrayList<>(route.retiredStrategyFocusObligationIds),
                         new ArrayList<>(route.activeMathematicalObjectIds),
                         route.activeDirectionSignature))
@@ -8447,6 +8584,7 @@ final class DesktopSolveCoordinator {
     Path structured = runDirectory.resolve("structured");
     Files.createDirectories(structured);
     writeJsonAtomically(statePath(), checkpoint);
+    failSemanticPivotAt(SemanticPivotFailurePoint.DURING_CHECKPOINT_PERSIST);
     writeJsonAtomically(structured.resolve("proof-graph.json"), checkpoint.proofGraph());
     writeJsonAtomically(structured.resolve("lemma-memory.json"), checkpoint.lemmaMemory());
     writeJsonAtomically(structured.resolve("typed-memory.json"), checkpoint.typedMemory());
@@ -9851,6 +9989,16 @@ final class DesktopSolveCoordinator {
     refreshRouteResearchProjection(route);
   }
 
+  private static void attachPendingPivotProposedClaims(RouteState route) {
+    if (route.attempt == null || route.pendingPivotProposedClaims.isEmpty()) {
+      return;
+    }
+    Map<String, ClaimCard> proposed = new LinkedHashMap<>();
+    route.attempt.proposedLemmas().forEach(claim -> proposed.put(claim.claimId(), claim));
+    route.pendingPivotProposedClaims.forEach(claim -> proposed.put(claim.claimId(), claim));
+    route.attempt = withProposedResearchClaims(route.attempt, List.copyOf(proposed.values()));
+  }
+
   private static ClaimCard proposedResearchClaim(
       ResearchFindingRecord finding, ProofAttempt attempt) {
     return new ClaimCard(
@@ -10167,6 +10315,7 @@ final class DesktopSolveCoordinator {
       List<String> semanticPivotIds,
       String activeStrategyEpochId,
       List<String> retiredActiveClaimIds,
+      List<ClaimCard> pendingPivotProposedClaims,
       List<String> retiredStrategyFocusObligationIds,
       List<String> activeMathematicalObjectIds,
       String activeDirectionSignature) {
@@ -10204,6 +10353,7 @@ final class DesktopSolveCoordinator {
           List.copyOf(route.semanticPivotIds),
           route.activeStrategyEpochId,
           List.copyOf(route.retiredActiveClaimIds),
+          List.copyOf(route.pendingPivotProposedClaims),
           List.copyOf(route.retiredStrategyFocusObligationIds),
           List.copyOf(route.activeMathematicalObjectIds),
           route.activeDirectionSignature);
@@ -10245,6 +10395,8 @@ final class DesktopSolveCoordinator {
       route.activeStrategyEpochId = activeStrategyEpochId;
       route.retiredActiveClaimIds.clear();
       route.retiredActiveClaimIds.addAll(retiredActiveClaimIds);
+      route.pendingPivotProposedClaims.clear();
+      route.pendingPivotProposedClaims.addAll(pendingPivotProposedClaims);
       route.retiredStrategyFocusObligationIds.clear();
       route.retiredStrategyFocusObligationIds.addAll(retiredStrategyFocusObligationIds);
       route.activeMathematicalObjectIds.clear();
@@ -10306,6 +10458,7 @@ final class DesktopSolveCoordinator {
     private final LinkedHashSet<String> semanticPivotIds = new LinkedHashSet<>();
     private String activeStrategyEpochId;
     private final LinkedHashSet<String> retiredActiveClaimIds = new LinkedHashSet<>();
+    private final List<ClaimCard> pendingPivotProposedClaims = new ArrayList<>();
     private final LinkedHashSet<String> retiredStrategyFocusObligationIds =
         new LinkedHashSet<>();
     private final LinkedHashSet<String> activeMathematicalObjectIds = new LinkedHashSet<>();

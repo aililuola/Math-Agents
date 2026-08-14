@@ -172,12 +172,60 @@ public record SemanticPivotProposal(
       @JsonProperty(value = "claim_statement_hash", required = true) @ContractNonNull
           String claimStatementHash,
       @JsonProperty(value = "action", required = true) @ContractNonNull String action,
-      @JsonProperty(value = "reason", required = true) @ContractNonNull String reason) {
+      @JsonProperty(value = "reason", required = true) @ContractNonNull String reason,
+      @JsonProperty(value = "proposed_claim") ProposedClaimDraft proposedClaim) {
+    public ClaimUseChangeDraft(
+        String claimId, String claimStatementHash, String action, String reason) {
+      this(claimId, claimStatementHash, action, reason, null);
+    }
+
     public ClaimUseChangeDraft {
       claimId = required("claim_id", claimId);
       claimStatementHash = required("claim_statement_hash", claimStatementHash);
       action = required("action", action);
       reason = required("reason", reason);
+    }
+  }
+
+  /** Complete non-authoritative payload required to materialize a new proposed Claim. */
+  public record ProposedClaimDraft(
+      @JsonProperty(value = "claim_id", required = true) @ContractNonNull String claimId,
+      @JsonProperty(value = "statement", required = true) @ContractNonNull String statement,
+      @JsonProperty(value = "statement_hash", required = true) @ContractNonNull
+          String statementHash,
+      @JsonProperty(value = "assumptions") @ContractNonNull List<String> assumptions,
+      @JsonProperty(value = "proof_step_refs") @ContractNonNull List<String> proofStepRefs,
+      @JsonProperty(value = "dependency_claim_ids") @ContractNonNull
+          List<String> dependencyClaimIds,
+      @JsonProperty(value = "tags") @ContractNonNull List<String> tags) {
+    public ProposedClaimDraft {
+      claimId = required("claim_id", claimId);
+      statement = required("statement", statement);
+      statementHash = required("statement_hash", statementHash);
+      assumptions = ImmutableCollections.listOrEmpty(assumptions);
+      proofStepRefs = ImmutableCollections.listOrEmpty(proofStepRefs);
+      dependencyClaimIds = ImmutableCollections.listOrEmpty(dependencyClaimIds);
+      tags = ImmutableCollections.listOrEmpty(tags);
+    }
+
+    @Override
+    public List<String> assumptions() {
+      return List.copyOf(assumptions);
+    }
+
+    @Override
+    public List<String> proofStepRefs() {
+      return List.copyOf(proofStepRefs);
+    }
+
+    @Override
+    public List<String> dependencyClaimIds() {
+      return List.copyOf(dependencyClaimIds);
+    }
+
+    @Override
+    public List<String> tags() {
+      return List.copyOf(tags);
     }
   }
 

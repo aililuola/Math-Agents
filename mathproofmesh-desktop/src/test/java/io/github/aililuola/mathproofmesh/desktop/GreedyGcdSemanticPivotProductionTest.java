@@ -25,7 +25,7 @@ class GreedyGcdSemanticPivotProductionTest {
               List.of(
                   new PivotClaimUseChange(
                       retained,
-                      "hitting-equivalence-hash",
+                      harness.authoritativeClaimStatementHash(retained),
                       PivotClaimUsageAction.RETAIN_AS_VERIFIED_FACT,
                       "The support hitting equivalence is unchanged.")));
       String oldTarget = harness.firstRetiredObligation(delta);

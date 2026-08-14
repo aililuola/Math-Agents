@@ -208,6 +208,7 @@ final class SemanticPivotTestFixtures {
         Set.of(OLD_OBLIGATION),
         Set.of(VERIFIED_CLAIM),
         Set.of(VERIFIED_CLAIM),
+        Map.of(VERIFIED_CLAIM, "verified-claim-hash"),
         Set.of(),
         null,
         Set.of(),

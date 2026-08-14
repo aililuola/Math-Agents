@@ -15,6 +15,7 @@ public record PivotAuthorityContext(
     Set<String> knownObligationIds,
     Set<String> verifiedClaimIds,
     Set<String> knownClaimIds,
+    Map<String, String> knownClaimStatementHashes,
     Set<String> permanentNegativeConflicts,
     String selectedFamilyId,
     Set<String> selectedCanonicalTargetIds,
@@ -32,6 +33,8 @@ public record PivotAuthorityContext(
     knownObligationIds = knownObligationIds == null ? Set.of() : Set.copyOf(knownObligationIds);
     verifiedClaimIds = verifiedClaimIds == null ? Set.of() : Set.copyOf(verifiedClaimIds);
     knownClaimIds = knownClaimIds == null ? Set.of() : Set.copyOf(knownClaimIds);
+    knownClaimStatementHashes =
+        knownClaimStatementHashes == null ? Map.of() : Map.copyOf(knownClaimStatementHashes);
     permanentNegativeConflicts =
         permanentNegativeConflicts == null ? Set.of() : Set.copyOf(permanentNegativeConflicts);
     selectedFamilyId = PivotValues.normalize(selectedFamilyId);
