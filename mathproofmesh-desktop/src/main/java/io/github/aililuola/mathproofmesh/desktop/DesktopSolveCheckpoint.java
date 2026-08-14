@@ -43,6 +43,11 @@ import io.github.aililuola.mathproofmesh.proofgraph.DeferredExpansionSnapshot;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphConvergenceSnapshot;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofTaskScope;
 import io.github.aililuola.mathproofmesh.research.ResearchCheckpointSnapshot;
+import io.github.aililuola.mathproofmesh.strategydiversity.PortfolioReplenishmentSnapshot;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyCandidateSnapshot;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyMechanismSnapshot;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioSnapshot;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPreflightSnapshot;
 import io.github.aililuola.mathproofmesh.provider.UsageTotals;
 import io.github.aililuola.mathproofmesh.inspiration.InspirationSnapshot;
 import io.github.aililuola.mathproofmesh.verification.EscalationPlan;
@@ -79,6 +84,11 @@ record DesktopSolveCheckpoint(
     StrategyArchive.Snapshot strategyArchive,
     Map<String, StrategyBlueprintCompiler.Compilation> strategyBlueprints,
     Map<String, ProofControlModels.GoalLink> goalLinks,
+    StrategyCandidateSnapshot strategyCandidates,
+    StrategyMechanismSnapshot strategyMechanisms,
+    StrategyPreflightSnapshot strategyPreflights,
+    StrategyPortfolioSnapshot strategyPortfolios,
+    PortfolioReplenishmentSnapshot portfolioReplenishments,
     List<MetaPivotController.Pivot> metaPivots,
     SemanticPivotSnapshot semanticPivots,
     InspirationRoundProgress inspirationProgress,
@@ -98,7 +108,7 @@ record DesktopSolveCheckpoint(
     DeferredExpansionSnapshot deferredExpansions,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 12;
+  static final int CURRENT_SCHEMA_VERSION = 13;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {
@@ -120,6 +130,18 @@ record DesktopSolveCheckpoint(
     proofDebtHistory = proofDebtHistory == null ? List.of() : List.copyOf(proofDebtHistory);
     strategyBlueprints = strategyBlueprints == null ? Map.of() : Map.copyOf(strategyBlueprints);
     goalLinks = goalLinks == null ? Map.of() : Map.copyOf(goalLinks);
+    strategyCandidates =
+        strategyCandidates == null ? StrategyCandidateSnapshot.empty() : strategyCandidates;
+    strategyMechanisms =
+        strategyMechanisms == null ? StrategyMechanismSnapshot.empty() : strategyMechanisms;
+    strategyPreflights =
+        strategyPreflights == null ? StrategyPreflightSnapshot.empty() : strategyPreflights;
+    strategyPortfolios =
+        strategyPortfolios == null ? StrategyPortfolioSnapshot.empty() : strategyPortfolios;
+    portfolioReplenishments =
+        portfolioReplenishments == null
+            ? PortfolioReplenishmentSnapshot.empty()
+            : portfolioReplenishments;
     metaPivots = metaPivots == null ? List.of() : List.copyOf(metaPivots);
     semanticPivots =
         semanticPivots == null ? SemanticPivotSnapshot.empty() : semanticPivots;

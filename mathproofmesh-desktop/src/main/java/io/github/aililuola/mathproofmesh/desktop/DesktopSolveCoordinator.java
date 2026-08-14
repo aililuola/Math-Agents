@@ -237,6 +237,33 @@ import io.github.aililuola.mathproofmesh.provider.AgentCallFailure;
 import io.github.aililuola.mathproofmesh.provider.AgentRuntime;
 import io.github.aililuola.mathproofmesh.provider.ProviderErrorKind;
 import io.github.aililuola.mathproofmesh.topology.SparseTopologyRouter;
+import io.github.aililuola.mathproofmesh.strategydiversity.CommonModeRiskRegistry;
+import io.github.aililuola.mathproofmesh.strategydiversity.CriticalClaimKeyCompiler;
+import io.github.aililuola.mathproofmesh.strategydiversity.CriticalClaimPreflightStatus;
+import io.github.aililuola.mathproofmesh.strategydiversity.GenericStrategyGenerationPolicy;
+import io.github.aililuola.mathproofmesh.strategydiversity.PortfolioReplenishmentLedger;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyCandidateLedger;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyCandidateStatus;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyCriticalClaimPreflight;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyDiversityConfig;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyFeasibilityCalibrator;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyMechanismAnalyzer;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyMechanismPrimitive;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyMechanismProfile;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyMechanismRegistry;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyMechanismSignature;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioApplyPlan;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioApplyReceipt;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioAuditEvent;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioCandidate;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioConstraint;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioDecision;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioOptimizer;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioRegistry;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPreflightRegistry;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPreflightReport;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategySemanticNormalizer;
+import io.github.aililuola.mathproofmesh.strategydiversity.TrustedStrategyPreflightEvidenceSource;
 import io.github.aililuola.mathproofmesh.verification.BlindReviewPacketFactory;
 import io.github.aililuola.mathproofmesh.verification.EscalationPlan;
 import io.github.aililuola.mathproofmesh.verification.FormalizationCoverage;
@@ -331,6 +358,22 @@ final class DesktopSolveCoordinator {
   private final Map<String, StrategyBlueprintCompiler.Compilation> strategyBlueprints =
       new LinkedHashMap<>();
   private final Map<String, ProofControlModels.GoalLink> goalLinks = new LinkedHashMap<>();
+  private final StrategyDiversityConfig strategyDiversityConfig =
+      StrategyDiversityConfig.defaults();
+  private final StrategyMechanismAnalyzer strategyMechanismAnalyzer =
+      new StrategyMechanismAnalyzer();
+  private final StrategyPortfolioOptimizer strategyPortfolioOptimizer =
+      new StrategyPortfolioOptimizer();
+  private StrategyCandidateLedger strategyCandidates = new StrategyCandidateLedger();
+  private StrategyMechanismRegistry strategyMechanisms = new StrategyMechanismRegistry();
+  private StrategyPreflightRegistry strategyPreflights = new StrategyPreflightRegistry();
+  private StrategyPortfolioRegistry strategyPortfolios = new StrategyPortfolioRegistry();
+  private PortfolioReplenishmentLedger portfolioReplenishments =
+      new PortfolioReplenishmentLedger();
+  private StrategyPortfolioFailurePoint strategyPortfolioFailurePoint =
+      StrategyPortfolioFailurePoint.NONE;
+  private StrategyPortfolioFailurePoint strategyPortfolioHardCrashPoint =
+      StrategyPortfolioFailurePoint.NONE;
   private final SemanticPivotCompiler semanticPivotCompiler = new SemanticPivotCompiler();
   private final PivotStructuralSignatureFactory pivotSignatures =
       new PivotStructuralSignatureFactory();
@@ -393,7 +436,7 @@ final class DesktopSolveCoordinator {
   private final RouteTeam routeTeam;
   private final RoleRunner roleRunner;
   private final RouteTeamFactory teamFactory;
-  private final RouteRegistry routeRegistry;
+  private RouteRegistry routeRegistry;
   private InMemoryMessageRepository messageRepository = new InMemoryMessageRepository();
   private MessageBroker messageBroker;
   private final AdaptiveBudgetManager adaptiveBudget;
@@ -682,6 +725,7 @@ final class DesktopSolveCoordinator {
 
   private void generateAndAdmitStrategies() {
     BudgetConfig budget = config.budget();
+    boolean initialBatchGeneratedHere = strategySet == null;
     if (strategySet == null) {
       stage(
           RoutePipelineFunctions.RunStage.STRATEGY_DIVERSITY,
@@ -720,44 +764,185 @@ final class DesktopSolveCoordinator {
           "Reusing the committed strategy set without another provider call",
           statePath().toString());
     }
-    List<StrategyCard> diverse =
-        topology.selectDiverseStrategies(
-            strategySet.strategies(),
-            Math.min(budget.strategiesToGenerate(), budget.maxPaths()));
-
     stage(
         RoutePipelineFunctions.RunStage.ROUTE_ADMISSION_AND_TEAM,
-        "Applying goal, blueprint, route-admission, and team gates");
-    List<StrategyCard> accepted = new ArrayList<>();
-    Set<String> mechanisms = new HashSet<>();
+        "Compiling and atomically admitting an evidence-grounded mechanism portfolio");
+    String episodeId = strategyPortfolioEpisodeId();
+    if (strategyPortfolios.receipt(episodeId).isEmpty()) {
+      StrategyPortfolioPreparation preparation = prepareStrategyPortfolio(episodeId, strategySet);
+      int effectiveMinimumPortfolioSize =
+          Math.min(
+              strategyDiversityConfig.minPortfolioSize(),
+              Math.min(budget.strategiesToGenerate(), budget.maxPaths()));
+      if (preparation.decision().selectedStrategyIds().size()
+              < effectiveMinimumPortfolioSize
+          && strategySet.strategies().size() >= effectiveMinimumPortfolioSize
+          && initialBatchGeneratedHere
+          && portfolioReplenishments.mayRequest(episodeId)) {
+        strategySet = replenishStrategyPortfolioOnce(episodeId, strategySet, preparation);
+        preparation = prepareStrategyPortfolio(episodeId, strategySet);
+      }
+      StrategyPortfolioDecision decision = strategyPortfolios.record(preparation.decision());
+      finalizeCandidateDecisions(preparation.candidates(), decision);
+      persistUnchecked("strategy_portfolio_prepared", false);
+      applyStrategyPortfolioAtomically(episodeId, preparation.withDecision(decision));
+    } else {
+      auditUnseenStrategyCandidatesAfterPortfolioCommit(episodeId, strategySet);
+    }
+    complete(RoutePipelineFunctions.RunStage.ROUTE_ADMISSION_AND_TEAM);
+    workflowCursor = CURSOR_INITIAL_ROUTES;
+    persistUnchecked("route_admission_and_team", false);
+  }
+
+  private void auditUnseenStrategyCandidatesAfterPortfolioCommit(
+      String episodeId, StrategySet source) {
+    List<StrategyCard> unseen =
+        source.strategies().stream()
+            .filter(strategy -> strategyCandidates.find(strategy.strategyId()).isEmpty())
+            .toList();
+    if (unseen.isEmpty()) {
+      return;
+    }
+    StrategyPortfolioPreparation audit =
+        prepareStrategyPortfolio(
+            episodeId,
+            new StrategySet(
+                "Late candidates audited against the committed portfolio.", List.of(), unseen));
+    audit.candidates().stream()
+        .map(candidate -> candidate.strategy().strategyId())
+        .forEach(
+            strategyId ->
+                strategyCandidates
+                    .find(strategyId)
+                    .filter(record -> !terminalStrategyCandidateStatus(record.status()))
+                    .ifPresent(
+                        ignored ->
+                            strategyCandidates.transition(
+                                strategyId,
+                                StrategyCandidateStatus.NOT_SELECTED,
+                                "",
+                                "",
+                                null,
+                                "PORTFOLIO_ALREADY_COMMITTED")));
+    persistUnchecked("strategy_portfolio_late_candidates_audited", false);
+  }
+
+  private StrategyPortfolioPreparation prepareStrategyPortfolio(
+      String episodeId, StrategySet source) {
+    var candidatesBefore = strategyCandidates.snapshot();
+    var mechanismsBefore = strategyMechanisms.snapshot();
+    var preflightsBefore = strategyPreflights.snapshot();
+    boolean completed = false;
+    try {
+      StrategyPortfolioPreparation prepared = prepareStrategyPortfolioUnchecked(episodeId, source);
+      completed = true;
+      return prepared;
+    } finally {
+      if (!completed) {
+        strategyCandidates = StrategyCandidateLedger.restore(candidatesBefore);
+        strategyMechanisms = StrategyMechanismRegistry.restore(mechanismsBefore);
+        strategyPreflights = StrategyPreflightRegistry.restore(preflightsBefore);
+      }
+    }
+  }
+
+  private StrategyPortfolioPreparation prepareStrategyPortfolioUnchecked(
+      String episodeId, StrategySet source) {
+    List<StrategyCard> raw = distinctStrategies(source.strategies());
+    Map<String, PreparedStrategyCandidate> prepared = new LinkedHashMap<>();
     ProofControlModels.Obligation goal = controlGoal();
     ProofControlModels.ScopeSignature scope =
         proofControl
             .scopeGuard()
             .extract("goal-scope", rootGoal().sourceStatement(), List.of(), 1.0d);
     ProofControlModels.Mode mode = proofControlMode();
-    for (StrategyCard strategy : diverse) {
-      String routeId = "route-" + (accepted.size() + 1);
+    StrategyCriticalClaimPreflight preflight = trustedStrategyPreflight();
+    CommonModeRiskRegistry commonMode = new CommonModeRiskRegistry();
+    int captureOrder = 0;
+    for (StrategyCard strategy : raw) {
+      boolean replenishment =
+          portfolioReplenishments
+              .find(episodeId)
+              .map(record -> record.candidateIds().contains(strategy.strategyId()))
+              .orElse(false);
+      if (strategyCandidates.find(strategy.strategyId()).isEmpty()) {
+        strategyCandidates.capture(
+            episodeId, strategy.strategyId(), captureOrder, replenishment);
+      }
+      captureOrder++;
+      failStrategyPortfolioAt(StrategyPortfolioFailurePoint.AFTER_CANDIDATE_LEDGER);
+      String routeId = "candidate-route-" + strategy.strategyId();
       ProofControlModels.Strategy controlStrategy = controlStrategy(strategy, routeId);
-      StrategyBlueprintCompiler.Compilation blueprint =
-          proofControl.blueprintCompiler().compile(problemHash, controlStrategy, goal);
-      ProofControlModels.GoalLink link =
-          proofControl
-              .goalAlignment()
-              .assess(
-                  controlStrategy.id(),
-                  rootGoal().sourceStatement(),
-                  scope,
-                  goal,
-                  scope,
-                  proofControl.scopeGuard(),
-                  (source, target) -> source.equals(target));
+      StrategyBlueprintCompiler.Compilation blueprint;
+      ProofControlModels.GoalLink link;
+      try {
+        blueprint = proofControl.blueprintCompiler().compile(problemHash, controlStrategy, goal);
+        link =
+            proofControl
+                .goalAlignment()
+                .assess(
+                    controlStrategy.id(),
+                    rootGoal().sourceStatement(),
+                    scope,
+                    goal,
+                    scope,
+                    proofControl.scopeGuard(),
+                    String::equals);
+        if (strategyCandidates
+            .find(strategy.strategyId())
+            .filter(record -> record.status() == StrategyCandidateStatus.CAPTURED)
+            .isPresent()) {
+          strategyCandidates.transition(
+              strategy.strategyId(),
+              StrategyCandidateStatus.BLUEPRINT_COMPILED,
+              "",
+              "",
+              null,
+              "BLUEPRINT_COMPILED");
+        }
+      } catch (RuntimeException exception) {
+        rejectStrategyCandidate(
+            strategy, StrategyCandidateStatus.REJECTED_INVALID, exception.getClass().getSimpleName());
+        continue;
+      }
+      StrategyMechanismSignature signature =
+          strategyMechanisms
+              .signature(strategy.strategyId())
+              .orElseGet(
+                  () ->
+                      strategyMechanismAnalyzer.signature(
+                          problemHash,
+                          rootGoal().sourceStatementHash(),
+                          strategy,
+                          controlStrategy,
+                          blueprint));
+      StrategyMechanismProfile profile =
+          strategyMechanisms
+              .profile(strategy.strategyId())
+              .orElseGet(() -> strategyMechanismAnalyzer.profile(strategy, blueprint));
+      strategyMechanisms.register(strategy.strategyId(), signature, profile, false);
+      StrategyPreflightReport report =
+          strategyPreflights
+              .find(strategy.strategyId())
+              .orElseGet(() -> strategyPreflights.record(preflight.evaluate(problemHash, strategy)));
+      StrategyCandidateStatus preflightStatus = preflightStatus(report);
+      if (preflightStatus != StrategyCandidateStatus.PREFLIGHTED) {
+        strategyCandidates.transition(
+            strategy.strategyId(),
+            preflightStatus,
+            signature.structuralSignatureHash(),
+            report.reportHash(),
+            null,
+            preflightDetail(report));
+      }
       try {
         negativeKnowledgeGate.requireAllAllowed(
             negativeKnowledgeCandidates(
                 strategy, blueprint, NegativeKnowledgeSurface.STRATEGY_ADMISSION),
             roundIndex.get());
       } catch (NegativeKnowledgeBlockedException exception) {
+        rejectStrategyCandidate(
+            strategy, StrategyCandidateStatus.REJECTED_NEGATIVE, exception.getMessage());
         recordNegativeKnowledgeRejection(
             "route_rejected",
             "route_admission_and_team",
@@ -765,42 +950,490 @@ final class DesktopSolveCoordinator {
             exception);
         continue;
       }
-      strategyArchive.archive(controlStrategy, "strategy://" + strategy.strategyId(), 0);
-      strategyBlueprints.put(strategy.strategyId(), blueprint);
-      goalLinks.put(strategy.strategyId(), link);
-      String signature = topology.mathNormalize(topology.strategyText(strategy));
-      boolean duplicate = mechanisms.contains(signature);
-      boolean commonMode =
-          accepted.stream()
-              .anyMatch(
-                  existing ->
-                      topology.sharesUnverifiedDependency(
-                          strategy,
-                          existing,
-                          Math.max(0.82d, config.topology().strategySimilarityThreshold())));
-      var decision =
+      if (preflightStatus != StrategyCandidateStatus.PREFLIGHTED) {
+        continue;
+      }
+      var baseDecision =
           proofControl
               .routeAdmission()
-              .evaluate(mode, controlStrategy, blueprint, link, duplicate, commonMode);
-      boolean admitted = !decision.blocksRuntime(mode);
-      event(
-          admitted ? "route_admitted" : "route_rejected",
-          "route_admission_and_team",
-          null,
-          admitted ? "completed" : "rejected",
-          (admitted ? "Admitted " : "Rejected ")
-              + strategy.title()
-              + (decision.reasons().isEmpty() ? "" : ": " + String.join("; ", decision.reasons())),
-          "strategy://" + strategy.strategyId());
-      if (admitted) {
-        mechanisms.add(signature);
-        accepted.add(strategy);
+              .evaluate(mode, controlStrategy, blueprint, link, false, false);
+      if (baseDecision.blocksRuntime(mode)) {
+        rejectStrategyCandidate(
+            strategy,
+            StrategyCandidateStatus.REJECTED_INVALID,
+            String.join(";", baseDecision.reasons()));
+        continue;
       }
+      strategyCandidates
+          .find(strategy.strategyId())
+          .filter(record -> !terminalStrategyCandidateStatus(record.status()))
+          .ifPresent(
+              ignored -> {
+                strategyCandidates.transition(
+                    strategy.strategyId(),
+                    StrategyCandidateStatus.BASE_VALIDATED,
+                    signature.structuralSignatureHash(),
+                    report.reportHash(),
+                    null,
+                    "BASE_VALIDATED");
+                strategyCandidates.transition(
+                    strategy.strategyId(),
+                    StrategyCandidateStatus.PREFLIGHTED,
+                    signature.structuralSignatureHash(),
+                    report.reportHash(),
+                    null,
+                    preflightDetail(report));
+              });
+      commonMode.observe(report);
+      prepared.put(
+          strategy.strategyId(),
+          new PreparedStrategyCandidate(
+              strategy, controlStrategy, blueprint, link, signature, profile, report));
     }
-    admittedStrategies = List.copyOf(accepted);
-    complete(RoutePipelineFunctions.RunStage.ROUTE_ADMISSION_AND_TEAM);
-    workflowCursor = CURSOR_INITIAL_ROUTES;
-    persistUnchecked("route_admission_and_team", false);
+    failStrategyPortfolioAt(StrategyPortfolioFailurePoint.AFTER_PREFLIGHT);
+
+    Map<String, Long> signatureCounts =
+        prepared.values().stream()
+            .collect(
+                java.util.stream.Collectors.groupingBy(
+                    candidate -> candidate.signature().structuralSignatureHash(),
+                    LinkedHashMap::new,
+                    java.util.stream.Collectors.counting()));
+    List<StrategyPortfolioCandidate> candidates = new ArrayList<>();
+    StrategyFeasibilityCalibrator calibrator =
+        new StrategyFeasibilityCalibrator(strategyDiversityConfig);
+    for (PreparedStrategyCandidate candidate : prepared.values()) {
+      int commonGroups = commonMode.groupsFor(candidate.strategy().strategyId()).size();
+      double novelty =
+          signatureCounts.get(candidate.signature().structuralSignatureHash()) == 1L ? 1.0d : 0.0d;
+      var score =
+          calibrator.calibrate(
+              candidate.strategy(),
+              candidate.blueprint(),
+              candidate.preflight(),
+              candidate.goalLink().confidence(),
+              novelty,
+              1.0d,
+              commonGroups == 0 ? 0.0d : 1.0d);
+      strategyCandidates
+          .find(candidate.strategy().strategyId())
+          .filter(record -> record.calibratedScore() == null)
+          .filter(record -> record.status() == StrategyCandidateStatus.PREFLIGHTED)
+          .ifPresent(
+              ignored ->
+                  strategyCandidates.transition(
+                      candidate.strategy().strategyId(),
+                      StrategyCandidateStatus.PREFLIGHTED,
+                      candidate.signature().structuralSignatureHash(),
+                      candidate.preflight().reportHash(),
+                      score.total(),
+                      "SERVER_CALIBRATED"));
+      candidates.add(
+          new StrategyPortfolioCandidate(
+              candidate.strategy(),
+              candidate.blueprint(),
+              candidate.signature(),
+              candidate.profile(),
+              candidate.preflight(),
+              score));
+    }
+    int requested =
+        Math.min(config.budget().strategiesToGenerate(), config.budget().maxPaths());
+    StrategyPortfolioDecision decision =
+        strategyPortfolioOptimizer.optimize(
+            episodeId,
+            candidates,
+            new StrategyPortfolioConstraint(
+                requested,
+                Math.min(strategyDiversityConfig.minPortfolioSize(), requested),
+                strategyDiversityConfig.maxExactPortfolioCandidates(),
+                Set.of(),
+                Set.of()));
+    failStrategyPortfolioAt(StrategyPortfolioFailurePoint.AFTER_PORTFOLIO_SELECTION);
+    return new StrategyPortfolioPreparation(candidates, prepared, decision);
+  }
+
+  private StrategySet replenishStrategyPortfolioOnce(
+      String episodeId, StrategySet source, StrategyPortfolioPreparation preparation) {
+    List<String> selectedSignatures =
+        preparation.decision().selectedStrategyIds().stream()
+            .map(preparation.prepared()::get)
+            .filter(Objects::nonNull)
+            .map(candidate -> candidate.signature().structuralSignatureHash())
+            .sorted()
+            .toList();
+    List<String> rejectedClaimKeys =
+        preparation.candidates().stream()
+            .flatMap(candidate -> candidate.preflight().claims().stream())
+            .filter(
+                claim ->
+                    claim.status() == CriticalClaimPreflightStatus.VERIFIED_REFUTED
+                        || claim.status() == CriticalClaimPreflightStatus.PERMANENTLY_BLOCKED)
+            .map(claim -> claim.key().semanticKey())
+            .distinct()
+            .sorted()
+            .toList();
+    List<String> commonModeGroups =
+        preparation.candidates().stream()
+            .flatMap(candidate -> candidate.preflight().unresolvedRequiredClaimKeys().stream())
+            .collect(java.util.stream.Collectors.groupingBy(value -> value, java.util.stream.Collectors.counting()))
+            .entrySet()
+            .stream()
+            .filter(entry -> entry.getValue() > 1L)
+            .map(Map.Entry::getKey)
+            .sorted()
+            .toList();
+    Set<StrategyMechanismPrimitive> coveredProfiles =
+        preparation.decision().selectedStrategyIds().stream()
+            .map(preparation.prepared()::get)
+            .filter(Objects::nonNull)
+            .flatMap(candidate -> candidate.profile().primitives().stream())
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    List<String> missingProfiles =
+        java.util.Arrays.stream(StrategyMechanismPrimitive.values())
+            .filter(primitive -> primitive != StrategyMechanismPrimitive.UNKNOWN)
+            .filter(primitive -> !coveredProfiles.contains(primitive))
+            .map(Enum::name)
+            .toList();
+    int needed =
+        Math.max(
+            1,
+            strategyDiversityConfig.minPortfolioSize()
+                - preparation.decision().selectedStrategyIds().size());
+    Map<String, Object> gap = new LinkedHashMap<>();
+    gap.put("episode_id", episodeId);
+    gap.put("selected_hard_mechanism_signatures", selectedSignatures);
+    gap.put("rejected_required_claim_keys", rejectedClaimKeys);
+    gap.put("missing_soft_mechanism_profiles", missingProfiles);
+    gap.put("unresolved_common_mode_groups", commonModeGroups);
+    gap.put("forbidden_structural_signatures", selectedSignatures);
+    gap.put("strategies_requested", needed);
+    String requestHash = CanonicalJson.stableHash(gap);
+    portfolioReplenishments.begin(episodeId, requestHash);
+    persistUnchecked("portfolio_gap_replenishment_requested", false);
+
+    AgentRuntime planner =
+        pool.select("planner", Set.of(), List.of("problem_decomposition"), null, true);
+    Map<String, Object> context = new LinkedHashMap<>();
+    context.put("immutable_problem", frozenProblem);
+    context.put("problem_hash", problemHash);
+    context.put("triage", triage);
+    context.put("generation_mode", "portfolio_gap_replenishment");
+    context.putAll(gap);
+    context.put("registered_computation_contracts", ContractsFunctions.experimentToolCatalog(Set.of()));
+    context.put("migration_parity_requirements", strategyGenerationGuidance());
+    StrategySet supplement =
+        callStage(
+                "portfolio-gap-replenishment",
+                "strategy_generation",
+                StrategySet.class,
+                context,
+                planner,
+                "breadth",
+                "Filling structural gaps in the strategy portfolio")
+            .value();
+    Set<String> existingIds =
+        source.strategies().stream()
+            .map(StrategyCard::strategyId)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    List<StrategyCard> additions =
+        supplement.strategies().stream()
+            .filter(candidate -> !existingIds.contains(candidate.strategyId()))
+            .toList();
+    portfolioReplenishments.complete(
+        episodeId, additions.stream().map(StrategyCard::strategyId).toList());
+    List<StrategyCard> combined = new ArrayList<>(source.strategies());
+    combined.addAll(additions);
+    StrategySet result =
+        new StrategySet(
+            source.coverageNotes() + " | one-shot portfolio gap replenishment",
+            distinctStrings(source.omittedDirections(), supplement.omittedDirections()),
+            combined);
+    strategySet = result;
+    persistUnchecked("portfolio_gap_replenishment_completed", false);
+    return result;
+  }
+
+  private StrategyCriticalClaimPreflight trustedStrategyPreflight() {
+    return new StrategyCriticalClaimPreflight(
+        new CriticalClaimKeyCompiler(),
+        List.of(
+            new TrustedStrategyPreflightEvidenceSource(
+                problemHash,
+                negativeKnowledgeGate,
+                lemmaMemory.verified(),
+                typedMemory.facts(),
+                roundIndex.get())));
+  }
+
+  private void rejectStrategyCandidate(
+      StrategyCard strategy, StrategyCandidateStatus status, String detail) {
+    strategyCandidates
+        .find(strategy.strategyId())
+        .filter(record -> !terminalStrategyCandidateStatus(record.status()))
+        .ifPresent(
+            ignored ->
+                strategyCandidates.transition(
+                    strategy.strategyId(), status, "", "", 0.0d, detail));
+    event(
+        "route_rejected",
+        "route_admission_and_team",
+        null,
+        "rejected",
+        "Rejected " + strategy.title() + (detail == null || detail.isBlank() ? "" : ": " + detail),
+        "strategy://" + strategy.strategyId());
+  }
+
+  private static StrategyCandidateStatus preflightStatus(StrategyPreflightReport report) {
+    if (report.claims().stream()
+        .anyMatch(claim -> claim.status() == CriticalClaimPreflightStatus.ERROR)) {
+      return StrategyCandidateStatus.QUARANTINED_PREFLIGHT_ERROR;
+    }
+    if (report.claims().stream()
+        .anyMatch(
+            claim ->
+                "required".equals(claim.necessity())
+                    && claim.status() == CriticalClaimPreflightStatus.VERIFIED_REFUTED)) {
+      return StrategyCandidateStatus.REJECTED_REFUTED_REQUIRED_CLAIM;
+    }
+    if (report.claims().stream()
+        .anyMatch(
+            claim ->
+                "required".equals(claim.necessity())
+                    && claim.status() == CriticalClaimPreflightStatus.PERMANENTLY_BLOCKED)) {
+      return StrategyCandidateStatus.REJECTED_NEGATIVE;
+    }
+    if (report.requiresRegeneration()) {
+      return StrategyCandidateStatus.QUARANTINED_PREFLIGHT_ERROR;
+    }
+    return StrategyCandidateStatus.PREFLIGHTED;
+  }
+
+  private static String preflightDetail(StrategyPreflightReport report) {
+    if (report.hardRejected()) {
+      return "REQUIRED_CLAIM_REFUTED_OR_BLOCKED";
+    }
+    if (report.requiresRegeneration()) {
+      return "SUPPORTING_CLAIM_REQUIRES_REGENERATION";
+    }
+    return "TRUSTED_PREFLIGHT_COMPLETE";
+  }
+
+  private void finalizeCandidateDecisions(
+      List<StrategyPortfolioCandidate> candidates, StrategyPortfolioDecision decision) {
+    Set<String> selected = Set.copyOf(decision.selectedStrategyIds());
+    for (StrategyPortfolioCandidate candidate : candidates) {
+      String strategyId = candidate.strategy().strategyId();
+      strategyCandidates
+          .find(strategyId)
+          .filter(record -> !terminalStrategyCandidateStatus(record.status()))
+          .ifPresent(
+              ignored -> {
+                String reason = decision.nonSelectionReasons().getOrDefault(strategyId, "SELECTED");
+                StrategyCandidateStatus status =
+                    selected.contains(strategyId)
+                        ? StrategyCandidateStatus.SELECTED
+                        : switch (reason) {
+                          case "SAME_STRUCTURAL_MECHANISM" ->
+                              StrategyCandidateStatus.SHADOW_DUPLICATE;
+                          case "SHARED_UNRESOLVED_REQUIRED_CLAIM" ->
+                              StrategyCandidateStatus.QUARANTINED_COMMON_MODE;
+                          default -> StrategyCandidateStatus.NOT_SELECTED;
+                        };
+                strategyCandidates.transition(
+                    strategyId,
+                    status,
+                    candidate.signature().structuralSignatureHash(),
+                    candidate.preflight().reportHash(),
+                    candidate.feasibility().total(),
+                    reason);
+              });
+    }
+  }
+
+  @SuppressFBWarnings(
+      value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
+      justification = "All active strategy and route projections are restored before failure propagation.")
+  private StrategyPortfolioApplyReceipt applyStrategyPortfolioAtomically(
+      String episodeId, StrategyPortfolioPreparation preparation) {
+    var candidatesBefore = strategyCandidates.snapshot();
+    var mechanismsBefore = strategyMechanisms.snapshot();
+    var preflightsBefore = strategyPreflights.snapshot();
+    var portfoliosBefore = strategyPortfolios.snapshot();
+    var replenishmentsBefore = portfolioReplenishments.snapshot();
+    StrategyArchive.Snapshot archiveBefore = strategyArchive.snapshot();
+    Map<String, StrategyBlueprintCompiler.Compilation> blueprintsBefore =
+        Map.copyOf(strategyBlueprints);
+    Map<String, ProofControlModels.GoalLink> goalLinksBefore = Map.copyOf(goalLinks);
+    List<StrategyCard> admittedBefore = admittedStrategies;
+    List<RouteState> routesBefore = List.copyOf(routes);
+    ProofGraphSnapshot graphBefore = proofGraph.snapshot();
+    var convergenceBefore = proofGraphConvergence.snapshot();
+    var deferredBefore = deferredExpansions.snapshot();
+    List<DesktopSolveCheckpoint.ScheduledProofTask> tasksBefore = List.copyOf(pendingProofTasks);
+    ContinuationFunctions.CheckpointLedgerSnapshot checkpointsBefore = checkpoints.snapshot();
+    int nextBefore = nextStrategyIndex.get();
+    String stageBefore = currentStage;
+    boolean persistAttempted = false;
+    try {
+      List<String> selectedIds = preparation.decision().selectedStrategyIds();
+      StrategyPortfolioApplyPlan plan =
+          new StrategyPortfolioApplyPlan(
+              "strategy-portfolio-plan-" + preparation.decision().decisionHash().substring(0, 20),
+              episodeId,
+              problemHash,
+              rootGoal().sourceStatementHash(),
+              selectedIds,
+              preparation.decision().decisionHash());
+      List<StrategyCard> selected =
+          selectedIds.stream()
+              .map(preparation.prepared()::get)
+              .filter(Objects::nonNull)
+              .map(PreparedStrategyCandidate::strategy)
+              .toList();
+      for (StrategyCard strategy : selected) {
+        PreparedStrategyCandidate candidate = preparation.prepared().get(strategy.strategyId());
+        strategyArchive.archive(
+            candidate.controlStrategy(), "strategy://" + strategy.strategyId(), roundIndex.get());
+        strategyBlueprints.put(strategy.strategyId(), candidate.blueprint());
+        goalLinks.put(strategy.strategyId(), candidate.goalLink());
+      }
+      admittedStrategies = List.copyOf(selected);
+      failStrategyPortfolioAt(StrategyPortfolioFailurePoint.AFTER_ARCHIVE);
+
+      nextStrategyIndex.set(0);
+      int initial = Math.min(config.budget().initialPaths(), admittedStrategies.size());
+      for (int index = 0; index < initial; index++) {
+        addRoute(
+            admittedStrategies.get(nextStrategyIndex.getAndIncrement()),
+            0,
+            NegativeKnowledgeSurface.STRATEGY_ADMISSION);
+      }
+      recomputeNeighbors();
+      failStrategyPortfolioAt(StrategyPortfolioFailurePoint.AFTER_ROUTE_CREATION);
+      String activeHash =
+          CanonicalJson.stableHash(
+              Map.of(
+                  "admitted",
+                  admittedStrategies.stream().map(StrategyCard::strategyId).toList(),
+                  "routes",
+                  routes.stream().map(route -> route.routeId).toList(),
+                  "archive",
+                  strategyArchive.snapshot()));
+      StrategyPortfolioApplyReceipt receipt =
+          new StrategyPortfolioApplyReceipt(
+              "strategy-portfolio-receipt-" + activeHash.substring(0, 20),
+              plan.planId(),
+              selectedIds,
+              routes.stream().map(route -> route.routeId).toList(),
+              activeHash);
+      strategyPortfolios.recordReceipt(episodeId, receipt);
+      failStrategyPortfolioAt(StrategyPortfolioFailurePoint.DURING_CHECKPOINT_PERSIST);
+      persistAttempted = true;
+      persistUnchecked("strategy_portfolio_apply", false);
+      selected.forEach(
+          strategy ->
+              event(
+                  "route_admitted",
+                  "route_admission_and_team",
+                  null,
+                  "completed",
+                  "Admitted independent mechanism " + strategy.title(),
+                  "strategy://" + strategy.strategyId()));
+      return receipt;
+    } catch (RuntimeException exception) {
+      strategyCandidates = StrategyCandidateLedger.restore(candidatesBefore);
+      strategyMechanisms = StrategyMechanismRegistry.restore(mechanismsBefore);
+      strategyPreflights = StrategyPreflightRegistry.restore(preflightsBefore);
+      strategyPortfolios = StrategyPortfolioRegistry.restore(portfoliosBefore);
+      portfolioReplenishments = PortfolioReplenishmentLedger.restore(replenishmentsBefore);
+      strategyArchive.restore(archiveBefore);
+      strategyBlueprints.clear();
+      strategyBlueprints.putAll(blueprintsBefore);
+      goalLinks.clear();
+      goalLinks.putAll(goalLinksBefore);
+      admittedStrategies = admittedBefore;
+      routes.clear();
+      routes.addAll(routesBefore);
+      proofGraph = ProofGraphStore.restore(graphBefore, ProofGraphPolicy.defaults());
+      proofGraphConvergence =
+          ProofGraphConvergenceMonitor.restore(
+              ProofGraphConvergenceConfig.defaults(), convergenceBefore);
+      deferredExpansions = DeferredExpansionLedger.restore(deferredBefore);
+      pendingProofTasks.clear();
+      pendingProofTasks.addAll(tasksBefore);
+      checkpoints.restore(checkpointsBefore);
+      nextStrategyIndex.set(nextBefore);
+      installNegativeKnowledgeRuntime();
+      resetRouteRuntimeRegistry();
+      if (persistAttempted) {
+        try {
+          persistUnchecked(stageBefore, false);
+        } catch (RuntimeException rollbackFailure) {
+          exception.addSuppressed(rollbackFailure);
+        }
+      } else {
+        currentStage = stageBefore;
+      }
+      throw exception;
+    }
+  }
+
+  private String strategyPortfolioEpisodeId() {
+    return "initial-portfolio-"
+        + CanonicalJson.stableHash(
+                Map.of(
+                    "problem_hash", problemHash,
+                    "root_goal_hash", rootGoal().sourceStatementHash()))
+            .substring(0, 20);
+  }
+
+  private void failStrategyPortfolioAt(StrategyPortfolioFailurePoint point) {
+    if (strategyPortfolioHardCrashPoint == point) {
+      strategyPortfolioHardCrashPoint = StrategyPortfolioFailurePoint.NONE;
+      throw new SimulatedStrategyPortfolioProcessTermination(point);
+    }
+    if (strategyPortfolioFailurePoint == point) {
+      strategyPortfolioFailurePoint = StrategyPortfolioFailurePoint.NONE;
+      throw new IllegalStateException("injected strategy portfolio failure at " + point);
+    }
+  }
+
+  void setStrategyPortfolioFailurePointForTest(StrategyPortfolioFailurePoint point) {
+    strategyPortfolioFailurePoint =
+        point == null ? StrategyPortfolioFailurePoint.NONE : point;
+  }
+
+  void setStrategyPortfolioHardCrashPointForTest(StrategyPortfolioFailurePoint point) {
+    strategyPortfolioHardCrashPoint =
+        point == null ? StrategyPortfolioFailurePoint.NONE : point;
+  }
+
+  private static boolean terminalStrategyCandidateStatus(StrategyCandidateStatus status) {
+    return switch (status) {
+      case SELECTED,
+          NOT_SELECTED,
+          REJECTED_INVALID,
+          REJECTED_NEGATIVE,
+          REJECTED_REFUTED_REQUIRED_CLAIM,
+          QUARANTINED_PREFLIGHT_ERROR,
+          QUARANTINED_COMMON_MODE,
+          SHADOW_DUPLICATE,
+          LEGACY_ACTIVE -> true;
+      default -> false;
+    };
+  }
+
+  private static List<StrategyCard> distinctStrategies(List<StrategyCard> candidates) {
+    LinkedHashMap<String, StrategyCard> distinct = new LinkedHashMap<>();
+    candidates.forEach(candidate -> distinct.putIfAbsent(candidate.strategyId(), candidate));
+    return List.copyOf(distinct.values());
+  }
+
+  private static List<String> distinctStrings(List<String> first, List<String> second) {
+    LinkedHashSet<String> values = new LinkedHashSet<>(first);
+    values.addAll(second);
+    return List.copyOf(values);
   }
 
   private void ensureInitialRoutes() {
@@ -924,6 +1557,17 @@ final class DesktopSolveCoordinator {
       registerRoute(route);
     }
     recomputeNeighbors();
+  }
+
+  private void resetRouteRuntimeRegistry() {
+    routeRegistry =
+        new RouteRegistry(
+            problemHash,
+            config.topology().crossRoute().maxNeighborsPerRoute(),
+            8,
+            config.topology().strategySimilarityThreshold());
+    messageBroker = createMessageBroker(messageRepository);
+    rebuildRouteRegistry();
   }
 
   private void recomputeNeighbors() {
@@ -4990,16 +5634,6 @@ final class DesktopSolveCoordinator {
         && nextStrategyIndex.get() < admittedStrategies.size()
         && routes.size() < config.budget().maxPaths()) {
       StrategyCard candidate = admittedStrategies.get(nextStrategyIndex.getAndIncrement());
-      if (duplicatesActiveDependency(candidate)) {
-        event(
-            "widen_candidate_rejected",
-            "scheduler_decision",
-            null,
-            "rejected",
-            "WIDEN candidate reused a refuted or unresolved common dependency",
-            "strategy://" + candidate.strategyId());
-        continue;
-      }
       try {
         negativeKnowledgeGate.requireAllAllowed(
             negativeKnowledgeCandidates(
@@ -5007,6 +5641,16 @@ final class DesktopSolveCoordinator {
                 strategyBlueprints.get(candidate.strategyId()),
                 NegativeKnowledgeSurface.ROUTE_WIDENING),
             roundIndex.get());
+        if (!strategyPortfolioAllowsWidening(candidate)) {
+          event(
+              "widen_candidate_rejected",
+              "scheduler_decision",
+              null,
+              "rejected",
+              "WIDEN candidate violates the active mechanism or unresolved-claim portfolio",
+              "strategy://" + candidate.strategyId());
+          continue;
+        }
         addRoute(candidate, 0, NegativeKnowledgeSurface.ROUTE_WIDENING);
       } catch (NegativeKnowledgeBlockedException exception) {
         recordNegativeKnowledgeRejection(
@@ -7967,6 +8611,12 @@ final class DesktopSolveCoordinator {
     strategyBlueprints.putAll(checkpoint.strategyBlueprints());
     goalLinks.clear();
     goalLinks.putAll(checkpoint.goalLinks());
+    strategyCandidates = StrategyCandidateLedger.restore(checkpoint.strategyCandidates());
+    strategyMechanisms = StrategyMechanismRegistry.restore(checkpoint.strategyMechanisms());
+    strategyPreflights = StrategyPreflightRegistry.restore(checkpoint.strategyPreflights());
+    strategyPortfolios = StrategyPortfolioRegistry.restore(checkpoint.strategyPortfolios());
+    portfolioReplenishments =
+        PortfolioReplenishmentLedger.restore(checkpoint.portfolioReplenishments());
     metaPivots.clear();
     metaPivots.addAll(checkpoint.metaPivots());
     semanticPivots.ledger().restore(checkpoint.semanticPivots());
@@ -8011,6 +8661,7 @@ final class DesktopSolveCoordinator {
     researchCheckpoints = ResearchCheckpointLedger.restore(checkpoint.researchCheckpoints());
     proofControl.claims().load(checkpoint.claimLifecycle());
     installNegativeKnowledgeRuntime();
+    restoreStrategyDiversityState(checkpoint);
     typedMemory.revalidateFactsAgainstNegativeKnowledge(roundIndex.get());
     Set<String> restoreBlockedObligations =
         new LinkedHashSet<>(proofGraph.revalidateNegativeKnowledge());
@@ -8572,6 +9223,11 @@ final class DesktopSolveCoordinator {
             strategyArchive.snapshot(),
             strategyBlueprints,
             goalLinks,
+            strategyCandidates.snapshot(),
+            strategyMechanisms.snapshot(),
+            strategyPreflights.snapshot(),
+            strategyPortfolios.snapshot(),
+            portfolioReplenishments.snapshot(),
             metaPivots,
             semanticPivots.ledger().snapshot(),
             inspirationProgress,
@@ -8620,6 +9276,17 @@ final class DesktopSolveCoordinator {
         structured.resolve("inspiration-outcomes.json"), checkpoint.inspirationOutcomes());
     writeJsonAtomically(structured.resolve("strategy-blueprints.json"), checkpoint.strategyBlueprints());
     writeJsonAtomically(structured.resolve("goal-links.json"), checkpoint.goalLinks());
+    writeJsonAtomically(
+        structured.resolve("strategy-candidates.json"), checkpoint.strategyCandidates());
+    writeJsonAtomically(
+        structured.resolve("strategy-mechanisms.json"), checkpoint.strategyMechanisms());
+    writeJsonAtomically(
+        structured.resolve("strategy-preflights.json"), checkpoint.strategyPreflights());
+    writeJsonAtomically(
+        structured.resolve("strategy-portfolios.json"), checkpoint.strategyPortfolios());
+    writeJsonAtomically(
+        structured.resolve("portfolio-replenishments.json"),
+        checkpoint.portfolioReplenishments());
     writeJsonAtomically(structured.resolve("meta-pivots.json"), checkpoint.metaPivots());
     writeJsonAtomically(
         structured.resolve("semantic-pivots.json"), checkpoint.semanticPivots());
@@ -8974,14 +9641,7 @@ final class DesktopSolveCoordinator {
     guidance.put(
         "migration_rule",
         "Preserve the full Python proof workflow: explicit obligations, independent routes, continuations, computation authority, skeptical review, checkpoints, and final verification.");
-    guidance.put(
-        "route_portfolio",
-        List.of(
-            "bounded gaps and finite-state route",
-            "enumeration of the fixed feasible integer sets",
-            "stabilization of the greedy constraint system",
-            "Skeptic route dedicated to counterexamples and common-mode assumptions",
-            "bridge route proving exactly why a finite state yields translation periodicity"));
+    guidance.putAll(new GenericStrategyGenerationPolicy().guidance());
     guidance.put(
         "authority_rules",
         List.of(
@@ -8989,22 +9649,9 @@ final class DesktopSolveCoordinator {
             "not_refuted is an exploration hint and never a Fact.",
             "Routes sharing an unresolved load-bearing lemma count as one independent mechanism.",
             "A route must resolve its focused obligation before claiming the main theorem."));
-    if (isGreedyGcdSequenceProblem()) {
-      guidance.put(
-          "trusted_starting_lemmas_to_prove",
-          List.of(
-              "For every n, gcd(a_n, a_1) > 1 because each new term must share a nontrivial gcd with every earlier term, including a_1.",
-              "Let Q = rad(a_1). Every multiple of Q is admissible after every prefix, so 1 <= a_(n+1)-a_n <= Q."));
-      guidance.put(
-          "unresolved_bridge",
-          "Bounded gaps alone do not prove translation periodicity. Prove a finite-state or stabilization theorem that preserves the greedy successor rule.");
-      guidance.put(
-          "forbidden_shortcuts",
-          List.of(
-              "Do not assume that the whole sequence uses only finitely many primes.",
-              "Do not assume one prime divides every term or every prefix.",
-              "Do not compare residue-class sets for different moduli by raw set inclusion.",
-              "Do not turn finite-sample non-refutation into a periodicity proof."));
+    var domainProvider = new GreedyGcdDomainStrategySeedProvider();
+    if (domainProvider.supports(frozenProblem)) {
+      guidance.put("optional_domain_strategy_seeds", domainProvider.seeds(frozenProblem));
     }
     return Map.copyOf(guidance);
   }
@@ -9034,15 +9681,71 @@ final class DesktopSolveCoordinator {
         "memory://negative/greedy-gcd-guardrails");
   }
 
-  private boolean duplicatesActiveDependency(StrategyCard candidate) {
-    return routes.stream()
+  private boolean strategyPortfolioAllowsWidening(StrategyCard strategy) {
+    StrategyBlueprintCompiler.Compilation blueprint =
+        strategyBlueprints.get(strategy.strategyId());
+    ProofControlModels.GoalLink link = goalLinks.get(strategy.strategyId());
+    if (blueprint == null || link == null) {
+      return false;
+    }
+    StrategyMechanismSignature signature =
+        strategyMechanisms
+            .signature(strategy.strategyId())
+            .orElseGet(
+                () ->
+                    strategyMechanismAnalyzer.signature(
+                        problemHash,
+                        rootGoal().sourceStatementHash(),
+                        strategy,
+                        controlStrategy(strategy, "widen-candidate"),
+                        blueprint));
+    StrategyMechanismProfile profile =
+        strategyMechanisms
+            .profile(strategy.strategyId())
+            .orElseGet(() -> strategyMechanismAnalyzer.profile(strategy, blueprint));
+    StrategyPreflightReport preflight = trustedStrategyPreflight().evaluate(problemHash, strategy);
+    Set<String> activeSignatures = new LinkedHashSet<>();
+    Set<String> activeUnresolvedRequiredClaims = new LinkedHashSet<>();
+    StrategyCriticalClaimPreflight livePreflight = trustedStrategyPreflight();
+    routes.stream()
         .filter(route -> !"abandoned".equals(route.status))
-        .anyMatch(
-            route ->
-                topology.sharesUnverifiedDependency(
-                    candidate,
-                    route.strategy,
-                    Math.max(0.82d, config.topology().strategySimilarityThreshold())));
+        .forEach(
+            route -> {
+              strategyMechanisms
+                  .signature(route.strategy.strategyId())
+                  .map(StrategyMechanismSignature::structuralSignatureHash)
+                  .ifPresent(activeSignatures::add);
+              activeUnresolvedRequiredClaims.addAll(
+                  livePreflight
+                      .evaluate(problemHash, route.strategy)
+                      .unresolvedRequiredClaimKeys());
+            });
+    var score =
+        new StrategyFeasibilityCalibrator(strategyDiversityConfig)
+            .calibrate(
+                strategy,
+                blueprint,
+                preflight,
+                link.confidence(),
+                activeSignatures.contains(signature.structuralSignatureHash()) ? 0.0d : 1.0d,
+                1.0d,
+                java.util.Collections.disjoint(
+                        preflight.unresolvedRequiredClaimKeys(), activeUnresolvedRequiredClaims)
+                    ? 0.0d
+                    : 1.0d);
+    StrategyPortfolioDecision decision =
+        strategyPortfolioOptimizer.optimize(
+            "widen-" + roundIndex.get() + '-' + strategy.strategyId(),
+            List.of(
+                new StrategyPortfolioCandidate(
+                    strategy, blueprint, signature, profile, preflight, score)),
+            new StrategyPortfolioConstraint(
+                1,
+                0,
+                strategyDiversityConfig.maxExactPortfolioCandidates(),
+                activeSignatures,
+                activeUnresolvedRequiredClaims));
+    return decision.selectedStrategyIds().contains(strategy.strategyId());
   }
 
   private List<NegativeKnowledgeCandidate> negativeKnowledgeCandidates(
@@ -9435,9 +10138,94 @@ final class DesktopSolveCoordinator {
     return true;
   }
 
+  private void restoreStrategyDiversityState(DesktopSolveCheckpoint checkpoint) {
+    if (checkpoint.schemaVersion() >= 13 || admittedStrategies.isEmpty() || rootGoal == null) {
+      return;
+    }
+    strategyCandidates = new StrategyCandidateLedger();
+    strategyMechanisms = new StrategyMechanismRegistry();
+    strategyPreflights = new StrategyPreflightRegistry();
+    strategyPortfolios = new StrategyPortfolioRegistry();
+    portfolioReplenishments = new PortfolioReplenishmentLedger();
+    ProofControlModels.Obligation goal = controlGoal();
+    int order = 0;
+    for (StrategyCard strategy : admittedStrategies) {
+      StrategyBlueprintCompiler.Compilation blueprint =
+          strategyBlueprints.computeIfAbsent(
+              strategy.strategyId(),
+              ignored ->
+                  proofControl
+                      .blueprintCompiler()
+                      .compile(
+                          problemHash,
+                          controlStrategy(strategy, "legacy-route-" + strategy.strategyId()),
+                          goal));
+      ProofControlModels.Strategy control =
+          controlStrategy(strategy, "legacy-route-" + strategy.strategyId());
+      StrategyMechanismSignature signature =
+          strategyMechanismAnalyzer.signature(
+              problemHash,
+              rootGoal.sourceStatementHash(),
+              strategy,
+              control,
+              blueprint);
+      strategyCandidates.capture(
+          strategyPortfolioEpisodeId(), strategy.strategyId(), order++, false);
+      strategyCandidates.transition(
+          strategy.strategyId(),
+          StrategyCandidateStatus.LEGACY_ACTIVE,
+          signature.structuralSignatureHash(),
+          "",
+          null,
+          "MIGRATED_V12_ACTIVE_WITHOUT_RETROACTIVE_PREFLIGHT");
+      strategyMechanisms.register(
+          strategy.strategyId(),
+          signature,
+          new StrategyMechanismProfile(Set.of(StrategyMechanismPrimitive.UNKNOWN)),
+          true);
+    }
+    String episodeId = strategyPortfolioEpisodeId();
+    List<String> selectedIds =
+        admittedStrategies.stream().map(StrategyCard::strategyId).sorted().toList();
+    Map<String, Object> identity =
+        Map.of(
+            "episode_id", episodeId,
+            "selected", selectedIds,
+            "migration", "v12-to-v13");
+    String decisionHash = CanonicalJson.stableHash(identity);
+    StrategyPortfolioDecision decision =
+        new StrategyPortfolioDecision(
+            episodeId,
+            selectedIds,
+            Map.of(),
+            selectedIds.size() * 10.0d,
+            true,
+            decisionHash,
+            List.of(
+                new StrategyPortfolioAuditEvent(
+                    "portfolio-audit-" + decisionHash.substring(0, 20),
+                    episodeId,
+                    "legacy_migration",
+                    selectedIds,
+                    "LEGACY_ACTIVE_PRESERVED_WITHOUT_PREFLIGHT")));
+    strategyPortfolios.record(decision);
+    String activeHash =
+        CanonicalJson.stableHash(
+            Map.of(
+                "admitted", selectedIds,
+                "routes", checkpoint.routes().stream().map(DesktopSolveCheckpoint.RouteCheckpoint::routeId).toList()));
+    strategyPortfolios.recordReceipt(
+        episodeId,
+        new StrategyPortfolioApplyReceipt(
+            "strategy-portfolio-receipt-" + activeHash.substring(0, 20),
+            "legacy-portfolio-plan-" + decisionHash.substring(0, 20),
+            selectedIds,
+            checkpoint.routes().stream().map(DesktopSolveCheckpoint.RouteCheckpoint::routeId).toList(),
+            activeHash));
+  }
+
   private void migrateAndRevalidateLegacyCanonicalProofTasks(int schemaVersion) {
-    if (schemaVersion >= DesktopSolveCheckpoint.CURRENT_SCHEMA_VERSION
-        || pendingProofTasks.isEmpty()) {
+    if (schemaVersion >= 12 || pendingProofTasks.isEmpty()) {
       return;
     }
     List<DesktopSolveCheckpoint.ScheduledProofTask> migrated = new ArrayList<>();
@@ -10411,6 +11199,48 @@ final class DesktopSolveCoordinator {
       route.activeMathematicalObjectIds.clear();
       route.activeMathematicalObjectIds.addAll(activeMathematicalObjectIds);
       route.activeDirectionSignature = activeDirectionSignature;
+    }
+  }
+
+  private record PreparedStrategyCandidate(
+      StrategyCard strategy,
+      ProofControlModels.Strategy controlStrategy,
+      StrategyBlueprintCompiler.Compilation blueprint,
+      ProofControlModels.GoalLink goalLink,
+      StrategyMechanismSignature signature,
+      StrategyMechanismProfile profile,
+      StrategyPreflightReport preflight) {
+    private PreparedStrategyCandidate {
+      Objects.requireNonNull(strategy, "strategy");
+      Objects.requireNonNull(controlStrategy, "controlStrategy");
+      Objects.requireNonNull(blueprint, "blueprint");
+      Objects.requireNonNull(goalLink, "goalLink");
+      Objects.requireNonNull(signature, "signature");
+      Objects.requireNonNull(profile, "profile");
+      Objects.requireNonNull(preflight, "preflight");
+    }
+  }
+
+  static final class SimulatedStrategyPortfolioProcessTermination extends Error {
+    private static final long serialVersionUID = 1L;
+
+    private SimulatedStrategyPortfolioProcessTermination(StrategyPortfolioFailurePoint point) {
+      super("simulated strategy portfolio process termination at " + point);
+    }
+  }
+
+  private record StrategyPortfolioPreparation(
+      List<StrategyPortfolioCandidate> candidates,
+      Map<String, PreparedStrategyCandidate> prepared,
+      StrategyPortfolioDecision decision) {
+    private StrategyPortfolioPreparation {
+      candidates = List.copyOf(candidates);
+      prepared = Map.copyOf(prepared);
+      Objects.requireNonNull(decision, "decision");
+    }
+
+    private StrategyPortfolioPreparation withDecision(StrategyPortfolioDecision replacement) {
+      return new StrategyPortfolioPreparation(candidates, prepared, replacement);
     }
   }
 

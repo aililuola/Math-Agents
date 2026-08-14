@@ -50,7 +50,19 @@ public final class PromptCatalog {
             + "For a CJK source, return a non-authoritative English semantic_view_candidate; "
             + "its preserves_* flags are self-reports and never authorize changing the root goal.");
     stages.put("statement_normalization", "Restate each proposition explicitly without changing its mathematics.");
-    stages.put("strategy_generation", "Generate genuinely distinct mechanisms and expose each load-bearing claim and falsification test. estimated_success and estimated_cost are normalized scores from 0.0 to 1.0, never percentages or token counts. calculation_checks accepts only typed ToolRequest kinds from its schema; sandboxed_python belongs in computation_hints and a later ExperimentSpec, never in calculation_checks.");
+    stages.put(
+        "strategy_generation",
+        "Generate routes that differ in mathematical objects, representations, proof transformations, or dependency DAGs, not merely titles, tags, or wording. "
+            + "Label every load-bearing claim as REQUIRED or SUPPORTING, separate verified facts from unresolved assumptions, and provide a bounded falsification plan. "
+            + "Avoid multiple routes sharing one unresolved REQUIRED claim and include a genuinely independent challenger mechanism when applicable. "
+            + "When generation_mode is portfolio_gap_replenishment, fill only the supplied structural gaps and never repeat a forbidden signature or rejected claim key. "
+            + "estimated_success and estimated_cost are normalized model metadata from 0.0 to 1.0 and never server authority. "
+            + "calculation_checks accepts only typed ToolRequest kinds from its schema; sandboxed_python belongs in computation_hints and a later ExperimentSpec, never in calculation_checks.");
+    stages.put(
+        "strategy_preflight_plan",
+        "Map each supplied critical claim only to an already registered computation contract and typed input references. "
+            + "Do not submit code, commands, dependencies, containers, unknown tools, verified status, server scores, or mathematical authority. "
+            + "Leave a claim untestable when no registered contract preserves its exact assumptions, quantifiers, polarity, and scope.");
     stages.put("independent_exploration", "Develop only the assigned isolated route and report honest partial progress or a complete proof. Prefer registered typed computation methods. sandboxed_python is a last resort: arguments must contain exactly one input field whose value is the complete bounded JSON object supplied to run(data), domains must be empty, and typed_tool_gap must state why no typed method applies.");
     stages.put("proof_continuation", "Continue only from the verified checkpoint with a bounded auditable proof delta.");
     stages.put("route_prove", "Continue the assigned route from verified state; Insights are hints and never premises.");
