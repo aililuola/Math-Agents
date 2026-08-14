@@ -23,11 +23,15 @@ import io.github.aililuola.mathproofmesh.config.SystemConfig;
 import io.github.aililuola.mathproofmesh.contract.ComputationMethod;
 import io.github.aililuola.mathproofmesh.contract.ComputationPurpose;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
+import io.github.aililuola.mathproofmesh.contract.Difficulty;
 import io.github.aililuola.mathproofmesh.contract.ExperimentSpec;
 import io.github.aililuola.mathproofmesh.contract.InitialExplorationAction;
 import io.github.aililuola.mathproofmesh.contract.InitialExplorationTurn;
+import io.github.aililuola.mathproofmesh.contract.ProblemKind;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
 import io.github.aililuola.mathproofmesh.contract.StrategySet;
+import io.github.aililuola.mathproofmesh.contract.TaskRequirement;
+import io.github.aililuola.mathproofmesh.contract.TriageResult;
 import io.github.aililuola.mathproofmesh.research.ResearchCheckpointLedger;
 import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
 import io.github.aililuola.mathproofmesh.provider.AgentPool;
@@ -53,6 +57,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
   enum Scenario {
     BUDGET_EXHAUSTION,
+    CAMPAIGN_PROPAGATION,
     FINAL_JSON_OMISSION,
     NORMAL,
     TRUNCATED_RESULT,
@@ -173,6 +178,23 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
     invoke("exploreUnstartedRoutes", new Class<?>[] {boolean.class}, new Object[] {false});
   }
 
+  void freezeProblemOnly() throws Exception {
+    invoke("freezeProblem");
+  }
+
+  void generateCampaignStrategyAndAdmitRoute() throws Exception {
+    if (scenario != Scenario.CAMPAIGN_PROPAGATION) {
+      throw new IllegalStateException("campaign strategy generation requires CAMPAIGN_PROPAGATION");
+    }
+    setField(coordinator, "triage", triage());
+    invoke("generateAndAdmitStrategies");
+    invoke("ensureInitialRoutes");
+  }
+
+  void explorePreparedRoutes() throws Exception {
+    invoke("exploreUnstartedRoutes", new Class<?>[] {boolean.class}, new Object[] {false});
+  }
+
   void prepareProductionRoute() throws Exception {
     invoke("freezeProblem");
     setField(
@@ -234,6 +256,10 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
 
   List<String> downstreamPrompts() {
     return responder.downstreamPrompts();
+  }
+
+  int campaignFindingsEmitted() {
+    return responder.campaignFindingsEmitted();
   }
 
   ResearchCheckpointLedger researchLedger() {
@@ -441,6 +467,21 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
         "Durable intermediate research");
   }
 
+  private static TriageResult triage() {
+    return new TriageResult(
+        0.99d,
+        Difficulty.HARD,
+        List.of("Retain campaign-wide material findings."),
+        List.of(),
+        ProblemKind.PROOF,
+        "decomposition",
+        "Generate one legal route from the immutable problem.",
+        null,
+        1,
+        1,
+        List.of(TaskRequirement.PROOF));
+  }
+
   private static ExperimentSpec boundedExperiment() {
     ObjectNode arguments = JsonNodeFactory.instance.objectNode();
     arguments.putObject("target").put("lhs", "n - n").put("rhs", "0").put("relation", "ne");
@@ -518,6 +559,7 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
     private final Scenario scenario;
     private final String finding;
     private final AtomicInteger explorationCalls = new AtomicInteger();
+    private final AtomicInteger campaignFindingsEmitted = new AtomicInteger();
     private final List<String> prompts = new ArrayList<>();
     private final Map<Integer, Integer> roundCalls = new LinkedHashMap<>();
     private int currentRound = -1;
@@ -530,6 +572,9 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
 
     @Override
     public synchronized LLMResponse respond(ProviderRequest request) {
+      if (scenario == Scenario.CAMPAIGN_PROPAGATION) {
+        return campaignPropagationResponse(request);
+      }
       if (!"InitialExplorationTurn".equals(request.schemaName())) {
         throw new AssertionError(
             "unexpected research checkpoint black-box schema: " + request.schemaName());
@@ -591,6 +636,36 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
               null,
               null,
               "The scripted route stops after the next prompt is captured."));
+    }
+
+    private LLMResponse campaignPropagationResponse(ProviderRequest request) {
+      if ("StrategySet".equals(request.schemaName())) {
+        writeReasoningTrace(
+            request,
+            "strategy_generation",
+            List.of(
+                Map.of(
+                    "kind", "representation_insight",
+                    "statement", finding,
+                    "rationale", "A global exact reduction produced this reusable direction.",
+                    "scope_limitations", List.of("campaign-wide candidate"))));
+        campaignFindingsEmitted.incrementAndGet();
+        return strategyResponse(
+            new StrategySet("One bounded research route.", List.of(), List.of(strategy())));
+      }
+      if ("InitialExplorationTurn".equals(request.schemaName())) {
+        explorationCalls.incrementAndGet();
+        prompts.add(request.messages().getLast().content());
+        return response(
+            new InitialExplorationTurn(
+                InitialExplorationAction.ABANDON,
+                null,
+                null,
+                null,
+                "The campaign propagation prompt has been captured."));
+      }
+      throw new AssertionError(
+          "unexpected campaign propagation schema: " + request.schemaName());
     }
 
     private LLMResponse multiRoundResponse(ProviderRequest request, String prompt) {
@@ -695,6 +770,11 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
 
     private void writeReasoningTrace(
         ProviderRequest request, List<Map<String, Object>> findings) {
+      writeReasoningTrace(request, "independent_exploration", findings);
+    }
+
+    private void writeReasoningTrace(
+        ProviderRequest request, String stage, List<Map<String, Object>> findings) {
       String frame =
           MARKER_BEGIN
               + "\n"
@@ -712,7 +792,7 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
           traces.beginCall(
               binding.taskId(),
               request.userId(),
-              "independent_exploration",
+              stage,
               binding.providerCallId(),
               true,
               "max");
@@ -743,12 +823,33 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
           JsonNodeFactory.instance.objectNode());
     }
 
+    private static LLMResponse strategyResponse(StrategySet strategies) {
+      return new LLMResponse(
+          ContractObjectMapper.write(strategies),
+          "research-checkpoint-model",
+          "mock",
+          10,
+          20,
+          1.0d,
+          "campaign-strategy-response",
+          "stop",
+          false,
+          JsonNodeFactory.instance.objectNode());
+    }
+
     private List<String> downstreamPrompts() {
+      if (scenario == Scenario.CAMPAIGN_PROPAGATION) {
+        return List.copyOf(prompts);
+      }
       if (prompts.size() <= 1) {
         return List.of();
       }
       int start = scenario == Scenario.BUDGET_EXHAUSTION ? Math.min(2, prompts.size()) : 1;
       return List.copyOf(prompts.subList(start, prompts.size()));
+    }
+
+    private int campaignFindingsEmitted() {
+      return campaignFindingsEmitted.get();
     }
   }
 }

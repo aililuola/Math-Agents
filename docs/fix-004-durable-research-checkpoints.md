@@ -8,8 +8,8 @@
 | 修复分支 | `fix/004-durable-research-checkpoints` |
 | 基准分支 | `java` |
 | 基准 commit | `1467925d7c55e6b274163574e7fa320a92036037` |
-| 提交信息 | `fix(research): persist interim findings across truncated calls` |
-| 第 4 项专项测试 | PASS，36 tests |
+| 提交信息 | `fix(research): persist interim findings across truncated calls`；Campaign 传播补丁见后续提交 |
+| 第 4 项专项测试 | PASS，37 tests |
 | 20 轮恢复测试 | PASS，60/60 material findings persisted |
 | 第 1、2、3 项回归 | PASS |
 | 四模块全回归 | PASS |
@@ -234,8 +234,8 @@ structured/research-finding-audit.json
 CONTRACTS_TESTS=4
 CORE_TESTS=16
 SERVER_TESTS=7
-DESKTOP_TESTS=9
-TOTAL_TESTS=36
+DESKTOP_TESTS=10
+TOTAL_TESTS=37
 TOTAL_FAILURES=0
 TOTAL_ERRORS=0
 RESULT=PASS
@@ -307,7 +307,7 @@ widening 10/10 blocked；Claim salvage 20 轮无 Fact/状态/恢复损失；v6 V
 Contracts: 48 tests, 0 failures, 0 errors
 Core:      974 tests, 0 failures, 0 errors
 Server:    841 tests, 0 failures, 0 errors, 3 skipped
-Desktop:    79 tests, 0 failures, 0 errors, 1 skipped
+Desktop:    80 tests, 0 failures, 0 errors, 1 skipped
 BUILD SUCCESS
 ```
 
@@ -320,7 +320,7 @@ BUILD SUCCESS
 结果 `exit 0` / `FULL VERIFICATION: PASS`。该次实跑包括：
 
 ```text
-UNIT_TESTS=2091
+UNIT_TESTS=2092
 UNIT_FAILURES=0
 UNIT_ERRORS=0
 POSTGRESQL_INTEGRATION_TESTS=26
@@ -379,3 +379,95 @@ git diff --stat
 - [x] 第 1、2、3 项回归、全模块回归与完整 Docker/PostgreSQL 门禁通过；
 - [x] 没有删除、跳过或弱化旧测试与质量门；
 - [x] 没有修改问题 005 至 013。
+
+## 18. Campaign 级 finding 传播补丁
+
+### 18.1 修复前证据
+
+`strategy_generation` 本来已经是 checkpointed research stage，但该阶段没有 `route_id`，因此 finding
+会持久化在 `campaign-research`。新 Route 的首轮 Prompt 原先只读取当前 Route 自己的 finding，导致
+Campaign finding 虽已入 Ledger，却没有进入后续自主研究。
+
+先在未修改生产代码时运行新的真实生产链测试，得到明确行为失败：
+
+```text
+DesktopCampaignResearchFindingPropagationTest.java:74
+expected: 0 but was: 1
+CAMPAIGN_FINDING_VISIBILITY_FAILURES=1
+```
+
+该失败经过真实的 Strategy Generation、Strategy admission、Route 创建与首轮
+`independent_exploration` Prompt，不是只测 Ledger 或人为拼接 context。
+
+### 18.2 生产修改
+
+`DesktopSolveCoordinator.baseRouteContext(...)` 现在分别注入：
+
+```text
+campaign_research_findings
+campaign_checkpoint_frames
+campaign_research_authority_rule
+```
+
+原有 `active_research_findings` 仍只代表当前 Route 的私有 finding。Campaign finding 只是全局、
+non-authoritative 候选，不会自动复制为 Route finding，也不会直接写入 Fact Memory、验证 Claim、注册
+永久负知识或关闭主目标。只有 Route 显式采纳后，才继续经过第 3 项 Claim Review 权威路径。
+
+### 18.3 真实生产链测试
+
+新增 `DesktopCampaignResearchFindingPropagationTest`，路径为：
+
+```text
+freeze immutable problem
+-> strategy_generation public reasoning marker
+-> ResearchCheckpointLedger[campaign-research]
+-> final StrategySet（故意遗漏 finding）
+-> strategy admission
+-> Route 创建
+-> 首轮 independent_exploration Prompt
+-> DesktopSolveCheckpoint v8 JSON restore
+-> 恢复后的首轮 Route Prompt
+```
+
+测试使用 Fake Provider、内存依赖和临时目录，不调用真实 DeepSeek、外部网络、Docker、PostgreSQL
+或 Python Sidecar。最终诊断为：
+
+```text
+CAMPAIGN RESEARCH FINDING PROPAGATION DIAGNOSTIC
+CAMPAIGN_FINDINGS_EMITTED=1
+CAMPAIGN_FINDINGS_PERSISTED=1
+FIRST_ROUTE_PROMPTS_CHECKED=1
+CAMPAIGN_FINDING_VISIBILITY_FAILURES=0
+POST_RESTORE_CAMPAIGN_FINDING_LOSSES=0
+POST_RESTORE_PROMPT_VISIBILITY_FAILURES=0
+DUPLICATE_CAMPAIGN_FINDINGS=0
+DIRECT_FACT_PROMOTIONS=0
+DIRECT_CLAIM_VERIFICATIONS=0
+DIRECT_NEGATIVE_REGISTRATIONS=0
+MAIN_GOAL_CLOSURES=0
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+ATTEMPT_ARTIFACT_LEDGER_HASH_CHANGES=0
+CLAIM_LIFECYCLE_HASH_CHANGES=0
+RESULT=PASS
+```
+
+补丁后的三项定向测试、更新后的 37 项问题 004 专项、第 1 至 3 项显式回归、四模块全回归均为
+`BUILD SUCCESS`。完整 `verify-all.ps1 -Offline` 在本机启动 Docker Desktop 后实际运行 26 个
+PostgreSQL IT，结果如下：
+
+```text
+UNIT_TESTS=2092
+UNIT_FAILURES=0
+UNIT_ERRORS=0
+POSTGRESQL_INTEGRATION_TESTS=26
+POSTGRESQL_IT_FAILURES=0
+POSTGRESQL_IT_ERRORS=0
+COVERAGE_RESULT=PASS
+SECURITY_RESULT=PASS
+LICENSE_RESULT=PASS
+SPOTBUGS_RESULT=PASS
+SOURCE_IMMUTABILITY=PASS
+```
+
+本补丁仍属于问题 004；没有开始问题 005，也没有修改第 1、2、3 项的受保护生产实现。

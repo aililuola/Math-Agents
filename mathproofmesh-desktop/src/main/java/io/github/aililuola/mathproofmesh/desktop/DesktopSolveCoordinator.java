@@ -228,6 +228,7 @@ final class DesktopSolveCoordinator {
   private static final int INSPIRATION_NO_GAIN_ROUNDS = 2;
   private static final int INSPIRATION_COOLDOWN_ROUNDS = 2;
   private static final String MAIN_GOAL_ID = "main-goal";
+  private static final String CAMPAIGN_RESEARCH_ROUTE_ID = "campaign-research";
   private static final String CURSOR_FREEZE = "freeze_problem";
   private static final String CURSOR_TRIAGE = "triage";
   private static final String CURSOR_STRATEGY = "strategy_diversity";
@@ -1076,6 +1077,17 @@ final class DesktopSolveCoordinator {
     Map<String, Object> context = new LinkedHashMap<>();
     context.put("immutable_problem", frozenProblem);
     context.put("problem_hash", problemHash);
+    context.put(
+        "campaign_research_findings",
+        researchCheckpoints.activeFindings(CAMPAIGN_RESEARCH_ROUTE_ID));
+    context.put(
+        "campaign_checkpoint_frames",
+        researchCheckpoints.checkpointsForRoute(CAMPAIGN_RESEARCH_ROUTE_ID));
+    context.put(
+        "campaign_research_authority_rule",
+        "campaign_research_findings are global non-authoritative candidates; "
+            + "active_research_findings are route-specific non-authoritative candidates. Neither "
+            + "may become a Claim or Fact without explicit adoption and issue-003 Claim Review.");
     context.put("route_id", route.routeId);
     context.put("assigned_agent_id", route.author.id());
     context.put("assigned_strategy", route.strategy);
@@ -7508,7 +7520,7 @@ final class DesktopSolveCoordinator {
     if (task instanceof InspirationTask inspiration && !inspiration.targetRouteIds().isEmpty()) {
       return inspiration.targetRouteIds().getFirst();
     }
-    return "campaign-research";
+    return CAMPAIGN_RESEARCH_ROUTE_ID;
   }
 
   private void incrementCheckpointRecovery(String routeId) {
