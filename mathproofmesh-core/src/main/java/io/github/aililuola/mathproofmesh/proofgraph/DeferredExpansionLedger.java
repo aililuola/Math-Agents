@@ -66,6 +66,13 @@ public final class DeferredExpansionLedger {
             actionType,
             decision.schedulingState(),
             decision.code(),
+            DeferredExpansionStatus.DEFERRED,
+            round,
+            -1,
+            "",
+            "",
+            -1,
+            "",
             0L);
     records.put(deferredId, created);
     version++;
@@ -74,6 +81,56 @@ public final class DeferredExpansionLedger {
 
   public synchronized List<DeferredExpansionRecord> records() {
     return List.copyOf(records.values());
+  }
+
+  public synchronized List<DeferredExpansionRecord> activeDeferredRecords() {
+    return records.values().stream()
+        .filter(record -> record.status() == DeferredExpansionStatus.DEFERRED)
+        .toList();
+  }
+
+  public synchronized DeferredExpansionRecord markEvaluated(
+      String deferredId, int currentRound) {
+    DeferredExpansionRecord current = requireRecord(deferredId);
+    DeferredExpansionRecord updated = current.evaluated(currentRound);
+    return replace(current, updated);
+  }
+
+  public synchronized DeferredExpansionRecord markReactivated(
+      String deferredId, int currentRound, String reason, String taskId) {
+    DeferredExpansionRecord current = requireRecord(deferredId);
+    if (current.status() == DeferredExpansionStatus.REACTIVATED
+        && current.reactivatedRound() == currentRound
+        && current.reactivationReason().equals(normalize(reason))
+        && current.reactivatedTaskId().equals(normalize(taskId))) {
+      return current;
+    }
+    requireDeferred(current, DeferredExpansionStatus.REACTIVATED);
+    return replace(current, current.reactivated(currentRound, reason, taskId));
+  }
+
+  public synchronized DeferredExpansionRecord markSatisfiedByActiveTarget(
+      String deferredId, int currentRound, String reason) {
+    DeferredExpansionRecord current = requireRecord(deferredId);
+    if (current.status() == DeferredExpansionStatus.SATISFIED_BY_ACTIVE_TARGET
+        && current.reactivatedRound() == currentRound
+        && current.reactivationReason().equals(normalize(reason))) {
+      return current;
+    }
+    requireDeferred(current, DeferredExpansionStatus.SATISFIED_BY_ACTIVE_TARGET);
+    return replace(current, current.satisfied(currentRound, reason));
+  }
+
+  public synchronized DeferredExpansionRecord markRetired(
+      String deferredId, int currentRound, String reason) {
+    DeferredExpansionRecord current = requireRecord(deferredId);
+    if (current.status() == DeferredExpansionStatus.RETIRED
+        && current.retiredRound() == currentRound
+        && current.retirementReason().equals(normalize(reason))) {
+      return current;
+    }
+    requireDeferred(current, DeferredExpansionStatus.RETIRED);
+    return replace(current, current.retired(currentRound, reason));
   }
 
   public synchronized long version() {
@@ -90,5 +147,31 @@ public final class DeferredExpansionLedger {
 
   private static String normalize(String value) {
     return value == null ? "" : value.strip();
+  }
+
+  private DeferredExpansionRecord requireRecord(String deferredId) {
+    DeferredExpansionRecord record = records.get(normalize(deferredId));
+    if (record == null) {
+      throw new IllegalArgumentException("unknown deferred expansion: " + deferredId);
+    }
+    return record;
+  }
+
+  private DeferredExpansionRecord replace(
+      DeferredExpansionRecord current, DeferredExpansionRecord updated) {
+    if (current == updated) {
+      return current;
+    }
+    records.put(updated.deferredId(), updated);
+    version++;
+    return updated;
+  }
+
+  private static void requireDeferred(
+      DeferredExpansionRecord current, DeferredExpansionStatus requested) {
+    if (current.status() != DeferredExpansionStatus.DEFERRED) {
+      throw new IllegalStateException(
+          "conflicting deferred transition: " + current.status() + " -> " + requested);
+    }
   }
 }

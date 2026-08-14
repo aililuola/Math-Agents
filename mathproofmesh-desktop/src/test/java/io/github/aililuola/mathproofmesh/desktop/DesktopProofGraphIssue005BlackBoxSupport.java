@@ -179,6 +179,31 @@ final class DesktopProofGraphIssue005BlackBoxSupport {
     ((AtomicInteger) field(coordinator(harness), "roundIndex")).set(round);
   }
 
+  static int reconsiderDeferredExpansions(DesktopResearchCheckpointBlackBoxHarness harness)
+      throws Exception {
+    Method method =
+        DesktopSolveCoordinator.class.getDeclaredMethod("reconsiderDeferredExpansions");
+    method.setAccessible(true);
+    return (int) method.invoke(coordinator(harness));
+  }
+
+  static void injectDeferredReactivationFailure(
+      DesktopResearchCheckpointBlackBoxHarness harness,
+      DeferredReactivationFailurePoint point)
+      throws Exception {
+    Method method =
+        DesktopSolveCoordinator.class.getDeclaredMethod(
+            "setDeferredReactivationFailurePointForTest",
+            DeferredReactivationFailurePoint.class);
+    method.setAccessible(true);
+    method.invoke(coordinator(harness), point);
+  }
+
+  static int canonicalTaskLeaseCount(DesktopResearchCheckpointBlackBoxHarness harness)
+      throws Exception {
+    return graph(harness).canonicalizationSnapshot().taskLeaseKeys().size();
+  }
+
   static boolean addControlledObligation(
       DesktopResearchCheckpointBlackBoxHarness harness,
       ProofObligation obligation,
@@ -247,6 +272,31 @@ final class DesktopProofGraphIssue005BlackBoxSupport {
             .findFirst()
             .orElseThrow();
     String factId = "focused-recovery-closing-fact";
+    if (graph.claimNodes().stream().noneMatch(message -> message.messageId().equals(factId))) {
+      graph.addClaimNode(verifiedFact(factId, target.signature().normalizedStatement()));
+    }
+    Map<String, String> obligationByOccurrence = new LinkedHashMap<>();
+    graph.rawObligationOccurrences().forEach(
+        occurrence ->
+            obligationByOccurrence.put(occurrence.occurrenceId(), occurrence.obligationId()));
+    target.occurrenceIds().stream()
+        .map(obligationByOccurrence::get)
+        .filter(java.util.Objects::nonNull)
+        .distinct()
+        .forEach(obligationId -> graph.closeObligation(obligationId, factId, 1.0d));
+  }
+
+  static void closeFirstActiveCanonicalTargetExcept(
+      DesktopResearchCheckpointBlackBoxHarness harness, String excludedCanonicalTargetId)
+      throws Exception {
+    ProofGraphStore graph = graph(harness);
+    var target =
+        graph.activeCanonicalOpenTargets().stream()
+            .filter(item -> !"MAIN_GOAL".equals(item.signature().kind().name()))
+            .filter(item -> !item.canonicalTargetId().equals(excludedCanonicalTargetId))
+            .findFirst()
+            .orElseThrow();
+    String factId = "capacity-release-" + target.canonicalTargetId();
     if (graph.claimNodes().stream().noneMatch(message -> message.messageId().equals(factId))) {
       graph.addClaimNode(verifiedFact(factId, target.signature().normalizedStatement()));
     }

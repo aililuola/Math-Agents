@@ -914,6 +914,36 @@ public final class ProofGraphStore {
     return canonicalization.hasTaskLease(scope, scopeId, actionKey);
   }
 
+  public synchronized CanonicalSchedulingTransitionResult reactivateCanonicalTarget(
+      String canonicalTargetId,
+      String obligationId,
+      ObligationOccurrenceSchedulingState expectedState,
+      int round,
+      String reason) {
+    return transitionDeferredScheduling(
+        canonicalTargetId,
+        obligationId,
+        expectedState,
+        ObligationOccurrenceSchedulingState.ACTIVE,
+        round,
+        reason);
+  }
+
+  public synchronized CanonicalSchedulingTransitionResult retireDeferredCanonicalTarget(
+      String canonicalTargetId,
+      String obligationId,
+      ObligationOccurrenceSchedulingState expectedState,
+      int round,
+      String reason) {
+    return transitionDeferredScheduling(
+        canonicalTargetId,
+        obligationId,
+        expectedState,
+        ObligationOccurrenceSchedulingState.RETIRED,
+        round,
+        reason);
+  }
+
   public synchronized ObligationCanonicalizationSnapshot canonicalizationSnapshot() {
     return canonicalization.snapshot();
   }
@@ -1057,6 +1087,186 @@ public final class ProofGraphStore {
   synchronized void recordExternal(
       String eventType, String subjectId, Map<String, String> details) {
     record(eventType, subjectId, details);
+  }
+
+  private CanonicalSchedulingTransitionResult transitionDeferredScheduling(
+      String canonicalTargetId,
+      String obligationId,
+      ObligationOccurrenceSchedulingState expectedState,
+      ObligationOccurrenceSchedulingState requestedState,
+      int round,
+      String reason) {
+    ensureMutable();
+    String normalizedCanonical = normalizeRequired(canonicalTargetId, "canonicalTargetId");
+    String normalizedObligation = normalizeRequired(obligationId, "obligationId");
+    java.util.Objects.requireNonNull(expectedState, "expectedState");
+    java.util.Objects.requireNonNull(requestedState, "requestedState");
+    if (expectedState == ObligationOccurrenceSchedulingState.ACTIVE
+        || expectedState == ObligationOccurrenceSchedulingState.RETIRED
+        || round < 0) {
+      throw new IllegalArgumentException("deferred scheduling transition has invalid state or round");
+    }
+    ObligationCanonicalizationSnapshot snapshot = canonicalization.snapshot();
+    CanonicalObligationRecord target = snapshot.canonicalTargets().get(normalizedCanonical);
+    if (target == null) {
+      return schedulingResult(
+          CanonicalSchedulingTransitionCode.TARGET_NOT_FOUND,
+          normalizedCanonical,
+          normalizedObligation,
+          CanonicalObligationSchedulingState.RETIRED,
+          reason);
+    }
+    CanonicalObligationStatus mathematicalStatus = canonicalStatus(normalizedCanonical);
+    if (requestedState == ObligationOccurrenceSchedulingState.ACTIVE
+        && (mathematicalStatus == CanonicalObligationStatus.RESOLVED
+            || mathematicalStatus == CanonicalObligationStatus.REFUTED)) {
+      return schedulingResult(
+          CanonicalSchedulingTransitionCode.TERMINAL_TARGET,
+          normalizedCanonical,
+          normalizedObligation,
+          target.schedulingState(),
+          reason);
+    }
+    if (requestedState == ObligationOccurrenceSchedulingState.ACTIVE
+        && target.schedulingState() == CanonicalObligationSchedulingState.ACTIVE) {
+      return schedulingResult(
+          CanonicalSchedulingTransitionCode.ALREADY_ACTIVE,
+          normalizedCanonical,
+          normalizedObligation,
+          target.schedulingState(),
+          reason);
+    }
+    ObligationOccurrenceRecord occurrence =
+        snapshot.occurrences().values().stream()
+            .filter(item -> item.canonicalTargetId().equals(normalizedCanonical))
+            .filter(item -> item.obligationId().equals(normalizedObligation))
+            .findFirst()
+            .orElse(null);
+    if (occurrence == null) {
+      return schedulingResult(
+          CanonicalSchedulingTransitionCode.OCCURRENCE_NOT_FOUND,
+          normalizedCanonical,
+          normalizedObligation,
+          target.schedulingState(),
+          reason);
+    }
+    if (occurrence.schedulingState() != expectedState) {
+      return schedulingResult(
+          CanonicalSchedulingTransitionCode.STATE_MISMATCH,
+          normalizedCanonical,
+          normalizedObligation,
+          target.schedulingState(),
+          reason);
+    }
+    Map<String, ObligationOccurrenceRecord> occurrences =
+        new LinkedHashMap<>(snapshot.occurrences());
+    occurrences.put(
+        occurrence.occurrenceId(),
+        new ObligationOccurrenceRecord(
+            occurrence.occurrenceId(),
+            occurrence.obligationId(),
+            occurrence.problemHash(),
+            occurrence.routeId(),
+            occurrence.strategyId(),
+            occurrence.sourceType(),
+            occurrence.sourceArtifactRef(),
+            occurrence.canonicalTargetId(),
+            occurrence.bottleneckFamilyId(),
+            occurrence.dependencyPlanSignature(),
+            requestedState,
+            occurrence.createdRound(),
+            occurrence.version() + 1));
+    CanonicalObligationSchedulingState canonicalState =
+        schedulingState(
+            target.occurrenceIds().stream()
+                .map(occurrences::get)
+                .filter(java.util.Objects::nonNull)
+                .toList());
+    Map<String, CanonicalObligationRecord> targets =
+        new LinkedHashMap<>(snapshot.canonicalTargets());
+    targets.put(
+        target.canonicalTargetId(),
+        new CanonicalObligationRecord(
+            target.canonicalTargetId(),
+            target.problemHash(),
+            target.signature(),
+            target.representativeOccurrenceId(),
+            target.occurrenceIds(),
+            target.routeIds(),
+            target.dependencyPlanSignatures(),
+            canonicalState,
+            target.version() + 1));
+    canonicalization.load(
+        new ObligationCanonicalizationSnapshot(
+            occurrences,
+            targets,
+            snapshot.bottleneckFamilies(),
+            snapshot.canonicalBySignature(),
+            snapshot.familyByKey(),
+            snapshot.familyByCanonicalTarget(),
+            snapshot.representativeExactStatements(),
+            snapshot.canonicalCentrality(),
+            snapshot.canonicalPriority(),
+            snapshot.canonicalRepresentativeStatements(),
+            snapshot.taskLeaseKeys(),
+            snapshot.audit(),
+            snapshot.possibleEquivalentQuarantines(),
+            snapshot.unsafeHardMerges(),
+            snapshot.version() + 1));
+    CanonicalSchedulingTransitionCode code =
+        requestedState == ObligationOccurrenceSchedulingState.ACTIVE
+            ? CanonicalSchedulingTransitionCode.REACTIVATED
+            : CanonicalSchedulingTransitionCode.RETIRED;
+    record(
+        "deferred_scheduling_" + code.name().toLowerCase(java.util.Locale.ROOT),
+        normalizedCanonical,
+        Map.of(
+            "obligation_id", normalizedObligation,
+            "round", Integer.toString(round),
+            "reason", reason == null ? "" : reason.strip()));
+    return schedulingResult(
+        code, normalizedCanonical, normalizedObligation, canonicalState, reason);
+  }
+
+  private static CanonicalSchedulingTransitionResult schedulingResult(
+      CanonicalSchedulingTransitionCode code,
+      String canonicalTargetId,
+      String obligationId,
+      CanonicalObligationSchedulingState state,
+      String reason) {
+    return new CanonicalSchedulingTransitionResult(
+        code, canonicalTargetId, obligationId, state, reason);
+  }
+
+  private static CanonicalObligationSchedulingState schedulingState(
+      List<ObligationOccurrenceRecord> occurrences) {
+    if (occurrences.stream()
+        .anyMatch(item -> item.schedulingState() == ObligationOccurrenceSchedulingState.ACTIVE)) {
+      return CanonicalObligationSchedulingState.ACTIVE;
+    }
+    if (occurrences.stream()
+        .anyMatch(
+            item ->
+                item.schedulingState()
+                    == ObligationOccurrenceSchedulingState.DEFERRED_FOCUSED_RECOVERY)) {
+      return CanonicalObligationSchedulingState.DEFERRED_FOCUSED_RECOVERY;
+    }
+    if (occurrences.stream()
+        .anyMatch(
+            item ->
+                item.schedulingState()
+                    == ObligationOccurrenceSchedulingState.DEFERRED_CAPACITY)) {
+      return CanonicalObligationSchedulingState.DEFERRED_CAPACITY;
+    }
+    return CanonicalObligationSchedulingState.RETIRED;
+  }
+
+  private static String normalizeRequired(String value, String field) {
+    String normalized = value == null ? "" : value.strip();
+    if (normalized.isEmpty()) {
+      throw new IllegalArgumentException(field + " is required");
+    }
+    return normalized;
   }
 
   private void reopenDependents(String targetId, String reason) {

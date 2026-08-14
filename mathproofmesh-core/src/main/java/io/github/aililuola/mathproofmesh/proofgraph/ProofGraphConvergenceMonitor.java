@@ -195,12 +195,26 @@ public final class ProofGraphConvergenceMonitor {
       String familyId,
       String canonicalTargetId) {
     java.util.Objects.requireNonNull(actionType, "actionType");
+    boolean focused = controlMode == ProofGraphControlMode.FOCUSED_RECOVERY;
+    boolean hasPlan = focusedRecoveryPlan != null;
+    boolean selected = hasPlan && focusedRecoveryPlan.selects(familyId, canonicalTargetId);
     if (existingCanonicalTarget) {
-      if (controlMode != ProofGraphControlMode.FOCUSED_RECOVERY
-          || actionType.recoveryAction()
-          || focusedRecoveryPlan != null
-              && focusedRecoveryPlan.selects(familyId, canonicalTargetId)) {
+      if (!focused) {
         return FocusedExpansionDecision.allow();
+      }
+      if (!hasPlan) {
+        return blockGeneric(FocusedExpansionDecision.deferFocusedRecovery());
+      }
+      if (selected || actionType == FocusedRecoveryActionType.EXACT_FALSIFICATION) {
+        return FocusedExpansionDecision.allow();
+      }
+      if (actionType.requiresSelectedBinding()) {
+        return blockGeneric(
+            new FocusedExpansionDecision(
+                false,
+                true,
+                ObligationOccurrenceSchedulingState.DEFERRED_FOCUSED_RECOVERY,
+                "DEFER_UNSELECTED_RECOVERY_BINDING"));
       }
       return blockGeneric(FocusedExpansionDecision.deferFocusedRecovery());
     }
@@ -208,19 +222,32 @@ public final class ProofGraphConvergenceMonitor {
         || activeTargetsCampaign >= config.maxActiveCanonicalTargetsCampaign()) {
       return blockGeneric(FocusedExpansionDecision.deferCapacity());
     }
-    if (controlMode != ProofGraphControlMode.FOCUSED_RECOVERY) {
+    if (!focused) {
       return FocusedExpansionDecision.allow();
     }
-    boolean selected =
-        focusedRecoveryPlan != null
-            && focusedRecoveryPlan.selects(familyId, canonicalTargetId);
-    if (!actionType.recoveryAction() && !selected) {
+    if (!hasPlan) {
       return blockGeneric(FocusedExpansionDecision.deferFocusedRecovery());
     }
-    if (focusedRecoveryPlan == null || focusedRecoveryPlan.quotaRemaining() <= 0) {
+    if (!selected) {
+      if (actionType.requiresSelectedBinding()) {
+        return blockGeneric(
+            new FocusedExpansionDecision(
+                false,
+                true,
+                ObligationOccurrenceSchedulingState.DEFERRED_FOCUSED_RECOVERY,
+                "DEFER_UNSELECTED_RECOVERY_BINDING"));
+      }
+      return blockGeneric(FocusedExpansionDecision.deferFocusedRecovery());
+    }
+    if (focusedRecoveryPlan.quotaRemaining() <= 0) {
       return blockGeneric(FocusedExpansionDecision.deferFocusedRecovery());
     }
     return FocusedExpansionDecision.allow();
+  }
+
+  public synchronized boolean selectsCurrentBinding(String familyId, String canonicalTargetId) {
+    return focusedRecoveryPlan != null
+        && focusedRecoveryPlan.selects(familyId, canonicalTargetId);
   }
 
   public synchronized void recordFocusedNewTarget() {
@@ -255,6 +282,27 @@ public final class ProofGraphConvergenceMonitor {
   public synchronized void recordGenericExpansionAttempt(boolean admitted) {
     genericExpansionAttempts++;
     if (controlMode == ProofGraphControlMode.FOCUSED_RECOVERY) {
+      if (admitted) {
+        genericExpansionLeaks++;
+      } else {
+        genericExpansionBlocks++;
+      }
+    }
+    version++;
+  }
+
+  public synchronized void recordExpansionDecision(
+      FocusedRecoveryActionType actionType,
+      boolean admitted,
+      String familyId,
+      String canonicalTargetId) {
+    java.util.Objects.requireNonNull(actionType, "actionType");
+    if (actionType.recoveryAction()) {
+      return;
+    }
+    genericExpansionAttempts++;
+    boolean selected = selectsCurrentBinding(familyId, canonicalTargetId);
+    if (controlMode == ProofGraphControlMode.FOCUSED_RECOVERY && !selected) {
       if (admitted) {
         genericExpansionLeaks++;
       } else {

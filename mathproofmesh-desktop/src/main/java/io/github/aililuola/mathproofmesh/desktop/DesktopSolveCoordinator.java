@@ -173,7 +173,14 @@ import io.github.aililuola.mathproofmesh.proofgraph.BottleneckRelationType;
 import io.github.aililuola.mathproofmesh.proofgraph.CanonicalObligationRecord;
 import io.github.aililuola.mathproofmesh.proofgraph.CanonicalObligationStatus;
 import io.github.aililuola.mathproofmesh.proofgraph.CanonicalizedObligationWriteResult;
+import io.github.aililuola.mathproofmesh.proofgraph.CanonicalObligationSchedulingState;
+import io.github.aililuola.mathproofmesh.proofgraph.CanonicalSchedulingTransitionCode;
 import io.github.aililuola.mathproofmesh.proofgraph.DeferredExpansionLedger;
+import io.github.aililuola.mathproofmesh.proofgraph.DeferredExpansionReactivationCandidate;
+import io.github.aililuola.mathproofmesh.proofgraph.DeferredExpansionReactivationDecision;
+import io.github.aililuola.mathproofmesh.proofgraph.DeferredExpansionReactivationOutcome;
+import io.github.aililuola.mathproofmesh.proofgraph.DeferredExpansionReactivationPlanner;
+import io.github.aililuola.mathproofmesh.proofgraph.DeferredExpansionRecord;
 import io.github.aililuola.mathproofmesh.proofgraph.FocusedExpansionDecision;
 import io.github.aililuola.mathproofmesh.proofgraph.FocusedRecoveryActionType;
 import io.github.aililuola.mathproofmesh.proofgraph.FocusedRecoveryBrief;
@@ -328,6 +335,10 @@ final class DesktopSolveCoordinator {
   private ProofGraphConvergenceMonitor proofGraphConvergence =
       new ProofGraphConvergenceMonitor(ProofGraphConvergenceConfig.defaults());
   private DeferredExpansionLedger deferredExpansions = new DeferredExpansionLedger();
+  private final DeferredExpansionReactivationPlanner deferredReactivationPlanner =
+      new DeferredExpansionReactivationPlanner();
+  private DeferredReactivationFailurePoint deferredReactivationFailurePoint =
+      DeferredReactivationFailurePoint.NONE;
   private NegativeKnowledgeRegistry negativeKnowledgeRegistry;
   private NegativeKnowledgeAdmissionGate negativeKnowledgeGate;
   private final ProofControlFacade proofControl = ProofControlFacade.createDefault();
@@ -1402,11 +1413,6 @@ final class DesktopSolveCoordinator {
             .flatMap(proofGraph::bottleneckFamilyForCanonical)
             .map(BottleneckFamilyRecord::familyId)
             .orElse("");
-    boolean selectedBinding =
-        proofGraphConvergence
-            .focusedRecoveryPlan()
-            .map(plan -> plan.selects(familyId, canonicalTargetId))
-            .orElse(false);
     FocusedExpansionDecision decision =
         proofGraphConvergence.decideExpansion(
             actionType,
@@ -1415,9 +1421,8 @@ final class DesktopSolveCoordinator {
             proofGraph.activeCanonicalTargetCount(),
             familyId,
             canonicalTargetId);
-    if (!actionType.recoveryAction() && !selectedBinding) {
-      proofGraphConvergence.recordGenericExpansionAttempt(decision.allowed());
-    }
+    proofGraphConvergence.recordExpansionDecision(
+        actionType, decision.allowed(), familyId, canonicalTargetId);
     return new ObligationControlAdmission(
         context.withSchedulingState(decision.schedulingState()),
         actionType,
@@ -4263,41 +4268,35 @@ final class DesktopSolveCoordinator {
     String familyId = family == null ? "" : family.familyId();
     String canonicalTargetId =
         canonicalTarget == null ? "" : canonicalTarget.canonicalTargetId();
-    boolean selectedBinding =
-        proofGraphConvergence
-            .focusedRecoveryPlan()
-            .map(plan -> plan.selects(familyId, canonicalTargetId))
-            .orElse(false);
-    if (!controlAction.recoveryAction() && !selectedBinding) {
-      FocusedExpansionDecision control =
-          proofGraphConvergence.decideExpansion(
-              controlAction,
-              canonicalTarget != null,
-              proofGraph.activeCanonicalTargetCount(routeId),
-              proofGraph.activeCanonicalTargetCount(),
-              familyId,
-              canonicalTargetId);
-      proofGraphConvergence.recordGenericExpansionAttempt(control.allowed());
-      if (!control.allowed()) {
-        if (control.deferred()) {
-          deferredExpansions.record(
-              problemHash,
-              roundIndex.get(),
-              routeId,
-              obligationId,
-              canonicalTargetId,
-              controlAction,
-              control);
-        }
-        event(
-            "proof_task_deferred_by_graph_control",
-            "scheduler_decision",
-            null,
-            "rejected",
-            control.code(),
-            obligationId);
-        return false;
+    FocusedExpansionDecision control =
+        proofGraphConvergence.decideExpansion(
+            controlAction,
+            canonicalTarget != null,
+            proofGraph.activeCanonicalTargetCount(routeId),
+            proofGraph.activeCanonicalTargetCount(),
+            familyId,
+            canonicalTargetId);
+    proofGraphConvergence.recordExpansionDecision(
+        controlAction, control.allowed(), familyId, canonicalTargetId);
+    if (!control.allowed()) {
+      if (control.deferred()) {
+        deferredExpansions.record(
+            problemHash,
+            roundIndex.get(),
+            routeId,
+            obligationId,
+            canonicalTargetId,
+            controlAction,
+            control);
       }
+      event(
+          "proof_task_deferred_by_graph_control",
+          "scheduler_decision",
+          null,
+          "rejected",
+          control.code(),
+          obligationId);
+      return false;
     }
     boolean automatic = automaticProofTaskSource(source);
     ProofTaskScope scope =
@@ -4312,18 +4311,7 @@ final class DesktopSolveCoordinator {
           case CANONICAL_TARGET -> canonicalTarget.canonicalTargetId();
           case ROUTE_OCCURRENCE -> routeId + ":" + obligationId;
         };
-    String actionKey =
-        source.toLowerCase(Locale.ROOT).contains("focused-recovery")
-            ? "focused-recovery:"
-                + proofGraphConvergence
-                    .focusedRecoveryPlan()
-                    .map(FocusedRecoveryPlan::episodeId)
-                    .orElse("none")
-                + ":"
-                + roundIndex.get()
-            : automatic
-            ? "repair"
-            : requestedAction.toLowerCase(Locale.ROOT).strip();
+    String actionKey = proofTaskActionKey(source, requestedAction, automatic);
     if (pendingProofTasks.stream()
         .anyMatch(
             task ->
@@ -4367,6 +4355,9 @@ final class DesktopSolveCoordinator {
   private static boolean automaticProofTaskSource(String source) {
     String normalized = source == null ? "" : source.toLowerCase(Locale.ROOT);
     return normalized.contains("focused-recovery")
+        || normalized.contains("focused-skeptic")
+        || normalized.contains("focused-prover")
+        || normalized.contains("exact-falsification")
         || normalized.contains("proof-debt")
         || normalized.contains("meta-review")
         || normalized.contains("inspiration")
@@ -4375,31 +4366,324 @@ final class DesktopSolveCoordinator {
 
   private static FocusedRecoveryActionType proofTaskControlAction(
       String source, BottleneckFamilyRecord family) {
+    return FocusedRecoveryActionType.classifyTaskSource(source, family != null);
+  }
+
+  private int reconsiderDeferredExpansions() {
+    List<DeferredExpansionRecord> deferred = deferredExpansions.activeDeferredRecords();
+    if (deferred.isEmpty()) {
+      return 0;
+    }
+    Map<String, DeferredExpansionRecord> byId =
+        deferred.stream()
+            .collect(
+                java.util.stream.Collectors.toMap(
+                    DeferredExpansionRecord::deferredId,
+                    java.util.function.Function.identity(),
+                    (left, right) -> left,
+                    LinkedHashMap::new));
+    List<DeferredExpansionReactivationCandidate> candidates =
+        deferred.stream().map(this::deferredReactivationCandidate).toList();
+    List<DeferredExpansionReactivationDecision> decisions =
+        deferredReactivationPlanner.plan(
+            candidates, proofGraphConvergence.controlMode(), proofGraphConvergence.config());
+    int reactivated = 0;
+    for (DeferredExpansionReactivationDecision decision : decisions) {
+      DeferredExpansionRecord record = byId.get(decision.deferredId());
+      if (record == null) {
+        throw new IllegalStateException("reactivation planner returned an unknown deferred record");
+      }
+      switch (decision.outcome()) {
+        case KEEP_DEFERRED -> deferredExpansions.markEvaluated(record.deferredId(), roundIndex.get());
+        case SATISFY_BY_ACTIVE_TARGET ->
+            satisfyDeferredExpansion(record, decision.reason());
+        case RETIRE -> retireDeferredExpansion(record, decision.reason());
+        case REACTIVATE -> {
+          if (reactivateDeferredExpansion(record, decision.reason())) {
+            reactivated++;
+          }
+        }
+      }
+    }
+    return reactivated;
+  }
+
+  private DeferredExpansionReactivationCandidate deferredReactivationCandidate(
+      DeferredExpansionRecord record) {
+    CanonicalObligationRecord target =
+        proofGraph.allCanonicalTargets().stream()
+            .filter(item -> item.canonicalTargetId().equals(record.canonicalTargetId()))
+            .findFirst()
+            .orElse(null);
+    ProofObligation obligation =
+        proofGraph.obligations().stream()
+            .filter(item -> item.obligationId().equals(record.obligationId()))
+            .findFirst()
+            .orElse(null);
+    boolean rawExists =
+        proofGraph.rawObligationOccurrences().stream()
+            .anyMatch(
+                occurrence ->
+                    occurrence.obligationId().equals(record.obligationId())
+                        && occurrence.canonicalTargetId().equals(record.canonicalTargetId()));
+    RouteState route =
+        routes.stream().filter(item -> item.routeId.equals(record.routeId())).findFirst().orElse(null);
+    boolean routePermanentlyUnavailable =
+        route == null
+            || route.metaAbandoned
+            || Set.of("abandoned", "failed").contains(route.status)
+            || "verified".equals(route.status) && !hasUnresolvedRouteObligation(route);
+    boolean routeSchedulable =
+        route != null && !routePermanentlyUnavailable && routeEligibleForWork(route);
+    String familyId =
+        target == null
+            ? ""
+            : proofGraph
+                .bottleneckFamilyForCanonical(target.canonicalTargetId())
+                .map(BottleneckFamilyRecord::familyId)
+                .orElse("");
+    boolean negativeAllowed =
+        obligation != null && negativeKnowledgeAllowsDeferredTarget(obligation, record.actionType());
+    return new DeferredExpansionReactivationCandidate(
+        record,
+        proofGraph.activeCanonicalTargetCount(record.routeId()),
+        proofGraph.activeCanonicalTargetCount(),
+        problemHash.equals(record.problemHash()),
+        rawExists,
+        target != null,
+        target == null
+            ? CanonicalObligationStatus.OPEN
+            : proofGraph.canonicalStatus(target.canonicalTargetId()),
+        target == null
+            ? CanonicalObligationSchedulingState.RETIRED
+            : target.schedulingState(),
+        routeSchedulable,
+        routePermanentlyUnavailable,
+        negativeAllowed,
+        target != null
+            && proofGraphConvergence.selectsCurrentBinding(
+                familyId, target.canonicalTargetId()),
+        target == null ? 0.0d : proofGraph.representativeCentrality(target.canonicalTargetId()),
+        target == null ? 0.0d : proofGraph.representativePriority(target.canonicalTargetId()));
+  }
+
+  private boolean negativeKnowledgeAllowsDeferredTarget(
+      ProofObligation obligation, FocusedRecoveryActionType actionType) {
+    NegativeCandidateIntent intent =
+        actionType == FocusedRecoveryActionType.EXACT_FALSIFICATION
+            ? NegativeCandidateIntent.FALSIFICATION_ONLY
+            : NegativeCandidateIntent.PROOF_TARGET;
+    return java.util.Arrays.stream(NegativeKnowledgeTargetType.values())
+        .map(
+            targetType ->
+                new NegativeKnowledgeCandidate(
+                    obligation.problemHash(),
+                    targetType,
+                    obligation.statement(),
+                    obligation.normalizedStatement(),
+                    obligation.assumptions(),
+                    obligation.quantifiers(),
+                    List.of(),
+                    negativeKnowledgeScope(),
+                    NegativeKnowledgeSurface.PROOF_OBLIGATION_CREATION,
+                    intent))
+        .map(candidate -> negativeKnowledgeGate.evaluate(candidate, roundIndex.get()))
+        .allMatch(NegativeKnowledgeDecision::allowed);
+  }
+
+  @SuppressFBWarnings(
+      value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
+      justification = "Transactional rollback must preserve the original deterministic failure")
+  private void retireDeferredExpansion(DeferredExpansionRecord record, String reason) {
+    ProofGraphSnapshot graphBefore = proofGraph.snapshot();
+    var ledgerBefore = deferredExpansions.snapshot();
+    List<DesktopSolveCheckpoint.ScheduledProofTask> tasksBefore = List.copyOf(pendingProofTasks);
+    try {
+      if (!record.canonicalTargetId().isBlank() && !record.obligationId().isBlank()) {
+        var transition =
+            proofGraph.retireDeferredCanonicalTarget(
+                record.canonicalTargetId(),
+                record.obligationId(),
+                record.schedulingState(),
+                roundIndex.get(),
+                reason);
+        boolean missingTargetRetirement =
+            "TARGET_MISSING".equals(reason)
+                && (transition.code() == CanonicalSchedulingTransitionCode.TARGET_NOT_FOUND
+                    || transition.code()
+                        == CanonicalSchedulingTransitionCode.OCCURRENCE_NOT_FOUND);
+        if (!transition.transitioned() && !missingTargetRetirement) {
+          throw new IllegalStateException(
+              "deferred retirement graph transition failed: " + transition.code());
+        }
+      }
+      deferredExpansions.markRetired(record.deferredId(), roundIndex.get(), reason);
+      event(
+          "deferred_expansion_retired",
+          "scheduler_decision",
+          null,
+          "completed",
+          reason,
+          record.deferredId());
+    } catch (RuntimeException exception) {
+      rollbackDeferredMutation(graphBefore, ledgerBefore, tasksBefore);
+      throw exception;
+    }
+  }
+
+  private void satisfyDeferredExpansion(DeferredExpansionRecord record, String reason) {
+    deferredExpansions.markSatisfiedByActiveTarget(
+        record.deferredId(), roundIndex.get(), reason);
+    event(
+        "deferred_expansion_satisfied_by_active_target",
+        "scheduler_decision",
+        null,
+        "completed",
+        reason,
+        record.deferredId());
+  }
+
+  @SuppressFBWarnings(
+      value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
+      justification = "Transactional rollback must preserve the original deterministic failure")
+  private boolean reactivateDeferredExpansion(DeferredExpansionRecord record, String reason) {
+    ProofGraphSnapshot graphBefore = proofGraph.snapshot();
+    var ledgerBefore = deferredExpansions.snapshot();
+    List<DesktopSolveCheckpoint.ScheduledProofTask> tasksBefore = List.copyOf(pendingProofTasks);
+    try {
+      CanonicalObligationRecord target =
+          proofGraph.allCanonicalTargets().stream()
+              .filter(item -> item.canonicalTargetId().equals(record.canonicalTargetId()))
+              .findFirst()
+              .orElseThrow();
+      BottleneckFamilyRecord family =
+          proofGraph.bottleneckFamilyForCanonical(target.canonicalTargetId()).orElse(null);
+      String familyId = family == null ? "" : family.familyId();
+      FocusedExpansionDecision gate =
+          proofGraphConvergence.decideExpansion(
+              record.actionType(),
+              true,
+              proofGraph.activeCanonicalTargetCount(record.routeId()),
+              proofGraph.activeCanonicalTargetCount(),
+              familyId,
+              target.canonicalTargetId());
+      proofGraphConvergence.recordExpansionDecision(
+          record.actionType(), gate.allowed(), familyId, target.canonicalTargetId());
+      if (!gate.allowed()) {
+        deferredExpansions.markEvaluated(record.deferredId(), roundIndex.get());
+        return false;
+      }
+      var transition =
+          proofGraph.reactivateCanonicalTarget(
+              target.canonicalTargetId(),
+              record.obligationId(),
+              record.schedulingState(),
+              roundIndex.get(),
+              reason);
+      if (transition.code() == CanonicalSchedulingTransitionCode.ALREADY_ACTIVE) {
+        deferredExpansions.markSatisfiedByActiveTarget(
+            record.deferredId(), roundIndex.get(), "CANONICAL_TARGET_ALREADY_ACTIVE");
+        return false;
+      }
+      if (transition.code() == CanonicalSchedulingTransitionCode.TERMINAL_TARGET) {
+        deferredExpansions.markRetired(record.deferredId(), roundIndex.get(), "TARGET_TERMINAL");
+        return false;
+      }
+      if (transition.code() != CanonicalSchedulingTransitionCode.REACTIVATED) {
+        throw new IllegalStateException("deferred graph transition failed: " + transition.code());
+      }
+      failDeferredReactivationAt(DeferredReactivationFailurePoint.AFTER_GRAPH_TRANSITION);
+
+      ProofTaskScope scope =
+          family == null ? ProofTaskScope.CANONICAL_TARGET : ProofTaskScope.BOTTLENECK_FAMILY;
+      String scopeId = family == null ? target.canonicalTargetId() : family.familyId();
+      String actionKey =
+          "deferred-reactivation:" + record.deferredId() + ":" + roundIndex.get();
+      String source = "deferred-reactivation:" + record.deferredId();
+      DesktopSolveCheckpoint.ScheduledProofTask existing =
+          pendingProofTasks.stream().filter(task -> task.source().equals(source)).findFirst().orElse(null);
+      if (existing != null) {
+        deferredExpansions.markReactivated(
+            record.deferredId(), roundIndex.get(), reason, existing.taskId());
+        return true;
+      }
+      if (!proofGraph.acquireCanonicalTaskLease(scope, scopeId, actionKey)) {
+        throw new IllegalStateException("deferred reactivation task lease is unavailable");
+      }
+      failDeferredReactivationAt(DeferredReactivationFailurePoint.AFTER_TASK_LEASE);
+      String taskId =
+          "proof-task-"
+              + CanonicalJson.stableHash(
+                      Map.of(
+                          "scope", scope.name(),
+                          "scope_id", scopeId,
+                          "action_key", actionKey))
+                  .substring(0, 20);
+      pendingProofTasks.add(
+          new DesktopSolveCheckpoint.ScheduledProofTask(
+              taskId,
+              source,
+              record.routeId(),
+              record.obligationId(),
+              target.canonicalTargetId(),
+              familyId,
+              scope,
+              actionKey,
+              record.actionType() == FocusedRecoveryActionType.EXACT_FALSIFICATION
+                  ? "FALSIFY"
+                  : "REPAIR",
+              roundIndex.get()));
+      failDeferredReactivationAt(DeferredReactivationFailurePoint.AFTER_PENDING_TASK);
+      deferredExpansions.markReactivated(
+          record.deferredId(), roundIndex.get(), reason, taskId);
+      event(
+          "deferred_expansion_reactivated",
+          "scheduler_decision",
+          null,
+          "completed",
+          reason,
+          record.deferredId());
+      return true;
+    } catch (RuntimeException exception) {
+      rollbackDeferredMutation(graphBefore, ledgerBefore, tasksBefore);
+      throw exception;
+    }
+  }
+
+  private void rollbackDeferredMutation(
+      ProofGraphSnapshot graphBefore,
+      io.github.aililuola.mathproofmesh.proofgraph.DeferredExpansionSnapshot ledgerBefore,
+      List<DesktopSolveCheckpoint.ScheduledProofTask> tasksBefore) {
+    proofGraph = ProofGraphStore.restore(graphBefore, ProofGraphPolicy.defaults());
+    deferredExpansions = DeferredExpansionLedger.restore(ledgerBefore);
+    pendingProofTasks.clear();
+    pendingProofTasks.addAll(tasksBefore);
+    installNegativeKnowledgeRuntime();
+  }
+
+  private void failDeferredReactivationAt(DeferredReactivationFailurePoint point) {
+    if (deferredReactivationFailurePoint == point) {
+      throw new IllegalStateException("injected deferred reactivation failure: " + point);
+    }
+  }
+
+  void setDeferredReactivationFailurePointForTest(DeferredReactivationFailurePoint point) {
+    deferredReactivationFailurePoint =
+        point == null ? DeferredReactivationFailurePoint.NONE : point;
+  }
+
+  private String proofTaskActionKey(String source, String requestedAction, boolean automatic) {
     String normalized = source == null ? "" : source.toLowerCase(Locale.ROOT);
-    if (normalized.contains("focused-recovery") || normalized.contains("proof-debt")) {
-      return FocusedRecoveryActionType.FOCUSED_PROVER;
+    if (normalized.contains("focused-recovery")) {
+      return "focused-recovery:"
+          + proofGraphConvergence
+              .focusedRecoveryPlan()
+              .map(FocusedRecoveryPlan::episodeId)
+              .orElse("none")
+          + ":"
+          + roundIndex.get();
     }
-    if (normalized.contains("exact-falsification") || normalized.contains("skeptic")) {
-      return FocusedRecoveryActionType.EXACT_FALSIFICATION;
-    }
-    if (normalized.contains("representation-switch")) {
-      return FocusedRecoveryActionType.REPRESENTATION_SWITCH;
-    }
-    if (normalized.contains("structural-analogy")) {
-      return FocusedRecoveryActionType.STRUCTURAL_ANALOGY;
-    }
-    if (normalized.contains("bridge")) {
-      return family == null
-          ? FocusedRecoveryActionType.UNSCOPED_BRIDGE
-          : FocusedRecoveryActionType.FAMILY_BRIDGE_REPAIR;
-    }
-    if (normalized.contains("inspiration")) {
-      return FocusedRecoveryActionType.GENERIC_INSPIRATION;
-    }
-    if (normalized.contains("meta-review")) {
-      return FocusedRecoveryActionType.FOCUSED_SKEPTIC;
-    }
-    return FocusedRecoveryActionType.NEW_STRATEGY;
+    return automatic ? "repair" : requestedAction.toLowerCase(Locale.ROOT).strip();
   }
 
   private boolean schedulePendingProofTask() {
@@ -5730,6 +6014,7 @@ final class DesktopSolveCoordinator {
         exactRefutations,
         proofGraphConvergence.genericExpansionBlocks(),
         immutableRootGoalHash());
+    reconsiderDeferredExpansions();
     if (proofGraphConvergence.controlMode() == ProofGraphControlMode.FOCUSED_RECOVERY) {
       enqueueFocusedRecoveryTask();
     }
@@ -6392,7 +6677,7 @@ final class DesktopSolveCoordinator {
         ProofGraphConvergenceMonitor.restore(
             ProofGraphConvergenceConfig.defaults(), checkpoint.proofGraphConvergence());
     deferredExpansions = DeferredExpansionLedger.restore(checkpoint.deferredExpansions());
-    migrateLegacyCanonicalProofTasks(checkpoint.schemaVersion());
+    migrateAndRevalidateLegacyCanonicalProofTasks(checkpoint.schemaVersion());
     attemptArtifacts = AttemptArtifactLedger.restore(checkpoint.attemptArtifacts());
     researchCheckpoints = ResearchCheckpointLedger.restore(checkpoint.researchCheckpoints());
     proofControl.claims().load(checkpoint.claimLifecycle());
@@ -6564,6 +6849,7 @@ final class DesktopSolveCoordinator {
                 strategyArchive.rejectChild(
                     strategyId, "negative-knowledge://restore-revalidation"));
     rebuildRouteRegistry();
+    reconsiderDeferredExpansions();
     MessageStoreSnapshot store = messageRepository.snapshot();
     for (RouteState route : routes) {
       store.deliveries().values().stream()
@@ -7761,8 +8047,9 @@ final class DesktopSolveCoordinator {
     return true;
   }
 
-  private void migrateLegacyCanonicalProofTasks(int schemaVersion) {
-    if (schemaVersion >= 9 || pendingProofTasks.isEmpty()) {
+  private void migrateAndRevalidateLegacyCanonicalProofTasks(int schemaVersion) {
+    if (schemaVersion >= DesktopSolveCheckpoint.CURRENT_SCHEMA_VERSION
+        || pendingProofTasks.isEmpty()) {
       return;
     }
     List<DesktopSolveCheckpoint.ScheduledProofTask> migrated = new ArrayList<>();
@@ -7776,6 +8063,41 @@ final class DesktopSolveCoordinator {
                   .bottleneckFamilyForCanonical(canonical.canonicalTargetId())
                   .orElse(null);
       boolean automatic = automaticProofTaskSource(task.source());
+      FocusedRecoveryActionType controlAction = proofTaskControlAction(task.source(), family);
+      String familyId = family == null ? "" : family.familyId();
+      String canonicalTargetId = canonical == null ? "" : canonical.canonicalTargetId();
+      FocusedExpansionDecision control =
+          proofGraphConvergence.decideExpansion(
+              controlAction,
+              canonical != null,
+              proofGraph.activeCanonicalTargetCount(task.routeId()),
+              proofGraph.activeCanonicalTargetCount(),
+              familyId,
+              canonicalTargetId);
+      if (!control.allowed()) {
+        if (control.deferred()) {
+          deferredExpansions.record(
+              problemHash,
+              roundIndex.get(),
+              task.routeId(),
+              task.obligationId(),
+              canonicalTargetId,
+              controlAction,
+              control);
+        }
+        event(
+            "restored_proof_task_deferred_by_graph_control",
+            "committed_checkpoint",
+            null,
+            "rejected",
+            control.code(),
+            task.taskId());
+        continue;
+      }
+      if (schemaVersion >= 9) {
+        migrated.add(task);
+        continue;
+      }
       ProofTaskScope scope =
           automatic && family != null
               ? ProofTaskScope.BOTTLENECK_FAMILY

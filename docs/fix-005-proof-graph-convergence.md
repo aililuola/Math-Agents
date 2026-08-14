@@ -526,3 +526,387 @@ No issue-006 through issue-013 production behavior was modified. In particular, 
 work did not change semantic pivoting, Broker behavior, computation infrastructure,
 provider selection, API-key concurrency, token allocation, budgets, retry/failover,
 Temporal concurrency, or Python-sidecar performance thresholds.
+
+## Final focused-recovery binding and deferred-reactivation patch
+
+### Patch identity and audited production paths
+
+This final issue-005 patch remains on `fix/005-proof-graph-convergence` and is based on
+`47f1784127fb76a719bd4cf1da97c96da9bf3f03`. Its commit message is
+`fix(control): bind recovery tasks and reactivate deferred targets`; the resulting Git
+hash is reported in the final delivery report because a commit cannot contain its own
+hash.
+
+The production audit covered these paths before implementation:
+
+- Recovery-task admission converges at `DesktopSolveCoordinator.enqueueProofTask(...)`.
+  Sources include focused prover, focused skeptic, proof-debt stall, meta-review,
+  family bridge, exact falsification, verified-claim reuse, and generic expansion.
+- Deferred records are created by the controlled proof-obligation and proof-task paths
+  only after `ProofGraphConvergenceMonitor.decideExpansion(...)` rejects scheduling.
+- Control-mode changes are observed after convergence samples, including entry into
+  focused recovery, recovery cooldown, and return to normal expansion.
+- Capacity is released by graph closure/refutation or scheduling retirement and is
+  reconsidered at the next production control sample.
+- Checkpoint restoration reinstalls Root/Negative/Graph/Convergence/Deferred/Routes/
+  Tasks first, then runs deterministic deferred reconciliation.
+
+### Modified files and purpose
+
+Production changes are limited to the issue-005 scheduling authority:
+
+- `FocusedRecoveryActionType.java`: separates `recoveryAction` from
+  `requiresSelectedBinding` and gives source classification a stable precedence.
+- `ProofGraphConvergenceMonitor.java`: owns the selected-family/target decision and
+  applies capacity, mode, binding, and quota checks to every action.
+- `ProofGraphConvergenceConfig.java`: adds the bounded per-round deferred-reactivation
+  limit while retaining the legacy constructor.
+- `DeferredExpansionRecord.java`, `DeferredExpansionLedger.java`, and the new
+  `DeferredExpansionStatus.java`: implement the monotonic deferred lifecycle.
+- `DeferredExpansionReactivationCandidate.java`,
+  `DeferredExpansionReactivationDecision.java`,
+  `DeferredExpansionReactivationOutcome.java`, and
+  `DeferredExpansionReactivationPlanner.java`: provide deterministic eligibility,
+  ordering, and the two-reactivations-per-round bound.
+- `CanonicalSchedulingTransitionCode.java` and
+  `CanonicalSchedulingTransitionResult.java`: type graph scheduling transitions.
+- `ProofGraphStore.java`: atomically changes raw-occurrence and canonical scheduling
+  projections without changing mathematical status or the canonical debt formula.
+- `DesktopSolveCheckpoint.java`: advances the checkpoint schema from v10 to v11.
+- `DesktopSolveCoordinator.java` and `DeferredReactivationFailurePoint.java`: gate every
+  task, reconcile deferred work, stage lease/task/ledger mutation, and roll back injected
+  failures.
+
+Tests added or updated are:
+
+- Core: `FocusedRecoverySelectedBindingPolicyTest`,
+  `ProofTaskControlActionClassificationTest`,
+  `DeferredExpansionLedgerLifecycleTest`,
+  `DeferredExpansionReactivationOrderingTest`,
+  `DeferredExpansionReactivationEligibilityTest`,
+  `DeferredExpansionNoFalseDebtTest`,
+  `DeferredExpansionSnapshotCompatibilityTest`, and
+  `CanonicalSchedulingTransitionTest`.
+- Desktop: `DesktopUnselectedRecoveryActionBypassBlackBoxTest`,
+  `DesktopFocusedRecoverySelectedBindingGateTest`,
+  `DesktopDeferredTargetNeverReactivatedBlackBoxTest`,
+  `DesktopDeferredCapacityReactivationTest`,
+  `DesktopFocusedDeferredReactivationRestoreTest`,
+  `DesktopDeferredReactivationAtomicityTest`,
+  `DesktopV10DeferredExpansionLifecycleMigrationTest`,
+  `DesktopDeferredReactivationMultiRoundTest`, and their shared test support.
+- Existing coverage was strengthened in
+  `ProofGraphConvergenceControlBoundaryTest`,
+  `DesktopProofGraphConvergenceMultiRoundRestoreTest`, and
+  `DesktopProofGraphIssue005BlackBoxSupport` without deleting or weakening an assertion.
+
+### Pre-fix behavioral failures
+
+The tests first ran against the old production behavior, without depending on missing
+new APIs. They exposed both defects directly:
+
+```text
+UNSELECTED RECOVERY BYPASS BLACK-BOX DIAGNOSTIC
+UNSELECTED_RECOVERY_ATTEMPTS=5
+EXPECTED_BLOCKS=5
+ACTUAL_BLOCKS=2
+UNRELATED_RECOVERY_TASK_LEAKS=3
+SELECTED_RECOVERY_ACTION_ALLOWED=1
+RESULT=FAIL
+```
+
+```text
+DEFERRED TARGET NEVER REACTIVATED BLACK-BOX DIAGNOSTIC
+DEFERRED_TARGETS_BEFORE_RELEASE=1
+AVAILABLE_CAPACITY_AFTER_RELEASE=1
+EXPECTED_REACTIVATIONS=1
+ACTUAL_REACTIVATIONS=0
+DEFERRED_TARGET_STILL_UNSCHEDULED=1
+REACTIVATION_TASKS=0
+RESULT=FAIL
+```
+
+After the fix, the same black-box observations are `ACTUAL_BLOCKS=5`,
+`UNRELATED_RECOVERY_TASK_LEAKS=0`, `ACTUAL_REACTIVATIONS=1`,
+`DEFERRED_TARGET_STILL_UNSCHEDULED=0`, and `REACTIVATION_TASKS=1`.
+
+### Selected-binding verification
+
+The requested Core suite passed 22 tests with zero failures/errors/skips. The additional
+three-case canonical transition test covers fail-closed outcomes and all aggregate
+scheduling-state precedence branches. The requested Desktop suite passed 9 tests with
+zero failures/errors/skips.
+
+```text
+SELECTED BINDING RECOVERY DIAGNOSTIC
+---------------------------------------------------------------
+ROUNDS=10
+RESTORE_ROUND=5
+SELECTED_FOCUSED_PROVER_ALLOWS=10
+SELECTED_FOCUSED_SKEPTIC_ALLOWS=10
+SELECTED_FAMILY_BRIDGE_ALLOWS=10
+SELECTED_PROOF_DEBT_ALLOWS=10
+SELECTED_META_REVIEW_ALLOWS=10
+UNSELECTED_FOCUSED_PROVER_BLOCKS=10
+UNSELECTED_FOCUSED_SKEPTIC_BLOCKS=10
+UNSELECTED_FAMILY_BRIDGE_BLOCKS=10
+UNSELECTED_PROOF_DEBT_BLOCKS=10
+UNSELECTED_META_REVIEW_BLOCKS=10
+EXACT_FALSIFICATION_SELECTED_ALLOWS=10
+EXACT_FALSIFICATION_UNSELECTED_ALLOWS=10
+UNRELATED_RECOVERY_TASK_LEAKS=0
+POST_RESTORE_RECOVERY_TASK_LEAKS=0
+DUPLICATE_RECOVERY_TASKS=0
+TASK_LEASE_LEAKS=0
+RESULT=PASS
+---------------------------------------------------------------
+```
+
+`EXACT_FALSIFICATION` is the explicit cross-family exception for an existing exact
+target. It still cannot bypass new-target capacity or focused new-target quota. Explicit
+`unscoped-bridge` classification also remains unscoped even when a family can be
+derived, preventing accidental promotion to a family-repair action.
+
+### Deferred lifecycle verification
+
+```text
+CAPACITY REACTIVATION DIAGNOSTIC
+---------------------------------------------------------------
+ACTIVE_TARGETS_AT_CAPACITY=8
+CAPACITY_DEFERRED_RECORDS=1
+CAPACITY_RELEASE_EVENTS=1
+REACTIVATED_AFTER_RELEASE=1
+ACTIVE_TARGETS_AFTER_REACTIVATION=8
+DUPLICATE_REACTIVATIONS=0
+DUPLICATE_REACTIVATION_TASKS=0
+GLOBAL_DEBT_FALSE_DECREASES=0
+GLOBAL_DEBT_BEFORE_REACTIVATION=19.5575
+GLOBAL_DEBT_AFTER_REACTIVATION=19.5575
+RESULT=PASS
+---------------------------------------------------------------
+```
+
+```text
+FOCUSED DEFERRED REACTIVATION DIAGNOSTIC
+---------------------------------------------------------------
+FOCUSED_DEFERRED_RECORDS=1
+RESTORE_ROUND=2
+POST_COOLDOWN_REACTIVATED=1
+POST_RESTORE_REACTIVATION_LOSSES=0
+POST_RESTORE_DUPLICATE_REACTIVATIONS=0
+POST_RESTORE_DUPLICATE_TASKS=0
+GLOBAL_DEBT_FALSE_DECREASES=0
+UNAUTHORIZED_FACT_PROMOTIONS=0
+UNAUTHORIZED_CLAIM_VERIFICATIONS=0
+MAIN_GOAL_CLOSURES=0
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+RESULT=PASS
+---------------------------------------------------------------
+```
+
+Injected failures after the graph transition, after lease acquisition, and after pending
+task insertion all roll back cleanly:
+
+```text
+DEFERRED REACTIVATION ATOMICITY DIAGNOSTIC
+GRAPH_PARTIAL_REACTIVATIONS=0
+LEDGER_PARTIAL_REACTIVATIONS=0
+TASK_LEASE_LEAKS=0
+PENDING_TASK_LEAKS=0
+DUPLICATE_RETRY_TASKS=0
+RESULT=PASS
+```
+
+The 12-round production lifecycle, including a real restore at round 6, reported:
+
+```text
+DEFERRED EXPANSION LIFECYCLE DIAGNOSTIC
+----------------------------------------------------------------
+ROUNDS=12
+RESTORE_ROUND=6
+CAPACITY_DEFERRED=1
+FOCUSED_RECOVERY_DEFERRED=1
+REACTIVATED_AFTER_CAPACITY_RELEASE=1
+REACTIVATED_AFTER_COOLDOWN=1
+SATISFIED_BY_ACTIVE_TARGET=1
+RETIRED_TERMINAL_TARGETS=1
+EARLY_FOCUSED_REACTIVATION_LEAKS=0
+DUPLICATE_REACTIVATIONS=0
+DUPLICATE_REACTIVATION_TASKS=0
+TASK_LEASE_LEAKS=0
+POST_RESTORE_REACTIVATION_LOSSES=0
+POST_RESTORE_STATUS_CHANGES=0
+POST_RESTORE_DUPLICATE_TASKS=0
+GLOBAL_DEBT_FALSE_DECREASES=0
+RAW_OCCURRENCE_LOSSES=0
+CANONICAL_TARGET_LOSSES=0
+DIRECT_FACT_PROMOTIONS=0
+DIRECT_CLAIM_VERIFICATIONS=0
+DIRECT_NEGATIVE_REGISTRATIONS=0
+MAIN_GOAL_CLOSURES=0
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+ATTEMPT_ARTIFACT_LEDGER_HASH_CHANGES=0
+CLAIM_LIFECYCLE_HASH_CHANGES=0
+RESEARCH_CHECKPOINT_LEDGER_HASH_CHANGES=0
+CANONICALIZATION_REGISTRY_UNAUTHORIZED_CHANGES=0
+DEFERRED_HASH_BEFORE_RESTORE=0e243e97d1b7f76e4708a934c7caff05eb04de84fd7af517ffd7883329d4222f
+DEFERRED_HASH_AFTER_RESTORE=0e243e97d1b7f76e4708a934c7caff05eb04de84fd7af517ffd7883329d4222f
+CONVERGENCE_HASH_BEFORE_RESTORE=3b0473274360e5928d085b7f89295f10a28e55fabc950f728c441d9c31930279
+CONVERGENCE_HASH_AFTER_RESTORE=3b0473274360e5928d085b7f89295f10a28e55fabc950f728c441d9c31930279
+RESULT=PASS
+----------------------------------------------------------------
+```
+
+### v10 to v11 migration
+
+Missing v10 lifecycle fields deterministically become `DEFERRED`; migration does not
+guess that work was reactivated and makes no Provider call. Two independent migrations
+produced the same ledger hash:
+
+```text
+LEGACY_RECORDS_MIGRATED=1
+LEGACY_RECORDS_DEFAULTED_TO_DEFERRED=1
+AUTOMATIC_REACTIVATION_GUESSES=0
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+ATTEMPT_ARTIFACT_LEDGER_HASH_CHANGES=0
+CLAIM_LIFECYCLE_HASH_CHANGES=0
+RESEARCH_CHECKPOINT_LEDGER_HASH_CHANGES=0
+CANONICALIZATION_REGISTRY_HASH_CHANGES=0
+CONVERGENCE_SNAPSHOT_HASH_CHANGES=0
+PROVIDER_CALLS_DURING_MIGRATION=0
+FIRST_MIGRATED_DEFERRED_HASH=9213fa127e776c7df12d5a6138aabda9de3391f45924ee5b81d3b785494d0b81
+SECOND_MIGRATED_DEFERRED_HASH=9213fa127e776c7df12d5a6138aabda9de3391f45924ee5b81d3b785494d0b81
+RESULT=PASS
+```
+
+### Existing issue-005 and earlier-issue regressions
+
+The updated original 20-round convergence test still creates exactly two legitimate
+focused-family tasks while suppressing unrelated or duplicate automatic work:
+
+```text
+STAGNATION_EPISODES=1
+FOCUSED_RECOVERY_ENTRIES=2
+GENERIC_EXPANSION_ATTEMPTS=58
+GENERIC_EXPANSION_BLOCKS=52
+GENERIC_EXPANSION_LEAKS=0
+FOCUSED_FAMILY_TASKS_CREATED=2
+DUPLICATE_FOCUSED_FAMILY_TASKS=0
+UNRELATED_FAMILY_TASKS_CREATED=0
+POST_RESTORE_STATE_CHANGES=0
+POST_RESTORE_DEFERRED_RECONCILIATIONS=1
+CONVERGENCE_HASH_BEFORE_RESTORE=e5da0a353bb2c1cd8c1f5ad876cec965eaa1fc7faf0b876e85844427b40098ca
+CONVERGENCE_HASH_AFTER_RESTORE=e5da0a353bb2c1cd8c1f5ad876cec965eaa1fc7faf0b876e85844427b40098ca
+RESULT=PASS
+```
+
+Explicit regression commands passed with no failures:
+
+- Issue 001: 15 tests (Core 14, Desktop 1).
+- Issue 002: 29 tests (Core 18, Desktop 11), including 10 route-widening blocks and
+  possible-equivalent quarantine without a permanent hard block.
+- Issue 003: 20 tests (Core 13, Desktop 7).
+- Issue 004: 37 tests (Contracts 4, Core 16, Server 7, Desktop 10).
+- Original issue 005 suites: 61 tests (Core 33, Server 2, Desktop 26).
+
+### Complete verification
+
+The first complete-gate attempt after the production fix correctly failed the unchanged
+audited-branch threshold (`84.023324% < 85%`). No threshold was relaxed. The added
+`CanonicalSchedulingTransitionTest` exercises the real fail-closed transition branches;
+the final audited invariant branch coverage is `85.422741%`.
+
+The final `scripts/verify-all.ps1 -Offline` execution completed with exit code 0 and
+included Docker-backed PostgreSQL Testcontainers integration tests:
+
+```text
+MathProofMesh Contracts:      48 tests, 0 failures, 0 errors, 0 skipped
+MathProofMesh Core:         1032 tests, 0 failures, 0 errors, 0 skipped
+MathProofMesh Server:        869 tests, 0 failures, 0 errors, 3 skipped
+MathProofMesh Desktop:       111 tests, 0 failures, 0 errors, 1 skipped
+MathProofMesh Compatibility: 149 tests, 0 failures, 0 errors, 0 skipped
+TOTAL:                      2209 tests, 0 failures, 0 errors, 4 skipped
+```
+
+The five PostgreSQL suites ran 21 tests with zero failures/errors/skips:
+`JdbcMessageRepositoryIT` (4), `MemoryProofGraphPostgresIT` (4),
+`PersistencePostgresIT` (9), `Phase17CheckpointOutboxPerformanceIT` (1), and
+`ProviderCallPostgresIT` (3). All integration-test suites together ran 26 tests.
+
+Final gates:
+
+- Coverage PASS: Core line `91.306951%`, Core branch `75.370075%`, audited invariant
+  line `93.816769%`, audited invariant branch `85.422741%`; every configured coverage
+  gate passed.
+- SpotBugs/FindSecBugs PASS: zero findings in all five Java modules.
+- Security PASS: 115 dependencies scanned, zero visible findings and zero findings at
+  or above CVSS 7; secret scan passed.
+- License PASS: 111 components, zero missing and zero unreviewed licenses.
+- Source immutability PASS: 401 files and manifest
+  `9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770`.
+- Existing offline performance artifacts passed; no Python-sidecar threshold changed.
+- `FULL VERIFICATION: PASS`.
+
+Generated verification reports, Maven targets, logs, checkpoints, databases, and
+Testcontainers data are not included in the patch.
+
+### Protected authority and final state
+
+Relative to `47f1784127fb76a719bd4cf1da97c96da9bf3f03`, all protected issue-001 through
+issue-004 production files and issue-005A identity/authority files have an empty diff:
+
+```text
+PROTECTED_FILES_NO_DIFF=PASS
+PATCH_DIFF_STAT=37 files changed, 4000 insertions(+), 119 deletions(-)
+```
+
+No issue-006 through issue-013 production behavior was changed. The patch does not alter
+Root Goal authority, permanent Negative Knowledge, Claim review, Research Checkpoint
+authority, canonical identity, family authority, canonical debt mathematics, Provider,
+Broker, concurrency, Temporal, token/budget policy, retry/failover, or Python-sidecar
+performance thresholds.
+
+```text
+ISSUE 005 FINAL PATCH DIAGNOSTIC
+================================================================
+SELECTED_BINDING_GATE_RESULT=PASS
+UNSELECTED_FOCUSED_PROVER_LEAKS=0
+UNSELECTED_FOCUSED_SKEPTIC_LEAKS=0
+UNSELECTED_FAMILY_BRIDGE_LEAKS=0
+UNSELECTED_PROOF_DEBT_LEAKS=0
+UNSELECTED_META_REVIEW_LEAKS=0
+EXACT_FALSIFICATION_POLICY=PASS
+POST_RESTORE_RECOVERY_TASK_LEAKS=0
+
+DEFERRED_REACTIVATION_RESULT=PASS
+CAPACITY_REACTIVATIONS=1
+POST_COOLDOWN_REACTIVATIONS=1
+SATISFIED_BY_ACTIVE_TARGET=1
+RETIRED_TERMINAL_TARGETS=1
+DUPLICATE_REACTIVATIONS=0
+DUPLICATE_REACTIVATION_TASKS=0
+GLOBAL_DEBT_FALSE_DECREASES=0
+POST_RESTORE_REACTIVATION_LOSSES=0
+
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+ATTEMPT_ARTIFACT_LEDGER_HASH_CHANGES=0
+CLAIM_LIFECYCLE_HASH_CHANGES=0
+RESEARCH_CHECKPOINT_LEDGER_HASH_CHANGES=0
+CANONICALIZATION_AUTHORITY_CHANGES=0
+
+ISSUE_001_REGRESSION=PASS
+ISSUE_002_REGRESSION=PASS
+ISSUE_003_REGRESSION=PASS
+ISSUE_004_REGRESSION=PASS
+ISSUE_005_ORIGINAL_REGRESSION=PASS
+
+PROTECTED_FILES_NO_DIFF=PASS
+FULL_VERIFICATION=PASS
+WORKTREE_CLEAN=true
+ISSUE_005_STATUS=CLOSED
+================================================================
+```

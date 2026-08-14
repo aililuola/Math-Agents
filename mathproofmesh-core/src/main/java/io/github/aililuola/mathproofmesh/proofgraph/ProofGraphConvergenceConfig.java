@@ -15,12 +15,14 @@ public record ProofGraphConvergenceConfig(
     double debtDecreaseWeight,
     double newTargetPenalty,
     double duplicateOccurrencePenalty,
-    double forbiddenProposalPenalty) {
+    double forbiddenProposalPenalty,
+    int maxDeferredReactivationsPerRound) {
 
   public ProofGraphConvergenceConfig {
     if (maxActiveCanonicalTargetsPerRoute <= 0
         || maxActiveCanonicalTargetsCampaign <= 0
         || maxNewCanonicalTargetsPerFocusedEpisode < 0
+        || maxDeferredReactivationsPerRound <= 0
         || stagnationWindow <= 0
         || divergenceWindow <= 0
         || cooldownRounds <= 0) {
@@ -38,9 +40,42 @@ public record ProofGraphConvergenceConfig(
     }
   }
 
+  public ProofGraphConvergenceConfig(
+      int maxActiveCanonicalTargetsPerRoute,
+      int maxActiveCanonicalTargetsCampaign,
+      int maxNewCanonicalTargetsPerFocusedEpisode,
+      int stagnationWindow,
+      int divergenceWindow,
+      int cooldownRounds,
+      double debtEpsilon,
+      double closedTargetWeight,
+      double verifiedClaimWeight,
+      double exactRefutationWeight,
+      double debtDecreaseWeight,
+      double newTargetPenalty,
+      double duplicateOccurrencePenalty,
+      double forbiddenProposalPenalty) {
+    this(
+        maxActiveCanonicalTargetsPerRoute,
+        maxActiveCanonicalTargetsCampaign,
+        maxNewCanonicalTargetsPerFocusedEpisode,
+        stagnationWindow,
+        divergenceWindow,
+        cooldownRounds,
+        debtEpsilon,
+        closedTargetWeight,
+        verifiedClaimWeight,
+        exactRefutationWeight,
+        debtDecreaseWeight,
+        newTargetPenalty,
+        duplicateOccurrencePenalty,
+        forbiddenProposalPenalty,
+        2);
+  }
+
   public static ProofGraphConvergenceConfig defaults() {
     return new ProofGraphConvergenceConfig(
-        8, 20, 2, 2, 2, 1, 1.0e-9d, 2.0d, 2.0d, 1.0d, 1.0d, 1.0d, 0.5d, 1.0d);
+        8, 20, 2, 2, 2, 1, 1.0e-9d, 2.0d, 2.0d, 1.0d, 1.0d, 1.0d, 0.5d, 1.0d, 2);
   }
 
   public double score(ProofGraphRoundMetrics current, ProofGraphRoundMetrics previous) {

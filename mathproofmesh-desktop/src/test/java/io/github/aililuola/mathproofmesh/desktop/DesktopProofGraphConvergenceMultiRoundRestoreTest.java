@@ -2,6 +2,7 @@ package io.github.aililuola.mathproofmesh.desktop;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.aililuola.mathproofmesh.contract.ProofObligation;
 import io.github.aililuola.mathproofmesh.proofgraph.BottleneckRelationType;
 import io.github.aililuola.mathproofmesh.proofgraph.FocusedRecoveryActionType;
 import io.github.aililuola.mathproofmesh.proofgraph.ObligationCreationContext;
@@ -35,6 +36,7 @@ class DesktopProofGraphConvergenceMultiRoundRestoreTest {
             "unused");
     int rawProposals = 0;
     int postRestoreStateChanges = 0;
+    int postRestoreDeferredReconciliations = 0;
     int rootHashChanges = 0;
     int negativeHashChanges = 0;
     int attemptHashChanges = 0;
@@ -97,23 +99,31 @@ class DesktopProofGraphConvergenceMultiRoundRestoreTest {
         if (round < 6) {
           for (int duplicate = 0; duplicate < 4; duplicate++) {
             String id = "convergence-duplicate-" + round + "-" + duplicate;
+            ProofObligation duplicateObligation =
+                DesktopProofGraphIssue005BlackBoxSupport.obligation(
+                    id,
+                    "route-1",
+                    "Resolve focused convergence seed 0.",
+                    "resolve focused convergence seed 0",
+                    "convergence-selected-family",
+                    "duplicate-plan-" + round + "-" + duplicate);
+            ObligationCreationContext duplicateContext =
+                context(
+                    id,
+                    "convergence-selected-family",
+                    "convergence-selected-family",
+                    round);
+            ProofGraphStore currentGraph = DesktopProofGraphIssue005BlackBoxSupport.graph(harness);
+            String candidateCanonical =
+                currentGraph
+                    .existingCanonicalTargetId(duplicateObligation, duplicateContext)
+                    .orElse("");
             boolean admitted =
                 DesktopProofGraphIssue005BlackBoxSupport.addControlledObligation(
-                    harness,
-                    DesktopProofGraphIssue005BlackBoxSupport.obligation(
-                        id,
-                        "route-1",
-                        "Resolve focused convergence seed 0.",
-                        "resolve focused convergence seed 0",
-                        "convergence-selected-family",
-                        "duplicate-plan-" + round + "-" + duplicate),
-                    context(
-                        id,
-                        "convergence-selected-family",
-                        "convergence-selected-family",
-                        round),
+                    harness, duplicateObligation, duplicateContext,
                     FocusedRecoveryActionType.FOCUSED_PROVER);
-            assertThat(admitted).isTrue();
+            assertThat(monitor.selectsCurrentBinding("", candidateCanonical)).isFalse();
+            assertThat(admitted).isFalse();
             rawProposals++;
           }
           for (int candidate = 0; candidate < 2; candidate++) {
@@ -172,7 +182,7 @@ class DesktopProofGraphConvergenceMultiRoundRestoreTest {
               DesktopProofGraphIssue005BlackBoxSupport.convergenceHash(harness);
           postRestoreStateChanges +=
               convergenceHashAfterRestore.equals(convergenceHashBeforeRestore) ? 0 : 1;
-          postRestoreStateChanges +=
+          postRestoreDeferredReconciliations +=
               DesktopProofGraphIssue005BlackBoxSupport.deferredHash(harness).equals(deferredHash)
                   ? 0
                   : 1;
@@ -230,6 +240,8 @@ class DesktopProofGraphConvergenceMultiRoundRestoreTest {
               .toList();
       List<DesktopSolveCheckpoint.ScheduledProofTask> focusedTasks =
           tasks.stream().filter(task -> task.source().startsWith("focused-recovery:")).toList();
+      List<DesktopSolveCheckpoint.ScheduledProofTask> recoveryTasks =
+          tasks.stream().filter(task -> recoveryTaskSource(task.source())).toList();
       long duplicateFocusedTasks =
           focusedTasks.size()
               - focusedTasks.stream()
@@ -243,7 +255,8 @@ class DesktopProofGraphConvergenceMultiRoundRestoreTest {
                   .distinct()
                   .count();
       long unrelatedFamilyTasks =
-          focusedTasks.stream()
+          recoveryTasks.stream()
+              .filter(task -> !task.source().contains("exact-falsification"))
               .filter(task -> !selectedFamilies.contains(task.familyId()))
               .count();
       int postRestoreGenericLeaks = monitor.genericExpansionLeaks();
@@ -262,7 +275,7 @@ class DesktopProofGraphConvergenceMultiRoundRestoreTest {
 
       assertThat(rawProposals).isEqualTo(38);
       assertThat(occurrenceDelta).isEqualTo(rawProposals);
-      assertThat(monitor.stagnationEpisodes()).isEqualTo(2);
+      assertThat(monitor.stagnationEpisodes()).isEqualTo(1);
       assertThat(monitor.focusedRecoveryEntries()).isEqualTo(2);
       assertThat(monitor.focusedRecoveryExits()).isEqualTo(1);
       assertThat(monitor.recoveryCooldownEntries()).isEqualTo(1);
@@ -282,6 +295,7 @@ class DesktopProofGraphConvergenceMultiRoundRestoreTest {
       assertThat(falseDebtDecreases).isZero();
       assertThat(duplicateProgress).isZero();
       assertThat(postRestoreStateChanges).isZero();
+      assertThat(postRestoreDeferredReconciliations).isEqualTo(1);
       assertThat(postRestoreGenericLeaks).isZero();
       assertThat(postRestoreDuplicateFocusedTasks).isZero();
       assertThat(rootHashChanges).isZero();
@@ -328,6 +342,7 @@ class DesktopProofGraphConvergenceMultiRoundRestoreTest {
       print("CANONICAL_DEBT_FALSE_DECREASES", falseDebtDecreases);
       print("RAW_DUPLICATES_COUNTED_AS_PROGRESS", duplicateProgress);
       print("POST_RESTORE_STATE_CHANGES", postRestoreStateChanges);
+      print("POST_RESTORE_DEFERRED_RECONCILIATIONS", postRestoreDeferredReconciliations);
       print("POST_RESTORE_GENERIC_EXPANSION_LEAKS", postRestoreGenericLeaks);
       print("POST_RESTORE_DUPLICATE_FOCUSED_TASKS", postRestoreDuplicateFocusedTasks);
       print("ROOT_HASH_CHANGES", rootHashChanges);
@@ -388,6 +403,17 @@ class DesktopProofGraphConvergenceMultiRoundRestoreTest {
                   "DEEPEN"))
           .isFalse();
     }
+  }
+
+  private static boolean recoveryTaskSource(String source) {
+    String normalized = source == null ? "" : source.toLowerCase(java.util.Locale.ROOT);
+    return normalized.contains("focused-recovery")
+        || normalized.contains("proof-debt")
+        || normalized.contains("meta-review")
+        || normalized.contains("family-bridge")
+        || normalized.contains("focused-prover")
+        || normalized.contains("focused-skeptic")
+        || normalized.contains("exact-falsification");
   }
 
   private static int debtDecreaseEvents(List<ProofGraphRoundMetrics> metrics, double epsilon) {

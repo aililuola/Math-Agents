@@ -92,7 +92,8 @@ final class ProofGraphConvergenceControlBoundaryTest {
                 1,
                 "",
                 "unrelated"))
-        .isEqualTo(FocusedExpansionDecision.allow());
+        .extracting(FocusedExpansionDecision::code)
+        .isEqualTo("DEFER_UNSELECTED_RECOVERY_BINDING");
     assertThat(
             focused.decideExpansion(
                 FocusedRecoveryActionType.GENERIC_INSPIRATION,
@@ -128,7 +129,7 @@ final class ProofGraphConvergenceControlBoundaryTest {
                 0,
                 "",
                 "unrelated"))
-        .isEqualTo(FocusedExpansionDecision.allow());
+        .isEqualTo(FocusedExpansionDecision.deferFocusedRecovery());
 
     assertThat(focused.acquireFocusedTaskLease(FocusedRecoveryActionType.FOCUSED_PROVER, -1))
         .isFalse();
