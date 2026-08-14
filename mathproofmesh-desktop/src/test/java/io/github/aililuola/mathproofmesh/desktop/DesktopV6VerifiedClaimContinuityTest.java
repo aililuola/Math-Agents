@@ -80,7 +80,8 @@ class DesktopV6VerifiedClaimContinuityTest {
       versionSeven = restored.checkpointRoundTrip();
     }
 
-    assertThat(versionSeven.schemaVersion()).isEqualTo(8);
+    assertThat(versionSeven.schemaVersion())
+        .isEqualTo(DesktopSolveCheckpoint.CURRENT_SCHEMA_VERSION);
     assertThat(versionSeven.claimLifecycle().entries()).containsKey(CLAIM_ID);
 
     int secondRestoreFactLosses;

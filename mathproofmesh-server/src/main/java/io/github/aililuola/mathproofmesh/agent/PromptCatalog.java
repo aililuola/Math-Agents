@@ -74,6 +74,11 @@ public final class PromptCatalog {
     stages.put("route_tool_audit", "Audit deterministic replay and the exact mathematical mapping of each result.");
     stages.put("post_failure_bottleneck", "Diagnose the smallest public-state bottleneck without reconstructing private reasoning.");
     stages.put("bridge_lemma", "Prove only the shared obligation from verified facts and failure records.");
+    stages.put(
+        "obligation_family_review",
+        "Classify only whether each supplied canonical target shares an upstream research "
+            + "bottleneck, refines it, or offers an alternative proof plan. This scheduling "
+            + "review never establishes mathematical equivalence and cannot close or refute a target.");
     stages.put("resolve_contradiction", "Return one scoped contradiction resolution and preserve both provenances.");
     stages.put("acknowledge_message", "Return the opaque receipt and report actual verified use without inventing a hash.");
     stages.put("counterexample_search", "Try to falsify the exact scoped claim; non-refutation is not verification.");

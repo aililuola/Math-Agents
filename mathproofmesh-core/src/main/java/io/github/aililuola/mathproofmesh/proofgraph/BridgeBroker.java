@@ -107,7 +107,25 @@ public final class BridgeBroker {
     }
     graph.addClaimNode(message);
     List<String> closed = new ArrayList<>();
+    String evidencedCanonicalTargetId =
+        task.obligationIds().stream()
+            .map(graph::canonicalTargetForObligation)
+            .flatMap(java.util.Optional::stream)
+            .filter(
+                target ->
+                    target.signature().normalizedStatement().equals(
+                        MathTextSimilarity.normalize(message.normalizedStatement())))
+            .map(CanonicalObligationRecord::canonicalTargetId)
+            .findFirst()
+            .orElse("");
     for (String obligationId : task.obligationIds()) {
+      if (evidencedCanonicalTargetId.isBlank()
+          || graph.canonicalTargetForObligation(obligationId).stream()
+              .noneMatch(
+                  target ->
+                      target.canonicalTargetId().equals(evidencedCanonicalTargetId))) {
+        continue;
+      }
       ProofObligation obligation = graph.getObligation(obligationId);
       if ("closed".equals(obligation.status())) {
         continue;

@@ -37,6 +37,7 @@ import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlModels;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyBlueprintCompiler;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyArchive;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphSnapshot;
+import io.github.aililuola.mathproofmesh.proofgraph.ProofTaskScope;
 import io.github.aililuola.mathproofmesh.research.ResearchCheckpointSnapshot;
 import io.github.aililuola.mathproofmesh.provider.UsageTotals;
 import io.github.aililuola.mathproofmesh.inspiration.InspirationSnapshot;
@@ -90,7 +91,7 @@ record DesktopSolveCheckpoint(
     List<String> completedStages,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 8;
+  static final int CURRENT_SCHEMA_VERSION = 9;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {
@@ -221,6 +222,8 @@ record DesktopSolveCheckpoint(
       String metaControlReason,
       List<AttemptRevisionCheckpoint> revisionHistory,
       String focusObligationId,
+      String focusedCanonicalTargetId,
+      String focusedBottleneckFamilyId,
       String focusSource,
       String latestResearchCheckpointId,
       List<String> activeResearchFindingIds,
@@ -242,6 +245,10 @@ record DesktopSolveCheckpoint(
       metaControlReason = metaControlReason == null ? "" : metaControlReason.strip();
       revisionHistory = revisionHistory == null ? List.of() : List.copyOf(revisionHistory);
       focusObligationId = focusObligationId == null ? "" : focusObligationId.strip();
+      focusedCanonicalTargetId =
+          focusedCanonicalTargetId == null ? "" : focusedCanonicalTargetId.strip();
+      focusedBottleneckFamilyId =
+          focusedBottleneckFamilyId == null ? "" : focusedBottleneckFamilyId.strip();
       focusSource = focusSource == null ? "" : focusSource.strip();
       latestResearchCheckpointId =
           latestResearchCheckpointId == null ? "" : latestResearchCheckpointId.strip();
@@ -331,6 +338,10 @@ record DesktopSolveCheckpoint(
       String source,
       String routeId,
       String obligationId,
+      String canonicalTargetId,
+      String familyId,
+      ProofTaskScope scope,
+      String actionKey,
       String requestedAction,
       int roundCreated) {
     ScheduledProofTask {
@@ -338,10 +349,39 @@ record DesktopSolveCheckpoint(
       source = require(source, "source");
       routeId = require(routeId, "routeId");
       obligationId = require(obligationId, "obligationId");
+      canonicalTargetId = canonicalTargetId == null ? "" : canonicalTargetId.strip();
+      familyId = familyId == null ? "" : familyId.strip();
+      scope = scope == null ? ProofTaskScope.ROUTE_OCCURRENCE : scope;
       requestedAction = require(requestedAction, "requestedAction");
+      actionKey =
+          actionKey == null || actionKey.isBlank()
+              ? requestedAction.toLowerCase(java.util.Locale.ROOT)
+              : actionKey.strip();
       if (roundCreated < 0) {
         throw new IllegalArgumentException("roundCreated must be nonnegative");
       }
+    }
+
+    ScheduledProofTask(
+        String taskId,
+        String source,
+        String routeId,
+        String obligationId,
+        String requestedAction,
+        int roundCreated) {
+      this(
+          taskId,
+          source,
+          routeId,
+          obligationId,
+          "",
+          "",
+          ProofTaskScope.ROUTE_OCCURRENCE,
+          requestedAction == null
+              ? ""
+              : requestedAction.toLowerCase(java.util.Locale.ROOT),
+          requestedAction,
+          roundCreated);
     }
   }
 

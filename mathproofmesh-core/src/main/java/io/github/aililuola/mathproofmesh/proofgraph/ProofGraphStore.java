@@ -52,11 +52,15 @@ public final class ProofGraphStore {
   private final Set<String> needsReverify = new LinkedHashSet<>();
   private final Map<String, Long> versions = new LinkedHashMap<>();
   private final List<ProofGraphAuditEvent> audit = new ArrayList<>();
+  private final ObligationCanonicalizationRegistry canonicalization =
+      new ObligationCanonicalizationRegistry();
   private final Graph<String, DefaultEdge> structuralProjection =
       new DirectedMultigraph<>(DefaultEdge.class);
   private String problemHash;
   private boolean frozen;
   private NegativeAwareProofGraphWriter negativeAwareWriter;
+  private ObligationCreationContext pendingCreationContext;
+  private CanonicalizedObligationWriteResult lastCanonicalizedWriteResult;
 
   public ProofGraphStore(String problemHash) {
     this(problemHash, ProofGraphPolicy.defaults());
@@ -72,6 +76,27 @@ public final class ProofGraphStore {
     return negativeAwareWriter.addObligation(obligation);
   }
 
+  public synchronized CanonicalizedObligationWriteResult addObligationCanonicalized(
+      ProofObligation obligation, ObligationCreationContext context) {
+    java.util.Objects.requireNonNull(obligation, "obligation");
+    java.util.Objects.requireNonNull(context, "context");
+    if (pendingCreationContext != null) {
+      throw new IllegalStateException("nested proof obligation creation is not permitted");
+    }
+    pendingCreationContext = context;
+    lastCanonicalizedWriteResult = null;
+    try {
+      negativeAwareWriter.addObligation(obligation);
+      if (lastCanonicalizedWriteResult == null) {
+        throw new IllegalStateException("canonical proof obligation write produced no result");
+      }
+      return lastCanonicalizedWriteResult;
+    } finally {
+      pendingCreationContext = null;
+      lastCanonicalizedWriteResult = null;
+    }
+  }
+
   public synchronized ProofObligation addRootGoalObligation(ProofObligation obligation) {
     return negativeAwareWriter.addRootGoalObligation(
         obligation, NegativeAwareProofGraphWriter.IMMUTABLE_ROOT_GOAL);
@@ -84,11 +109,19 @@ public final class ProofGraphStore {
   synchronized ProofObligation addObligationUnchecked(ProofObligation obligation) {
     ensureMutable();
     validateProblemHash(obligation.problemHash(), "obligation");
+    ObligationCreationContext context =
+        pendingCreationContext == null
+            ? ObligationCreationContext.defaultFor(obligation)
+            : pendingCreationContext;
+    if (!context.problemHash().equals(obligation.problemHash())) {
+      throw new IllegalArgumentException("obligation creation context problemHash mismatch");
+    }
     ProofObligation existing = obligations.get(resolve(obligation.obligationId()));
     if (existing != null) {
       if (!existing.contentHash().equals(obligation.contentHash())) {
         throw new IllegalArgumentException("obligation ID collision");
       }
+      lastCanonicalizedWriteResult = canonicalization.register(obligation, context);
       return existing;
     }
     for (String rawDependency : obligation.dependencyIds()) {
@@ -101,12 +134,24 @@ public final class ProofGraphStore {
       }
     }
 
+    String dependencyPlanSignature =
+        ObligationCanonicalizationRegistry.dependencyPlanSignature(obligation, context);
     Set<String> routes = Set.copyOf(obligation.routeIds());
     Optional<ProofObligation> duplicate =
         contentIndex.getOrDefault(obligation.contentHash(), List.of()).stream()
             .map(obligations::get)
             .filter(java.util.Objects::nonNull)
             .filter(item -> item.routeIds().stream().anyMatch(routes::contains))
+            .filter(
+                item ->
+                    dependencyPlanSignature.equals(
+                        canonicalization
+                            .occurrenceForObligation(item.obligationId())
+                            .map(ObligationOccurrenceRecord::dependencyPlanSignature)
+                            .orElseGet(
+                                () ->
+                                    ObligationCanonicalizationRegistry.dependencyPlanSignature(
+                                        item, ObligationCreationContext.defaultFor(item)))))
             .findFirst();
     if (duplicate.isPresent()) {
       ProofObligation canonical = duplicate.orElseThrow();
@@ -126,8 +171,10 @@ public final class ProofGraphStore {
           "obligation_duplicate_collapsed",
           canonical.obligationId(),
           Map.of("duplicate_obligation_id", obligation.obligationId()));
+      lastCanonicalizedWriteResult = canonicalization.register(obligation, context);
       return merged;
     }
+    ObligationCanonicalizationSnapshot beforeCanonicalization = canonicalization.snapshot();
     requireNodeCapacity();
     obligations.put(obligation.obligationId(), obligation);
     contentIndex
@@ -147,8 +194,11 @@ public final class ProofGraphStore {
                 obligation.obligationId(),
                 resolve(dependency)));
       }
+      lastCanonicalizedWriteResult = canonicalization.register(obligation, context);
     } catch (RuntimeException exception) {
       removeObligationInternal(obligation.obligationId());
+      canonicalization.load(beforeCanonicalization);
+      lastCanonicalizedWriteResult = null;
       throw exception;
     }
     return obligations.get(obligation.obligationId());
@@ -445,68 +495,106 @@ public final class ProofGraphStore {
 
   public synchronized List<List<ProofObligation>> findSharedBottlenecks(
       int minRoutes) {
-    List<ProofObligation> open =
-        obligations.values().stream()
-            .filter(item -> Set.of("open", "tentative", "blocked").contains(item.status()))
-            .toList();
-    Set<String> consumed = new LinkedHashSet<>();
+    if (minRoutes < 1) {
+      throw new IllegalArgumentException("minRoutes must be positive");
+    }
     List<List<ProofObligation>> result = new ArrayList<>();
-    for (ProofObligation candidate : open) {
-      if (consumed.contains(candidate.obligationId())) {
-        continue;
-      }
-      List<ProofObligation> group = new ArrayList<>();
-      group.add(candidate);
-      open.stream()
-          .filter(item -> !item.obligationId().equals(candidate.obligationId()))
-          .filter(item -> item.problemHash().equals(candidate.problemHash()))
-          .filter(item -> item.assumptions().equals(candidate.assumptions()))
-          .filter(
-              item ->
-                  MathTextSimilarity.statementSimilarity(
-                          item.normalizedStatement(), candidate.normalizedStatement())
-                      >= policy.bridgeSimilarityThreshold())
-          .forEach(group::add);
+    Set<String> familyTargets = new LinkedHashSet<>();
+    for (BottleneckFamilyRecord family : activeBottleneckFamilies()) {
+      familyTargets.addAll(family.canonicalTargetIds());
       Set<String> routes = new LinkedHashSet<>();
-      group.forEach(item -> routes.addAll(item.routeIds()));
-      if (routes.size() >= minRoutes) {
-        result.add(List.copyOf(group));
-        group.stream().map(ProofObligation::obligationId).forEach(consumed::add);
+      List<ProofObligation> members = new ArrayList<>();
+      for (String canonicalTargetId : family.canonicalTargetIds()) {
+        CanonicalObligationRecord target =
+            allCanonicalTargets().stream()
+                .filter(item -> item.canonicalTargetId().equals(canonicalTargetId))
+                .findFirst()
+                .orElse(null);
+        if (target == null) {
+          continue;
+        }
+        routes.addAll(target.routeIds());
+        target.occurrenceIds().stream()
+            .map(id -> canonicalization.snapshot().occurrences().get(id))
+            .filter(java.util.Objects::nonNull)
+            .map(ObligationOccurrenceRecord::obligationId)
+            .map(this::resolve)
+            .distinct()
+            .map(obligations::get)
+            .filter(java.util.Objects::nonNull)
+            .filter(item -> Set.of("open", "tentative", "blocked").contains(item.status()))
+            .forEach(members::add);
+      }
+      if (routes.size() >= minRoutes && !members.isEmpty()) {
+        result.add(
+            members.stream()
+                .distinct()
+                .sorted(Comparator.comparing(ProofObligation::obligationId))
+                .toList());
       }
     }
+    Map<String, ObligationOccurrenceRecord> occurrenceIndex =
+        canonicalization.snapshot().occurrences();
+    canonicalOpenTargets().stream()
+        .filter(target -> !familyTargets.contains(target.canonicalTargetId()))
+        .filter(target -> target.routeIds().size() >= minRoutes)
+        .map(
+            target ->
+                target.occurrenceIds().stream()
+                    .map(occurrenceIndex::get)
+                    .filter(java.util.Objects::nonNull)
+                    .map(ObligationOccurrenceRecord::obligationId)
+                    .map(this::resolve)
+                    .distinct()
+                    .map(obligations::get)
+                    .filter(java.util.Objects::nonNull)
+                    .filter(
+                        item ->
+                            Set.of("open", "tentative", "blocked").contains(item.status()))
+                    .sorted(Comparator.comparing(ProofObligation::obligationId))
+                    .toList())
+        .filter(group -> !group.isEmpty())
+        .forEach(result::add);
     return List.copyOf(result);
   }
 
   public synchronized double proofDebt(String routeId) {
+    return rawProofDebt(routeId);
+  }
+
+  public synchronized double rawProofDebt(String routeId) {
     double debt = 0.0;
     for (ProofObligation obligation : obligations.values()) {
       if (!obligation.routeIds().contains(routeId)
           || "closed".equals(obligation.status())) {
         continue;
       }
-      double weight = policy.obligationBaseWeight();
-      if (obligation.kind() == ObligationKind.MAIN_GOAL) {
-        weight += policy.obligationMainGoalWeight();
-      }
-      weight += obligation.centrality() * policy.obligationCentralityWeight();
-      weight +=
-          dependentsByTarget
-                  .getOrDefault(obligation.obligationId(), Set.of())
-                  .size()
-              * policy.obligationDependencyWeight();
-      weight +=
-          Math.max(0, Set.copyOf(obligation.routeIds()).size() - 1)
-              * policy.obligationSharedRouteWeight();
-      if (obligation.firstErrorFingerprint() != null) {
-        weight += policy.obligationFailureWeight();
-      }
-      if (obligation.kind() == ObligationKind.CONTRADICTION
-          || "blocked".equals(obligation.status())) {
-        weight += policy.obligationConflictWeight();
-      }
-      debt += weight * Math.max(0.01, obligation.priority());
+      debt += obligationDebtWeight(obligation);
     }
     return debt;
+  }
+
+  public synchronized double canonicalProofDebt(String routeId) {
+    Map<String, Double> weights = canonicalDebtWeights(routeId, null);
+    return weights.values().stream().mapToDouble(Double::doubleValue).sum();
+  }
+
+  public synchronized double globalCanonicalProofDebt() {
+    return canonicalDebtWeights(null, null).values().stream()
+        .mapToDouble(Double::doubleValue)
+        .sum();
+  }
+
+  public synchronized double activeCanonicalProofDebt() {
+    return canonicalDebtWeights(null, Boolean.TRUE).values().stream()
+        .mapToDouble(Double::doubleValue)
+        .sum();
+  }
+
+  public synchronized double deferredCanonicalProofDebt() {
+    return canonicalDebtWeights(null, Boolean.FALSE).values().stream()
+        .mapToDouble(Double::doubleValue)
+        .sum();
   }
 
   public synchronized String coreBottleneck() {
@@ -559,7 +647,8 @@ public final class ProofGraphStore {
         Map.of(),
         intersection(needsReverify, selected),
         filteredVersions(selected, selectedClaims),
-        audit);
+        audit,
+        canonicalization.snapshot());
   }
 
   public synchronized void freeze() {
@@ -584,6 +673,179 @@ public final class ProofGraphStore {
 
   public synchronized List<ProofObligation> obligations() {
     return List.copyOf(obligations.values());
+  }
+
+  public synchronized List<ObligationOccurrenceRecord> rawObligationOccurrences() {
+    return canonicalization.occurrences();
+  }
+
+  public synchronized List<CanonicalObligationRecord> allCanonicalTargets() {
+    return canonicalization.canonicalTargets();
+  }
+
+  public synchronized List<CanonicalObligationRecord> canonicalOpenTargets() {
+    return canonicalization.canonicalTargets().stream()
+        .filter(this::isOperationallyOpen)
+        .sorted(canonicalTargetOrder())
+        .toList();
+  }
+
+  public synchronized List<CanonicalObligationRecord> canonicalOpenTargets(String routeId) {
+    return canonicalOpenTargets().stream()
+        .filter(target -> target.routeIds().contains(routeId))
+        .toList();
+  }
+
+  public synchronized List<BottleneckFamilyRecord> allBottleneckFamilies() {
+    return canonicalization.bottleneckFamilies();
+  }
+
+  public synchronized List<BottleneckFamilyRecord> activeBottleneckFamilies() {
+    return canonicalization.bottleneckFamilies().stream()
+        .filter(family -> family.schedulingState() == BottleneckFamilySchedulingState.ACTIVE)
+        .filter(
+            family ->
+                family.canonicalTargetIds().stream()
+                    .map(this::canonicalStatus)
+                    .anyMatch(
+                        status ->
+                            status == CanonicalObligationStatus.OPEN
+                                || status == CanonicalObligationStatus.MIXED))
+        .sorted(Comparator.comparing(BottleneckFamilyRecord::familyId))
+        .toList();
+  }
+
+  public synchronized List<ProofGraphWorkItem> coreOpenWorkItems() {
+    Set<String> core = coreDependencyClosure();
+    boolean hasMainGoal =
+        obligations.values().stream().anyMatch(item -> item.kind() == ObligationKind.MAIN_GOAL);
+    Map<String, ObligationOccurrenceRecord> occurrenceIndex =
+        canonicalization.snapshot().occurrences();
+    List<CanonicalObligationRecord> targets =
+        canonicalOpenTargets().stream()
+        .filter(
+            target ->
+                !hasMainGoal
+                    || target.occurrenceIds().stream()
+                        .map(occurrenceIndex::get)
+                        .filter(java.util.Objects::nonNull)
+                        .map(ObligationOccurrenceRecord::obligationId)
+                        .map(this::resolve)
+                        .anyMatch(core::contains))
+        .toList();
+    Map<String, CanonicalObligationRecord> byId =
+        targets.stream()
+            .collect(
+                java.util.stream.Collectors.toMap(
+                    CanonicalObligationRecord::canonicalTargetId,
+                    java.util.function.Function.identity(),
+                    (left, right) -> left,
+                    LinkedHashMap::new));
+    Set<String> consumed = new LinkedHashSet<>();
+    List<ProofGraphWorkItem> workItems = new ArrayList<>();
+    for (BottleneckFamilyRecord family : activeBottleneckFamilies()) {
+      Set<String> members = new LinkedHashSet<>(family.canonicalTargetIds());
+      members.retainAll(byId.keySet());
+      if (members.isEmpty()) {
+        continue;
+      }
+      Set<String> routes = new LinkedHashSet<>();
+      members.stream().map(byId::get).forEach(target -> routes.addAll(target.routeIds()));
+      String representative =
+          members.contains(family.representativeCanonicalTargetId())
+              ? family.representativeCanonicalTargetId()
+              : members.stream().sorted().findFirst().orElseThrow();
+      workItems.add(
+          new ProofGraphWorkItem(
+              ProofTaskScope.BOTTLENECK_FAMILY,
+              family.familyId(),
+              representative,
+              members,
+              routes));
+      consumed.addAll(members);
+    }
+    targets.stream()
+        .filter(target -> !consumed.contains(target.canonicalTargetId()))
+        .forEach(
+            target ->
+                workItems.add(
+                    new ProofGraphWorkItem(
+                        ProofTaskScope.CANONICAL_TARGET,
+                        target.canonicalTargetId(),
+                        target.canonicalTargetId(),
+                        Set.of(target.canonicalTargetId()),
+                        target.routeIds())));
+    return workItems.stream()
+        .sorted(Comparator.comparing(ProofGraphWorkItem::workItemId))
+        .toList();
+  }
+
+  public synchronized Optional<CanonicalObligationRecord> canonicalTargetForObligation(
+      String obligationId) {
+    return canonicalization.canonicalForObligation(obligationId);
+  }
+
+  public synchronized Optional<BottleneckFamilyRecord> bottleneckFamilyForCanonical(
+      String canonicalTargetId) {
+    return canonicalization.familyForCanonicalTarget(canonicalTargetId);
+  }
+
+  public synchronized CanonicalObligationStatus canonicalStatus(String canonicalTargetId) {
+    CanonicalObligationRecord target =
+        canonicalization.canonicalTargets().stream()
+            .filter(item -> item.canonicalTargetId().equals(canonicalTargetId))
+            .findFirst()
+            .orElseThrow(
+                () ->
+                    new IllegalArgumentException(
+                        "unknown canonical obligation target: " + canonicalTargetId));
+    Map<String, ObligationOccurrenceRecord> occurrenceIndex =
+        canonicalization.snapshot().occurrences();
+    List<String> statuses =
+        target.occurrenceIds().stream()
+            .map(occurrenceIndex::get)
+            .filter(java.util.Objects::nonNull)
+            .map(ObligationOccurrenceRecord::obligationId)
+            .map(this::resolve)
+            .map(obligations::get)
+            .filter(java.util.Objects::nonNull)
+            .map(ProofObligation::status)
+            .toList();
+    if (statuses.isEmpty()) {
+      return CanonicalObligationStatus.OPEN;
+    }
+    boolean allClosed = statuses.stream().allMatch("closed"::equals);
+    if (allClosed) {
+      return CanonicalObligationStatus.RESOLVED;
+    }
+    boolean allRefuted = statuses.stream().allMatch("refuted"::equals);
+    if (allRefuted) {
+      return CanonicalObligationStatus.REFUTED;
+    }
+    boolean allTerminal =
+        statuses.stream().allMatch(status -> Set.of("closed", "refuted").contains(status));
+    if (allTerminal) {
+      return CanonicalObligationStatus.MIXED;
+    }
+    return CanonicalObligationStatus.OPEN;
+  }
+
+  public synchronized boolean acquireCanonicalTaskLease(
+      ProofTaskScope scope, String scopeId, String actionKey) {
+    return canonicalization.acquireTaskLease(scope, scopeId, actionKey);
+  }
+
+  public synchronized boolean hasCanonicalTaskLease(
+      ProofTaskScope scope, String scopeId, String actionKey) {
+    return canonicalization.hasTaskLease(scope, scopeId, actionKey);
+  }
+
+  public synchronized ObligationCanonicalizationSnapshot canonicalizationSnapshot() {
+    return canonicalization.snapshot();
+  }
+
+  public synchronized String canonicalizationHash() {
+    return canonicalization.stableHash();
   }
 
   public synchronized List<MessageEnvelope> claimNodes() {
@@ -620,7 +882,8 @@ public final class ProofGraphStore {
         aliases,
         needsReverify,
         versions,
-        audit);
+        audit,
+        canonicalization.snapshot());
   }
 
   public synchronized void configureNegativeKnowledge(
@@ -680,6 +943,20 @@ public final class ProofGraphStore {
                   .computeIfAbsent(item.contentHash(), ignored -> new ArrayList<>())
                   .add(item.obligationId()));
       store.rebuildProjectionAndIndexes();
+      if (snapshot.canonicalization().emptyState()) {
+        snapshot.obligations().values().stream()
+            .sorted(Comparator.comparing(ProofObligation::obligationId))
+            .forEach(
+                obligation ->
+                    store.canonicalization.register(
+                        obligation, ObligationCreationContext.defaultFor(obligation)));
+        store.record(
+            "canonicalization_rebuilt_from_raw",
+            "proof-graph",
+            Map.of("raw_obligation_count", Integer.toString(snapshot.obligations().size())));
+      } else {
+        store.canonicalization.load(snapshot.canonicalization());
+      }
     }
     return store;
   }
@@ -832,6 +1109,80 @@ public final class ProofGraphStore {
             entry.getValue().sourceId().equals(obligationId)
                 || entry.getValue().targetId().equals(obligationId));
     rebuildProjectionAndIndexes();
+  }
+
+  private Map<String, Double> canonicalDebtWeights(
+      String routeId, Boolean activeOnly) {
+    Map<String, Double> result = new LinkedHashMap<>();
+    for (CanonicalObligationRecord target : canonicalization.canonicalTargets()) {
+      CanonicalObligationStatus status = canonicalStatus(target.canonicalTargetId());
+      if (status == CanonicalObligationStatus.RESOLVED
+          || status == CanonicalObligationStatus.REFUTED) {
+        continue;
+      }
+      boolean active =
+          target.schedulingState() == CanonicalObligationSchedulingState.ACTIVE;
+      if (activeOnly != null && activeOnly.booleanValue() != active) {
+        continue;
+      }
+      double maximum = 0.0d;
+      for (String occurrenceId : target.occurrenceIds()) {
+        ObligationOccurrenceRecord occurrence =
+            canonicalization.snapshot().occurrences().get(occurrenceId);
+        if (occurrence == null) {
+          continue;
+        }
+        ProofObligation obligation = obligations.get(resolve(occurrence.obligationId()));
+        if (obligation == null
+            || (routeId != null && !obligation.routeIds().contains(routeId))) {
+          continue;
+        }
+        maximum = Math.max(maximum, obligationDebtWeight(obligation));
+      }
+      if (maximum > 0.0d) {
+        result.put(target.canonicalTargetId(), maximum);
+      }
+    }
+    return Map.copyOf(result);
+  }
+
+  private double obligationDebtWeight(ProofObligation obligation) {
+    double weight = policy.obligationBaseWeight();
+    if (obligation.kind() == ObligationKind.MAIN_GOAL) {
+      weight += policy.obligationMainGoalWeight();
+    }
+    weight += obligation.centrality() * policy.obligationCentralityWeight();
+    weight +=
+        dependentsByTarget.getOrDefault(obligation.obligationId(), Set.of()).size()
+            * policy.obligationDependencyWeight();
+    weight +=
+        Math.max(0, Set.copyOf(obligation.routeIds()).size() - 1)
+            * policy.obligationSharedRouteWeight();
+    if (obligation.firstErrorFingerprint() != null) {
+      weight += policy.obligationFailureWeight();
+    }
+    if (obligation.kind() == ObligationKind.CONTRADICTION
+        || "blocked".equals(obligation.status())) {
+      weight += policy.obligationConflictWeight();
+    }
+    return weight * Math.max(0.01d, obligation.priority());
+  }
+
+  private boolean isOperationallyOpen(CanonicalObligationRecord target) {
+    CanonicalObligationStatus status = canonicalStatus(target.canonicalTargetId());
+    return target.schedulingState() == CanonicalObligationSchedulingState.ACTIVE
+        && (status == CanonicalObligationStatus.OPEN
+            || status == CanonicalObligationStatus.MIXED);
+  }
+
+  private Comparator<CanonicalObligationRecord> canonicalTargetOrder() {
+    return Comparator.comparing(
+            (CanonicalObligationRecord target) ->
+                target.signature().kind() != ObligationKind.MAIN_GOAL)
+        .thenComparing(
+            (CanonicalObligationRecord target) -> target.routeIds().size(),
+            Comparator.reverseOrder())
+        .thenComparing(CanonicalObligationRecord::canonicalTargetId);
   }
 
   private void requireNodeCapacity() {

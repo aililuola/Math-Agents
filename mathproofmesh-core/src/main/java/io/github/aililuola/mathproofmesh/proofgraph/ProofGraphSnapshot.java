@@ -22,7 +22,8 @@ public record ProofGraphSnapshot(
     Map<String, String> aliases,
     Set<String> needsReverify,
     Map<String, Long> versions,
-    List<ProofGraphAuditEvent> audit) {
+    List<ProofGraphAuditEvent> audit,
+    ObligationCanonicalizationSnapshot canonicalization) {
 
   public ProofGraphSnapshot {
     problemHash = problemHash == null ? "" : problemHash;
@@ -33,6 +34,33 @@ public record ProofGraphSnapshot(
     needsReverify = needsReverify == null ? Set.of() : Set.copyOf(needsReverify);
     versions = copy(versions);
     audit = audit == null ? List.of() : List.copyOf(audit);
+    canonicalization =
+        canonicalization == null
+            ? ObligationCanonicalizationSnapshot.empty()
+            : canonicalization;
+  }
+
+  public ProofGraphSnapshot(
+      String problemHash,
+      boolean frozen,
+      Map<String, ProofObligation> obligations,
+      Map<String, MessageEnvelope> claimNodes,
+      Map<String, ProofGraphEdge> edges,
+      Map<String, String> aliases,
+      Set<String> needsReverify,
+      Map<String, Long> versions,
+      List<ProofGraphAuditEvent> audit) {
+    this(
+        problemHash,
+        frozen,
+        obligations,
+        claimNodes,
+        edges,
+        aliases,
+        needsReverify,
+        versions,
+        audit,
+        ObligationCanonicalizationSnapshot.empty());
   }
 
   private static <K, V> Map<K, V> copy(Map<K, V> value) {

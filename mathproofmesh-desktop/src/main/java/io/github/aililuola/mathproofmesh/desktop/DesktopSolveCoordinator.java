@@ -168,9 +168,16 @@ import io.github.aililuola.mathproofmesh.proofcontrol.ProblemSemanticViewService
 import io.github.aililuola.mathproofmesh.proofcontrol.RootGoalContract;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyArchive;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyBlueprintCompiler;
+import io.github.aililuola.mathproofmesh.proofgraph.BottleneckFamilyRecord;
+import io.github.aililuola.mathproofmesh.proofgraph.BottleneckRelationType;
+import io.github.aililuola.mathproofmesh.proofgraph.CanonicalObligationRecord;
+import io.github.aililuola.mathproofmesh.proofgraph.ObligationCreationContext;
+import io.github.aililuola.mathproofmesh.proofgraph.ObligationOccurrenceSchedulingState;
+import io.github.aililuola.mathproofmesh.proofgraph.ObligationSourceType;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphPolicy;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphServices;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
+import io.github.aililuola.mathproofmesh.proofgraph.ProofTaskScope;
 import io.github.aililuola.mathproofmesh.research.ResearchCheckpointLedger;
 import io.github.aililuola.mathproofmesh.research.ResearchCheckpointRecord;
 import io.github.aililuola.mathproofmesh.research.ResearchFindingRecord;
@@ -795,7 +802,7 @@ final class DesktopSolveCoordinator {
     String obligationId = routeObligationId(routeId);
     if (proofGraph.obligations().stream()
         .noneMatch(obligation -> obligation.obligationId().equals(obligationId))) {
-      proofGraph.addObligation(
+      ProofObligation routeObligation =
           new ProofObligation(
               List.of(),
               0.7d,
@@ -812,7 +819,15 @@ final class DesktopSolveCoordinator {
               List.of(),
               List.of(routeId),
               strategy.bottleneck(),
-              "open"));
+              "open");
+      proofGraph.addObligationCanonicalized(
+          routeObligation,
+          obligationContext(
+              state,
+              ObligationSourceType.ROUTE_BOTTLENECK,
+              "strategy://" + strategy.strategyId(),
+              topology.mathNormalize(strategy.bottleneck()),
+              strategy.bottleneck()));
     }
     addBlueprintObligations(state);
     event(
@@ -1096,6 +1111,74 @@ final class DesktopSolveCoordinator {
         "focused_obligation",
         findObligation(route.focusObligationId).map(ProofObligation::statement).orElse("none"));
     context.put("focused_obligation_id", route.focusObligationId);
+    Optional<CanonicalObligationRecord> focusedCanonical =
+        route.focusedCanonicalTargetId.isBlank()
+            ? proofGraph.canonicalTargetForObligation(route.focusObligationId)
+            : proofGraph.allCanonicalTargets().stream()
+                .filter(
+                    target ->
+                        target.canonicalTargetId().equals(route.focusedCanonicalTargetId))
+                .findFirst();
+    Optional<BottleneckFamilyRecord> focusedFamily =
+        route.focusedBottleneckFamilyId.isBlank()
+            ? focusedCanonical.flatMap(
+                target ->
+                    proofGraph.bottleneckFamilyForCanonical(target.canonicalTargetId()))
+            : proofGraph.allBottleneckFamilies().stream()
+                .filter(family -> family.familyId().equals(route.focusedBottleneckFamilyId))
+                .findFirst();
+    context.put(
+        "focused_raw_obligation",
+        findObligation(route.focusObligationId)
+            .map(
+                obligation ->
+                    Map.of(
+                        "obligation_id", obligation.obligationId(),
+                        "statement", obligation.statement(),
+                        "status", obligation.status()))
+            .orElse(Map.of()));
+    context.put(
+        "focused_canonical_target",
+        focusedCanonical.map(DesktopSolveCoordinator::canonicalPromptView).orElse(Map.of()));
+    context.put(
+        "focused_dependency_plan",
+        proofGraph.rawObligationOccurrences().stream()
+            .filter(occurrence -> occurrence.obligationId().equals(route.focusObligationId))
+            .map(
+                occurrence ->
+                    Map.of(
+                        "dependency_plan_signature", occurrence.dependencyPlanSignature(),
+                        "source_type", occurrence.sourceType().name()))
+            .findFirst()
+            .orElse(Map.of()));
+    context.put(
+        "focused_bottleneck_family",
+        focusedFamily.map(DesktopSolveCoordinator::familyPromptView).orElse(Map.of()));
+    context.put(
+        "canonical_open_targets",
+        proofGraph.canonicalOpenTargets(route.routeId).stream()
+            .limit(8)
+            .map(DesktopSolveCoordinator::canonicalPromptView)
+            .toList());
+    context.put(
+        "bottleneck_family_summary",
+        proofGraph.activeBottleneckFamilies().stream()
+            .filter(
+                family ->
+                    family.canonicalTargetIds().stream()
+                        .anyMatch(
+                            id ->
+                                proofGraph.allCanonicalTargets().stream()
+                                    .filter(target -> target.canonicalTargetId().equals(id))
+                                    .anyMatch(target -> target.routeIds().contains(route.routeId))))
+            .limit(6)
+            .map(DesktopSolveCoordinator::familyPromptView)
+            .toList());
+    context.put(
+        "canonicalization_authority_rule",
+        "Canonical targets deduplicate scheduling only. Bottleneck families are research "
+            + "focus groups, never mathematical equivalence, Claim, Fact, proof, refutation, "
+            + "or authority to propagate status between raw obligations.");
     context.put("focus_source", route.focusSource);
     context.put(
         "strategy_blueprint",
@@ -1133,6 +1216,46 @@ final class DesktopSolveCoordinator {
     return context;
   }
 
+  private static Map<String, Object> canonicalPromptView(CanonicalObligationRecord target) {
+    return Map.of(
+        "canonical_target_id", target.canonicalTargetId(),
+        "statement", target.signature().normalizedStatement(),
+        "route_count", target.routeIds().size(),
+        "dependency_plan_count", target.dependencyPlanSignatures().size(),
+        "scheduling_state", target.schedulingState().name());
+  }
+
+  private static Map<String, Object> familyPromptView(BottleneckFamilyRecord family) {
+    return Map.of(
+        "family_id", family.familyId(),
+        "label", family.label(),
+        "representative_canonical_target_id", family.representativeCanonicalTargetId(),
+        "target_count", family.canonicalTargetIds().size(),
+        "scheduling_state", family.schedulingState().name());
+  }
+
+  private ObligationCreationContext obligationContext(
+      RouteState route,
+      ObligationSourceType sourceType,
+      String sourceArtifactRef,
+      String bottleneckKey,
+      String bottleneckLabel) {
+    return new ObligationCreationContext(
+        problemHash,
+        route.routeId,
+        route.strategy.strategyId(),
+        sourceType,
+        sourceArtifactRef,
+        List.of(),
+        "",
+        Map.of(),
+        bottleneckKey,
+        bottleneckLabel,
+        BottleneckRelationType.SHARES_UPSTREAM_BOTTLENECK,
+        ObligationOccurrenceSchedulingState.ACTIVE,
+        roundIndex.get());
+  }
+
   private void addBlueprintObligations(RouteState route) {
     StrategyBlueprintCompiler.Compilation compilation =
         strategyBlueprints.get(route.strategy.strategyId());
@@ -1154,7 +1277,7 @@ final class DesktopSolveCoordinator {
                 : node.kind() == ProofControlModels.BlueprintNodeKind.COMPUTATION_TASK
                     ? ObligationKind.COMPUTATION_QUESTION
                     : ObligationKind.LEMMA;
-        proofGraph.addObligation(
+        ProofObligation blueprintObligation =
             new ProofObligation(
                 List.of(),
                 0.65d,
@@ -1171,7 +1294,15 @@ final class DesktopSolveCoordinator {
                 List.of(),
                 List.of(route.routeId),
                 node.statement(),
-                "open"));
+                "open");
+        proofGraph.addObligationCanonicalized(
+            blueprintObligation,
+            obligationContext(
+                route,
+                ObligationSourceType.STRATEGY_BLUEPRINT,
+                "blueprint://" + blueprint.id() + "/" + node.id(),
+                topology.mathNormalize(route.strategy.bottleneck()),
+                route.strategy.bottleneck()));
       }
       created.add(node.id());
     }
@@ -1308,7 +1439,7 @@ final class DesktopSolveCoordinator {
     }
     String id = "computation-obligation-" + spec.requestHash().substring(0, 16);
     if (findObligation(id).isEmpty()) {
-      proofGraph.addObligation(
+      ProofObligation computationObligation =
           new ProofObligation(
               spec.assumptions(),
               0.45d,
@@ -1325,7 +1456,19 @@ final class DesktopSolveCoordinator {
               List.of(),
               List.of(route.routeId),
               spec.targetClaim(),
-              "open"));
+              "open");
+      String computationBottleneck =
+          route.failure == null || route.failure.firstErrorFingerprint() == null
+              ? topology.mathNormalize(spec.targetClaim())
+              : route.failure.firstErrorFingerprint();
+      proofGraph.addObligationCanonicalized(
+          computationObligation,
+          obligationContext(
+              route,
+              ObligationSourceType.COMPUTATION_TARGET,
+              "experiment://" + spec.experimentId(),
+              computationBottleneck,
+              spec.targetClaim()));
     }
     return id;
   }
@@ -2588,7 +2731,7 @@ final class DesktopSolveCoordinator {
       if (acknowledged.status() != ReceiptStatus.ACCEPTED) {
         continue;
       }
-      double before = proofGraph.proofDebt(route.routeId);
+      double before = proofGraph.canonicalProofDebt(route.routeId);
       VerifiedDownstreamEffect effect =
           new VerifiedDownstreamEffect(
               verifiedSteps,
@@ -2598,7 +2741,7 @@ final class DesktopSolveCoordinator {
               Set.of(),
               false,
               before,
-              proofGraph.proofDebt(route.routeId));
+              proofGraph.canonicalProofDebt(route.routeId));
       messageBroker.verifyUtility(message.messageId(), route.routeId, effect);
       proofControl
           .messageUtility()
@@ -3217,7 +3360,7 @@ final class DesktopSolveCoordinator {
               .map(ProofObligation::obligationId)
               .toList();
       inspirationLedger.recordVerifiedGain(
-          proposalId, roundIndex.get(), proofGraph.proofDebt(route.routeId), closed);
+          proposalId, roundIndex.get(), proofGraph.canonicalProofDebt(route.routeId), closed);
     } else {
       InspirationOutcome current = inspirationLedger.snapshot().get(proposalId);
       inspirationLedger.recordMaterialization(
@@ -3519,7 +3662,7 @@ final class DesktopSolveCoordinator {
                 List.of(MAIN_GOAL_ID),
                 ProofControlModels.MessageExpectedEffect.CLOSE,
                 message.assumptions(),
-                Math.max(0.01d, proofGraph.proofDebt(route.routeId)),
+                Math.max(0.01d, proofGraph.canonicalProofDebt(route.routeId)),
                 roundIndex.get() + message.ttlRounds(),
                 knownObligations);
         var utilityDecision =
@@ -3884,7 +4027,8 @@ final class DesktopSolveCoordinator {
                     .filter(route -> !"verified".equals(route.status))
                     .min(
                         java.util.Comparator.comparingDouble(
-                                (RouteState route) -> proofGraph.proofDebt(route.routeId))
+                                (RouteState route) ->
+                                    proofGraph.canonicalProofDebt(route.routeId))
                             .reversed()
                             .thenComparing(route -> route.routeId)));
   }
@@ -3909,27 +4053,77 @@ final class DesktopSolveCoordinator {
 
   private boolean enqueueProofTask(
       String source, String routeId, String obligationId, String requestedAction) {
+    CanonicalObligationRecord canonicalTarget =
+        proofGraph.canonicalTargetForObligation(obligationId).orElse(null);
+    BottleneckFamilyRecord family =
+        canonicalTarget == null
+            ? null
+            : proofGraph
+                .bottleneckFamilyForCanonical(canonicalTarget.canonicalTargetId())
+                .orElse(null);
+    boolean automatic = automaticProofTaskSource(source);
+    ProofTaskScope scope =
+        automatic && family != null
+            ? ProofTaskScope.BOTTLENECK_FAMILY
+            : automatic && canonicalTarget != null
+                ? ProofTaskScope.CANONICAL_TARGET
+                : ProofTaskScope.ROUTE_OCCURRENCE;
+    String scopeId =
+        switch (scope) {
+          case BOTTLENECK_FAMILY -> family.familyId();
+          case CANONICAL_TARGET -> canonicalTarget.canonicalTargetId();
+          case ROUTE_OCCURRENCE -> routeId + ":" + obligationId;
+        };
+    String actionKey =
+        automatic
+            ? "repair"
+            : requestedAction.toLowerCase(Locale.ROOT).strip();
     if (pendingProofTasks.stream()
         .anyMatch(
             task ->
-                task.routeId().equals(routeId)
-                    && task.obligationId().equals(obligationId)
-                    && task.source().equals(source))) {
+                task.scope() == scope
+                    && task.actionKey().equals(actionKey)
+                    && switch (scope) {
+                      case BOTTLENECK_FAMILY -> task.familyId().equals(scopeId);
+                      case CANONICAL_TARGET -> task.canonicalTargetId().equals(scopeId);
+                      case ROUTE_OCCURRENCE ->
+                          task.routeId().equals(routeId)
+                              && task.obligationId().equals(obligationId);
+                    })) {
+      return false;
+    }
+    if (!proofGraph.acquireCanonicalTaskLease(scope, scopeId, actionKey)) {
       return false;
     }
     String taskId =
         "proof-task-"
             + CanonicalJson.stableHash(
                     Map.of(
-                        "source", source,
-                        "route_id", routeId,
-                        "obligation_id", obligationId,
-                        "round", roundIndex.get()))
+                        "scope", scope.name(),
+                        "scope_id", scopeId,
+                        "action_key", actionKey))
                 .substring(0, 20);
     pendingProofTasks.add(
         new DesktopSolveCheckpoint.ScheduledProofTask(
-            taskId, source, routeId, obligationId, requestedAction, roundIndex.get()));
+            taskId,
+            source,
+            routeId,
+            obligationId,
+            canonicalTarget == null ? "" : canonicalTarget.canonicalTargetId(),
+            family == null ? "" : family.familyId(),
+            scope,
+            actionKey,
+            requestedAction,
+            roundIndex.get()));
     return true;
+  }
+
+  private static boolean automaticProofTaskSource(String source) {
+    String normalized = source == null ? "" : source.toLowerCase(Locale.ROOT);
+    return normalized.contains("proof-debt")
+        || normalized.contains("meta-review")
+        || normalized.contains("inspiration")
+        || normalized.contains("bridge");
   }
 
   private boolean schedulePendingProofTask() {
@@ -3949,6 +4143,8 @@ final class DesktopSolveCoordinator {
         continue;
       }
       route.focusObligationId = obligation.obligationId();
+      route.focusedCanonicalTargetId = task.canonicalTargetId();
+      route.focusedBottleneckFamilyId = task.familyId();
       route.focusSource = task.source();
       boolean scheduled;
       if (route.attempt == null && route.segmentCount == 0 && "pending".equals(route.status)) {
@@ -4122,7 +4318,7 @@ final class DesktopSolveCoordinator {
                     route.routeId,
                     "verified".equals(route.status),
                     attemptFailureClass(route),
-                    proofGraph.proofDebt(route.routeId),
+                    proofGraph.canonicalProofDebt(route.routeId),
                     route.plan.risk().score(),
                     Math.max(0, route.segmentCount),
                     "abandoned".equals(route.status)
@@ -5022,7 +5218,34 @@ final class DesktopSolveCoordinator {
             statement,
             "open");
     if (findObligation(id).isEmpty()) {
-      proofGraph.addObligation(inspirationObligation);
+      RouteState contextRoute = targetRoute;
+      if (contextRoute == null) {
+        proofGraph.addObligationCanonicalized(
+            inspirationObligation,
+            new ObligationCreationContext(
+                problemHash,
+                "run",
+                "",
+                ObligationSourceType.INSPIRATION,
+                "inspiration://" + proposal.proposalId(),
+                List.of(),
+                "",
+                Map.of(),
+                proposal.mechanism().value(),
+                proposal.mechanism().value(),
+                BottleneckRelationType.SHARES_UPSTREAM_BOTTLENECK,
+                ObligationOccurrenceSchedulingState.ACTIVE,
+                roundIndex.get()));
+      } else {
+        proofGraph.addObligationCanonicalized(
+            inspirationObligation,
+            obligationContext(
+                contextRoute,
+                ObligationSourceType.INSPIRATION,
+                "inspiration://" + proposal.proposalId(),
+                proposal.mechanism().value(),
+                proposal.mechanism().value()));
+      }
     }
     if (targetRoute != null) {
       enqueueProofTask(
@@ -5094,7 +5317,7 @@ final class DesktopSolveCoordinator {
     Map<String, Double> debt = new LinkedHashMap<>();
     Map<String, Integer> stagnation = new LinkedHashMap<>();
     for (RouteState route : routes) {
-      debt.put(route.routeId, proofGraph.proofDebt(route.routeId));
+      debt.put(route.routeId, proofGraph.canonicalProofDebt(route.routeId));
       stagnation.put(
           route.routeId,
           "verified".equals(route.status) ? 0 : Math.max(1, roundIndex.get()));
@@ -5169,7 +5392,7 @@ final class DesktopSolveCoordinator {
   }
 
   private double totalProofDebt() {
-    return routes.stream().mapToDouble(route -> proofGraph.proofDebt(route.routeId)).sum();
+    return proofGraph.globalCanonicalProofDebt();
   }
 
   private List<InspirationAssignmentPlanner.AgentCandidate> inspirationAgentCandidates() {
@@ -5204,7 +5427,7 @@ final class DesktopSolveCoordinator {
               item.put("route_id", route.routeId);
               item.put("strategy_id", route.strategy.strategyId());
               item.put("status", route.status);
-              item.put("proof_debt", proofGraph.proofDebt(route.routeId));
+              item.put("proof_debt", proofGraph.canonicalProofDebt(route.routeId));
               item.put("claim_ids", List.copyOf(route.claimIds));
               item.put("failure", route.failure == null ? "none" : route.failure.failureClass());
               item.put("message_utility", messageBroker.utilityForRoute(route.routeId));
@@ -5753,6 +5976,7 @@ final class DesktopSolveCoordinator {
     if (checkpoint.proofGraph() != null) {
       proofGraph = ProofGraphStore.restore(checkpoint.proofGraph(), ProofGraphPolicy.defaults());
     }
+    migrateLegacyCanonicalProofTasks(checkpoint.schemaVersion());
     attemptArtifacts = AttemptArtifactLedger.restore(checkpoint.attemptArtifacts());
     researchCheckpoints = ResearchCheckpointLedger.restore(checkpoint.researchCheckpoints());
     proofControl.claims().load(checkpoint.claimLifecycle());
@@ -5836,6 +6060,8 @@ final class DesktopSolveCoordinator {
       route.metaControlReason = saved.metaControlReason();
       route.revisionHistory.addAll(saved.revisionHistory());
       route.focusObligationId = saved.focusObligationId();
+      route.focusedCanonicalTargetId = saved.focusedCanonicalTargetId();
+      route.focusedBottleneckFamilyId = saved.focusedBottleneckFamilyId();
       route.focusSource = saved.focusSource();
       route.latestResearchCheckpointId = saved.latestResearchCheckpointId();
       route.activeResearchFindingIds.addAll(saved.activeResearchFindingIds());
@@ -6206,6 +6432,8 @@ final class DesktopSolveCoordinator {
                         route.metaControlReason,
                         route.revisionHistory,
                         route.focusObligationId,
+                        route.focusedCanonicalTargetId,
+                        route.focusedBottleneckFamilyId,
                         route.focusSource,
                         route.latestResearchCheckpointId,
                         route.activeResearchFindingIds,
@@ -7109,6 +7337,55 @@ final class DesktopSolveCoordinator {
     return true;
   }
 
+  private void migrateLegacyCanonicalProofTasks(int schemaVersion) {
+    if (schemaVersion >= 9 || pendingProofTasks.isEmpty()) {
+      return;
+    }
+    List<DesktopSolveCheckpoint.ScheduledProofTask> migrated = new ArrayList<>();
+    for (DesktopSolveCheckpoint.ScheduledProofTask task : List.copyOf(pendingProofTasks)) {
+      CanonicalObligationRecord canonical =
+          proofGraph.canonicalTargetForObligation(task.obligationId()).orElse(null);
+      BottleneckFamilyRecord family =
+          canonical == null
+              ? null
+              : proofGraph
+                  .bottleneckFamilyForCanonical(canonical.canonicalTargetId())
+                  .orElse(null);
+      boolean automatic = automaticProofTaskSource(task.source());
+      ProofTaskScope scope =
+          automatic && family != null
+              ? ProofTaskScope.BOTTLENECK_FAMILY
+              : automatic && canonical != null
+                  ? ProofTaskScope.CANONICAL_TARGET
+                  : ProofTaskScope.ROUTE_OCCURRENCE;
+      String scopeId =
+          switch (scope) {
+            case BOTTLENECK_FAMILY -> family.familyId();
+            case CANONICAL_TARGET -> canonical.canonicalTargetId();
+            case ROUTE_OCCURRENCE -> task.routeId() + ":" + task.obligationId();
+          };
+      String actionKey =
+          automatic ? "repair" : task.requestedAction().toLowerCase(Locale.ROOT).strip();
+      if (!proofGraph.acquireCanonicalTaskLease(scope, scopeId, actionKey)) {
+        continue;
+      }
+      migrated.add(
+          new DesktopSolveCheckpoint.ScheduledProofTask(
+              task.taskId(),
+              task.source(),
+              task.routeId(),
+              task.obligationId(),
+              canonical == null ? "" : canonical.canonicalTargetId(),
+              family == null ? "" : family.familyId(),
+              scope,
+              actionKey,
+              task.requestedAction(),
+              task.roundCreated()));
+    }
+    pendingProofTasks.clear();
+    pendingProofTasks.addAll(migrated);
+  }
+
   private RouteDescriptor routeDescriptor(RouteState route) {
     String signature = topology.mathNormalize(topology.strategyText(route.strategy));
     return new RouteDescriptor(
@@ -7879,6 +8156,8 @@ final class DesktopSolveCoordinator {
     private boolean metaAbandoned;
     private String metaControlReason = "";
     private String focusObligationId = "";
+    private String focusedCanonicalTargetId = "";
+    private String focusedBottleneckFamilyId = "";
     private String focusSource = "";
     private String latestResearchCheckpointId = "";
     private final List<String> activeResearchFindingIds = new ArrayList<>();
