@@ -374,6 +374,8 @@ final class DesktopSolveCoordinator {
   private DeferredReactivationFailurePoint deferredReactivationFailurePoint =
       DeferredReactivationFailurePoint.NONE;
   private SemanticPivotFailurePoint semanticPivotFailurePoint = SemanticPivotFailurePoint.NONE;
+  private SemanticPivotFailurePoint semanticPivotHardCrashPoint =
+      SemanticPivotFailurePoint.NONE;
   private NegativeKnowledgeRegistry negativeKnowledgeRegistry;
   private NegativeKnowledgeAdmissionGate negativeKnowledgeGate;
   private final ProofControlFacade proofControl = ProofControlFacade.createDefault();
@@ -5875,14 +5877,13 @@ final class DesktopSolveCoordinator {
               route.routeId + "-pivot-" + route.semanticPivotIds.size(),
               delta.proposedStrategyId());
       failSemanticPivotAt(SemanticPivotFailurePoint.AFTER_CHECKPOINT_BRANCH);
-      checkpointPersistAttempted = true;
-      persistUnchecked("semantic_pivot_checkpoint_branch", false);
-      failSemanticPivotAt(
-          SemanticPivotFailurePoint.AFTER_CHECKPOINT_PERSIST_BEFORE_APPLY_RECEIPT);
       SemanticPivotApplyReceipt receipt =
           SemanticPivotApplyReceipt.applied(
               delta, addedObligations, taskIds, roundIndex.get());
       semanticPivots.ledger().commitApply(receipt);
+      // The authoritative state file must contain either the pre-Pivot state or full APPLIED state.
+      failSemanticPivotAt(SemanticPivotFailurePoint.BEFORE_APPLIED_CHECKPOINT_PERSIST);
+      checkpointPersistAttempted = true;
       persistUnchecked("semantic_pivot_apply", false);
       return receipt;
     } catch (RuntimeException exception) {
@@ -6462,6 +6463,10 @@ final class DesktopSolveCoordinator {
   }
 
   private void failSemanticPivotAt(SemanticPivotFailurePoint point) {
+    if (semanticPivotHardCrashPoint == point) {
+      semanticPivotHardCrashPoint = SemanticPivotFailurePoint.NONE;
+      throw new SimulatedSemanticPivotProcessTermination(point);
+    }
     if (semanticPivotFailurePoint == point) {
       semanticPivotFailurePoint = SemanticPivotFailurePoint.NONE;
       throw new IllegalStateException("injected semantic pivot failure: " + point);
@@ -6470,6 +6475,10 @@ final class DesktopSolveCoordinator {
 
   void setSemanticPivotFailurePointForTest(SemanticPivotFailurePoint point) {
     semanticPivotFailurePoint = point == null ? SemanticPivotFailurePoint.NONE : point;
+  }
+
+  void setSemanticPivotHardCrashPointForTest(SemanticPivotFailurePoint point) {
+    semanticPivotHardCrashPoint = point == null ? SemanticPivotFailurePoint.NONE : point;
   }
 
   private void runInspiration(InspirationSnapshot requestedSnapshot) {

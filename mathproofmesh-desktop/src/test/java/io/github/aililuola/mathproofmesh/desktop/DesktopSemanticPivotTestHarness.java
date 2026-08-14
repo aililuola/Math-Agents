@@ -511,6 +511,10 @@ final class DesktopSemanticPivotTestHarness implements AutoCloseable {
     coordinator.setSemanticPivotFailurePointForTest(point);
   }
 
+  void hardCrashPoint(SemanticPivotFailurePoint point) {
+    coordinator.setSemanticPivotHardCrashPointForTest(point);
+  }
+
   DesktopSolveCoordinator coordinator() {
     return coordinator;
   }

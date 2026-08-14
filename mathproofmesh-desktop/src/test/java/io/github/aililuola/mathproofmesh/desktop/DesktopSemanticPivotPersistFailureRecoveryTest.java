@@ -26,7 +26,7 @@ class DesktopSemanticPivotPersistFailureRecoveryTest {
     List<SemanticPivotFailurePoint> points =
         List.of(
             SemanticPivotFailurePoint.DURING_CHECKPOINT_PERSIST,
-            SemanticPivotFailurePoint.AFTER_CHECKPOINT_PERSIST_BEFORE_APPLY_RECEIPT);
+            SemanticPivotFailurePoint.BEFORE_APPLIED_CHECKPOINT_PERSIST);
     for (int index = 0; index < points.size(); index++) {
       SemanticPivotFailurePoint point = points.get(index);
       try (DesktopSemanticPivotTestHarness harness =
@@ -64,8 +64,7 @@ class DesktopSemanticPivotPersistFailureRecoveryTest {
         assertThat(durableAfter.routes().getFirst().strategy().strategyId())
             .isEqualTo(stateBefore.activeStrategyId());
 
-        if (point
-            == SemanticPivotFailurePoint.AFTER_CHECKPOINT_PERSIST_BEFORE_APPLY_RECEIPT) {
+        if (point == SemanticPivotFailurePoint.BEFORE_APPLIED_CHECKPOINT_PERSIST) {
           harness.failurePoint(SemanticPivotFailurePoint.NONE);
           int checkpointCountBeforeRetry = ledgerBefore.checkpoints().size();
           assertThat(harness.apply(delta).status()).isEqualTo(PivotDeltaStatus.APPLIED);
