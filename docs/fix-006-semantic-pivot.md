@@ -11,6 +11,8 @@
 - Implementation commit: `14303bcbfd5f5e80395ccb5d47807505d4f9a643`.
 - Claim materialization and checkpoint atomicity follow-up commit:
   `9e77ad374d2e4313354e330b8245fc2877f2fea2`.
+- Process-crash-safe checkpoint follow-up commit:
+  `c73803297396057c52d4b6ef193ed00240fee9d7`.
 - Issue 005 prerequisite: `CLOSED` at the baseline.
 
 The work remained on `fix/006-semantic-pivot`. It did not modify `main` or commit directly
@@ -207,8 +209,8 @@ frontier.
 The 20-round checkpoint at round 10 reported:
 
 ```text
-PIVOT_LEDGER_HASH_BEFORE_RESTORE=3dbb909e6203fee7331a41c4b5e9015338fda13f47177f08e875c90c371bbed8
-PIVOT_LEDGER_HASH_AFTER_RESTORE=3dbb909e6203fee7331a41c4b5e9015338fda13f47177f08e875c90c371bbed8
+PIVOT_LEDGER_HASH_BEFORE_RESTORE=d67c4944a8b1967316ef1a0c2513f26163f870ea8854a485572b5b7255fac19a
+PIVOT_LEDGER_HASH_AFTER_RESTORE=d67c4944a8b1967316ef1a0c2513f26163f870ea8854a485572b5b7255fac19a
 ```
 
 ## 10. Twenty-round diagnostic
@@ -328,7 +330,7 @@ Issue 006 specialized tests:
 |---|---:|---:|---:|---:|---|
 | Core Pivot and Checkpoint suite | 48 | 0 | 0 | 0 | PASS |
 | Server Pivot suite | 4 | 0 | 0 | 0 | PASS |
-| Desktop production suite | 21 | 0 | 0 | 0 | PASS |
+| Desktop production suite | 23 | 0 | 0 | 0 | PASS |
 
 Explicit issue 001-005 regression suites:
 
@@ -351,7 +353,7 @@ Final module regression:
 | Core | 1068 | 0 | 0 | 0 | PASS |
 | Server unit | 847 | 0 | 0 | 3 | PASS |
 | Server integration | 26 | 0 | 0 | 0 | PASS |
-| Desktop | 134 | 0 | 0 | 1 | PASS |
+| Desktop | 136 | 0 | 0 | 1 | PASS |
 | Compatibility | 149 | 0 | 0 | 0 | PASS |
 
 The final `verify-all.ps1 -Offline` run completed through the project's expected source layout
@@ -384,7 +386,7 @@ FULL_VERIFICATION=PASS
 ```
 
 The new fail-closed boundary tests keep core aggregate branch coverage above the unchanged
-75% gate. The final clean verification measured `75.294622%` core branch coverage. No Python
+75% gate. The final clean verification measured `75.305335%` core branch coverage. No Python
 Sidecar performance or coverage/security/license threshold was changed.
 
 Implementation diff stat:
@@ -392,6 +394,7 @@ Implementation diff stat:
 ```text
 initial_implementation=91 files/8778 insertions/43 deletions
 claim_and_checkpoint_follow_up=27 files/1019 insertions/17 deletions
+process_crash_follow_up=6 files/239 insertions/8 deletions
 ```
 
 ## 13. Protected files and scope
@@ -531,12 +534,14 @@ The tested failure points now include:
 ```text
 AFTER_CHECKPOINT_BRANCH
 DURING_CHECKPOINT_PERSIST
-AFTER_CHECKPOINT_PERSIST_BEFORE_APPLY_RECEIPT
+BEFORE_APPLIED_CHECKPOINT_PERSIST
 ```
 
-If persistence has started, rollback writes a compensating checkpoint from the restored state.
-No receipt is committed until the staged checkpoint has been persisted. A retry then creates
-one Pivot application and one checkpoint branch, while a duplicate retry creates neither.
+The production transaction no longer persists a checkpoint after branching while its ledger is
+`APPLYING`. It creates and commits the receipt in memory, then atomically persists one complete
+`APPLIED` checkpoint. If ordinary persistence fails, rollback writes a compensating checkpoint
+from the restored state. A retry then creates one Pivot application and one checkpoint branch,
+while a duplicate retry creates neither.
 
 ### 15.4 Follow-up diagnostics
 
@@ -571,8 +576,8 @@ The existing 20-round production test also remained green through round 10 resto
 ```text
 ROUNDS=20
 RESTORE_ROUND=10
-PIVOT_LEDGER_HASH_BEFORE_RESTORE=3dbb909e6203fee7331a41c4b5e9015338fda13f47177f08e875c90c371bbed8
-PIVOT_LEDGER_HASH_AFTER_RESTORE=3dbb909e6203fee7331a41c4b5e9015338fda13f47177f08e875c90c371bbed8
+PIVOT_LEDGER_HASH_BEFORE_RESTORE=d67c4944a8b1967316ef1a0c2513f26163f870ea8854a485572b5b7255fac19a
+PIVOT_LEDGER_HASH_AFTER_RESTORE=d67c4944a8b1967316ef1a0c2513f26163f870ea8854a485572b5b7255fac19a
 ROOT_HASH_CHANGES=0
 NEGATIVE_REGISTRY_HASH_CHANGES=0
 POST_RESTORE_PIVOT_LOSSES=0
@@ -582,7 +587,7 @@ RESULT=PASS
 
 ### 15.5 Follow-up tests and final gates
 
-The six new test classes contain nine tests:
+The seven new test classes contain eleven tests:
 
 - `PivotClaimStatementHashBindingTest`: three statement-binding/materializability cases.
 - `ContinuationCheckpointLedgerSnapshotTest`: one complete snapshot/restore case.
@@ -592,10 +597,12 @@ The six new test classes contain nine tests:
 - `DesktopSemanticPivotCheckpointBranchAtomicityTest`: one post-branch rollback case.
 - `DesktopSemanticPivotPersistFailureRecoveryTest`: one production scenario that iterates both
   persistence failure windows, followed by retry and duplicate retry.
+- `DesktopSemanticPivotHardCrashRecoveryTest`: two fresh-Coordinator restore cases covering a
+  crash before the atomic state move and a crash immediately after it.
 
-The final clean reactor executed `2272` tests with zero failures and zero errors. Four expected
+The final clean reactor executed `2274` tests with zero failures and zero errors. Four expected
 tests were skipped. The module split was Contracts 48, Core 1068, Server unit 847, Server
-integration 26, Desktop 134, and Compatibility 149. All 21 Docker-backed PostgreSQL integration
+integration 26, Desktop 136, and Compatibility 149. All 21 Docker-backed PostgreSQL integration
 tests passed.
 
 The unmodified `verify-all.ps1 -Offline` completed from the repository's required source-layout
@@ -632,3 +639,113 @@ suppression, threshold, performance gate, or old test was weakened.
 The follow-up implementation commit changed 27 files with 1019 insertions and 17 deletions.
 It did not modify issue 001-005-specific implementation, Provider selection, concurrency,
 Temporal, budget/token handling, Python Sidecar thresholds, or any issue 007-013 behavior.
+
+## 16. Process-crash-safe authoritative checkpoint boundary
+
+### 16.1 Confirmed pre-fix failure
+
+The prior RuntimeException tests proved in-process compensation, but the coordinator still
+persisted a formal `APPLYING` checkpoint between `branchForStrategy` and receipt creation. A
+new test-only `Error` termination hook was first added without changing that order. Because
+`Error` bypasses both RuntimeException compensation layers, the pre-fix production path
+reported:
+
+```text
+HARD_CRASHES_INJECTED=1
+APPLYING_CHECKPOINTS_OBSERVED=1
+RESTORE_FAILURES=1
+PIVOT_APPLIES=0
+CHECKPOINT_BRANCHES=0
+RESULT=FAIL
+```
+
+The checkpoint was read back from the real `structured/desktop-solve-state.json`, the first
+Coordinator was discarded, and a fresh Coordinator called the production restore path. Restore
+failed at `reconcileSemanticPivotProjection` with the partial apply frontier, confirming a real
+process-death behavior gap rather than an in-process test artifact.
+
+### 16.2 Implemented option A
+
+The authoritative apply order is now:
+
+```text
+stage the Pivot in memory
+-> mutate Route, Strategy, Claim, Obligation, Task, and CheckpointLedger projections
+-> create SemanticPivotApplyReceipt
+-> commitApply, producing the complete APPLIED ledger record
+-> atomically persist one complete semantic_pivot_apply checkpoint
+```
+
+`persistUnchecked("semantic_pivot_checkpoint_branch", false)` was removed. The authoritative
+state file can therefore contain only the complete pre-Pivot state or the complete `APPLIED`
+state. It cannot contain a newly written `APPLYING` Pivot. No checkpoint schema change or
+durable roll-forward frontier is required.
+
+If termination occurs before the atomic state-file move, restore sees the complete pre-Pivot
+state and the stable Pivot may be submitted again. If termination occurs after that move,
+restore sees the complete `APPLIED` record and receipt; submitting the same Pivot is an
+idempotent no-op. Existing RuntimeException compensation remains in place for ordinary write
+failures and rewrites the restored state when persistence had begun.
+
+### 16.3 Hard-crash test
+
+`DesktopSemanticPivotHardCrashRecoveryTest` uses
+`SimulatedSemanticPivotProcessTermination extends Error`, so neither production
+RuntimeException catch executes. Each case reads the real state file, closes the old Agent pool,
+creates a fresh Coordinator, invokes production restore, and resubmits the same stable Pivot.
+
+Final diagnostic for termination before the authoritative atomic write:
+
+```text
+SEMANTIC PIVOT HARD-CRASH RECOVERY DIAGNOSTIC
+HARD_CRASHES_INJECTED=1
+APPLYING_CHECKPOINTS_OBSERVED=0
+RESTORE_FAILURES=0
+PARTIAL_PIVOT_FRONTIERS_AFTER_RESTORE=0
+PIVOT_APPLIES=1
+CHECKPOINT_BRANCHES=1
+DUPLICATE_PIVOT_APPLIES=0
+DUPLICATE_CHECKPOINT_BRANCHES=0
+GHOST_PROPOSED_CLAIMS=0
+DUPLICATE_PROPOSED_CLAIMS=0
+PARTIAL_OBLIGATION_WRITES=0
+TASK_LEASE_LEAKS=0
+PENDING_TASK_LEAKS=0
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+RESULT=PASS
+```
+
+`APPLYING_CHECKPOINTS_OBSERVED` is intentionally zero after the fix because option A removes
+that durable state rather than recovering it. The same test class also terminates immediately
+after the authoritative state move and reports:
+
+```text
+POST_ATOMIC_MOVE_APPLIED_RESTORES=1
+POST_ATOMIC_MOVE_DUPLICATE_APPLIES=0
+```
+
+### 16.4 Final verification
+
+```text
+CORE_PIVOT_AND_CHECKPOINT_TESTS=48 PASS
+SERVER_PIVOT_TESTS=4 PASS
+DESKTOP_PIVOT_TESTS=23 PASS
+FULL_REACTOR_TESTS=2274
+FULL_REACTOR_FAILURES=0
+FULL_REACTOR_ERRORS=0
+POSTGRESQL_INTEGRATION_TESTS=21 PASS
+CORE_BRANCH_COVERAGE=75.305335
+SPOTBUGS_OR_SECURITY_BUGS=0
+SOURCE_FILES=401
+SOURCE_MANIFEST_SHA256=9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770
+FULL_VERIFICATION=PASS
+```
+
+The first full-module attempt correctly failed `-Werror` because the simulated termination
+class was initially an auxiliary class in the failure-point source file. It was moved to its own
+source file and the unmodified compiler gate passed; no warning suppression was added.
+
+This final follow-up changed six files with 239 insertions and eight deletions. It remains on
+`fix/006-semantic-pivot`, changes no issue 001-005-specific implementation, and does not start
+issue 007 or alter Provider, concurrency, Temporal, budget, token, or Python Sidecar behavior.
