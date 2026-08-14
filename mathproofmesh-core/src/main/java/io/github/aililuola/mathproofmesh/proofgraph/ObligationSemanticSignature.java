@@ -5,6 +5,8 @@ import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
 import io.github.aililuola.mathproofmesh.contract.ObligationKind;
 import io.github.aililuola.mathproofmesh.contract.ProofObligation;
 import io.github.aililuola.mathproofmesh.contract.QuantifierSpec;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -48,7 +50,9 @@ public record ObligationSemanticSignature(
                 "scope_markers", scopeMarkers));
     if (signatureHash == null || signatureHash.isBlank()) {
       signatureHash = computed;
-    } else if (!computed.equals(signatureHash)) {
+    } else if (!MessageDigest.isEqual(
+        computed.getBytes(StandardCharsets.UTF_8),
+        signatureHash.getBytes(StandardCharsets.UTF_8))) {
       throw new IllegalArgumentException("signatureHash does not match semantic signature");
     }
   }

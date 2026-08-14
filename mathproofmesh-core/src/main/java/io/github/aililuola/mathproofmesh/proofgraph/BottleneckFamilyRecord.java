@@ -24,8 +24,7 @@ public record BottleneckFamilyRecord(
     label = require(label, "label");
     representativeCanonicalTargetId =
         require(representativeCanonicalTargetId, "representativeCanonicalTargetId");
-    canonicalTargetIds =
-        canonicalTargetIds == null ? Set.of() : Set.copyOf(canonicalTargetIds);
+    canonicalTargetIds = immutableSorted(canonicalTargetIds);
     memberRelations = memberRelations == null ? Map.of() : Map.copyOf(memberRelations);
     schedulingState =
         schedulingState == null ? BottleneckFamilySchedulingState.ACTIVE : schedulingState;
@@ -49,5 +48,11 @@ public record BottleneckFamilyRecord(
       throw new IllegalArgumentException(field + " is required");
     }
     return normalized;
+  }
+
+  private static Set<String> immutableSorted(Set<String> values) {
+    return values == null || values.isEmpty()
+        ? Set.of()
+        : java.util.Collections.unmodifiableSet(new java.util.TreeSet<>(values));
   }
 }

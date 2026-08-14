@@ -171,9 +171,19 @@ import io.github.aililuola.mathproofmesh.proofcontrol.StrategyBlueprintCompiler;
 import io.github.aililuola.mathproofmesh.proofgraph.BottleneckFamilyRecord;
 import io.github.aililuola.mathproofmesh.proofgraph.BottleneckRelationType;
 import io.github.aililuola.mathproofmesh.proofgraph.CanonicalObligationRecord;
+import io.github.aililuola.mathproofmesh.proofgraph.CanonicalObligationStatus;
+import io.github.aililuola.mathproofmesh.proofgraph.CanonicalizedObligationWriteResult;
+import io.github.aililuola.mathproofmesh.proofgraph.DeferredExpansionLedger;
+import io.github.aililuola.mathproofmesh.proofgraph.FocusedExpansionDecision;
+import io.github.aililuola.mathproofmesh.proofgraph.FocusedRecoveryActionType;
+import io.github.aililuola.mathproofmesh.proofgraph.FocusedRecoveryBrief;
+import io.github.aililuola.mathproofmesh.proofgraph.FocusedRecoveryPlan;
 import io.github.aililuola.mathproofmesh.proofgraph.ObligationCreationContext;
 import io.github.aililuola.mathproofmesh.proofgraph.ObligationOccurrenceSchedulingState;
 import io.github.aililuola.mathproofmesh.proofgraph.ObligationSourceType;
+import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphControlMode;
+import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphConvergenceConfig;
+import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphConvergenceMonitor;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphPolicy;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphServices;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
@@ -315,6 +325,9 @@ final class DesktopSolveCoordinator {
   private ResearchCheckpointLedger researchCheckpoints = new ResearchCheckpointLedger();
   private TypedMemory typedMemory;
   private ProofGraphStore proofGraph;
+  private ProofGraphConvergenceMonitor proofGraphConvergence =
+      new ProofGraphConvergenceMonitor(ProofGraphConvergenceConfig.defaults());
+  private DeferredExpansionLedger deferredExpansions = new DeferredExpansionLedger();
   private NegativeKnowledgeRegistry negativeKnowledgeRegistry;
   private NegativeKnowledgeAdmissionGate negativeKnowledgeGate;
   private final ProofControlFacade proofControl = ProofControlFacade.createDefault();
@@ -820,14 +833,15 @@ final class DesktopSolveCoordinator {
               List.of(routeId),
               strategy.bottleneck(),
               "open");
-      proofGraph.addObligationCanonicalized(
+      addControlledObligation(
           routeObligation,
           obligationContext(
               state,
               ObligationSourceType.ROUTE_BOTTLENECK,
               "strategy://" + strategy.strategyId(),
               topology.mathNormalize(strategy.bottleneck()),
-              strategy.bottleneck()));
+              strategy.bottleneck()),
+          FocusedRecoveryActionType.NEW_STRATEGY);
     }
     addBlueprintObligations(state);
     event(
@@ -1179,6 +1193,28 @@ final class DesktopSolveCoordinator {
         "Canonical targets deduplicate scheduling only. Bottleneck families are research "
             + "focus groups, never mathematical equivalence, Claim, Fact, proof, refutation, "
             + "or authority to propagate status between raw obligations.");
+    context.put("proof_graph_control_mode", proofGraphConvergence.controlMode().name());
+    Optional<FocusedRecoveryBrief> recoveryBrief = focusedRecoveryBrief(route);
+    context.put("focused_recovery_brief", recoveryBrief.orElse(null));
+    context.put(
+        "selected_bottleneck_family",
+        recoveryBrief.map(FocusedRecoveryBrief::selectedFamilyId).orElse(""));
+    context.put(
+        "selected_canonical_targets",
+        recoveryBrief.map(FocusedRecoveryBrief::canonicalMemberIds).orElse(List.of()));
+    context.put(
+        "allowed_recovery_actions",
+        recoveryBrief.map(FocusedRecoveryBrief::allowedActions).orElse(List.of()));
+    context.put(
+        "blocked_generic_actions",
+        recoveryBrief.map(FocusedRecoveryBrief::blockedGenericActions).orElse(List.of()));
+    context.put(
+        "new_target_quota_remaining",
+        recoveryBrief.map(FocusedRecoveryBrief::newTargetQuotaRemaining).orElse(0));
+    context.put(
+        "focused_recovery_authority_rule",
+        "Do not treat family members as equivalent. Do not close or refute sibling targets. "
+            + "Do not introduce unrelated high-level strategies during focused recovery.");
     context.put("focus_source", route.focusSource);
     context.put(
         "strategy_blueprint",
@@ -1214,6 +1250,95 @@ final class DesktopSolveCoordinator {
         "action_rule",
         "Return submit_attempt, request_computation, or abandon. Computation is bounded evidence, never proof by itself.");
     return context;
+  }
+
+  private Optional<FocusedRecoveryBrief> focusedRecoveryBrief(RouteState route) {
+    FocusedRecoveryPlan plan = proofGraphConvergence.focusedRecoveryPlan().orElse(null);
+    if (plan == null || proofGraphConvergence.controlMode() == ProofGraphControlMode.NORMAL_EXPANSION) {
+      return Optional.empty();
+    }
+    List<String> members = plan.selectedCanonicalTargetIds().stream().sorted().toList();
+    Map<String, String> statements = new LinkedHashMap<>();
+    Map<String, Set<String>> dependencyPlans = new LinkedHashMap<>();
+    proofGraph.allCanonicalTargets().stream()
+        .filter(target -> plan.selectedCanonicalTargetIds().contains(target.canonicalTargetId()))
+        .forEach(
+            target -> {
+              statements.put(
+                  target.canonicalTargetId(),
+                  proofGraph.representativeStatement(target.canonicalTargetId()));
+              dependencyPlans.put(
+                  target.canonicalTargetId(), target.dependencyPlanSignatures());
+            });
+    BottleneckFamilyRecord family =
+        plan.selectedFamilyId().isBlank()
+            ? null
+            : proofGraph.allBottleneckFamilies().stream()
+                .filter(item -> item.familyId().equals(plan.selectedFamilyId()))
+                .findFirst()
+                .orElse(null);
+    List<String> findings =
+        java.util.stream.Stream.concat(
+                researchCheckpoints.activeFindings(CAMPAIGN_RESEARCH_ROUTE_ID).stream(),
+                researchCheckpoints.activeFindings(route.routeId).stream())
+            .map(io.github.aililuola.mathproofmesh.research.ResearchFindingRecord::statement)
+            .distinct()
+            .limit(12)
+            .toList();
+    String sharpObstruction =
+        java.util.stream.Stream.concat(
+                researchCheckpoints.activeFindings(CAMPAIGN_RESEARCH_ROUTE_ID).stream(),
+                researchCheckpoints.activeFindings(route.routeId).stream())
+            .filter(item -> "SHARP_OBSTRUCTION".equals(item.kind().name()))
+            .map(io.github.aililuola.mathproofmesh.research.ResearchFindingRecord::statement)
+            .findFirst()
+            .orElse("");
+    List<String> permanentNegatives =
+        negativeKnowledgeRegistry.records().stream()
+            .filter(item -> item.problemHash().equals(problemHash) && item.permanent())
+            .map(io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeRecord::statement)
+            .distinct()
+            .limit(12)
+            .toList();
+    List<String> exactCounterexamples =
+        negativeKnowledgeRegistry.records().stream()
+            .filter(item -> item.problemHash().equals(problemHash) && item.permanent())
+            .filter(
+                item ->
+                    item.kinds().stream()
+                        .anyMatch(kind -> "VERIFIED_COUNTEREXAMPLE".equals(kind.name())))
+            .map(io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeRecord::statement)
+            .distinct()
+            .limit(12)
+            .toList();
+    List<FocusedRecoveryActionType> allowed =
+        java.util.Arrays.stream(FocusedRecoveryActionType.values())
+            .filter(FocusedRecoveryActionType::recoveryAction)
+            .toList();
+    List<FocusedRecoveryActionType> blocked =
+        java.util.Arrays.stream(FocusedRecoveryActionType.values())
+            .filter(action -> !action.recoveryAction())
+            .toList();
+    return Optional.of(
+        new FocusedRecoveryBrief(
+            immutableRootGoalHash(),
+            plan.selectedFamilyId(),
+            family == null ? "single canonical target" : family.label(),
+            members,
+            statements,
+            dependencyPlans,
+            typedMemory.facts().stream()
+                .map(MessageEnvelope::statement)
+                .distinct()
+                .limit(12)
+                .toList(),
+            exactCounterexamples,
+            permanentNegatives,
+            findings,
+            sharpObstruction,
+            allowed,
+            blocked,
+            plan.quotaRemaining()));
   }
 
   private static Map<String, Object> canonicalPromptView(CanonicalObligationRecord target) {
@@ -1256,6 +1381,77 @@ final class DesktopSolveCoordinator {
         roundIndex.get());
   }
 
+  private ControlledObligationWrite addControlledObligation(
+      ProofObligation obligation,
+      ObligationCreationContext context,
+      FocusedRecoveryActionType actionType) {
+    ObligationControlAdmission admission =
+        previewObligationControl(obligation, context, actionType);
+    return addObligationThroughControl(obligation, admission);
+  }
+
+  private ObligationControlAdmission previewObligationControl(
+      ProofObligation obligation,
+      ObligationCreationContext context,
+      FocusedRecoveryActionType actionType) {
+    Optional<String> existingCanonical =
+        proofGraph.existingCanonicalTargetId(obligation, context);
+    String canonicalTargetId = existingCanonical.orElse("");
+    String familyId =
+        existingCanonical
+            .flatMap(proofGraph::bottleneckFamilyForCanonical)
+            .map(BottleneckFamilyRecord::familyId)
+            .orElse("");
+    boolean selectedBinding =
+        proofGraphConvergence
+            .focusedRecoveryPlan()
+            .map(plan -> plan.selects(familyId, canonicalTargetId))
+            .orElse(false);
+    FocusedExpansionDecision decision =
+        proofGraphConvergence.decideExpansion(
+            actionType,
+            existingCanonical.isPresent(),
+            proofGraph.activeCanonicalTargetCount(context.routeId()),
+            proofGraph.activeCanonicalTargetCount(),
+            familyId,
+            canonicalTargetId);
+    if (!actionType.recoveryAction() && !selectedBinding) {
+      proofGraphConvergence.recordGenericExpansionAttempt(decision.allowed());
+    }
+    return new ObligationControlAdmission(
+        context.withSchedulingState(decision.schedulingState()),
+        actionType,
+        decision,
+        existingCanonical.isPresent());
+  }
+
+  private ControlledObligationWrite addObligationThroughControl(
+      ProofObligation obligation, ObligationControlAdmission admission) {
+    CanonicalizedObligationWriteResult result =
+        proofGraph.addObligationCanonicalized(obligation, admission.context());
+    if (admission.decision().deferred()) {
+      deferredExpansions.record(
+          problemHash,
+          roundIndex.get(),
+          admission.context().routeId(),
+          obligation.obligationId(),
+          result.canonicalTarget().canonicalTargetId(),
+          admission.actionType(),
+          admission.decision());
+      event(
+          "proof_obligation_deferred_by_graph_control",
+          "proof_control",
+          null,
+          "warning",
+          admission.decision().code(),
+          obligation.obligationId());
+    } else if (!admission.existingCanonicalTarget()
+        && proofGraphConvergence.controlMode() == ProofGraphControlMode.FOCUSED_RECOVERY) {
+      proofGraphConvergence.recordFocusedNewTarget();
+    }
+    return new ControlledObligationWrite(result, admission.decision());
+  }
+
   private void addBlueprintObligations(RouteState route) {
     StrategyBlueprintCompiler.Compilation compilation =
         strategyBlueprints.get(route.strategy.strategyId());
@@ -1295,14 +1491,15 @@ final class DesktopSolveCoordinator {
                 List.of(route.routeId),
                 node.statement(),
                 "open");
-        proofGraph.addObligationCanonicalized(
+        addControlledObligation(
             blueprintObligation,
             obligationContext(
                 route,
                 ObligationSourceType.STRATEGY_BLUEPRINT,
                 "blueprint://" + blueprint.id() + "/" + node.id(),
                 topology.mathNormalize(route.strategy.bottleneck()),
-                route.strategy.bottleneck()));
+                route.strategy.bottleneck()),
+            FocusedRecoveryActionType.NEW_STRATEGY);
       }
       created.add(node.id());
     }
@@ -1461,14 +1658,15 @@ final class DesktopSolveCoordinator {
           route.failure == null || route.failure.firstErrorFingerprint() == null
               ? topology.mathNormalize(spec.targetClaim())
               : route.failure.firstErrorFingerprint();
-      proofGraph.addObligationCanonicalized(
+      addControlledObligation(
           computationObligation,
           obligationContext(
               route,
               ObligationSourceType.COMPUTATION_TARGET,
               "experiment://" + spec.experimentId(),
               computationBottleneck,
-              spec.targetClaim()));
+              spec.targetClaim()),
+          FocusedRecoveryActionType.EXACT_FALSIFICATION);
     }
     return id;
   }
@@ -4061,6 +4259,46 @@ final class DesktopSolveCoordinator {
             : proofGraph
                 .bottleneckFamilyForCanonical(canonicalTarget.canonicalTargetId())
                 .orElse(null);
+    FocusedRecoveryActionType controlAction = proofTaskControlAction(source, family);
+    String familyId = family == null ? "" : family.familyId();
+    String canonicalTargetId =
+        canonicalTarget == null ? "" : canonicalTarget.canonicalTargetId();
+    boolean selectedBinding =
+        proofGraphConvergence
+            .focusedRecoveryPlan()
+            .map(plan -> plan.selects(familyId, canonicalTargetId))
+            .orElse(false);
+    if (!controlAction.recoveryAction() && !selectedBinding) {
+      FocusedExpansionDecision control =
+          proofGraphConvergence.decideExpansion(
+              controlAction,
+              canonicalTarget != null,
+              proofGraph.activeCanonicalTargetCount(routeId),
+              proofGraph.activeCanonicalTargetCount(),
+              familyId,
+              canonicalTargetId);
+      proofGraphConvergence.recordGenericExpansionAttempt(control.allowed());
+      if (!control.allowed()) {
+        if (control.deferred()) {
+          deferredExpansions.record(
+              problemHash,
+              roundIndex.get(),
+              routeId,
+              obligationId,
+              canonicalTargetId,
+              controlAction,
+              control);
+        }
+        event(
+            "proof_task_deferred_by_graph_control",
+            "scheduler_decision",
+            null,
+            "rejected",
+            control.code(),
+            obligationId);
+        return false;
+      }
+    }
     boolean automatic = automaticProofTaskSource(source);
     ProofTaskScope scope =
         automatic && family != null
@@ -4075,7 +4313,15 @@ final class DesktopSolveCoordinator {
           case ROUTE_OCCURRENCE -> routeId + ":" + obligationId;
         };
     String actionKey =
-        automatic
+        source.toLowerCase(Locale.ROOT).contains("focused-recovery")
+            ? "focused-recovery:"
+                + proofGraphConvergence
+                    .focusedRecoveryPlan()
+                    .map(FocusedRecoveryPlan::episodeId)
+                    .orElse("none")
+                + ":"
+                + roundIndex.get()
+            : automatic
             ? "repair"
             : requestedAction.toLowerCase(Locale.ROOT).strip();
     if (pendingProofTasks.stream()
@@ -4120,10 +4366,40 @@ final class DesktopSolveCoordinator {
 
   private static boolean automaticProofTaskSource(String source) {
     String normalized = source == null ? "" : source.toLowerCase(Locale.ROOT);
-    return normalized.contains("proof-debt")
+    return normalized.contains("focused-recovery")
+        || normalized.contains("proof-debt")
         || normalized.contains("meta-review")
         || normalized.contains("inspiration")
         || normalized.contains("bridge");
+  }
+
+  private static FocusedRecoveryActionType proofTaskControlAction(
+      String source, BottleneckFamilyRecord family) {
+    String normalized = source == null ? "" : source.toLowerCase(Locale.ROOT);
+    if (normalized.contains("focused-recovery") || normalized.contains("proof-debt")) {
+      return FocusedRecoveryActionType.FOCUSED_PROVER;
+    }
+    if (normalized.contains("exact-falsification") || normalized.contains("skeptic")) {
+      return FocusedRecoveryActionType.EXACT_FALSIFICATION;
+    }
+    if (normalized.contains("representation-switch")) {
+      return FocusedRecoveryActionType.REPRESENTATION_SWITCH;
+    }
+    if (normalized.contains("structural-analogy")) {
+      return FocusedRecoveryActionType.STRUCTURAL_ANALOGY;
+    }
+    if (normalized.contains("bridge")) {
+      return family == null
+          ? FocusedRecoveryActionType.UNSCOPED_BRIDGE
+          : FocusedRecoveryActionType.FAMILY_BRIDGE_REPAIR;
+    }
+    if (normalized.contains("inspiration")) {
+      return FocusedRecoveryActionType.GENERIC_INSPIRATION;
+    }
+    if (normalized.contains("meta-review")) {
+      return FocusedRecoveryActionType.FOCUSED_SKEPTIC;
+    }
+    return FocusedRecoveryActionType.NEW_STRATEGY;
   }
 
   private boolean schedulePendingProofTask() {
@@ -4344,6 +4620,12 @@ final class DesktopSolveCoordinator {
   }
 
   private boolean widenRoutes() {
+    if (proofGraphConvergence.controlMode() == ProofGraphControlMode.FOCUSED_RECOVERY) {
+      proofGraphConvergence.recordGenericExpansionAttempt(false);
+      eventSchedulerAction(
+          "NEW_ROUTE", false, "generic route widening deferred during focused recovery");
+      return false;
+    }
     if (nextStrategyIndex.get() >= admittedStrategies.size()
         || routes.size() >= config.budget().maxPaths()) {
       return false;
@@ -4448,6 +4730,13 @@ final class DesktopSolveCoordinator {
       StrategyCard revision,
       String action,
       StrategyArchive.RevisionReason reason) {
+    if (proofGraphConvergence.controlMode() == ProofGraphControlMode.FOCUSED_RECOVERY
+        && !routeMatchesFocusedRecovery(target)) {
+      proofGraphConvergence.recordGenericExpansionAttempt(false);
+      eventSchedulerAction(
+          action, false, "unrelated route revision deferred during focused recovery");
+      return false;
+    }
     ProofControlModels.Strategy control = controlStrategy(revision, target.routeId);
     ProofControlModels.Obligation goal = controlGoal();
     StrategyBlueprintCompiler.Compilation blueprint =
@@ -4610,6 +4899,22 @@ final class DesktopSolveCoordinator {
     stage(
         RoutePipelineFunctions.RunStage.INSPIRATION,
         "Detecting stalls and running independently reviewed inspiration mechanisms");
+    if (proofGraphConvergence.controlMode() == ProofGraphControlMode.FOCUSED_RECOVERY
+        && inspirationProgress == null) {
+      proofGraphConvergence.recordGenericExpansionAttempt(false);
+      enqueueFocusedRecoveryTask();
+      event(
+          "generic_inspiration_deferred_by_graph_control",
+          "scheduler_inspiration",
+          null,
+          "rejected",
+          "Focused recovery admits only actions bound to the selected family or canonical target",
+          proofGraphConvergence
+              .focusedRecoveryPlan()
+              .map(FocusedRecoveryPlan::episodeId)
+              .orElse("focused-recovery"));
+      return;
+    }
     InspirationSnapshot snapshot = requestedSnapshot;
     Map<String, InspirationTriggerType> triggerTypes;
     List<InspirationTask> boundedTasks;
@@ -4856,6 +5161,23 @@ final class DesktopSolveCoordinator {
   private boolean routeEligibleForWork(RouteState route) {
     return !route.metaAbandoned
         && (route.cooldownUntilRound < 0 || roundIndex.get() >= route.cooldownUntilRound);
+  }
+
+  private boolean routeMatchesFocusedRecovery(RouteState route) {
+    return proofGraphConvergence
+        .focusedRecoveryPlan()
+        .map(
+            plan ->
+                plan.selects(
+                        route.focusedBottleneckFamilyId,
+                        route.focusedCanonicalTargetId)
+                    || proofGraph.allCanonicalTargets().stream()
+                        .filter(
+                            target ->
+                                plan.selectedCanonicalTargetIds()
+                                    .contains(target.canonicalTargetId()))
+                        .anyMatch(target -> target.routeIds().contains(route.routeId)))
+        .orElse(false);
   }
 
   @SuppressFBWarnings(
@@ -5186,19 +5508,12 @@ final class DesktopSolveCoordinator {
       return;
     }
 
-    if (inspired != null) {
-      strategyArchive.archive(
-          inspiredControl, "inspiration://" + proposal.proposalId(), roundIndex.get());
-      strategyBlueprints.put(inspired.strategyId(), inspiredBlueprint);
-      admittedStrategies =
-          java.util.stream.Stream.concat(
-                  admittedStrategies.stream(), java.util.stream.Stream.of(inspired))
-              .toList();
-      addRoute(inspired, 0, NegativeKnowledgeSurface.INSPIRATION_MATERIALIZATION);
-      targetRoute = routes.getLast();
-    }
-    typedMemory.addInsight(insight);
-    List<String> routeIds = targetRoute == null ? List.of("run") : List.of(targetRoute.routeId);
+    String prospectiveRouteId =
+        inspired == null
+            ? targetRoute == null ? "run" : targetRoute.routeId
+            : "route-" + (routes.size() + 1);
+    String prospectiveStrategyId = inspired == null ? "" : inspired.strategyId();
+    List<String> routeIds = List.of(prospectiveRouteId);
     ProofObligation inspirationObligation =
         new ProofObligation(
             List.of(),
@@ -5217,36 +5532,47 @@ final class DesktopSolveCoordinator {
             routeIds,
             statement,
             "open");
+    ObligationCreationContext inspirationContext =
+        new ObligationCreationContext(
+            problemHash,
+            prospectiveRouteId,
+            prospectiveStrategyId,
+            ObligationSourceType.INSPIRATION,
+            "inspiration://" + proposal.proposalId(),
+            List.of(),
+            "",
+            Map.of(),
+            proposal.mechanism().value(),
+            proposal.mechanism().value(),
+            BottleneckRelationType.SHARES_UPSTREAM_BOTTLENECK,
+            ObligationOccurrenceSchedulingState.ACTIVE,
+            roundIndex.get());
+    ObligationControlAdmission graphAdmission =
+        previewObligationControl(
+            inspirationObligation,
+            inspirationContext,
+            inspirationControlAction(proposal.mechanism().value()));
     if (findObligation(id).isEmpty()) {
-      RouteState contextRoute = targetRoute;
-      if (contextRoute == null) {
-        proofGraph.addObligationCanonicalized(
-            inspirationObligation,
-            new ObligationCreationContext(
-                problemHash,
-                "run",
-                "",
-                ObligationSourceType.INSPIRATION,
-                "inspiration://" + proposal.proposalId(),
-                List.of(),
-                "",
-                Map.of(),
-                proposal.mechanism().value(),
-                proposal.mechanism().value(),
-                BottleneckRelationType.SHARES_UPSTREAM_BOTTLENECK,
-                ObligationOccurrenceSchedulingState.ACTIVE,
-                roundIndex.get()));
-      } else {
-        proofGraph.addObligationCanonicalized(
-            inspirationObligation,
-            obligationContext(
-                contextRoute,
-                ObligationSourceType.INSPIRATION,
-                "inspiration://" + proposal.proposalId(),
-                proposal.mechanism().value(),
-                proposal.mechanism().value()));
+      ControlledObligationWrite graphWrite =
+          addObligationThroughControl(inspirationObligation, graphAdmission);
+      if (!graphWrite.decision().allowed()) {
+        return;
       }
+    } else if (!graphAdmission.decision().allowed()) {
+      return;
     }
+    if (inspired != null) {
+      strategyArchive.archive(
+          inspiredControl, "inspiration://" + proposal.proposalId(), roundIndex.get());
+      strategyBlueprints.put(inspired.strategyId(), inspiredBlueprint);
+      admittedStrategies =
+          java.util.stream.Stream.concat(
+                  admittedStrategies.stream(), java.util.stream.Stream.of(inspired))
+              .toList();
+      addRoute(inspired, 0, NegativeKnowledgeSurface.INSPIRATION_MATERIALIZATION);
+      targetRoute = routes.getLast();
+    }
+    typedMemory.addInsight(insight);
     if (targetRoute != null) {
       enqueueProofTask(
           "inspiration:" + proposal.mechanism().value(),
@@ -5254,6 +5580,20 @@ final class DesktopSolveCoordinator {
           id,
           targetRoute.failure == null ? "DEEPEN" : "REVISE");
     }
+  }
+
+  private static FocusedRecoveryActionType inspirationControlAction(String mechanism) {
+    String normalized = mechanism == null ? "" : mechanism.toLowerCase(Locale.ROOT);
+    if (normalized.contains("representation")) {
+      return FocusedRecoveryActionType.REPRESENTATION_SWITCH;
+    }
+    if (normalized.contains("analogy")) {
+      return FocusedRecoveryActionType.STRUCTURAL_ANALOGY;
+    }
+    if (normalized.contains("bridge")) {
+      return FocusedRecoveryActionType.UNSCOPED_BRIDGE;
+    }
+    return FocusedRecoveryActionType.GENERIC_INSPIRATION;
   }
 
   private StrategyCard inspiredStrategy(InspirationProposal proposal) {
@@ -5325,6 +5665,7 @@ final class DesktopSolveCoordinator {
     double total = debt.values().stream().mapToDouble(Double::doubleValue).sum();
     double prior = proofDebtHistory.isEmpty() ? total : proofDebtHistory.getLast();
     proofDebtHistory.add(total);
+    sampleProofGraphConvergenceRound();
     List<ProofObligation> open =
         proofGraph.obligations().stream()
             .filter(obligation -> !"closed".equals(obligation.status()))
@@ -5371,6 +5712,77 @@ final class DesktopSolveCoordinator {
                     LinkedHashMap::new)),
         false,
         manualTrigger && inspirationPolicy.runs());
+  }
+
+  private void sampleProofGraphConvergenceRound() {
+    int exactRefutations =
+        (int)
+            proofGraph.allCanonicalTargets().stream()
+                .filter(
+                    target ->
+                        proofGraph.canonicalStatus(target.canonicalTargetId())
+                            == CanonicalObligationStatus.REFUTED)
+                .count();
+    proofGraphConvergence.sample(
+        roundIndex.get(),
+        proofGraph,
+        lemmaMemory.verified().size(),
+        exactRefutations,
+        proofGraphConvergence.genericExpansionBlocks(),
+        immutableRootGoalHash());
+    if (proofGraphConvergence.controlMode() == ProofGraphControlMode.FOCUSED_RECOVERY) {
+      enqueueFocusedRecoveryTask();
+    }
+  }
+
+  private void enqueueFocusedRecoveryTask() {
+    FocusedRecoveryPlan plan = proofGraphConvergence.focusedRecoveryPlan().orElse(null);
+    if (plan == null
+        || pendingProofTasks.stream()
+            .anyMatch(task -> task.source().equals("focused-recovery:" + plan.episodeId()))
+        || !proofGraphConvergence.acquireFocusedTaskLease(
+            FocusedRecoveryActionType.FOCUSED_PROVER, roundIndex.get())) {
+      return;
+    }
+    Map<String, String> canonicalByObligation = new LinkedHashMap<>();
+    proofGraph.rawObligationOccurrences().forEach(
+        occurrence ->
+            canonicalByObligation.put(
+                occurrence.obligationId(), occurrence.canonicalTargetId()));
+    Optional<ProofObligation> selected =
+        proofGraph.obligations().stream()
+            .filter(
+                obligation ->
+                    plan.selectedCanonicalTargetIds()
+                        .contains(canonicalByObligation.get(obligation.obligationId())))
+            .filter(
+                obligation ->
+                    Set.of("open", "tentative", "blocked").contains(obligation.status()))
+            .sorted(
+                java.util.Comparator.comparingDouble(ProofObligation::centrality)
+                    .reversed()
+                    .thenComparing(
+                        ProofObligation::priority, java.util.Comparator.reverseOrder())
+                    .thenComparing(ProofObligation::obligationId))
+            .findFirst();
+    selected
+        .flatMap(
+            obligation ->
+                routeForObligation(obligation)
+                    .map(route -> Map.entry(obligation, route)))
+        .ifPresent(
+            entry ->
+                enqueueProofTask(
+                    "focused-recovery:" + plan.episodeId(),
+                    entry.getValue().routeId,
+                    entry.getKey().obligationId(),
+                    entry.getValue().failure == null ? "DEEPEN" : "REVISE"));
+  }
+
+  private String immutableRootGoalHash() {
+    return rootGoal == null
+        ? CanonicalJson.stableHash(Map.of("problem_hash", problemHash, "problem", request.problem()))
+        : rootGoal.sourceStatementHash();
   }
 
   private double routeRedundancy() {
@@ -5976,6 +6388,10 @@ final class DesktopSolveCoordinator {
     if (checkpoint.proofGraph() != null) {
       proofGraph = ProofGraphStore.restore(checkpoint.proofGraph(), ProofGraphPolicy.defaults());
     }
+    proofGraphConvergence =
+        ProofGraphConvergenceMonitor.restore(
+            ProofGraphConvergenceConfig.defaults(), checkpoint.proofGraphConvergence());
+    deferredExpansions = DeferredExpansionLedger.restore(checkpoint.deferredExpansions());
     migrateLegacyCanonicalProofTasks(checkpoint.schemaVersion());
     attemptArtifacts = AttemptArtifactLedger.restore(checkpoint.attemptArtifacts());
     researchCheckpoints = ResearchCheckpointLedger.restore(checkpoint.researchCheckpoints());
@@ -6500,6 +6916,8 @@ final class DesktopSolveCoordinator {
             formalizationCoverage,
             computationAudits,
             new ArrayList<>(completedStages),
+            proofGraphConvergence.snapshot(),
+            deferredExpansions.snapshot(),
             terminal);
     Path structured = runDirectory.resolve("structured");
     Files.createDirectories(structured);
@@ -6516,6 +6934,12 @@ final class DesktopSolveCoordinator {
     writeJsonAtomically(
         structured.resolve("research-finding-audit.json"),
         checkpoint.researchCheckpoints().audit());
+    writeJsonAtomically(
+        structured.resolve("proof-graph-convergence.json"),
+        checkpoint.proofGraphConvergence());
+    writeJsonAtomically(
+        structured.resolve("deferred-proof-expansions.json"),
+        checkpoint.deferredExpansions());
     writeJsonAtomically(structured.resolve("message-store.json"), checkpoint.messageStore());
     writeJsonAtomically(structured.resolve("strategy-archive.json"), checkpoint.strategyArchive());
     writeJsonAtomically(
@@ -8115,6 +8539,26 @@ final class DesktopSolveCoordinator {
       view.put("authority", authority.name().toLowerCase(Locale.ROOT));
       view.put("replay_valid", replayValid);
       return Map.copyOf(view);
+    }
+  }
+
+  private record ObligationControlAdmission(
+      ObligationCreationContext context,
+      FocusedRecoveryActionType actionType,
+      FocusedExpansionDecision decision,
+      boolean existingCanonicalTarget) {
+    private ObligationControlAdmission {
+      context = Objects.requireNonNull(context, "context");
+      actionType = Objects.requireNonNull(actionType, "actionType");
+      decision = Objects.requireNonNull(decision, "decision");
+    }
+  }
+
+  private record ControlledObligationWrite(
+      CanonicalizedObligationWriteResult result, FocusedExpansionDecision decision) {
+    private ControlledObligationWrite {
+      result = Objects.requireNonNull(result, "result");
+      decision = Objects.requireNonNull(decision, "decision");
     }
   }
 

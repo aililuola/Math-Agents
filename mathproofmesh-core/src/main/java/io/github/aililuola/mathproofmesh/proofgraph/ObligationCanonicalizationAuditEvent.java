@@ -1,11 +1,7 @@
 package io.github.aililuola.mathproofmesh.proofgraph;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.Map;
 
-@SuppressFBWarnings(
-    value = "EI_EXPOSE_REP",
-    justification = "The compact constructor creates an immutable map copy.")
 public record ObligationCanonicalizationAuditEvent(
     long sequence,
     String code,

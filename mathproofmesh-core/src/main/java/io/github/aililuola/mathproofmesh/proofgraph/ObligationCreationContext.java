@@ -1,13 +1,9 @@
 package io.github.aililuola.mathproofmesh.proofgraph;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.contract.ProofObligation;
 import java.util.List;
 import java.util.Map;
 
-@SuppressFBWarnings(
-    value = "EI_EXPOSE_REP",
-    justification = "The compact constructor creates immutable collection copies.")
 public record ObligationCreationContext(
     String problemHash,
     String routeId,

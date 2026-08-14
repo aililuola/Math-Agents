@@ -36,7 +36,7 @@ public record ObligationCanonicalizationSnapshot(
     canonicalCentrality = immutable(canonicalCentrality);
     canonicalPriority = immutable(canonicalPriority);
     canonicalRepresentativeStatements = immutable(canonicalRepresentativeStatements);
-    taskLeaseKeys = taskLeaseKeys == null ? Set.of() : Set.copyOf(taskLeaseKeys);
+    taskLeaseKeys = immutableSorted(taskLeaseKeys);
     audit = audit == null ? List.of() : List.copyOf(audit);
     if (possibleEquivalentQuarantines < 0 || unsafeHardMerges < 0 || version < 0) {
       throw new IllegalArgumentException("snapshot counters must be nonnegative");
@@ -68,5 +68,11 @@ public record ObligationCanonicalizationSnapshot(
 
   private static <K, V> Map<K, V> immutable(Map<K, V> value) {
     return value == null ? Map.of() : Map.copyOf(value);
+  }
+
+  private static Set<String> immutableSorted(Set<String> values) {
+    return values == null || values.isEmpty()
+        ? Set.of()
+        : java.util.Collections.unmodifiableSet(new java.util.TreeSet<>(values));
   }
 }

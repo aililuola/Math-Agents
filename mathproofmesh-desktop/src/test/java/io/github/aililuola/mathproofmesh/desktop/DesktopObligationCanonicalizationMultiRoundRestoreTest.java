@@ -19,7 +19,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 class DesktopObligationCanonicalizationMultiRoundRestoreTest {
   @Test
-  void twentyRoundsPreserveCanonicalFamiliesAlternativesAndTaskLeasesAcrossV9Restore(
+  void twentyRoundsPreserveCanonicalFamiliesAlternativesAndTaskLeasesAcrossCurrentRestore(
       @TempDir Path directory) throws Exception {
     DesktopResearchCheckpointBlackBoxHarness harness =
         DesktopResearchCheckpointBlackBoxHarness.open(
@@ -64,7 +64,8 @@ class DesktopObligationCanonicalizationMultiRoundRestoreTest {
           canonicalBeforeRestore = canonicalIds(graph);
           familiesBeforeRestore = familyIds(graph);
           DesktopSolveCheckpoint checkpoint = harness.checkpointRoundTrip();
-          assertThat(checkpoint.schemaVersion()).isEqualTo(9);
+          assertThat(checkpoint.schemaVersion())
+              .isEqualTo(DesktopSolveCheckpoint.CURRENT_SCHEMA_VERSION);
           DesktopResearchCheckpointBlackBoxHarness restored = harness.restored(checkpoint);
           harness.close();
           harness = restored;
@@ -97,7 +98,8 @@ class DesktopObligationCanonicalizationMultiRoundRestoreTest {
 
       System.out.println("OBLIGATION CANONICALIZATION MULTI-ROUND DIAGNOSTIC");
       System.out.println("ROUNDS=20");
-      System.out.println("RESTORE_SCHEMA_VERSION=9");
+      System.out.println(
+          "RESTORE_SCHEMA_VERSION=" + DesktopSolveCheckpoint.CURRENT_SCHEMA_VERSION);
       System.out.println("RESTORE_ROUND=10");
       System.out.println("RAW_OBLIGATION_PROPOSALS=" + proposals);
       System.out.println("RAW_OCCURRENCES_RECORDED=" + graph.rawObligationOccurrences().size());

@@ -22,10 +22,10 @@ public record CanonicalObligationRecord(
     problemHash = require(problemHash, "problemHash");
     signature = java.util.Objects.requireNonNull(signature, "signature");
     representativeOccurrenceId = require(representativeOccurrenceId, "representativeOccurrenceId");
-    occurrenceIds = occurrenceIds == null ? Set.of() : Set.copyOf(occurrenceIds);
-    routeIds = routeIds == null ? Set.of() : Set.copyOf(routeIds);
+    occurrenceIds = immutableSorted(occurrenceIds);
+    routeIds = immutableSorted(routeIds);
     dependencyPlanSignatures =
-        dependencyPlanSignatures == null ? Set.of() : Set.copyOf(dependencyPlanSignatures);
+        immutableSorted(dependencyPlanSignatures);
     schedulingState =
         schedulingState == null ? CanonicalObligationSchedulingState.ACTIVE : schedulingState;
     if (occurrenceIds.isEmpty() || !occurrenceIds.contains(representativeOccurrenceId)) {
@@ -42,5 +42,11 @@ public record CanonicalObligationRecord(
       throw new IllegalArgumentException(field + " is required");
     }
     return normalized;
+  }
+
+  private static Set<String> immutableSorted(Set<String> values) {
+    return values == null || values.isEmpty()
+        ? Set.of()
+        : java.util.Collections.unmodifiableSet(new java.util.TreeSet<>(values));
   }
 }

@@ -76,6 +76,11 @@ public final class ProofGraphStore {
     return negativeAwareWriter.addObligation(obligation);
   }
 
+  @SuppressFBWarnings(
+      value = "RCN_REDUNDANT_NULLCHECK_OF_NULL_VALUE",
+      justification =
+          "The negative-aware writer sets the result through the guarded unchecked callback;"
+              + " SpotBugs does not follow that indirect call.")
   public synchronized CanonicalizedObligationWriteResult addObligationCanonicalized(
       ProofObligation obligation, ObligationCreationContext context) {
     java.util.Objects.requireNonNull(obligation, "obligation");
@@ -696,6 +701,22 @@ public final class ProofGraphStore {
         .toList();
   }
 
+  public synchronized List<CanonicalObligationRecord> activeCanonicalOpenTargets() {
+    return canonicalOpenTargets().stream()
+        .filter(
+            target ->
+                target.schedulingState() == CanonicalObligationSchedulingState.ACTIVE)
+        .toList();
+  }
+
+  public synchronized List<CanonicalObligationRecord> deferredCanonicalOpenTargets() {
+    return canonicalOpenTargets().stream()
+        .filter(
+            target ->
+                target.schedulingState() != CanonicalObligationSchedulingState.ACTIVE)
+        .toList();
+  }
+
   public synchronized List<BottleneckFamilyRecord> allBottleneckFamilies() {
     return canonicalization.bottleneckFamilies();
   }
@@ -706,7 +727,18 @@ public final class ProofGraphStore {
         .filter(
             family ->
                 family.canonicalTargetIds().stream()
-                    .map(this::canonicalStatus)
+                    .map(
+                        id ->
+                            canonicalization.canonicalTargets().stream()
+                                .filter(target -> target.canonicalTargetId().equals(id))
+                                .findFirst()
+                                .orElse(null))
+                    .filter(java.util.Objects::nonNull)
+                    .filter(
+                        target ->
+                            target.schedulingState()
+                                == CanonicalObligationSchedulingState.ACTIVE)
+                    .map(target -> canonicalStatus(target.canonicalTargetId()))
                     .anyMatch(
                         status ->
                             status == CanonicalObligationStatus.OPEN
@@ -722,7 +754,7 @@ public final class ProofGraphStore {
     Map<String, ObligationOccurrenceRecord> occurrenceIndex =
         canonicalization.snapshot().occurrences();
     List<CanonicalObligationRecord> targets =
-        canonicalOpenTargets().stream()
+        activeCanonicalOpenTargets().stream()
         .filter(
             target ->
                 !hasMainGoal
@@ -783,6 +815,48 @@ public final class ProofGraphStore {
   public synchronized Optional<CanonicalObligationRecord> canonicalTargetForObligation(
       String obligationId) {
     return canonicalization.canonicalForObligation(obligationId);
+  }
+
+  public synchronized Optional<String> existingCanonicalTargetId(
+      ProofObligation obligation, ObligationCreationContext context) {
+    return canonicalization.exactCanonicalTargetId(obligation, context);
+  }
+
+  public synchronized boolean wouldCreateCanonicalTarget(
+      ProofObligation obligation, ObligationCreationContext context) {
+    return existingCanonicalTargetId(obligation, context).isEmpty();
+  }
+
+  public synchronized int activeCanonicalTargetCount() {
+    return (int)
+        canonicalOpenTargets().stream()
+            .filter(target -> target.signature().kind() != ObligationKind.MAIN_GOAL)
+            .filter(
+                target ->
+                    target.schedulingState() == CanonicalObligationSchedulingState.ACTIVE)
+            .count();
+  }
+
+  public synchronized int activeCanonicalTargetCount(String routeId) {
+    return (int)
+        canonicalOpenTargets(routeId).stream()
+            .filter(target -> target.signature().kind() != ObligationKind.MAIN_GOAL)
+            .filter(
+                target ->
+                    target.schedulingState() == CanonicalObligationSchedulingState.ACTIVE)
+            .count();
+  }
+
+  public synchronized double representativeCentrality(String canonicalTargetId) {
+    return canonicalization.representativeCentrality(canonicalTargetId);
+  }
+
+  public synchronized double representativePriority(String canonicalTargetId) {
+    return canonicalization.representativePriority(canonicalTargetId);
+  }
+
+  public synchronized String representativeStatement(String canonicalTargetId) {
+    return canonicalization.representativeStatement(canonicalTargetId);
   }
 
   public synchronized Optional<BottleneckFamilyRecord> bottleneckFamilyForCanonical(
@@ -1170,9 +1244,8 @@ public final class ProofGraphStore {
 
   private boolean isOperationallyOpen(CanonicalObligationRecord target) {
     CanonicalObligationStatus status = canonicalStatus(target.canonicalTargetId());
-    return target.schedulingState() == CanonicalObligationSchedulingState.ACTIVE
-        && (status == CanonicalObligationStatus.OPEN
-            || status == CanonicalObligationStatus.MIXED);
+    return status == CanonicalObligationStatus.OPEN
+        || status == CanonicalObligationStatus.MIXED;
   }
 
   private Comparator<CanonicalObligationRecord> canonicalTargetOrder() {

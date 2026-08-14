@@ -1,12 +1,8 @@
 package io.github.aililuola.mathproofmesh.proofgraph;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.Set;
 
 /** One schedulable unit without conflating family membership with mathematical equivalence. */
-@SuppressFBWarnings(
-    value = "EI_EXPOSE_REP",
-    justification = "The compact constructor creates immutable collection copies.")
 public record ProofGraphWorkItem(
     ProofTaskScope scope,
     String workItemId,

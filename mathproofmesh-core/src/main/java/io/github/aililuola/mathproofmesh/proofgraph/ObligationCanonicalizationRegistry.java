@@ -18,9 +18,10 @@ import java.util.Set;
 
 /** Deterministic operational projection over the immutable raw obligation history. */
 @SuppressFBWarnings(
-    value = {"EI_EXPOSE_REP", "IMPROPER_UNICODE"},
+    value = {"USO_UNSAFE_METHOD_SYNCHRONIZATION", "IMPROPER_UNICODE"},
     justification =
-        "Public collection views are immutable; NFKC and Locale.ROOT define stable keys.")
+        "Public operations serialize registry state; NFKC plus Locale.ROOT define its stable"
+            + " semantic keys.")
 public final class ObligationCanonicalizationRegistry {
   private final Map<String, ObligationOccurrenceRecord> occurrences = new LinkedHashMap<>();
   private final Map<String, CanonicalObligationRecord> canonicalTargets =
@@ -179,6 +180,14 @@ public final class ObligationCanonicalizationRegistry {
         .map(canonicalTargets::get);
   }
 
+  public synchronized Optional<String> exactCanonicalTargetId(
+      ProofObligation obligation, ObligationCreationContext context) {
+    java.util.Objects.requireNonNull(obligation, "obligation");
+    java.util.Objects.requireNonNull(context, "context");
+    ObligationSemanticSignature signature = ObligationSemanticSignature.from(obligation, context);
+    return Optional.ofNullable(canonicalBySignature.get(signature.signatureHash()));
+  }
+
   public synchronized Optional<BottleneckFamilyRecord> familyForCanonicalTarget(
       String canonicalTargetId) {
     return Optional.ofNullable(familyByCanonicalTarget.get(canonicalTargetId))
@@ -199,6 +208,14 @@ public final class ObligationCanonicalizationRegistry {
 
   public synchronized String representativeStatement(String canonicalTargetId) {
     return canonicalRepresentativeStatements.getOrDefault(canonicalTargetId, "");
+  }
+
+  public synchronized double representativeCentrality(String canonicalTargetId) {
+    return canonicalCentrality.getOrDefault(canonicalTargetId, 0.0d);
+  }
+
+  public synchronized double representativePriority(String canonicalTargetId) {
+    return canonicalPriority.getOrDefault(canonicalTargetId, 0.0d);
   }
 
   public synchronized boolean acquireTaskLease(

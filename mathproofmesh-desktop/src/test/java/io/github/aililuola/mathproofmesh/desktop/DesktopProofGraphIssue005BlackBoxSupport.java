@@ -1,8 +1,20 @@
 package io.github.aililuola.mathproofmesh.desktop;
 
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
+import io.github.aililuola.mathproofmesh.contract.EvidenceType;
+import io.github.aililuola.mathproofmesh.contract.MemoryTier;
+import io.github.aililuola.mathproofmesh.contract.MessageEnvelope;
+import io.github.aililuola.mathproofmesh.contract.MessageType;
 import io.github.aililuola.mathproofmesh.contract.ObligationKind;
 import io.github.aililuola.mathproofmesh.contract.ProofObligation;
+import io.github.aililuola.mathproofmesh.contract.ClaimCard;
+import io.github.aililuola.mathproofmesh.contract.ClaimStatus;
+import io.github.aililuola.mathproofmesh.contract.RouteRole;
+import io.github.aililuola.mathproofmesh.memory.LemmaMemory;
+import io.github.aililuola.mathproofmesh.proofgraph.DeferredExpansionLedger;
+import io.github.aililuola.mathproofmesh.proofgraph.FocusedRecoveryActionType;
+import io.github.aililuola.mathproofmesh.proofgraph.ObligationCreationContext;
+import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphConvergenceMonitor;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -71,7 +83,8 @@ final class DesktopProofGraphIssue005BlackBoxSupport {
     List<Object> routes = (List<Object>) field(coordinator, "routes");
     Method method = DesktopSolveCoordinator.class.getDeclaredMethod("baseRouteContext", routes.getFirst().getClass());
     method.setAccessible(true);
-    return Map.copyOf((Map<String, Object>) method.invoke(coordinator, routes.getFirst()));
+    return java.util.Collections.unmodifiableMap(
+        new LinkedHashMap<>((Map<String, Object>) method.invoke(coordinator, routes.getFirst())));
   }
 
   @SuppressWarnings("unchecked")
@@ -109,6 +122,176 @@ final class DesktopProofGraphIssue005BlackBoxSupport {
     return (int) method.invoke(monitor);
   }
 
+  static ProofGraphConvergenceMonitor convergence(
+      DesktopResearchCheckpointBlackBoxHarness harness) throws Exception {
+    return (ProofGraphConvergenceMonitor) field(coordinator(harness), "proofGraphConvergence");
+  }
+
+  static DeferredExpansionLedger deferredExpansions(
+      DesktopResearchCheckpointBlackBoxHarness harness) throws Exception {
+    return (DeferredExpansionLedger) field(coordinator(harness), "deferredExpansions");
+  }
+
+  static int routeCount(DesktopResearchCheckpointBlackBoxHarness harness) throws Exception {
+    return ((List<?>) field(coordinator(harness), "routes")).size();
+  }
+
+  static int admittedStrategyCount(DesktopResearchCheckpointBlackBoxHarness harness)
+      throws Exception {
+    return ((List<?>) field(coordinator(harness), "admittedStrategies")).size();
+  }
+
+  static boolean widenRoutes(DesktopResearchCheckpointBlackBoxHarness harness)
+      throws Exception {
+    Method method = DesktopSolveCoordinator.class.getDeclaredMethod("widenRoutes");
+    method.setAccessible(true);
+    return (boolean) method.invoke(coordinator(harness));
+  }
+
+  static void addVerifiedLocalClaim(
+      DesktopResearchCheckpointBlackBoxHarness harness, String claimId) throws Exception {
+    LemmaMemory memory = (LemmaMemory) field(coordinator(harness), "lemmaMemory");
+    memory.addMany(
+        List.of(
+            new ClaimCard(
+                List.of(),
+                claimId,
+                "A locally reviewed obstruction is valid.",
+                "",
+                "bounded",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                1.0d,
+                null,
+                null,
+                null,
+                "A locally reviewed obstruction is valid.",
+                ClaimStatus.VERIFIED,
+                List.of("legacy_verified_fact"),
+                1.0d)));
+  }
+
+  static void setRound(DesktopResearchCheckpointBlackBoxHarness harness, int round)
+      throws Exception {
+    ((AtomicInteger) field(coordinator(harness), "roundIndex")).set(round);
+  }
+
+  static boolean addControlledObligation(
+      DesktopResearchCheckpointBlackBoxHarness harness,
+      ProofObligation obligation,
+      ObligationCreationContext context,
+      FocusedRecoveryActionType actionType)
+      throws Exception {
+    Method method =
+        DesktopSolveCoordinator.class.getDeclaredMethod(
+            "addControlledObligation",
+            ProofObligation.class,
+            ObligationCreationContext.class,
+            FocusedRecoveryActionType.class);
+    method.setAccessible(true);
+    Object write = method.invoke(coordinator(harness), obligation, context, actionType);
+    Method decisionMethod = write.getClass().getDeclaredMethod("decision");
+    decisionMethod.setAccessible(true);
+    Object decision = decisionMethod.invoke(write);
+    Method allowedMethod = decision.getClass().getMethod("allowed");
+    return (boolean) allowedMethod.invoke(decision);
+  }
+
+  static void refuteFirstCanonicalTarget(DesktopResearchCheckpointBlackBoxHarness harness)
+      throws Exception {
+    ProofGraphStore graph = graph(harness);
+    String canonicalId =
+        graph.canonicalOpenTargets().stream()
+            .filter(target -> !"MAIN_GOAL".equals(target.signature().kind().name()))
+            .findFirst()
+            .orElseThrow()
+            .canonicalTargetId();
+    Map<String, String> obligationByOccurrence = new LinkedHashMap<>();
+    graph.rawObligationOccurrences().forEach(
+        occurrence ->
+            obligationByOccurrence.put(
+                occurrence.occurrenceId(), occurrence.obligationId()));
+    graph.allCanonicalTargets().stream()
+        .filter(target -> target.canonicalTargetId().equals(canonicalId))
+        .findFirst()
+        .orElseThrow()
+        .occurrenceIds()
+        .stream()
+        .map(obligationByOccurrence::get)
+        .filter(java.util.Objects::nonNull)
+        .distinct()
+        .forEach(obligationId -> graph.refuteObligation(obligationId, null));
+  }
+
+  static void closeFirstCanonicalTarget(DesktopResearchCheckpointBlackBoxHarness harness)
+      throws Exception {
+    ProofGraphStore graph = graph(harness);
+    var target =
+        graph.canonicalOpenTargets().stream()
+            .filter(item -> !"MAIN_GOAL".equals(item.signature().kind().name()))
+            .filter(
+                item ->
+                    item.occurrenceIds().stream()
+                        .map(
+                            occurrenceId ->
+                                graph.rawObligationOccurrences().stream()
+                                    .filter(occurrence -> occurrence.occurrenceId().equals(occurrenceId))
+                                    .findFirst()
+                                    .map(occurrence -> graph.getObligation(occurrence.obligationId()))
+                                    .orElse(null))
+                        .filter(java.util.Objects::nonNull)
+                        .allMatch(obligation -> "open".equals(obligation.status())))
+            .findFirst()
+            .orElseThrow();
+    String factId = "focused-recovery-closing-fact";
+    if (graph.claimNodes().stream().noneMatch(message -> message.messageId().equals(factId))) {
+      graph.addClaimNode(verifiedFact(factId, target.signature().normalizedStatement()));
+    }
+    Map<String, String> obligationByOccurrence = new LinkedHashMap<>();
+    graph.rawObligationOccurrences().forEach(
+        occurrence ->
+            obligationByOccurrence.put(occurrence.occurrenceId(), occurrence.obligationId()));
+    target.occurrenceIds().stream()
+        .map(obligationByOccurrence::get)
+        .filter(java.util.Objects::nonNull)
+        .distinct()
+        .forEach(obligationId -> graph.closeObligation(obligationId, factId, 1.0d));
+  }
+
+  static String canonicalizationHash(DesktopResearchCheckpointBlackBoxHarness harness)
+      throws Exception {
+    return graph(harness).canonicalizationHash();
+  }
+
+  static String convergenceHash(DesktopResearchCheckpointBlackBoxHarness harness)
+      throws Exception {
+    return convergence(harness).stableHash();
+  }
+
+  static String deferredHash(DesktopResearchCheckpointBlackBoxHarness harness)
+      throws Exception {
+    return deferredExpansions(harness).stableHash();
+  }
+
+  static void enterFocusedRecovery(DesktopResearchCheckpointBlackBoxHarness harness)
+      throws Exception {
+    ProofGraphStore graph = graph(harness);
+    for (int round = 0; round < 2; round++) {
+      graph.addObligation(
+          obligation(
+              "focused-entry-" + round,
+              "route-1",
+              "Derive the same focused recovery obstruction.",
+              "derive the same focused recovery obstruction",
+              "focused-entry-family",
+              "focused-entry-plan-" + round));
+      sampleSchedulerRound(harness, round);
+    }
+  }
+
   static String controlMode(DesktopResearchCheckpointBlackBoxHarness harness) throws Exception {
     Object monitor = optionalField(coordinator(harness), "proofGraphConvergence");
     if (monitor == null) {
@@ -142,6 +325,38 @@ final class DesktopProofGraphIssue005BlackBoxSupport {
         List.of(routeId),
         statement,
         "open");
+  }
+
+  private static MessageEnvelope verifiedFact(String id, String statement) {
+    return new MessageEnvelope(
+        List.of(),
+        List.of(),
+        statement,
+        "",
+        null,
+        List.of(),
+        List.of(),
+        EvidenceType.NATURAL_PROOF_AUDITED,
+        MemoryTier.FACT,
+        id,
+        MessageType.VERIFIED_LEMMA,
+        1.0d,
+        statement,
+        DesktopNegativeKnowledgeTestHarness.PROBLEM_HASH,
+        List.of(),
+        null,
+        0,
+        "1",
+        List.of(),
+        "issue-005-test-authority",
+        RouteRole.PROVER,
+        "route-1",
+        statement,
+        List.of(),
+        2,
+        List.of(),
+        0.99d,
+        ClaimStatus.VERIFIED);
   }
 
   private static Object coordinator(DesktopResearchCheckpointBlackBoxHarness harness)

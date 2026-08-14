@@ -37,6 +37,8 @@ import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlModels;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyBlueprintCompiler;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyArchive;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphSnapshot;
+import io.github.aililuola.mathproofmesh.proofgraph.DeferredExpansionSnapshot;
+import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphConvergenceSnapshot;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofTaskScope;
 import io.github.aililuola.mathproofmesh.research.ResearchCheckpointSnapshot;
 import io.github.aililuola.mathproofmesh.provider.UsageTotals;
@@ -89,9 +91,11 @@ record DesktopSolveCheckpoint(
     FormalizationCoverageReport formalizationCoverage,
     List<ComputationBroker.ComputationAudit> computationAudits,
     List<String> completedStages,
+    ProofGraphConvergenceSnapshot proofGraphConvergence,
+    DeferredExpansionSnapshot deferredExpansions,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 9;
+  static final int CURRENT_SCHEMA_VERSION = 10;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {
@@ -120,6 +124,12 @@ record DesktopSolveCheckpoint(
     finalValidationPassed = Boolean.TRUE.equals(finalValidationPassed);
     computationAudits = computationAudits == null ? List.of() : List.copyOf(computationAudits);
     completedStages = completedStages == null ? List.of() : List.copyOf(completedStages);
+    proofGraphConvergence =
+        proofGraphConvergence == null
+            ? ProofGraphConvergenceSnapshot.empty()
+            : proofGraphConvergence;
+    deferredExpansions =
+        deferredExpansions == null ? DeferredExpansionSnapshot.empty() : deferredExpansions;
   }
 
   @Override
