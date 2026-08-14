@@ -34,6 +34,7 @@ import io.github.aililuola.mathproofmesh.proofcontrol.FailureControlService;
 import io.github.aililuola.mathproofmesh.proofcontrol.MetaPivotController;
 import io.github.aililuola.mathproofmesh.proofcontrol.NearMissLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlModels;
+import io.github.aililuola.mathproofmesh.proofcontrol.SemanticPivotSnapshot;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyBlueprintCompiler;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyArchive;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphSnapshot;
@@ -78,6 +79,7 @@ record DesktopSolveCheckpoint(
     Map<String, StrategyBlueprintCompiler.Compilation> strategyBlueprints,
     Map<String, ProofControlModels.GoalLink> goalLinks,
     List<MetaPivotController.Pivot> metaPivots,
+    SemanticPivotSnapshot semanticPivots,
     InspirationRoundProgress inspirationProgress,
     MetaReview pendingMetaReview,
     List<ScheduledProofTask> pendingProofTasks,
@@ -95,7 +97,7 @@ record DesktopSolveCheckpoint(
     DeferredExpansionSnapshot deferredExpansions,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 11;
+  static final int CURRENT_SCHEMA_VERSION = 12;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {
@@ -118,6 +120,8 @@ record DesktopSolveCheckpoint(
     strategyBlueprints = strategyBlueprints == null ? Map.of() : Map.copyOf(strategyBlueprints);
     goalLinks = goalLinks == null ? Map.of() : Map.copyOf(goalLinks);
     metaPivots = metaPivots == null ? List.of() : List.copyOf(metaPivots);
+    semanticPivots =
+        semanticPivots == null ? SemanticPivotSnapshot.empty() : semanticPivots;
     pendingProofTasks = pendingProofTasks == null ? List.of() : List.copyOf(pendingProofTasks);
     workflowCursor = workflowCursor == null ? "" : workflowCursor.strip();
     finalReviewReports = finalReviewReports == null ? List.of() : List.copyOf(finalReviewReports);
@@ -242,7 +246,14 @@ record DesktopSolveCheckpoint(
       Boolean pendingFindingReconciliation,
       boolean reviewComplete,
       boolean checkpointProcessed,
-      boolean integrated) {
+      boolean integrated,
+      String activeSemanticPivotId,
+      List<String> semanticPivotIds,
+      String activeStrategyEpochId,
+      List<String> retiredActiveClaimIds,
+      List<String> retiredStrategyFocusObligationIds,
+      List<String> activeMathematicalObjectIds,
+      String activeDirectionSignature) {
     RouteCheckpoint {
       claimIds = claimIds == null ? List.of() : List.copyOf(claimIds);
       artifactIds = artifactIds == null ? List.of() : List.copyOf(artifactIds);
@@ -273,6 +284,27 @@ record DesktopSolveCheckpoint(
         throw new IllegalArgumentException("checkpointRecoveryCount must be nonnegative");
       }
       pendingFindingReconciliation = Boolean.TRUE.equals(pendingFindingReconciliation);
+      activeSemanticPivotId =
+          activeSemanticPivotId == null ? "" : activeSemanticPivotId.strip();
+      semanticPivotIds = semanticPivotIds == null ? List.of() : List.copyOf(semanticPivotIds);
+      activeStrategyEpochId =
+          activeStrategyEpochId == null || activeStrategyEpochId.isBlank()
+              ? strategy.strategyId()
+              : activeStrategyEpochId.strip();
+      retiredActiveClaimIds =
+          retiredActiveClaimIds == null ? List.of() : List.copyOf(retiredActiveClaimIds);
+      retiredStrategyFocusObligationIds =
+          retiredStrategyFocusObligationIds == null
+              ? List.of()
+              : List.copyOf(retiredStrategyFocusObligationIds);
+      activeMathematicalObjectIds =
+          activeMathematicalObjectIds == null
+              ? List.of()
+              : List.copyOf(activeMathematicalObjectIds);
+      activeDirectionSignature =
+          activeDirectionSignature == null || activeDirectionSignature.isBlank()
+              ? "forward"
+              : activeDirectionSignature.strip();
     }
 
     @Override
@@ -313,6 +345,26 @@ record DesktopSolveCheckpoint(
     @Override
     public List<AttemptRevisionCheckpoint> revisionHistory() {
       return List.copyOf(revisionHistory);
+    }
+
+    @Override
+    public List<String> semanticPivotIds() {
+      return List.copyOf(semanticPivotIds);
+    }
+
+    @Override
+    public List<String> retiredActiveClaimIds() {
+      return List.copyOf(retiredActiveClaimIds);
+    }
+
+    @Override
+    public List<String> retiredStrategyFocusObligationIds() {
+      return List.copyOf(retiredStrategyFocusObligationIds);
+    }
+
+    @Override
+    public List<String> activeMathematicalObjectIds() {
+      return List.copyOf(activeMathematicalObjectIds);
     }
   }
 

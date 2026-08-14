@@ -113,6 +113,26 @@ public final class StrategyArchive {
     return lineage.get(child.id());
   }
 
+  /**
+   * Archives a true semantic pivot as a new root epoch. Cross-epoch parentage is deliberately
+   * owned by {@link SemanticPivotLedger}, because normal child lineage requires object preservation.
+   */
+  public Entry archivePivotEpoch(
+      ProofControlModels.Strategy strategy,
+      String sourceStrategyId,
+      String pivotId,
+      int round) {
+    ProofControlModels.required(sourceStrategyId, "sourceStrategyId");
+    ProofControlModels.required(pivotId, "pivotId");
+    if (!lineage.containsKey(sourceStrategyId)) {
+      throw new IllegalArgumentException("unknown source strategy epoch");
+    }
+    if (lineage.containsKey(strategy.id())) {
+      return java.util.Objects.requireNonNull(originals.get(strategy.id()), "existing epoch root");
+    }
+    return archive(strategy, "semantic-pivot://" + pivotId, round);
+  }
+
   public Lineage rejectChild(String childId, String evidenceId) {
     ProofControlModels.required(evidenceId, "evidenceId");
     Lineage current =
@@ -190,8 +210,14 @@ public final class StrategyArchive {
             || mechanism.equals("direct proof");
     if (generic || child.domainObjects().isEmpty()
         || !new LinkedHashSet<>(child.domainObjects()).containsAll(root.domainObjects())) {
+      LinkedHashSet<String> missingObjects = new LinkedHashSet<>(root.domainObjects());
+      missingObjects.removeAll(child.domainObjects());
       throw new IllegalArgumentException(
-          "rewrite must preserve the original domain mechanism and objects");
+          "rewrite must preserve the original domain mechanism and objects"
+              + "; generic="
+              + generic
+              + "; missing_objects="
+              + missingObjects);
     }
     String fingerprint =
         CanonicalJson.stableHash(

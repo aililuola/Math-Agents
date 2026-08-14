@@ -326,6 +326,7 @@ public final class ProofControlModels {
   public enum MetaPivotEffect {
     EFFECTIVE,
     MATERIALIZED_NO_GAIN,
+    PROPOSAL_ONLY,
     EMPTY,
     DEFERRED,
     FAILED

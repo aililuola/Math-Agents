@@ -23,6 +23,7 @@ public record ProofControlFacade(
     ControlActionDispatcher actions,
     ResumePlanner resume,
     MetaPivotController metaPivot,
+    SemanticPivotController semanticPivots,
     ClaimLifecycleController claims) {
   public ProofControlFacade {
     java.util.Objects.requireNonNull(goalAlignment, "goalAlignment");
@@ -37,6 +38,7 @@ public record ProofControlFacade(
     java.util.Objects.requireNonNull(actions, "actions");
     java.util.Objects.requireNonNull(resume, "resume");
     java.util.Objects.requireNonNull(metaPivot, "metaPivot");
+    java.util.Objects.requireNonNull(semanticPivots, "semanticPivots");
     java.util.Objects.requireNonNull(claims, "claims");
   }
 
@@ -54,6 +56,7 @@ public record ProofControlFacade(
         new ControlActionDispatcher(),
         new ResumePlanner(),
         new MetaPivotController(),
+        new SemanticPivotController(),
         new ClaimLifecycleController());
   }
 }

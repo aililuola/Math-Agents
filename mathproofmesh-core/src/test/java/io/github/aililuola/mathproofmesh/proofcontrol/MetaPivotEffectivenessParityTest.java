@@ -32,9 +32,9 @@ class MetaPivotEffectivenessParityTest {
     controller.execute(
         requested.pivotId(),
         List.of("bridge_lemma"),
-        List.of("task://bridge-lemma"),
+        appliedReceipt(4),
         List.of(),
-        "proposal was converted to a scheduled task");
+        "reviewed semantic delta was atomically applied");
 
     var noGain = controller.evaluate(requested.pivotId(), true);
 
@@ -49,14 +49,28 @@ class MetaPivotEffectivenessParityTest {
     controller.execute(
         requested.pivotId(),
         List.of("bridge_lemma"),
-        List.of("task://bridge-lemma"),
+        appliedReceipt(5),
         List.of(),
-        "bridge task executed");
+        "reviewed semantic delta was atomically applied");
 
     var gained =
         controller.evaluate(
             requested.pivotId(), true, new MetaPivotController.GainEvidence(0, 1, 0, 4.0d, 3.0d));
 
     assertThat(gained.outcome().effect()).isEqualTo(MetaPivotEffect.EFFECTIVE);
+  }
+
+  private static SemanticPivotApplyReceipt appliedReceipt(int round) {
+    return new SemanticPivotApplyReceipt(
+        null,
+        "semantic-pivot-" + round,
+        "semantic-delta-hash-" + round,
+        "route-1",
+        "source-strategy-" + round,
+        "strategy-epoch-" + round,
+        List.of("obligation-" + round),
+        List.of(),
+        round,
+        true);
   }
 }

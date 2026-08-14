@@ -36,6 +36,7 @@ import io.github.aililuola.mathproofmesh.contract.ProblemKind;
 import io.github.aililuola.mathproofmesh.contract.ProofAttempt;
 import io.github.aililuola.mathproofmesh.contract.ProofStep;
 import io.github.aililuola.mathproofmesh.contract.Severity;
+import io.github.aililuola.mathproofmesh.contract.SemanticPivotProposal;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
 import io.github.aililuola.mathproofmesh.contract.StrategySet;
 import io.github.aililuola.mathproofmesh.contract.TriageResult;
@@ -59,6 +60,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -494,6 +497,7 @@ final class DesktopLiveRunExecutionBackendTest {
           case "ToolAuditReport" -> toolAudit(mode);
           case "FinalProof" -> finalProof();
           case "StrategyCard" -> inspirationStrategy(user);
+          case "SemanticPivotProposal" -> textOnlySemanticPivot(user);
           case "MetaReview" -> metaReview(mode);
           default -> throw new AssertionError("unexpected response schema: " + request.schemaName());
         };
@@ -625,6 +629,37 @@ final class DesktopLiveRunExecutionBackendTest {
         "inspired-strategy",
         List.of("inspiration"),
         "Scripted inspiration proposal");
+  }
+
+  private static SemanticPivotProposal textOnlySemanticPivot(String prompt) {
+    return new SemanticPivotProposal(
+        null,
+        "scripted-proposer",
+        promptField(prompt, "problem_hash"),
+        promptField(prompt, "source_statement_hash"),
+        promptField(prompt, "route_id"),
+        promptField(prompt, "strategy_id"),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        inspirationStrategy(prompt),
+        "The scripted fixture proposes only prose and must be rejected as a no-op.",
+        null,
+        null);
+  }
+
+  private static String promptField(String prompt, String field) {
+    Matcher matcher =
+        Pattern.compile("\\\"" + Pattern.quote(field) + "\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"")
+            .matcher(prompt);
+    if (!matcher.find()) {
+      throw new AssertionError("missing semantic pivot prompt field: " + field);
+    }
+    return matcher.group(1);
   }
 
   private static MetaReview metaReview(Mode mode) {

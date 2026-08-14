@@ -13,6 +13,12 @@ import java.util.Map;
 
 /** Exactly-once state machine for a route/round meta pivot. */
 public final class MetaPivotController {
+  public record Snapshot(Map<String, Pivot> pivots) {
+    public Snapshot {
+      pivots = pivots == null ? Map.of() : Map.copyOf(pivots);
+    }
+  }
+
   public record Pivot(
       String pivotId,
       String routeId,
@@ -76,6 +82,39 @@ public final class MetaPivotController {
             evidenceId, "evidenceId"));
   }
 
+  /** Records proposal material without admitting or applying a semantic pivot. */
+  public synchronized Pivot recordProposal(
+      String pivotId, List<String> completedMechanisms, List<String> proposalRefs, String reason) {
+    Pivot pivot = required(pivotId);
+    if (pivot.status() == MetaPivotStatus.EVALUATED
+        || pivot.status() == MetaPivotStatus.APPLIED) {
+      return pivot;
+    }
+    if (pivot.status() != MetaPivotStatus.REQUESTED) {
+      throw new IllegalStateException("only a requested pivot intent can record proposal material");
+    }
+    List<String> completed =
+        completedMechanisms == null
+            ? List.of()
+            : completedMechanisms.stream().distinct().sorted().toList();
+    List<String> refs =
+        proposalRefs == null ? List.of() : proposalRefs.stream().distinct().sorted().toList();
+    MetaPivotOutcome outcome =
+        new MetaPivotOutcome(
+            pivot.pivotId(),
+            refs.isEmpty() ? MetaPivotEffect.EMPTY : MetaPivotEffect.PROPOSAL_ONLY,
+            pivot.requestedMechanisms(),
+            completed,
+            refs,
+            List.of(),
+            ProofControlModels.required(reason, "reason"));
+    return put(
+        pivot,
+        MetaPivotStatus.EVALUATED,
+        outcome,
+        refs.isEmpty() ? "intent produced no proposal" : "proposal recorded without apply");
+  }
+
   public synchronized Pivot execute(
       String pivotId,
       List<String> completedMechanisms,
@@ -103,7 +142,7 @@ public final class MetaPivotController {
             : wakeConditions.stream().sorted(Comparator.comparing(WakeCondition::id)).toList();
     MetaPivotEffect effect;
     if (!stateRefs.isEmpty()) {
-      effect = MetaPivotEffect.MATERIALIZED_NO_GAIN;
+      effect = MetaPivotEffect.PROPOSAL_ONLY;
     } else if (!wakes.isEmpty()) {
       effect = MetaPivotEffect.DEFERRED;
     } else {
@@ -118,7 +157,53 @@ public final class MetaPivotController {
             stateRefs,
             wakes,
             ProofControlModels.required(reason, "reason"));
-    return put(required(pivotId), MetaPivotStatus.APPLIED, outcome, "execution applied");
+    return put(
+        required(pivotId),
+        MetaPivotStatus.EVALUATED,
+        outcome,
+        stateRefs.isEmpty()
+            ? "intent produced no applied semantic delta"
+            : "proposal references recorded without semantic application");
+  }
+
+  /** Applies a pivot only after the semantic controller produced a durable atomic receipt. */
+  public synchronized Pivot execute(
+      String pivotId,
+      List<String> completedMechanisms,
+      SemanticPivotApplyReceipt receipt,
+      List<WakeCondition> wakeConditions,
+      String reason) {
+    Pivot pivot = required(pivotId);
+    if (pivot.status() == MetaPivotStatus.APPLIED
+        || pivot.status() == MetaPivotStatus.EVALUATED) {
+      return pivot;
+    }
+    if (pivot.status() != MetaPivotStatus.ADMITTED) {
+      throw new IllegalStateException("pivot must be admitted before execution");
+    }
+    java.util.Objects.requireNonNull(receipt, "receipt");
+    if (!receipt.applied()) {
+      throw new IllegalArgumentException("semantic pivot receipt is not applied");
+    }
+    put(pivot, MetaPivotStatus.EXECUTING, null, "semantic execution began");
+    List<String> completed =
+        completedMechanisms == null
+            ? List.of()
+            : completedMechanisms.stream().distinct().sorted().toList();
+    List<WakeCondition> wakes =
+        wakeConditions == null
+            ? List.of()
+            : wakeConditions.stream().sorted(Comparator.comparing(WakeCondition::id)).toList();
+    MetaPivotOutcome outcome =
+        new MetaPivotOutcome(
+            pivot.pivotId(),
+            MetaPivotEffect.MATERIALIZED_NO_GAIN,
+            pivot.requestedMechanisms(),
+            completed,
+            List.of("semantic-pivot-receipt://" + receipt.receiptId()),
+            wakes,
+            ProofControlModels.required(reason, "reason"));
+    return put(required(pivotId), MetaPivotStatus.APPLIED, outcome, "semantic delta applied");
   }
 
   public synchronized Pivot evaluate(String pivotId, boolean independentReviewAccepted) {
@@ -207,6 +292,16 @@ public final class MetaPivotController {
 
   public synchronized Pivot get(String pivotId) {
     return required(pivotId);
+  }
+
+  public synchronized Snapshot snapshot() {
+    return new Snapshot(pivots);
+  }
+
+  public synchronized void restore(Snapshot snapshot) {
+    java.util.Objects.requireNonNull(snapshot, "snapshot");
+    pivots.clear();
+    pivots.putAll(snapshot.pivots());
   }
 
   private Pivot put(

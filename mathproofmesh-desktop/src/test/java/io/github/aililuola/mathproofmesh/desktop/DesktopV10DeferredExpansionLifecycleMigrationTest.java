@@ -102,7 +102,7 @@ class DesktopV10DeferredExpansionLifecycleMigrationTest {
           convergenceHash);
 
       DesktopSolveCheckpoint upgraded = harness.checkpointRoundTrip();
-      assertThat(upgraded.schemaVersion()).isEqualTo(11);
+      assertThat(upgraded.schemaVersion()).isEqualTo(DesktopSolveCheckpoint.CURRENT_SCHEMA_VERSION);
       DesktopResearchCheckpointBlackBoxHarness secondRestore = harness.restored(upgraded);
       harness.close();
       harness = secondRestore;

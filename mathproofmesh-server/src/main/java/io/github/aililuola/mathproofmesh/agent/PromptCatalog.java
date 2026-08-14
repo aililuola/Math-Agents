@@ -88,6 +88,17 @@ public final class PromptCatalog {
     stages.put("hypothesize_invariant", "Propose a candidate invariant with state, operations, boundary, and falsification request.");
     stages.put("reverse_goal_analysis", "Keep forward verified facts and backward sufficient claims separate; lexical overlap is not implication.");
     stages.put("persistent_meta_strategy", "Choose one portfolio action from observable persisted evidence without modifying Fact memory.");
+    stages.put(
+        "semantic_pivot_proposal",
+        "Propose one bounded, non-authoritative draft of a structural strategy-state delta from "
+            + "the supplied immutable root, "
+            + "trusted obstruction references, and authority projections. Do not claim a pivot ID, "
+            + "hash, verified claim, Fact, refutation, or permanent negative authority.");
+    stages.put(
+        "semantic_pivot_review",
+        "Independently review exactly one compiled semantic pivot for obstruction binding, real "
+            + "state change, root-goal preservation, and authority boundaries. This review does not "
+            + "verify any proposed mathematical claim.");
     stages.put("surprise_exploration", "Execute the supplied seeded mutation and return a structurally different falsifiable proposal.");
     stages.put("inspiration_referee", "Assess novelty and relevance independently; novelty is never correctness.");
     stages.put("experiment_codegen", "Produce only the smallest bounded deterministic sandbox program under the admitted contract.");

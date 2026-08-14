@@ -93,10 +93,13 @@ import io.github.aililuola.mathproofmesh.contract.ProofObligation;
 import io.github.aililuola.mathproofmesh.contract.ProofStep;
 import io.github.aililuola.mathproofmesh.contract.ReceiptStatus;
 import io.github.aililuola.mathproofmesh.contract.ResearchFindingDispositionAction;
+import io.github.aililuola.mathproofmesh.contract.ResearchFindingKind;
 import io.github.aililuola.mathproofmesh.contract.ResearchFindingUpdateBatch;
 import io.github.aililuola.mathproofmesh.contract.RouteDescriptor;
 import io.github.aililuola.mathproofmesh.contract.RouteRole;
 import io.github.aililuola.mathproofmesh.contract.RouteStatus;
+import io.github.aililuola.mathproofmesh.contract.SemanticPivotProposal;
+import io.github.aililuola.mathproofmesh.contract.SemanticPivotReviewBatch;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
 import io.github.aililuola.mathproofmesh.contract.StrategySet;
 import io.github.aililuola.mathproofmesh.contract.TaskRequirement;
@@ -126,6 +129,7 @@ import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeBlockedExceptio
 import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeCandidate;
 import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeDecision;
 import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeRegistry;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeRecord;
 import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeSurface;
 import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeTargetType;
 import io.github.aililuola.mathproofmesh.memory.VerifiedCounterexampleAuthority;
@@ -160,6 +164,31 @@ import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactStatus;
 import io.github.aililuola.mathproofmesh.proofcontrol.ExactGoalContractChecker;
 import io.github.aililuola.mathproofmesh.proofcontrol.FailureControlService;
 import io.github.aililuola.mathproofmesh.proofcontrol.MetaPivotController;
+import io.github.aililuola.mathproofmesh.proofcontrol.LocalRepairApplyReceipt;
+import io.github.aililuola.mathproofmesh.proofcontrol.LocalRepairPlan;
+import io.github.aililuola.mathproofmesh.proofcontrol.MathematicalObjectChange;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotAssumptionChange;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotAuthorityContext;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotClaimUsageAction;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotCompilationException;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotDelta;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotDeltaStatus;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotDirectionChange;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotEvidenceAuthority;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotObjectDisposition;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotObligationAction;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotObligationChange;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotObstructionRef;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotStructuralSignature;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotStructuralSignatureFactory;
+import io.github.aililuola.mathproofmesh.proofcontrol.PivotTransformationType;
+import io.github.aililuola.mathproofmesh.proofcontrol.SemanticPivotApplyPlan;
+import io.github.aililuola.mathproofmesh.proofcontrol.SemanticPivotApplyReceipt;
+import io.github.aililuola.mathproofmesh.proofcontrol.SemanticPivotCompiler;
+import io.github.aililuola.mathproofmesh.proofcontrol.SemanticPivotController;
+import io.github.aililuola.mathproofmesh.proofcontrol.SemanticPivotRecord;
+import io.github.aililuola.mathproofmesh.proofcontrol.SemanticPivotSnapshot;
+import io.github.aililuola.mathproofmesh.proofcontrol.StrategyRevisionKind;
 import io.github.aililuola.mathproofmesh.proofcontrol.NearMissLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlFacade;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlModels;
@@ -300,6 +329,9 @@ final class DesktopSolveCoordinator {
   private final Map<String, StrategyBlueprintCompiler.Compilation> strategyBlueprints =
       new LinkedHashMap<>();
   private final Map<String, ProofControlModels.GoalLink> goalLinks = new LinkedHashMap<>();
+  private final SemanticPivotCompiler semanticPivotCompiler = new SemanticPivotCompiler();
+  private final PivotStructuralSignatureFactory pivotSignatures =
+      new PivotStructuralSignatureFactory();
   private final AtomicInteger activitySequence = new AtomicInteger();
 
   private ProblemContract frozenProblem;
@@ -339,9 +371,11 @@ final class DesktopSolveCoordinator {
       new DeferredExpansionReactivationPlanner();
   private DeferredReactivationFailurePoint deferredReactivationFailurePoint =
       DeferredReactivationFailurePoint.NONE;
+  private SemanticPivotFailurePoint semanticPivotFailurePoint = SemanticPivotFailurePoint.NONE;
   private NegativeKnowledgeRegistry negativeKnowledgeRegistry;
   private NegativeKnowledgeAdmissionGate negativeKnowledgeGate;
   private final ProofControlFacade proofControl = ProofControlFacade.createDefault();
+  private final SemanticPivotController semanticPivots = proofControl.semanticPivots();
   private final ExactGoalContractChecker exactGoalContractChecker =
       new ExactGoalContractChecker(proofControl.scopeGuard());
   private final ProblemSemanticViewService semanticViewService =
@@ -1131,6 +1165,26 @@ final class DesktopSolveCoordinator {
     context.put("route_id", route.routeId);
     context.put("assigned_agent_id", route.author.id());
     context.put("assigned_strategy", route.strategy);
+    SemanticPivotRecord activePivot =
+        route.activeSemanticPivotId.isBlank()
+            ? null
+            : semanticPivots.ledger().get(route.activeSemanticPivotId);
+    context.put("active_semantic_pivot_delta", activePivot == null ? Map.of() : activePivot.delta());
+    context.put("active_mathematical_object_ids", List.copyOf(route.activeMathematicalObjectIds));
+    context.put("active_direction_signature", route.activeDirectionSignature);
+    context.put(
+        "retained_verified_claim_ids",
+        activePivot == null
+            ? List.of()
+            : activePivot.delta().claimUseChanges().stream()
+                .filter(change -> change.action() == PivotClaimUsageAction.RETAIN_AS_VERIFIED_FACT)
+                .map(io.github.aililuola.mathproofmesh.proofcontrol.PivotClaimUseChange::claimId)
+                .toList());
+    context.put(
+        "semantic_pivot_authority_rule",
+        "The active PivotDelta changes only strategy state. Retained verified facts keep their "
+            + "existing authority; retired targets remain historically present and keep their "
+            + "mathematical status.");
     context.put("migration_parity_requirements", strategyGenerationGuidance());
     context.put(
         "focused_obligation",
@@ -5014,6 +5068,8 @@ final class DesktopSolveCoordinator {
       StrategyCard revision,
       String action,
       StrategyArchive.RevisionReason reason) {
+    StrategyRevisionKind revisionKind = StrategyRevisionKind.LOCAL_REPAIR;
+    LocalRepairPlan repairPlan = localRepairPlan(target, revision.bottleneck());
     if (proofGraphConvergence.controlMode() == ProofGraphControlMode.FOCUSED_RECOVERY
         && !routeMatchesFocusedRecovery(target)) {
       proofGraphConvergence.recordGenericExpansionAttempt(false);
@@ -5021,7 +5077,8 @@ final class DesktopSolveCoordinator {
           action, false, "unrelated route revision deferred during focused recovery");
       return false;
     }
-    ProofControlModels.Strategy control = controlStrategy(revision, target.routeId);
+    ProofControlModels.Strategy control =
+        localRepairControlStrategy(target.strategy, revision, target.routeId);
     ProofControlModels.Obligation goal = controlGoal();
     StrategyBlueprintCompiler.Compilation blueprint =
         proofControl.blueprintCompiler().compile(problemHash, control, goal);
@@ -5120,8 +5177,20 @@ final class DesktopSolveCoordinator {
         "scheduler_decision",
         target.author.id(),
         "completed",
-        action + " preserved the prior attempt and opened revision " + nextRevision,
+        action
+            + " applied "
+            + revisionKind.name()
+            + " while preserving the prior attempt and opened revision "
+            + nextRevision,
         target.checkpoint.checkpointId());
+    LocalRepairApplyReceipt receipt = localRepairReceipt(repairPlan, revision);
+    event(
+        "local_repair_applied",
+        "scheduler_decision",
+        target.author.id(),
+        "completed",
+        "Applied a same-object, same-target bridge repair outside the semantic pivot ledger",
+        receipt.repairId());
     return true;
   }
 
@@ -5157,19 +5226,28 @@ final class DesktopSolveCoordinator {
         hint = "Resolve exactly this obligation before any broader claim: " + focus.statement();
       }
     }
+    LocalRepairPlan repair = localRepairPlan(target, hint);
+    List<String> expectedLemmas = new ArrayList<>(target.strategy.expectedLemmas());
+    if (!expectedLemmas.contains(repair.updatedExpectedLemma())) {
+      expectedLemmas.add(repair.updatedExpectedLemma());
+    }
     return new StrategyCard(
         null,
-        target.strategy.bottleneck(),
+        repair.bridgeStatement(),
         target.strategy.calculationChecks(),
         target.strategy.calculationEvidenceRefs(),
         target.strategy.computationHints(),
-        target.strategy.coreIdea() + " Repair only the first invalid bridge: " + hint,
+        target.strategy.coreIdea(),
         target.strategy.criticalClaims(),
         target.strategy.estimatedCost(),
         Math.max(0.05d, target.strategy.estimatedSuccess() * 0.9d),
-        target.strategy.expectedLemmas(),
-        target.strategy.falsificationTest(),
-        target.strategy.independenceBasis() + "; committed-state " + kind,
+        expectedLemmas,
+        repair.updatedFalsificationTest(),
+        target.strategy.independenceBasis()
+            + "; local-repair="
+            + repair.repairId()
+            + "; committed-state "
+            + kind,
         target.strategy.inspirationProposalId(),
         target.strategy.keyOriginalStep(),
         List.of(target.strategy.strategyId()),
@@ -5177,6 +5255,1086 @@ final class DesktopSolveCoordinator {
         target.strategy.strategyId() + "-" + kind + "-r" + roundIndex.get(),
         target.strategy.tags(),
         target.strategy.title() + " (" + kind + " " + roundIndex.get() + ")");
+  }
+
+  private LocalRepairPlan localRepairPlan(RouteState target, String hint) {
+    String focusId =
+        target.focusObligationId == null || target.focusObligationId.isBlank()
+            ? routeObligationId(target.routeId)
+            : target.focusObligationId;
+    String bridge =
+        findObligation(focusId)
+            .map(ProofObligation::statement)
+            .filter(value -> !value.isBlank())
+            .orElseGet(
+                () ->
+                    hint == null || hint.isBlank()
+                        ? target.strategy.bottleneck()
+                        : hint.strip());
+    String lemma = "Establish the focused bridge: " + bridge;
+    String falsification =
+        "Try to falsify exactly the focused bridge before reusing it: " + bridge;
+    return new LocalRepairPlan(
+        null,
+        target.strategy.strategyId(),
+        focusId,
+        bridge,
+        lemma,
+        falsification,
+        "A local dependency is missing while object, target, and direction remain fixed.");
+  }
+
+  private LocalRepairApplyReceipt localRepairReceipt(
+      LocalRepairPlan plan, StrategyCard revision) {
+    return new LocalRepairApplyReceipt(
+        plan.repairId(),
+        plan.sourceStrategyId(),
+        revision.strategyId(),
+        plan.exactFocusedObligationId(),
+        roundIndex.get(),
+        true);
+  }
+
+  private ProofControlModels.Strategy localRepairControlStrategy(
+      StrategyCard source, StrategyCard revision, String routeId) {
+    ProofControlModels.Strategy sourceControl = controlStrategy(source, routeId);
+    ProofControlModels.Strategy revisionControl = controlStrategy(revision, routeId);
+    LinkedHashSet<String> preservedObjects =
+        new LinkedHashSet<>(sourceControl.domainObjects());
+    StrategyArchive.Lineage sourceLineage = strategyArchive.lineage().get(source.strategyId());
+    if (sourceLineage != null) {
+      StrategyArchive.Entry epochRoot =
+          strategyArchive.snapshot().originals().get(sourceLineage.rootStrategyId());
+      if (epochRoot != null) {
+        preservedObjects.addAll(epochRoot.domainObjects());
+      }
+    }
+    preservedObjects.addAll(revisionControl.domainObjects());
+    return new ProofControlModels.Strategy(
+        revisionControl.id(),
+        revisionControl.title(),
+        revisionControl.mechanism(),
+        revisionControl.prerequisites(),
+        revisionControl.criticalClaims(),
+        revisionControl.expectedLemmas(),
+        revisionControl.falsificationTests(),
+        List.copyOf(preservedObjects),
+        revisionControl.routeId());
+  }
+
+  PivotDelta compileSemanticPivotProposal(SemanticPivotProposal proposal) {
+    RouteState route = requirePivotRoute(proposal.routeId());
+    return semanticPivotCompiler.compile(proposal, pivotObstructionReferences(route));
+  }
+
+  SemanticPivotRecord applySemanticPivot(
+      PivotDelta delta, SemanticPivotReviewBatch review) {
+    return applySemanticPivot(delta, review, null);
+  }
+
+  @SuppressFBWarnings(
+      value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
+      justification = "The meta-pivot projection is restored before an atomic apply failure is propagated.")
+  private SemanticPivotRecord applySemanticPivot(
+      PivotDelta delta,
+      SemanticPivotReviewBatch review,
+      String metaPivotIntentId) {
+    RouteState route = requirePivotRoute(delta.routeId());
+    StrategyBlueprintCompiler.Compilation proposedBlueprint =
+        proofControl
+            .blueprintCompiler()
+            .compile(problemHash, controlStrategy(delta.proposedStrategy(), route.routeId), controlGoal());
+    PivotStructuralSignature sourceSignature = pivotSignature(route, null, null);
+    PivotStructuralSignature proposedSignature =
+        pivotSignature(route, delta, proposedBlueprint);
+    PivotAuthorityContext authority = pivotAuthority(route, delta);
+    ProofControlModels.GoalLink proposedGoalLink =
+        pivotGoalLink(delta.proposedStrategy(), route.routeId);
+
+    SemanticPivotController.Preparation preparation =
+        semanticPivots.prepare(
+            delta,
+            sourceSignature,
+            proposedSignature,
+            authority,
+            review == null ? "missing-proposer" : review.proposerAgentId(),
+            review,
+            config.budget().verificationPassThreshold(),
+            () ->
+                semanticPivotExternalGateFailures(
+                    route, delta, proposedBlueprint, proposedGoalLink));
+    if (!preparation.admitted()) {
+      event(
+          "semantic_pivot_rejected",
+          "semantic_pivot_review",
+          review == null ? null : review.reviewerAgentId(),
+          "rejected",
+          String.join(",", preparation.failureCodes()),
+          delta.pivotId());
+      return preparation.record();
+    }
+    MetaPivotController.Snapshot metaBefore = proofControl.metaPivot().snapshot();
+    if (metaPivotIntentId != null) {
+      proofControl
+          .metaPivot()
+          .admit(
+              metaPivotIntentId,
+              true,
+              "semantic-pivot-review://" + review.reportId());
+    }
+    SemanticPivotRecord applied;
+    try {
+      applied =
+          semanticPivots.apply(
+              preparation.plan(),
+              plan ->
+                  applySemanticPivotAtomically(
+                      route, plan, proposedBlueprint, proposedGoalLink));
+    } catch (RuntimeException exception) {
+      if (metaPivotIntentId != null) {
+        proofControl.metaPivot().restore(metaBefore);
+      }
+      throw exception;
+    }
+    if (metaPivotIntentId != null) {
+      proofControl
+          .metaPivot()
+          .execute(
+              metaPivotIntentId,
+              delta.transformationTypes().stream().map(Enum::name).toList(),
+              applied.applyReceipt(),
+              List.of(),
+              "Independent review admitted and the semantic delta was atomically applied");
+    }
+    event(
+        "semantic_pivot_applied",
+        "semantic_pivot_apply",
+        review.reviewerAgentId(),
+        "completed",
+        "Applied a reviewed non-empty mathematical strategy-state delta",
+        applied.applyReceipt().receiptId());
+    return applied;
+  }
+
+  @SuppressFBWarnings(
+      value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
+      justification = "Recoverable provider failures are audited; cancellation and programming failures propagate.")
+  private SemanticPivotRecord runSemanticPivotCycle(
+      MetaPivotController.Pivot pivot, List<InspirationProposal> produced) {
+    if (pivot == null || produced == null || produced.isEmpty()) {
+      return null;
+    }
+    RouteState route =
+        routes.stream()
+            .filter(candidate -> candidate.routeId.equals(pivot.routeId()))
+            .findFirst()
+            .orElse(null);
+    if (route == null || !semanticPivotMechanismRequested(pivot.requestedMechanisms())) {
+      return null;
+    }
+    if (!route.activeSemanticPivotId.isBlank()) {
+      SemanticPivotRecord prior = semanticPivots.ledger().get(route.activeSemanticPivotId);
+      if (prior.applyReceipt() != null
+          && prior.applyReceipt().appliedRound() == pivot.round()) {
+        proofControl
+            .metaPivot()
+            .admit(
+                pivot.pivotId(),
+                true,
+                "semantic-pivot-replay://" + prior.pivotId());
+        return prior;
+      }
+    }
+    Map<String, PivotObstructionRef> obstructionRefs = pivotObstructionReferences(route);
+    if (obstructionRefs.isEmpty()) {
+      return null;
+    }
+    InspirationProposal sourceProposal = produced.getFirst();
+    AgentRuntime proposer = requireAgent(sourceProposal.sourceAgentId());
+    StructuredCallResult<SemanticPivotProposal> proposalCall;
+    try {
+      proposalCall =
+          callStage(
+              "semantic-pivot-proposal-" + pivot.pivotId(),
+              "semantic_pivot_proposal",
+              SemanticPivotProposal.class,
+              semanticPivotProposalContext(route, pivot, produced, obstructionRefs),
+              proposer,
+              "breadth",
+              "Drafting one typed semantic strategy-state delta");
+    } catch (RuntimeException failure) {
+      if (!isRecoverableInspirationAgentFailure(failure)) {
+        throw failure;
+      }
+      event(
+          "semantic_pivot_proposal_failed",
+          "semantic_pivot_proposal",
+          proposer.id(),
+          "warning",
+          inspirationFailureSummary(failure),
+          pivot.pivotId());
+      return null;
+    }
+
+    SemanticPivotProposal proposal;
+    PivotDelta delta;
+    try {
+      proposal = bindSemanticPivotProposal(proposalCall.value(), proposer, route);
+      delta = semanticPivotCompiler.compile(proposal, obstructionRefs);
+    } catch (IllegalArgumentException failure) {
+      event(
+          "semantic_pivot_proposal_rejected",
+          "semantic_pivot_proposal",
+          proposer.id(),
+          "rejected",
+          failure.getMessage(),
+          proposalCall.value().proposalId());
+      return null;
+    }
+
+    AgentRuntime reviewer =
+        selectIndependentAgent(Set.of(proposer.id()), "detailed_verifier");
+    StructuredCallResult<SemanticPivotReviewBatch> reviewCall;
+    try {
+      reviewCall =
+          callStage(
+              "semantic-pivot-review-" + delta.pivotId(),
+              "semantic_pivot_review",
+              SemanticPivotReviewBatch.class,
+              semanticPivotReviewContext(route, delta, proposer.id()),
+              reviewer,
+              "verification",
+              "Independently reviewing one semantic strategy-state delta");
+    } catch (RuntimeException failure) {
+      if (!isRecoverableInspirationAgentFailure(failure)) {
+        throw failure;
+      }
+      event(
+          "semantic_pivot_review_failed",
+          "semantic_pivot_review",
+          reviewer.id(),
+          "warning",
+          inspirationFailureSummary(failure),
+          delta.pivotId());
+      return null;
+    }
+    SemanticPivotReviewBatch review =
+        new SemanticPivotReviewBatch(
+            reviewCall.value().reportId(),
+            reviewer.id(),
+            proposer.id(),
+            reviewCall.value().decisions(),
+            reviewCall.responseArtifactRef(),
+            reviewCall.usage());
+    return applySemanticPivot(delta, review, pivot.pivotId());
+  }
+
+  private Map<String, Object> semanticPivotProposalContext(
+      RouteState route,
+      MetaPivotController.Pivot pivot,
+      List<InspirationProposal> produced,
+      Map<String, PivotObstructionRef> obstructionRefs) {
+    Map<String, Object> context = new LinkedHashMap<>();
+    context.put(
+        "immutable_root_goal",
+        Map.of(
+            "source_statement", rootGoal().sourceStatement(),
+            "source_statement_hash", rootGoal().sourceStatementHash(),
+            "problem_hash", problemHash,
+            "editable", false));
+    context.put("route_id", route.routeId);
+    context.put("source_strategy", route.strategy);
+    context.put("source_structural_signature", pivotSignature(route, null, null));
+    context.put("trusted_obstruction_refs", obstructionRefs.values());
+    context.put(
+        "verified_facts",
+        typedMemory.facts().stream()
+            .limit(24)
+            .map(fact -> Map.of("message_id", fact.messageId(), "statement", fact.statement()))
+            .toList());
+    context.put(
+        "permanent_negative_summaries",
+        negativeKnowledgeRegistry.records().stream()
+            .filter(NegativeKnowledgeRecord::permanent)
+            .filter(record -> record.problemHash().equals(problemHash))
+            .limit(24)
+            .map(
+                record ->
+                    Map.of(
+                        "negative_id", record.negativeId(),
+                        "target_type", record.targetType(),
+                        "statement", record.statement(),
+                        "scope_limitations", record.scopeLimitations()))
+            .toList());
+    context.put(
+        "active_canonical_targets",
+        proofGraph.activeCanonicalOpenTargets().stream()
+            .filter(target -> target.routeIds().contains(route.routeId))
+            .limit(24)
+            .toList());
+    context.put(
+        "active_research_findings",
+        researchCheckpoints.activeFindings(route.routeId).stream().limit(24).toList());
+    context.put(
+        "allowed_transformation_types",
+        List.of(
+                PivotTransformationType.OBJECT_REPLACEMENT,
+                PivotTransformationType.TARGET_REFORMULATION,
+                PivotTransformationType.DIRECTION_REVERSAL,
+                PivotTransformationType.REPRESENTATION_CHANGE,
+                PivotTransformationType.ASSUMPTION_CHANGE,
+                PivotTransformationType.DECOMPOSITION_CHANGE,
+                PivotTransformationType.DUALIZATION,
+                PivotTransformationType.AUXILIARY_OBJECT_INTRODUCTION)
+            .stream()
+            .map(Enum::name)
+            .toList());
+    context.put(
+        "focused_recovery_plan",
+        proofGraphConvergence.focusedRecoveryPlan().<Object>map(value -> value).orElse(Map.of()));
+    context.put("pivot_intent", pivot);
+    context.put("bounded_inspiration_proposals", produced.stream().limit(8).toList());
+    context.put(
+        "authority_rule",
+        "Return a non-authoritative draft. Leave claimed_pivot_id and "
+            + "claimed_structural_delta_hash empty; never change the immutable root goal or "
+            + "claim verified/fact/refutation/permanent-negative authority.");
+    return Map.copyOf(context);
+  }
+
+  private Map<String, Object> semanticPivotReviewContext(
+      RouteState route, PivotDelta delta, String proposerAgentId) {
+    StrategyBlueprintCompiler.Compilation proposedBlueprint =
+        proofControl
+            .blueprintCompiler()
+            .compile(problemHash, controlStrategy(delta.proposedStrategy(), route.routeId), controlGoal());
+    Map<String, Object> context = new LinkedHashMap<>();
+    context.put(
+        "immutable_root_goal",
+        Map.of(
+            "source_statement", rootGoal().sourceStatement(),
+            "source_statement_hash", rootGoal().sourceStatementHash(),
+            "problem_hash", problemHash,
+            "editable", false));
+    context.put("compiled_pivot_delta", delta);
+    context.put("source_structural_signature", pivotSignature(route, null, null));
+    context.put("proposed_structural_signature", pivotSignature(route, delta, proposedBlueprint));
+    context.put("trusted_authority_projection", pivotAuthority(route, delta));
+    context.put("proposer_agent_id", proposerAgentId);
+    context.put(
+        "review_rule",
+        "Review coherence and authority boundaries only. Return exactly one decision for the "
+            + "supplied pivot and do not verify any new mathematical claim.");
+    return Map.copyOf(context);
+  }
+
+  private SemanticPivotProposal bindSemanticPivotProposal(
+      SemanticPivotProposal source, AgentRuntime proposer, RouteState route) {
+    if (!problemHash.equals(source.problemHash())
+        || !rootGoal().sourceStatementHash().equals(source.rootGoalHash())
+        || !route.routeId.equals(source.routeId())
+        || !route.strategy.strategyId().equals(source.sourceStrategyId())) {
+      throw new PivotCompilationException(
+          "PIVOT_IDENTITY_MISMATCH",
+          "provider proposal changed problem, root-goal, route, or source-strategy identity");
+    }
+    return new SemanticPivotProposal(
+        source.proposalId(),
+        proposer.id(),
+        source.problemHash(),
+        source.rootGoalHash(),
+        source.routeId(),
+        source.sourceStrategyId(),
+        source.transformationTypes(),
+        source.obstructionIds(),
+        source.objectChanges(),
+        source.directionChanges(),
+        source.assumptionChanges(),
+        source.claimUseChanges(),
+        source.obligationChanges(),
+        source.proposedStrategy(),
+        source.rationale(),
+        source.claimedPivotId(),
+        source.claimedStructuralDeltaHash());
+  }
+
+  private static boolean semanticPivotMechanismRequested(List<String> mechanisms) {
+    Set<String> eligible =
+        Set.of(
+            InspirationMechanism.REPRESENTATION_SWITCH.value(),
+            InspirationMechanism.REVERSE_GOAL_ANALYSIS.value(),
+            InspirationMechanism.AUXILIARY_CONSTRUCTION.value(),
+            InspirationMechanism.META_REPLAN.value(),
+            InspirationMechanism.INSPIRATION_COMPOSITION.value(),
+            MetaDirectiveAction.SWITCH_REPRESENTATION.value(),
+            MetaDirectiveAction.REWRITE_PLAN.value());
+    return mechanisms.stream().anyMatch(eligible::contains);
+  }
+
+  private List<String> semanticPivotExternalGateFailures(
+      RouteState route,
+      PivotDelta delta,
+      StrategyBlueprintCompiler.Compilation blueprint,
+      ProofControlModels.GoalLink goalLink) {
+    LinkedHashSet<String> failures = new LinkedHashSet<>();
+    if (route.checkpoint == null) {
+      failures.add("MISSING_SOURCE_CHECKPOINT");
+    }
+    if (strategyArchive.lineage().containsKey(delta.proposedStrategyId())) {
+      failures.add("STRATEGY_EPOCH_ID_CONFLICT");
+    }
+    List<NegativeKnowledgeCandidate> negativeCandidates =
+        new ArrayList<>(
+            negativeKnowledgeCandidates(
+                delta.proposedStrategy(), blueprint, NegativeKnowledgeSurface.ROUTE_REVISION));
+    delta.obligationChanges().stream()
+        .filter(change -> change.action() == PivotObligationAction.ADD_NEW_OBLIGATION)
+        .map(PivotObligationChange::proposedStatement)
+        .forEach(
+            statement -> {
+              for (NegativeKnowledgeTargetType targetType : NegativeKnowledgeTargetType.values()) {
+                negativeCandidates.add(
+                    negativeKnowledgeCandidate(
+                        statement,
+                        targetType,
+                        NegativeKnowledgeSurface.PROOF_OBLIGATION_CREATION,
+                        NegativeCandidateIntent.PROOF_TARGET));
+              }
+            });
+    negativeKnowledgeGate.evaluateAll(negativeCandidates, roundIndex.get()).stream()
+        .filter(decision -> !decision.allowed())
+        .forEach(ignored -> failures.add("PERMANENT_NEGATIVE_CONFLICT"));
+
+    ProofControlModels.Strategy control = controlStrategy(delta.proposedStrategy(), route.routeId);
+    boolean duplicate =
+        routes.stream()
+            .filter(candidate -> candidate != route)
+            .map(candidate -> topology.mathNormalize(topology.strategyText(candidate.strategy)))
+            .anyMatch(topology.mathNormalize(topology.strategyText(delta.proposedStrategy()))::equals);
+    boolean commonMode =
+        routes.stream()
+            .filter(candidate -> candidate != route)
+            .anyMatch(
+                candidate ->
+                    topology.sharesUnverifiedDependency(
+                        delta.proposedStrategy(),
+                        candidate.strategy,
+                        Math.max(0.82d, config.topology().strategySimilarityThreshold())));
+    var admission =
+        proofControl
+            .routeAdmission()
+            .evaluate(proofControlMode(), control, blueprint, goalLink, duplicate, commonMode);
+    if (!"accepted".equals(blueprint.blueprint().status())
+        || admission.blocksRuntime(proofControlMode())) {
+      failures.add("GOAL_OR_ROUTE_ADMISSION_BLOCK");
+    }
+    for (PivotObligationChange change : delta.obligationChanges()) {
+      if (change.action() != PivotObligationAction.ADD_NEW_OBLIGATION) {
+        continue;
+      }
+      if (findObligation(change.obligationId()).isPresent()) {
+        failures.add("OBLIGATION_ID_CONFLICT");
+        continue;
+      }
+      ProofObligation obligation = pivotObligation(route, delta, change);
+      ObligationCreationContext context = pivotObligationContext(route, delta, change);
+      Optional<String> existing = proofGraph.existingCanonicalTargetId(obligation, context);
+      String canonicalTargetId = existing.orElse("");
+      String familyId =
+          existing
+              .flatMap(proofGraph::bottleneckFamilyForCanonical)
+              .map(BottleneckFamilyRecord::familyId)
+              .orElse("");
+      FocusedExpansionDecision decision =
+          proofGraphConvergence.decideExpansion(
+              FocusedRecoveryActionType.FAMILY_BRIDGE_REPAIR,
+              existing.isPresent(),
+              proofGraph.activeCanonicalTargetCount(route.routeId),
+              proofGraph.activeCanonicalTargetCount(),
+              familyId,
+              canonicalTargetId);
+      if (!decision.allowed()) {
+        failures.add(
+            decision.code().contains("CAPACITY")
+                ? "CAPACITY_OR_QUOTA_BLOCK"
+                : "FOCUSED_RECOVERY_BINDING_MISMATCH");
+      }
+    }
+    return List.copyOf(failures);
+  }
+
+  @SuppressFBWarnings(
+      value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
+      justification = "Every staged projection is restored before the injected or runtime failure is propagated.")
+  private SemanticPivotApplyReceipt applySemanticPivotAtomically(
+      RouteState route,
+      SemanticPivotApplyPlan plan,
+      StrategyBlueprintCompiler.Compilation blueprint,
+      ProofControlModels.GoalLink goalLink) {
+    PivotRouteSnapshot routeBefore = PivotRouteSnapshot.capture(route);
+    StrategyArchive.Snapshot archiveBefore = strategyArchive.snapshot();
+    ProofGraphSnapshot graphBefore = proofGraph.snapshot();
+    var convergenceBefore = proofGraphConvergence.snapshot();
+    var deferredBefore = deferredExpansions.snapshot();
+    List<DesktopSolveCheckpoint.ScheduledProofTask> tasksBefore =
+        List.copyOf(pendingProofTasks);
+    List<StrategyCard> admittedBefore = admittedStrategies;
+    Map<String, StrategyBlueprintCompiler.Compilation> blueprintsBefore =
+        Map.copyOf(strategyBlueprints);
+    Map<String, ProofControlModels.GoalLink> goalLinksBefore = Map.copyOf(goalLinks);
+    try {
+      failSemanticPivotAt(SemanticPivotFailurePoint.AFTER_LEDGER_STAGED);
+      PivotDelta delta = plan.delta();
+      archiveCurrentAttempt(route, "SEMANTIC_PIVOT");
+      strategyArchive.archivePivotEpoch(
+          controlStrategy(delta.proposedStrategy(), route.routeId),
+          delta.sourceStrategyId(),
+          delta.pivotId(),
+          roundIndex.get());
+      strategyBlueprints.put(delta.proposedStrategyId(), blueprint);
+      goalLinks.put(delta.proposedStrategyId(), goalLink);
+      admittedStrategies = appendDistinctStrategy(admittedStrategies, delta.proposedStrategy());
+      failSemanticPivotAt(SemanticPivotFailurePoint.AFTER_STRATEGY_EPOCH);
+
+      route.strategy = delta.proposedStrategy();
+      route.activeStrategyEpochId = delta.proposedStrategyId();
+      route.activeSemanticPivotId = delta.pivotId();
+      route.semanticPivotIds.add(delta.pivotId());
+      applyPivotRouteProjection(route, delta);
+      resetRouteForSemanticPivot(route);
+      failSemanticPivotAt(SemanticPivotFailurePoint.AFTER_ROUTE_SWITCH);
+
+      List<String> addedObligations = new ArrayList<>();
+      for (PivotObligationChange change : delta.obligationChanges()) {
+        if (change.action() != PivotObligationAction.ADD_NEW_OBLIGATION) {
+          continue;
+        }
+        ControlledObligationWrite write =
+            addControlledObligation(
+                pivotObligation(route, delta, change),
+                pivotObligationContext(route, delta, change),
+                FocusedRecoveryActionType.FAMILY_BRIDGE_REPAIR);
+        if (!write.decision().allowed()) {
+          throw new IllegalStateException("pivot obligation control changed after preflight");
+        }
+        addedObligations.add(change.obligationId());
+      }
+      if (!addedObligations.isEmpty()) {
+        route.focusObligationId = addedObligations.getFirst();
+        route.focusedCanonicalTargetId = canonicalTargetId(route.focusObligationId);
+        route.focusedBottleneckFamilyId =
+            route.focusedCanonicalTargetId == null
+                ? ""
+                : proofGraph
+                    .bottleneckFamilyForCanonical(route.focusedCanonicalTargetId)
+                    .map(BottleneckFamilyRecord::familyId)
+                    .orElse("");
+        route.focusSource = "semantic-pivot:" + delta.pivotId();
+      }
+      failSemanticPivotAt(SemanticPivotFailurePoint.AFTER_OBLIGATION_CANONICALIZATION);
+
+      List<String> taskIds = new ArrayList<>();
+      for (String obligationId : addedObligations) {
+        if (enqueueProofTask(
+            "semantic-pivot:" + delta.pivotId(), route.routeId, obligationId, "DEEPEN")) {
+          pendingProofTasks.stream()
+              .filter(task -> task.obligationId().equals(obligationId))
+              .map(DesktopSolveCheckpoint.ScheduledProofTask::taskId)
+              .findFirst()
+              .ifPresent(taskIds::add);
+        }
+      }
+      failSemanticPivotAt(SemanticPivotFailurePoint.AFTER_PENDING_TASK);
+
+      route.checkpoint =
+          checkpoints.branchForStrategy(
+              routeBefore.checkpoint().checkpointId(),
+              route.routeId + "-pivot-" + route.semanticPivotIds.size(),
+              delta.proposedStrategyId());
+      SemanticPivotApplyReceipt receipt =
+          SemanticPivotApplyReceipt.applied(
+              delta, addedObligations, taskIds, roundIndex.get());
+      semanticPivots.ledger().commitApply(receipt);
+      persistUnchecked("semantic_pivot_apply", false);
+      return receipt;
+    } catch (RuntimeException exception) {
+      routeBefore.restore(route);
+      strategyArchive.restore(archiveBefore);
+      proofGraph = ProofGraphStore.restore(graphBefore, ProofGraphPolicy.defaults());
+      proofGraphConvergence =
+          ProofGraphConvergenceMonitor.restore(
+              ProofGraphConvergenceConfig.defaults(), convergenceBefore);
+      deferredExpansions = DeferredExpansionLedger.restore(deferredBefore);
+      pendingProofTasks.clear();
+      pendingProofTasks.addAll(tasksBefore);
+      admittedStrategies = admittedBefore;
+      strategyBlueprints.clear();
+      strategyBlueprints.putAll(blueprintsBefore);
+      goalLinks.clear();
+      goalLinks.putAll(goalLinksBefore);
+      installNegativeKnowledgeRuntime();
+      throw exception;
+    }
+  }
+
+  private void applyPivotRouteProjection(RouteState route, PivotDelta delta) {
+    for (MathematicalObjectChange change : delta.objectChanges()) {
+      switch (change.disposition()) {
+        case RETAIN -> {
+          // Explicitly retained in the current epoch.
+        }
+        case RETIRE_FROM_ACTIVE_STRATEGY ->
+            route.activeMathematicalObjectIds.remove(change.oldObjectId());
+        case REPLACE -> {
+          route.activeMathematicalObjectIds.remove(change.oldObjectId());
+          route.activeMathematicalObjectIds.add(change.newObjectId());
+        }
+        case ADD -> route.activeMathematicalObjectIds.add(change.newObjectId());
+      }
+    }
+    delta.directionChanges().stream()
+        .map(PivotDirectionChange::newDirectionSignature)
+        .reduce((first, second) -> second)
+        .ifPresent(value -> route.activeDirectionSignature = value);
+    for (var change : delta.claimUseChanges()) {
+      if (change.action() == PivotClaimUsageAction.RETIRE_FROM_ACTIVE_DEPENDENCY) {
+        route.retiredActiveClaimIds.add(change.claimId());
+      } else {
+        route.retiredActiveClaimIds.remove(change.claimId());
+      }
+    }
+    for (PivotObligationChange change : delta.obligationChanges()) {
+      if (change.action() == PivotObligationAction.RETIRE_FROM_STRATEGY_FOCUS) {
+        route.retiredStrategyFocusObligationIds.add(change.obligationId());
+      } else {
+        route.retiredStrategyFocusObligationIds.remove(change.obligationId());
+      }
+    }
+  }
+
+  private void resetRouteForSemanticPivot(RouteState route) {
+    route.attempt = null;
+    route.skepticReview = null;
+    route.toolAudit = null;
+    route.structuralReview = null;
+    route.detailedReview = null;
+    route.crossProviderReview = null;
+    route.claimReview = null;
+    route.teamResult = null;
+    route.escalation = null;
+    route.validationExecution = null;
+    route.delta = null;
+    route.deltaId = null;
+    route.failure = null;
+    route.status = "pending";
+    route.failureReason = "";
+    route.nearMissId = null;
+    route.segmentCount = 0;
+    route.noProgressSegments = 0;
+    route.reviewComplete = false;
+    route.checkpointProcessed = false;
+    route.integrated = false;
+  }
+
+  private ProofObligation pivotObligation(
+      RouteState route, PivotDelta delta, PivotObligationChange change) {
+    return new ProofObligation(
+        change.assumptions(),
+        0.7d,
+        "",
+        change.dependencyIds(),
+        List.of(),
+        List.of(),
+        null,
+        change.proposedKind(),
+        topology.mathNormalize(change.proposedStatement()),
+        change.obligationId(),
+        0.8d,
+        problemHash,
+        List.of(),
+        List.of(route.routeId),
+        change.proposedStatement(),
+        "open");
+  }
+
+  private ObligationCreationContext pivotObligationContext(
+      RouteState route, PivotDelta delta, PivotObligationChange change) {
+    return new ObligationCreationContext(
+        problemHash,
+        route.routeId,
+        delta.proposedStrategyId(),
+        ObligationSourceType.STRATEGY_BLUEPRINT,
+        "semantic-pivot://" + delta.pivotId() + "/" + change.obligationId(),
+        change.dependencyIds(),
+        "",
+        Map.of("semantic_pivot_id", delta.pivotId()),
+        route.focusedBottleneckFamilyId.isBlank()
+            ? topology.mathNormalize(change.proposedStatement())
+            : route.focusedBottleneckFamilyId,
+        change.reason(),
+        BottleneckRelationType.REFINEMENT,
+        ObligationOccurrenceSchedulingState.ACTIVE,
+        roundIndex.get());
+  }
+
+  private PivotStructuralSignature pivotSignature(
+      RouteState route,
+      PivotDelta delta,
+      StrategyBlueprintCompiler.Compilation proposedBlueprint) {
+    StrategyCard strategy = delta == null ? route.strategy : delta.proposedStrategy();
+    Set<String> objects = new LinkedHashSet<>(route.activeMathematicalObjectIds);
+    Set<String> targets =
+        proofGraph.activeCanonicalOpenTargets().stream()
+            .filter(target -> target.routeIds().contains(route.routeId))
+            .map(CanonicalObligationRecord::canonicalTargetId)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    Set<String> retainedClaims =
+        route.claimIds.stream()
+            .filter(id -> !route.retiredActiveClaimIds.contains(id))
+            .filter(this::verifiedClaim)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    Set<String> proposedClaims = new LinkedHashSet<>();
+    Set<String> obligations =
+        proofGraph.obligations().stream()
+            .filter(obligation -> obligation.routeIds().contains(route.routeId))
+            .filter(obligation -> "open".equals(obligation.status()))
+            .filter(
+                obligation ->
+                    !route.retiredStrategyFocusObligationIds.contains(
+                        obligation.obligationId()))
+            .map(ProofObligation::statement)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    String direction = route.activeDirectionSignature;
+    if (delta != null) {
+      for (MathematicalObjectChange change : delta.objectChanges()) {
+        if (change.disposition() == PivotObjectDisposition.RETIRE_FROM_ACTIVE_STRATEGY) {
+          objects.remove(change.oldObjectId());
+        } else if (change.disposition() == PivotObjectDisposition.REPLACE) {
+          objects.remove(change.oldObjectId());
+          objects.add(change.newObjectId());
+        } else if (change.disposition() == PivotObjectDisposition.ADD) {
+          objects.add(change.newObjectId());
+        }
+      }
+      for (var change : delta.claimUseChanges()) {
+        switch (change.action()) {
+          case RETAIN_AS_VERIFIED_FACT -> retainedClaims.add(change.claimId());
+          case RETIRE_FROM_ACTIVE_DEPENDENCY -> retainedClaims.remove(change.claimId());
+          case ADD_AS_PROPOSED_CLAIM -> proposedClaims.add(change.claimStatementHash());
+        }
+      }
+      for (PivotObligationChange change : delta.obligationChanges()) {
+        if (change.action() == PivotObligationAction.RETIRE_FROM_STRATEGY_FOCUS) {
+          findObligation(change.obligationId())
+              .map(ProofObligation::statement)
+              .ifPresent(obligations::remove);
+          if (change.canonicalTargetId() != null) {
+            targets.remove(change.canonicalTargetId());
+          }
+        } else if (change.action() == PivotObligationAction.ADD_NEW_OBLIGATION) {
+          obligations.add(change.proposedStatement());
+          targets.add(
+              change.canonicalTargetId() == null
+                  ? "proposed-target-"
+                      + CanonicalJson.stableHash(
+                              ProofIdentity.normalizeText(change.proposedStatement()))
+                          .substring(0, 16)
+                  : change.canonicalTargetId());
+        }
+      }
+      direction =
+          delta.directionChanges().stream()
+              .map(PivotDirectionChange::newDirectionSignature)
+              .reduce((first, second) -> second)
+              .orElse(direction);
+    }
+    Set<String> assumptions =
+        strategy.prerequisites().stream()
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    return pivotSignatures.create(
+        strategy,
+        objects,
+        targets,
+        assumptions,
+        retainedClaims,
+        proposedClaims,
+        obligations,
+        direction,
+        delta == null
+            ? strategyBlueprints.get(strategy.strategyId())
+            : proposedBlueprint);
+  }
+
+  private PivotAuthorityContext pivotAuthority(RouteState route, PivotDelta delta) {
+    Map<String, PivotObstructionRef> references = pivotObstructionReferences(route);
+    Map<String, PivotAuthorityContext.KnownObstruction> known = new LinkedHashMap<>();
+    references.forEach(
+        (id, reference) ->
+            known.put(
+                id,
+                new PivotAuthorityContext.KnownObstruction(reference, problemHash, true)));
+    Set<String> activeTargets =
+        proofGraph.activeCanonicalOpenTargets().stream()
+            .filter(target -> target.routeIds().contains(route.routeId))
+            .map(CanonicalObligationRecord::canonicalTargetId)
+            .collect(java.util.stream.Collectors.toSet());
+    Set<String> knownObligations =
+        proofGraph.obligations().stream()
+            .map(ProofObligation::obligationId)
+            .collect(java.util.stream.Collectors.toSet());
+    Set<String> knownClaims =
+        proofControl.claims().entries().stream()
+            .map(entry -> entry.claimId())
+            .collect(java.util.stream.Collectors.toSet());
+    Set<String> verifiedClaims =
+        proofControl.claims().entries().stream()
+            .filter(
+                entry ->
+                    entry.state()
+                        == io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleController.State.EXTERNALLY_ADMITTED_FACT)
+            .map(entry -> entry.claimId())
+            .collect(java.util.stream.Collectors.toSet());
+    LinkedHashSet<String> negativeConflicts = new LinkedHashSet<>();
+    List<NegativeKnowledgeCandidate> pivotCandidates =
+        new ArrayList<>(
+            negativeKnowledgeCandidates(
+                delta.proposedStrategy(),
+                proofControl
+                    .blueprintCompiler()
+                    .compile(
+                        problemHash,
+                        controlStrategy(delta.proposedStrategy(), route.routeId),
+                        controlGoal()),
+                NegativeKnowledgeSurface.ROUTE_REVISION));
+    delta.obligationChanges().stream()
+        .filter(change -> change.action() == PivotObligationAction.ADD_NEW_OBLIGATION)
+        .map(PivotObligationChange::proposedStatement)
+        .forEach(
+            statement -> {
+              for (NegativeKnowledgeTargetType targetType : NegativeKnowledgeTargetType.values()) {
+                pivotCandidates.add(
+                    negativeKnowledgeCandidate(
+                        statement,
+                        targetType,
+                        NegativeKnowledgeSurface.PROOF_OBLIGATION_CREATION,
+                        NegativeCandidateIntent.PROOF_TARGET));
+              }
+            });
+    negativeKnowledgeGate
+        .evaluateAll(pivotCandidates, roundIndex.get())
+        .stream()
+        .filter(decision -> !decision.allowed())
+        .flatMap(decision -> decision.matchedNegativeIds().stream())
+        .forEach(negativeConflicts::add);
+    FocusedRecoveryPlan focused = proofGraphConvergence.focusedRecoveryPlan().orElse(null);
+    boolean capacityAvailable =
+        delta.obligationChanges().stream()
+            .filter(change -> change.action() == PivotObligationAction.ADD_NEW_OBLIGATION)
+            .allMatch(
+                change -> {
+                  ProofObligation obligation = pivotObligation(route, delta, change);
+                  ObligationCreationContext context = pivotObligationContext(route, delta, change);
+                  Optional<String> existing = proofGraph.existingCanonicalTargetId(obligation, context);
+                  String canonicalTargetId = existing.orElse("");
+                  String familyId =
+                      existing
+                          .flatMap(proofGraph::bottleneckFamilyForCanonical)
+                          .map(BottleneckFamilyRecord::familyId)
+                          .orElse("");
+                  return proofGraphConvergence
+                      .decideExpansion(
+                          FocusedRecoveryActionType.FAMILY_BRIDGE_REPAIR,
+                          existing.isPresent(),
+                          proofGraph.activeCanonicalTargetCount(route.routeId),
+                          proofGraph.activeCanonicalTargetCount(),
+                          familyId,
+                          canonicalTargetId)
+                      .allowed();
+                });
+    return new PivotAuthorityContext(
+        problemHash,
+        rootGoal().sourceStatementHash(),
+        route.routeId,
+        route.strategy.strategyId(),
+        known,
+        route.activeMathematicalObjectIds,
+        activeTargets,
+        knownObligations,
+        verifiedClaims,
+        knownClaims,
+        negativeConflicts,
+        focused == null ? null : focused.selectedFamilyId(),
+        focused == null ? Set.of() : focused.selectedCanonicalTargetIds(),
+        proofGraphConvergence.controlMode() == ProofGraphControlMode.FOCUSED_RECOVERY,
+        capacityAvailable);
+  }
+
+  private Map<String, PivotObstructionRef> pivotObstructionReferences(RouteState route) {
+    Map<String, PivotObstructionRef> references = new LinkedHashMap<>();
+    if (route.failure != null) {
+      String statement =
+          route.failure.firstErrorFingerprint() == null
+              ? route.failureReason
+              : route.failure.firstErrorFingerprint();
+      putPivotObstruction(
+          references,
+          route,
+          route.failure.id(),
+          PivotEvidenceAuthority.FAILURE_FINGERPRINT,
+          "failure://" + route.failure.id(),
+          route.focusedCanonicalTargetId,
+          statement);
+    }
+    attemptArtifacts.records().stream()
+        .filter(record -> record.routeId().equals(route.routeId))
+        .filter(record -> record.status() == AttemptArtifactStatus.APPLIED_COUNTEREXAMPLE)
+        .forEach(
+            record ->
+                putPivotObstruction(
+                    references,
+                    route,
+                    record.artifactId(),
+                    PivotEvidenceAuthority.VERIFIED_COUNTEREXAMPLE,
+                    "attempt-artifact://" + record.artifactId(),
+                    canonicalTargetId(record.targetObligationId()),
+                    record.statement()));
+    researchCheckpoints.activeFindings(route.routeId).stream()
+        .filter(record -> record.kind() == ResearchFindingKind.SHARP_OBSTRUCTION)
+        .forEach(
+            record ->
+                putPivotObstruction(
+                    references,
+                    route,
+                    record.findingId(),
+                    PivotEvidenceAuthority.SHARP_OBSTRUCTION_CANDIDATE,
+                    "research-finding://" + record.findingId(),
+                    canonicalTargetId(record.targetObligationId()),
+                    record.statement()));
+    proofGraph.obligations().stream()
+        .filter(obligation -> obligation.routeIds().contains(route.routeId))
+        .filter(obligation -> "refuted".equals(obligation.status()))
+        .forEach(
+            obligation ->
+                putPivotObstruction(
+                    references,
+                    route,
+                    obligation.obligationId(),
+                    PivotEvidenceAuthority.EXACT_REFUTED_OBLIGATION,
+                    "obligation://" + obligation.obligationId(),
+                    canonicalTargetId(obligation.obligationId()),
+                    obligation.statement()));
+    negativeKnowledgeRegistry.records().stream()
+        .filter(NegativeKnowledgeRecord::permanent)
+        .filter(record -> record.problemHash().equals(problemHash))
+        .forEach(
+            record ->
+                putPivotObstruction(
+                    references,
+                    route,
+                    record.negativeId(),
+                    PivotEvidenceAuthority.PERMANENT_NEGATIVE,
+                    "negative-knowledge://" + record.negativeId(),
+                    route.focusedCanonicalTargetId,
+                    record.statement()));
+    proofGraph.allBottleneckFamilies().stream()
+        .filter(
+            family ->
+                family.canonicalTargetIds().contains(route.focusedCanonicalTargetId)
+                    || family.familyId().equals(route.focusedBottleneckFamilyId))
+        .forEach(
+            family ->
+                putPivotObstruction(
+                    references,
+                    route,
+                    family.familyId(),
+                    PivotEvidenceAuthority.BOTTLENECK_FAMILY,
+                    "bottleneck-family://" + family.familyId(),
+                    family.representativeCanonicalTargetId(),
+                    family.label()));
+    return Map.copyOf(references);
+  }
+
+  private void putPivotObstruction(
+      Map<String, PivotObstructionRef> target,
+      RouteState route,
+      String id,
+      PivotEvidenceAuthority authority,
+      String sourceRef,
+      String canonicalTargetId,
+      String statement) {
+    if (id == null || id.isBlank() || statement == null || statement.isBlank()) {
+      return;
+    }
+    target.putIfAbsent(
+        id,
+        new PivotObstructionRef(
+            id,
+            authority,
+            sourceRef,
+            route.routeId,
+            route.strategy.strategyId(),
+            canonicalTargetId,
+            CanonicalJson.stableHash(ProofIdentity.normalizeText(statement))));
+  }
+
+  private String canonicalTargetId(String obligationId) {
+    if (obligationId == null || obligationId.isBlank()) {
+      return null;
+    }
+    return proofGraph
+        .canonicalTargetForObligation(obligationId)
+        .map(CanonicalObligationRecord::canonicalTargetId)
+        .orElse(null);
+  }
+
+  private boolean verifiedClaim(String claimId) {
+    return proofControl.claims().entries().stream()
+        .anyMatch(
+            entry ->
+                entry.claimId().equals(claimId)
+                    && entry.state()
+                        == io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleController.State.EXTERNALLY_ADMITTED_FACT);
+  }
+
+  private ProofControlModels.GoalLink pivotGoalLink(StrategyCard strategy, String routeId) {
+    ProofControlModels.ScopeSignature scope =
+        proofControl.scopeGuard().extract("goal-scope", rootGoal().sourceStatement(), List.of(), 1.0d);
+    return proofControl
+        .goalAlignment()
+        .assess(
+            strategy.strategyId(),
+            rootGoal().sourceStatement(),
+            scope,
+            controlGoal(),
+            scope,
+            proofControl.scopeGuard(),
+            String::equals);
+  }
+
+  private RouteState requirePivotRoute(String routeId) {
+    return routes.stream()
+        .filter(route -> route.routeId.equals(routeId))
+        .findFirst()
+        .orElseThrow(() -> new IllegalArgumentException("unknown semantic pivot route: " + routeId));
+  }
+
+  private static List<StrategyCard> appendDistinctStrategy(
+      List<StrategyCard> strategies, StrategyCard strategy) {
+    if (strategies.stream().anyMatch(value -> value.strategyId().equals(strategy.strategyId()))) {
+      return strategies;
+    }
+    return java.util.stream.Stream.concat(strategies.stream(), java.util.stream.Stream.of(strategy))
+        .toList();
+  }
+
+  private void failSemanticPivotAt(SemanticPivotFailurePoint point) {
+    if (semanticPivotFailurePoint == point) {
+      throw new IllegalStateException("injected semantic pivot failure: " + point);
+    }
+  }
+
+  void setSemanticPivotFailurePointForTest(SemanticPivotFailurePoint point) {
+    semanticPivotFailurePoint = point == null ? SemanticPivotFailurePoint.NONE : point;
   }
 
   private void runInspiration(InspirationSnapshot requestedSnapshot) {
@@ -5285,7 +6443,6 @@ final class DesktopSolveCoordinator {
         String targetRoute =
             directive.routeIds().stream().filter(routeRegistry::exists).findFirst().orElse("run");
         pivot = proofControl.metaPivot().request(targetRoute, roundIndex.get(), mechanisms);
-        pivot = proofControl.metaPivot().admit(pivot.pivotId(), true, directiveAudit.directiveId());
       }
 
       boundedTasks =
@@ -5352,29 +6509,49 @@ final class DesktopSolveCoordinator {
           inspirationProposals.subList(proposalCountBefore, inspirationProposals.size());
       List<String> completedMechanisms =
           produced.stream().map(proposal -> proposal.mechanism().value()).distinct().toList();
-      MetaPivotController.Pivot applied =
-          proofControl
-              .metaPivot()
-              .execute(
-                  pivot.pivotId(),
-                  completedMechanisms,
-                  produced.stream().map(InspirationProposal::proposalId).toList(),
-                  List.of(),
-                  produced.isEmpty()
-                      ? "audited pivot produced no material proposal"
-                      : "audited pivot produced independently reviewed proposal state");
-      MetaPivotController.Pivot evaluated =
-          proofControl
-              .metaPivot()
-              .evaluate(
-                  applied.pivotId(),
-                  !produced.isEmpty(),
-                  new MetaPivotController.GainEvidence(
-                      Math.max(0, typedMemory.facts().size() - verifiedFactsBefore),
-                      Math.max(0, closedObligationCount() - closedObligationsBefore),
-                      0,
-                      pivotDebtBefore,
-                      totalProofDebt()));
+      SemanticPivotRecord semanticPivot = runSemanticPivotCycle(pivot, produced);
+      MetaPivotController.Pivot evaluated;
+      if (semanticPivot != null && semanticPivot.applyReceipt() != null) {
+        proofControl
+            .metaPivot()
+            .admit(
+                pivot.pivotId(),
+                true,
+                "semantic-pivot-receipt://" + semanticPivot.applyReceipt().receiptId());
+        proofControl
+            .metaPivot()
+            .execute(
+                pivot.pivotId(),
+                completedMechanisms,
+                semanticPivot.applyReceipt(),
+                List.of(),
+                "independently reviewed semantic state delta was atomically applied");
+        MetaPivotController.GainEvidence gain =
+            new MetaPivotController.GainEvidence(
+                Math.max(0, typedMemory.facts().size() - verifiedFactsBefore),
+                Math.max(0, closedObligationCount() - closedObligationsBefore),
+                0,
+                pivotDebtBefore,
+                totalProofDebt());
+        evaluated = proofControl.metaPivot().evaluate(pivot.pivotId(), true, gain);
+        semanticPivots
+            .ledger()
+            .evaluate(
+                semanticPivot.pivotId(),
+                evaluated.outcome().effect(),
+                evaluated.outcome().reason());
+      } else {
+        evaluated =
+            proofControl
+                .metaPivot()
+                .recordProposal(
+                    pivot.pivotId(),
+                    completedMechanisms,
+                    produced.stream().map(InspirationProposal::proposalId).toList(),
+                    produced.isEmpty()
+                        ? "audited intent produced no proposal"
+                        : "proposal material did not pass typed semantic delta review and apply");
+      }
       metaPivots.removeIf(existing -> existing.pivotId().equals(evaluated.pivotId()));
       metaPivots.add(evaluated);
       event(
@@ -5402,9 +6579,16 @@ final class DesktopSolveCoordinator {
         proofControl
             .metaPivot()
             .request(persisted.routeId(), persisted.round(), persisted.requestedMechanisms());
+    if (persisted.outcome() == null) {
+      return restored;
+    }
     return proofControl
         .metaPivot()
-        .admit(restored.pivotId(), true, "checkpoint:" + persisted.pivotId());
+        .recordProposal(
+            restored.pivotId(),
+            persisted.outcome().completedMechanisms(),
+            persisted.outcome().materialStateRefs(),
+            persisted.outcome().reason());
   }
 
   private void persistInspirationProgress() {
@@ -6641,6 +7825,7 @@ final class DesktopSolveCoordinator {
     goalLinks.putAll(checkpoint.goalLinks());
     metaPivots.clear();
     metaPivots.addAll(checkpoint.metaPivots());
+    semanticPivots.ledger().restore(checkpoint.semanticPivots());
     inspirationProgress = checkpoint.inspirationProgress();
     computationAudits.clear();
     computationAudits.addAll(checkpoint.computationAudits());
@@ -6773,6 +7958,17 @@ final class DesktopSolveCoordinator {
       route.reviewComplete = saved.reviewComplete();
       route.checkpointProcessed = saved.checkpointProcessed();
       route.integrated = saved.integrated();
+      route.activeSemanticPivotId = saved.activeSemanticPivotId();
+      route.semanticPivotIds.addAll(saved.semanticPivotIds());
+      route.activeStrategyEpochId = saved.activeStrategyEpochId();
+      route.retiredActiveClaimIds.addAll(saved.retiredActiveClaimIds());
+      route.retiredStrategyFocusObligationIds.addAll(
+          saved.retiredStrategyFocusObligationIds());
+      if (!saved.activeMathematicalObjectIds().isEmpty()) {
+        route.activeMathematicalObjectIds.clear();
+        route.activeMathematicalObjectIds.addAll(saved.activeMathematicalObjectIds());
+      }
+      route.activeDirectionSignature = saved.activeDirectionSignature();
       if (!"verified".equals(route.status)
           && negativeKnowledgeBlocksStrategy(
               route.strategy,
@@ -6842,6 +8038,7 @@ final class DesktopSolveCoordinator {
             restoreBlockedRouteIds.contains(task.routeId())
                 || restoreBlockedObligations.contains(task.obligationId()));
     restoreStrategyArchive(checkpoint);
+    reconcileSemanticPivotProjection();
     restoreBlockedStrategyIds.stream()
         .filter(strategyArchive.lineage()::containsKey)
         .forEach(
@@ -6932,6 +8129,40 @@ final class DesktopSolveCoordinator {
             "strategy://" + strategy.strategyId(),
             0);
       }
+    }
+  }
+
+  private void reconcileSemanticPivotProjection() {
+    Map<String, RouteState> byRoute =
+        routes.stream()
+            .collect(
+                java.util.stream.Collectors.toMap(
+                    route -> route.routeId,
+                    java.util.function.Function.identity(),
+                    (left, right) -> left,
+                    LinkedHashMap::new));
+    for (SemanticPivotRecord record : semanticPivots.ledger().records()) {
+      if (record.status() == PivotDeltaStatus.APPLYING) {
+        throw new IllegalStateException(
+            "checkpoint contains a partial semantic pivot apply frontier");
+      }
+      if (record.status() != PivotDeltaStatus.APPLIED
+          && record.status() != PivotDeltaStatus.EVALUATED) {
+        continue;
+      }
+      if (record.applyReceipt() == null || !record.applyReceipt().applied()) {
+        throw new IllegalStateException("applied semantic pivot is missing its receipt");
+      }
+      RouteState route = byRoute.get(record.delta().routeId());
+      if (route == null
+          || !route.strategy.strategyId().equals(record.delta().proposedStrategyId())
+          || !strategyArchive.lineage().containsKey(record.delta().sourceStrategyId())
+          || !strategyArchive.lineage().containsKey(record.delta().proposedStrategyId())) {
+        throw new IllegalStateException("semantic pivot route or strategy epoch projection is invalid");
+      }
+      route.semanticPivotIds.add(record.pivotId());
+      route.activeSemanticPivotId = record.pivotId();
+      route.activeStrategyEpochId = record.delta().proposedStrategyId();
     }
   }
 
@@ -7144,7 +8375,14 @@ final class DesktopSolveCoordinator {
                         route.pendingFindingReconciliation,
                         route.reviewComplete,
                         route.checkpointProcessed,
-                        route.integrated))
+                        route.integrated,
+                        route.activeSemanticPivotId,
+                        new ArrayList<>(route.semanticPivotIds),
+                        route.activeStrategyEpochId,
+                        new ArrayList<>(route.retiredActiveClaimIds),
+                        new ArrayList<>(route.retiredStrategyFocusObligationIds),
+                        new ArrayList<>(route.activeMathematicalObjectIds),
+                        route.activeDirectionSignature))
             .toList();
     List<DesktopSolveCheckpoint.ComputationCheckpoint> computations =
         computationTraces.stream()
@@ -7189,6 +8427,7 @@ final class DesktopSolveCoordinator {
             strategyBlueprints,
             goalLinks,
             metaPivots,
+            semanticPivots.ledger().snapshot(),
             inspirationProgress,
             pendingMetaReview,
             pendingProofTasks,
@@ -7235,6 +8474,8 @@ final class DesktopSolveCoordinator {
     writeJsonAtomically(structured.resolve("strategy-blueprints.json"), checkpoint.strategyBlueprints());
     writeJsonAtomically(structured.resolve("goal-links.json"), checkpoint.goalLinks());
     writeJsonAtomically(structured.resolve("meta-pivots.json"), checkpoint.metaPivots());
+    writeJsonAtomically(
+        structured.resolve("semantic-pivots.json"), checkpoint.semanticPivots());
     writeJsonAtomically(structured.resolve("computation-audits.json"), checkpoint.computationAudits());
     writeJsonAtomically(
         structured.resolve("final-validation-execution.json"), checkpoint.finalValidationExecution());
@@ -8709,6 +9950,15 @@ final class DesktopSolveCoordinator {
               List.of("structural_verifier", "route_referee", "detailed_verifier");
           case "detailed_verification", "claim_salvage_review", "inspiration_referee" ->
               List.of("detailed_verifier", "route_referee", "inspiration_referee");
+          case "semantic_pivot_review" ->
+              List.of("detailed_verifier", "route_referee", "final_verifier");
+          case "semantic_pivot_proposal" ->
+              List.of(
+                  "meta_strategist",
+                  "representation_switchboard",
+                  "reverse_goal_analyzer",
+                  "construction_inventor",
+                  "explorer");
           case "inspiration_proposal" ->
               List.of(
                   "representation_switchboard",
@@ -8884,6 +10134,125 @@ final class DesktopSolveCoordinator {
     }
   }
 
+  private record PivotRouteSnapshot(
+      StrategyCard strategy,
+      ContinuationFunctions.Checkpoint checkpoint,
+      List<DesktopSolveCheckpoint.AttemptRevisionCheckpoint> revisionHistory,
+      ProofAttempt attempt,
+      VerificationReport skepticReview,
+      ToolAuditReport toolAudit,
+      VerificationReport structuralReview,
+      VerificationReport detailedReview,
+      VerificationReport crossProviderReview,
+      ClaimReviewBatch claimReview,
+      RouteTeamResult teamResult,
+      EscalationPlan escalation,
+      ValidationExecution validationExecution,
+      ContinuationFunctions.Delta delta,
+      FailureControlService.Failure failure,
+      String deltaId,
+      String status,
+      String failureReason,
+      String nearMissId,
+      int segmentCount,
+      int noProgressSegments,
+      String focusObligationId,
+      String focusedCanonicalTargetId,
+      String focusedBottleneckFamilyId,
+      String focusSource,
+      boolean reviewComplete,
+      boolean checkpointProcessed,
+      boolean integrated,
+      String activeSemanticPivotId,
+      List<String> semanticPivotIds,
+      String activeStrategyEpochId,
+      List<String> retiredActiveClaimIds,
+      List<String> retiredStrategyFocusObligationIds,
+      List<String> activeMathematicalObjectIds,
+      String activeDirectionSignature) {
+    private static PivotRouteSnapshot capture(RouteState route) {
+      return new PivotRouteSnapshot(
+          route.strategy,
+          route.checkpoint,
+          List.copyOf(route.revisionHistory),
+          route.attempt,
+          route.skepticReview,
+          route.toolAudit,
+          route.structuralReview,
+          route.detailedReview,
+          route.crossProviderReview,
+          route.claimReview,
+          route.teamResult,
+          route.escalation,
+          route.validationExecution,
+          route.delta,
+          route.failure,
+          route.deltaId,
+          route.status,
+          route.failureReason,
+          route.nearMissId,
+          route.segmentCount,
+          route.noProgressSegments,
+          route.focusObligationId,
+          route.focusedCanonicalTargetId,
+          route.focusedBottleneckFamilyId,
+          route.focusSource,
+          route.reviewComplete,
+          route.checkpointProcessed,
+          route.integrated,
+          route.activeSemanticPivotId,
+          List.copyOf(route.semanticPivotIds),
+          route.activeStrategyEpochId,
+          List.copyOf(route.retiredActiveClaimIds),
+          List.copyOf(route.retiredStrategyFocusObligationIds),
+          List.copyOf(route.activeMathematicalObjectIds),
+          route.activeDirectionSignature);
+    }
+
+    private void restore(RouteState route) {
+      route.strategy = strategy;
+      route.checkpoint = checkpoint;
+      route.revisionHistory.clear();
+      route.revisionHistory.addAll(revisionHistory);
+      route.attempt = attempt;
+      route.skepticReview = skepticReview;
+      route.toolAudit = toolAudit;
+      route.structuralReview = structuralReview;
+      route.detailedReview = detailedReview;
+      route.crossProviderReview = crossProviderReview;
+      route.claimReview = claimReview;
+      route.teamResult = teamResult;
+      route.escalation = escalation;
+      route.validationExecution = validationExecution;
+      route.delta = delta;
+      route.failure = failure;
+      route.deltaId = deltaId;
+      route.status = status;
+      route.failureReason = failureReason;
+      route.nearMissId = nearMissId;
+      route.segmentCount = segmentCount;
+      route.noProgressSegments = noProgressSegments;
+      route.focusObligationId = focusObligationId;
+      route.focusedCanonicalTargetId = focusedCanonicalTargetId;
+      route.focusedBottleneckFamilyId = focusedBottleneckFamilyId;
+      route.focusSource = focusSource;
+      route.reviewComplete = reviewComplete;
+      route.checkpointProcessed = checkpointProcessed;
+      route.integrated = integrated;
+      route.activeSemanticPivotId = activeSemanticPivotId;
+      route.semanticPivotIds.clear();
+      route.semanticPivotIds.addAll(semanticPivotIds);
+      route.activeStrategyEpochId = activeStrategyEpochId;
+      route.retiredActiveClaimIds.clear();
+      route.retiredActiveClaimIds.addAll(retiredActiveClaimIds);
+      route.retiredStrategyFocusObligationIds.clear();
+      route.retiredStrategyFocusObligationIds.addAll(retiredStrategyFocusObligationIds);
+      route.activeMathematicalObjectIds.clear();
+      route.activeMathematicalObjectIds.addAll(activeMathematicalObjectIds);
+      route.activeDirectionSignature = activeDirectionSignature;
+    }
+  }
+
   private static final class RouteState {
     private final String routeId;
     private final AgentRuntime author;
@@ -8933,6 +10302,14 @@ final class DesktopSolveCoordinator {
     private boolean reviewComplete;
     private boolean checkpointProcessed;
     private boolean integrated;
+    private String activeSemanticPivotId = "";
+    private final LinkedHashSet<String> semanticPivotIds = new LinkedHashSet<>();
+    private String activeStrategyEpochId;
+    private final LinkedHashSet<String> retiredActiveClaimIds = new LinkedHashSet<>();
+    private final LinkedHashSet<String> retiredStrategyFocusObligationIds =
+        new LinkedHashSet<>();
+    private final LinkedHashSet<String> activeMathematicalObjectIds = new LinkedHashSet<>();
+    private String activeDirectionSignature = "forward";
 
     private RouteState(
         String routeId,
@@ -8945,6 +10322,13 @@ final class DesktopSolveCoordinator {
       this.strategy = Objects.requireNonNull(strategy, "strategy");
       this.plan = Objects.requireNonNull(plan, "plan");
       this.revisionCount = revisionCount;
+      this.activeStrategyEpochId = strategy.strategyId();
+      List<String> domainSources = new ArrayList<>();
+      domainSources.add(strategy.coreIdea());
+      domainSources.add(strategy.bottleneck());
+      domainSources.addAll(strategy.expectedLemmas());
+      domainSources.addAll(strategy.prerequisites());
+      this.activeMathematicalObjectIds.addAll(ProofIdentity.domainObjects(domainSources));
     }
   }
 }
