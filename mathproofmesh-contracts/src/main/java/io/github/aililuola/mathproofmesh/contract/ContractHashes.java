@@ -40,6 +40,41 @@ final class ContractHashes {
     return CanonicalJson.stableHash(payload);
   }
 
+  static String claimBoundMessageContentHash(
+      String problemHash,
+      String sourceRouteId,
+      MessageType messageType,
+      String normalizedStatement,
+      List<String> assumptions,
+      String conclusion,
+      List<QuantifierSpec> quantifiers,
+      List<String> dependencies,
+      EvidenceType evidenceType,
+      MemoryTier memoryTier,
+      List<VariableBinding> variableBindings,
+      List<String> scopeLimitations,
+      String claimStatementHash,
+      String claimSemanticHash,
+      String polarity) {
+    ObjectNode payload = object();
+    payload.put("problem_hash", problemHash);
+    payload.put("source_route_id", sourceRouteId);
+    payload.put("message_type", messageType.value());
+    payload.put("normalized_statement", normalizedStatement);
+    payload.set("assumptions", tree(assumptions));
+    payload.put("conclusion", conclusion);
+    payload.set("quantifiers", tree(quantifiers));
+    payload.set("dependencies", tree(dependencies));
+    payload.put("evidence_type", evidenceType.value());
+    payload.put("memory_tier", memoryTier.value());
+    payload.set("variable_bindings", tree(variableBindings));
+    payload.set("scope_limitations", tree(scopeLimitations));
+    payload.put("claim_statement_hash", claimStatementHash);
+    payload.put("claim_semantic_hash", claimSemanticHash);
+    payload.put("polarity", polarity);
+    return CanonicalJson.stableHash(payload);
+  }
+
   static String messageSemanticHash(
       List<String> assumptions,
       String conclusion,

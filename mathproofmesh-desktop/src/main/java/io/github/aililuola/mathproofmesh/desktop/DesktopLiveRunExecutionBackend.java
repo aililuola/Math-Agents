@@ -855,7 +855,9 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
         source.seed(),
         source.targetClaim(),
         source.typedToolGap(),
-        source.whyComputationIsNeeded());
+        source.whyComputationIsNeeded(),
+        source.targetClaimId(),
+        source.claimEvidenceSemanticBinding());
   }
 
   private static ProofAttempt bindAttempt(
@@ -887,7 +889,11 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
         source.status(),
         routeId,
         source.unresolvedGaps(),
-        call.usage());
+        call.usage(),
+        source.claimSemanticContextManifestVersion() == 1
+            ? source.claimSemanticContextBindings()
+            : List.of(),
+        1);
   }
 
   private static VerificationReport bindReview(

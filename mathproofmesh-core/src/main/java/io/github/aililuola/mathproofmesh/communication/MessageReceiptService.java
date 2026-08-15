@@ -40,6 +40,12 @@ public final class MessageReceiptService {
         parsedVariableBindings == null
             ? message.variableBindings()
             : List.copyOf(parsedVariableBindings);
+    String parsedSemanticHash = semanticHash(assumptions, conclusion, quantifiers, bindings);
+    String receiptSemanticHash =
+        message.claimSemanticHash() != null
+                && exactParsedClaimCore(message, assumptions, conclusion, quantifiers, bindings)
+            ? message.expectedSemanticHash()
+            : parsedSemanticHash;
     return new MessageReceipt(
         null,
         claimedClosedObligationIds,
@@ -53,7 +59,7 @@ public final class MessageReceiptService {
         null,
         delivery.receiptToken(),
         referencedStepIds,
-        semanticHash(assumptions, conclusion, quantifiers, bindings),
+        receiptSemanticHash,
         status,
         delivery.targetRouteId(),
         false);
@@ -83,8 +89,16 @@ public final class MessageReceiptService {
             supplied.parsedVariableBindings());
     boolean tokenValid = sameSecret(supplied.receiptToken(), delivery.receiptToken());
     boolean semanticValid =
-        sameSecret(parsedHash, message.expectedSemanticHash())
-            && sameSecret(supplied.semanticHash(), message.expectedSemanticHash());
+        message.claimSemanticHash() == null
+            ? sameSecret(parsedHash, message.expectedSemanticHash())
+                && sameSecret(supplied.semanticHash(), message.expectedSemanticHash())
+            : exactParsedClaimCore(
+                    message,
+                    supplied.parsedAssumptions(),
+                    supplied.parsedConclusion(),
+                    supplied.parsedQuantifiers(),
+                    supplied.parsedVariableBindings())
+                && sameSecret(supplied.semanticHash(), message.expectedSemanticHash());
     MessageReceipt validated = supplied;
     if (!tokenValid || !semanticValid) {
       validated =
@@ -122,6 +136,18 @@ public final class MessageReceiptService {
     payload.set("quantifiers", ContractObjectMapper.toTree(quantifiers));
     payload.set("variable_bindings", ContractObjectMapper.toTree(variableBindings));
     return CanonicalJson.stableHash(payload);
+  }
+
+  private static boolean exactParsedClaimCore(
+      MessageEnvelope message,
+      List<String> assumptions,
+      String conclusion,
+      List<QuantifierSpec> quantifiers,
+      List<VariableBinding> variableBindings) {
+    return message.assumptions().equals(assumptions)
+        && message.conclusion().equals(conclusion)
+        && message.quantifiers().equals(quantifiers)
+        && message.variableBindings().equals(variableBindings);
   }
 
   private static boolean sameSecret(String supplied, String expected) {

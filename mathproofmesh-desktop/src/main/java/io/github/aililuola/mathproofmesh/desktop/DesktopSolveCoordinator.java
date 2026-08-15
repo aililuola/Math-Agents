@@ -54,6 +54,7 @@ import io.github.aililuola.mathproofmesh.contract.ClaimBlindAdjudicationVerdict;
 import io.github.aililuola.mathproofmesh.contract.ClaimCounterexampleWitnessReviewBatch;
 import io.github.aililuola.mathproofmesh.contract.ClaimCounterexampleWitnessReviewDecision;
 import io.github.aililuola.mathproofmesh.contract.ClaimCourtOutcome;
+import io.github.aililuola.mathproofmesh.contract.ClaimEvidenceSemanticBinding;
 import io.github.aililuola.mathproofmesh.contract.ClaimMinimalRepairBatch;
 import io.github.aililuola.mathproofmesh.contract.ClaimMinimalRepairDecision;
 import io.github.aililuola.mathproofmesh.contract.ClaimMinimalRepairDisposition;
@@ -63,6 +64,7 @@ import io.github.aililuola.mathproofmesh.contract.ClaimProofAuditVerdict;
 import io.github.aililuola.mathproofmesh.contract.ClaimProofPatch;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewBatch;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimSemanticContextBinding;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatementAssessment;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatementFalsificationBatch;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatementFalsificationDecision;
@@ -247,6 +249,7 @@ import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimFreezeServ
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofPatchValidator;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionRecord;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionStatus;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionSnapshot;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimRefutationEvidence;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimRefutationEvidenceType;
@@ -374,6 +377,8 @@ final class DesktopSolveCoordinator {
   private static final int INSPIRATION_NO_GAIN_ROUNDS = 2;
   private static final int INSPIRATION_COOLDOWN_ROUNDS = 2;
   private static final String MAIN_GOAL_ID = "main-goal";
+  private static final String LEGACY_INCOMPLETE_SEMANTIC_CONTEXT =
+      "LEGACY_INCOMPLETE_SEMANTIC_CONTEXT";
   private static final String CAMPAIGN_RESEARCH_ROUTE_ID = "campaign-research";
   private static final String CURSOR_FREEZE = "freeze_problem";
   private static final String CURSOR_TRIAGE = "triage";
@@ -3439,6 +3444,13 @@ final class DesktopSolveCoordinator {
         changed, "experiment_id", original.experimentId(), candidate.experimentId());
     immutableDifference(changed, "purpose", original.purpose(), candidate.purpose());
     immutableDifference(changed, "target_claim", original.targetClaim(), candidate.targetClaim());
+    immutableDifference(
+        changed, "target_claim_id", original.targetClaimId(), candidate.targetClaimId());
+    immutableDifference(
+        changed,
+        "claim_evidence_semantic_binding",
+        original.claimEvidenceSemanticBinding(),
+        candidate.claimEvidenceSemanticBinding());
     immutableDifference(changed, "assumptions", original.assumptions(), candidate.assumptions());
     immutableDifference(
         changed,
@@ -3503,7 +3515,9 @@ final class DesktopSolveCoordinator {
         original.seed(),
         original.targetClaim(),
         repaired.typedToolGap(),
-        original.whyComputationIsNeeded());
+        original.whyComputationIsNeeded(),
+        original.targetClaimId(),
+        original.claimEvidenceSemanticBinding());
   }
 
   private static ComputationDecision withComputationRepair(
@@ -4244,15 +4258,19 @@ final class DesktopSolveCoordinator {
           "The original court failure must be rethrown after restoring the durable mutation snapshot.")
   private List<AttemptArtifactRecord> reviewAttemptArtifacts(
       RouteState route, List<AttemptArtifactRecord> harvested) {
-    List<AttemptArtifactRecord> reviewable =
+    List<AttemptArtifactRecord> contextChecked =
         harvested.stream()
+            .map(record -> rejectUnboundModernLocalClaim(route, record))
+            .toList();
+    List<AttemptArtifactRecord> reviewable =
+        contextChecked.stream()
             .filter(
                 record ->
                     record.status() == AttemptArtifactStatus.HARVESTED
                         || record.status() == AttemptArtifactStatus.REVIEW_PENDING)
             .limit(ClaimReviewBatch.MAX_DECISIONS)
             .toList();
-    harvested.stream()
+    contextChecked.stream()
         .filter(record -> record.status() == AttemptArtifactStatus.UNCERTAIN)
         .forEach(
             record -> {
@@ -4285,6 +4303,33 @@ final class DesktopSolveCoordinator {
       }
     }
     return attemptArtifacts.recordsForAttempt(route.attempt.attemptId());
+  }
+
+  private AttemptArtifactRecord rejectUnboundModernLocalClaim(
+      RouteState route, AttemptArtifactRecord record) {
+    if (record.status() != AttemptArtifactStatus.HARVESTED
+        || record.kind() == AttemptArtifactKind.ROUTE_THEOREM
+        || route.attempt.claimSemanticContextManifestVersion() != 1
+        || route.strategy.criticalClaims().stream()
+            .anyMatch(claim -> claim.claimId().equals(record.claimId()))) {
+      return record;
+    }
+    boolean bound =
+        route.attempt.claimSemanticContextBindings().stream()
+            .anyMatch(binding -> binding.claimId().equals(record.claimId()));
+    if (bound) {
+      return record;
+    }
+    event(
+        "claim_context_rejected",
+        "claim_court",
+        record.authorAgentId(),
+        "blocked",
+        "MISSING_ATTEMPT_LOCAL_CLAIM_CONTEXT_BINDING",
+        record.claimId());
+    return attemptArtifacts.markUncertain(
+        record.artifactId(),
+        "MISSING_ATTEMPT_LOCAL_CLAIM_CONTEXT_BINDING:" + record.claimId());
   }
 
   private ClaimCourtReviewResult conductClaimCourt(
@@ -4360,7 +4405,7 @@ final class DesktopSolveCoordinator {
     if (boundClaim != null && !explicitBinding) {
       LinkedHashSet<String> legacyScope =
           new LinkedHashSet<>(bound.scopeLimitations());
-      legacyScope.add("LEGACY_INCOMPLETE_SEMANTIC_CONTEXT");
+      legacyScope.add(LEGACY_INCOMPLETE_SEMANTIC_CONTEXT);
       bound =
           new CriticalClaimContext(
               bound.assumptions(),
@@ -4368,6 +4413,36 @@ final class DesktopSolveCoordinator {
               List.copyOf(legacyScope),
               bound.variableBindings(),
               bound.polarity());
+    } else if (boundClaim == null) {
+      ClaimSemanticContextBinding localBinding =
+          route.attempt.claimSemanticContextBindings().stream()
+              .filter(value -> value.claimId().equals(claim.claimId()))
+              .findFirst()
+              .orElse(null);
+      if (localBinding != null) {
+        bound =
+            new CriticalClaimContext(
+                localBinding.localAssumptions(),
+                localBinding.quantifiers(),
+                localBinding.scopeLimitations(),
+                localBinding.variableBindings(),
+                localBinding.polarity());
+      } else if (claim.tags().contains("route_theorem")) {
+        bound = root;
+      } else if (route.attempt.claimSemanticContextManifestVersion() == 1) {
+        throw new IllegalArgumentException(
+            "MISSING_ATTEMPT_LOCAL_CLAIM_CONTEXT_BINDING:" + claim.claimId());
+      } else {
+        bound =
+            new CriticalClaimContext(
+                List.of(),
+                List.of(),
+                FrozenClaimSemanticContext.legacyIncomplete(
+                        effectiveClaimScope(claim))
+                    .scopeLimitations(),
+                List.of(),
+                "positive");
+      }
     }
     return claimCourtSemanticContexts.compile(
         claim,
@@ -4631,31 +4706,7 @@ final class DesktopSolveCoordinator {
     List<TrustedClaimEvidence> trusted = new ArrayList<>();
     synchronized (computationTraces) {
       for (ComputationTrace trace : computationTraces) {
-        if (trace.result() == null
-            || !trace.replayValid()
-            || (trace.authority() != ComputationEvidenceGate.EvidenceAuthority.VERIFIED
-                && trace.authority()
-                    != ComputationEvidenceGate.EvidenceAuthority.VERIFIED_BOUNDED)
-            || !computationTargetsFrozenClaim(trace, frozen)) {
-          continue;
-        }
-        for (EvidenceRef reference : trace.result().artifactRefs()) {
-          if (reference.contentHash() == null || reference.contentHash().isBlank()) {
-            continue;
-          }
-          trusted.add(
-              new TrustedClaimEvidence(
-                  "claim-evidence-" + trace.result().experimentId() + "-"
-                      + CanonicalJson.stableHash(reference).substring(0, 12),
-                  reference,
-                  problemHash,
-                  frozen.claimSemanticHash(),
-                  ClaimTrustedEvidenceAuthority.REPLAYED_COMPUTATION,
-                  true,
-                  true,
-                  true,
-                  true));
-        }
+        trusted.addAll(trustedComputationEvidence(trace, frozen));
       }
     }
     typedMemory.facts().stream()
@@ -4686,22 +4737,108 @@ final class DesktopSolveCoordinator {
     return List.copyOf(trusted);
   }
 
+  private List<TrustedClaimEvidence> trustedComputationEvidence(
+      ComputationTrace trace, FrozenClaimSnapshot frozen) {
+    if (trace.result() == null
+        || !trace.replayValid()
+        || (trace.authority() != ComputationEvidenceGate.EvidenceAuthority.VERIFIED
+            && trace.authority() != ComputationEvidenceGate.EvidenceAuthority.VERIFIED_BOUNDED)
+        || !computationTargetsFrozenClaim(trace, frozen)) {
+      return List.of();
+    }
+    List<TrustedClaimEvidence> trusted = new ArrayList<>();
+    for (EvidenceRef reference : trace.result().artifactRefs()) {
+      if (reference.contentHash() == null || reference.contentHash().isBlank()) {
+        continue;
+      }
+      trusted.add(
+          new TrustedClaimEvidence(
+              "claim-evidence-"
+                  + trace.result().experimentId()
+                  + "-"
+                  + CanonicalJson.stableHash(reference).substring(0, 12),
+              reference,
+              problemHash,
+              frozen.claimSemanticHash(),
+              ClaimTrustedEvidenceAuthority.REPLAYED_COMPUTATION,
+              true,
+              true,
+              true,
+              true));
+    }
+    return List.copyOf(trusted);
+  }
+
+  List<TrustedClaimEvidence> trustedComputationEvidenceForTest(
+      ExperimentSpec spec,
+      ExperimentResult result,
+      FrozenClaimSnapshot frozen,
+      ComputationEvidenceGate.EvidenceAuthority authority,
+      boolean replayValid) {
+    return trustedComputationEvidence(
+        new ComputationTrace(
+            "claim-evidence-test",
+            spec,
+            null,
+            null,
+            result,
+            null,
+            authority,
+            replayValid),
+        frozen);
+  }
+
   private boolean computationTargetsFrozenClaim(
       ComputationTrace trace, FrozenClaimSnapshot frozen) {
-    String targetClaimId = trace.result().targetClaimId();
-    boolean exactClaimId =
-        targetClaimId == null
-            || targetClaimId.isBlank()
-            || targetClaimId.equals(frozen.claimId());
+    return computationEvidenceMatchesFrozenClaim(trace.spec(), trace.result(), frozen);
+  }
+
+  private boolean computationEvidenceMatchesFrozenClaim(
+      ExperimentSpec spec, ExperimentResult result, FrozenClaimSnapshot frozen) {
+    String targetClaimId = result.targetClaimId();
+    ClaimEvidenceSemanticBinding requestBinding =
+        spec.claimEvidenceSemanticBinding();
+    ClaimEvidenceSemanticBinding resultBinding =
+        result.claimEvidenceSemanticBinding();
+    if (targetClaimId == null
+        || targetClaimId.isBlank()
+        || !targetClaimId.equals(frozen.claimId())
+        || requestBinding == null
+        || !requestBinding.equals(resultBinding)) {
+      return false;
+    }
+    ClaimEvidenceSemanticBinding expected =
+        new ClaimEvidenceSemanticBinding(
+            frozen.problemHash(),
+            frozen.claimId(),
+            frozen.claimStatementHash(),
+            frozen.claimSemanticHash(),
+            frozen.statement(),
+            frozen.conclusion(),
+            frozen.assumptions(),
+            frozen.quantifiers(),
+            frozen.variableBindings(),
+            frozen.scopeLimitations(),
+            frozen.polarity(),
+            frozen.dependencyClaimIds(),
+            spec.domains());
     boolean exactStatement =
-        topology.mathNormalize(trace.result().targetClaim())
+        topology.mathNormalize(result.targetClaim())
                 .equals(topology.mathNormalize(frozen.statement()))
-            || topology.mathNormalize(trace.result().targetClaim())
+            || topology.mathNormalize(result.targetClaim())
                 .equals(topology.mathNormalize(frozen.conclusion()));
-    return exactClaimId
+    return requestBinding.equals(expected)
         && exactStatement
-        && new LinkedHashSet<>(trace.spec().assumptions())
-            .equals(new LinkedHashSet<>(frozen.assumptions()));
+        && spec.assumptions().equals(frozen.assumptions())
+        && resultScopeMatchesDomains(result.scope(), spec.domains());
+  }
+
+  private static boolean resultScopeMatchesDomains(ObjectNode scope, ObjectNode domains) {
+    JsonNode reportedDomains = scope.get("domains");
+    if (reportedDomains != null) {
+      return reportedDomains.equals(domains);
+    }
+    return domains.isEmpty() && scope.path("complete_domain").asBoolean(false);
   }
 
   private boolean exactVerifiedFactForFrozenClaim(
@@ -4709,12 +4846,16 @@ final class DesktopSolveCoordinator {
     return fact.memoryTier() == MemoryTier.FACT
         && fact.verificationStatus() == ClaimStatus.VERIFIED
         && fact.problemHash().equals(frozen.problemHash())
-        && topology.mathNormalize(fact.statement())
-            .equals(topology.mathNormalize(frozen.statement()))
+        && fact.statement().equals(frozen.statement())
+        && fact.conclusion().equals(frozen.conclusion())
         && fact.assumptions().equals(frozen.assumptions())
         && fact.quantifiers().equals(frozen.quantifiers())
         && fact.variableBindings().equals(frozen.variableBindings())
-        && fact.scopeLimitations().equals(frozen.scopeLimitations());
+        && fact.scopeLimitations().equals(frozen.scopeLimitations())
+        && fact.dependencies().equals(frozen.dependencyClaimIds())
+        && frozen.claimStatementHash().equals(fact.claimStatementHash())
+        && frozen.claimSemanticHash().equals(fact.claimSemanticHash())
+        && frozen.polarity().equals(fact.polarity());
   }
 
   private static boolean claimEvidenceFailure(String message) {
@@ -5539,7 +5680,24 @@ final class DesktopSolveCoordinator {
       return null;
     }
 
-    MessageEnvelope candidate = factMessage(claim, route, artifact, decision, counterexample);
+    VerifiedCourtFactProjection courtProjection = verifiedCourtFactProjection(artifact);
+    boolean completeCourtContext =
+        courtProjection != null
+            && !courtProjection
+                .frozen()
+                .scopeLimitations()
+                .contains(LEGACY_INCOMPLETE_SEMANTIC_CONTEXT);
+    MessageEnvelope candidate =
+        completeCourtContext
+            ? factMessage(
+                courtProjection.frozen(),
+                courtProjection.revision(),
+                claim,
+                route,
+                artifact,
+                decision,
+                counterexample)
+            : legacyFactMessage(claim, route, artifact, decision, counterexample);
     MessageEnvelope admitted =
         typedMemory
             .find(claim.claimId())
@@ -5564,11 +5722,43 @@ final class DesktopSolveCoordinator {
     if (!existing.normalizedStatement().equals(candidate.normalizedStatement())
         || !existing.assumptions().equals(candidate.assumptions())
         || !existing.conclusion().equals(candidate.conclusion())
-        || !existing.quantifiers().equals(candidate.quantifiers())) {
+        || !existing.quantifiers().equals(candidate.quantifiers())
+        || !existing.variableBindings().equals(candidate.variableBindings())
+        || !existing.scopeLimitations().equals(candidate.scopeLimitations())
+        || !Objects.equals(existing.claimStatementHash(), candidate.claimStatementHash())
+        || !Objects.equals(existing.claimSemanticHash(), candidate.claimSemanticHash())
+        || !Objects.equals(existing.polarity(), candidate.polarity())) {
       throw new IllegalArgumentException(
           "claim Fact ID collision for non-equivalent statements: " + candidate.messageId());
     }
     return existing;
+  }
+
+  private VerifiedCourtFactProjection verifiedCourtFactProjection(
+      AttemptArtifactRecord artifact) {
+    for (String reviewRef : artifact.reviewIds()) {
+      int separator = reviewRef.lastIndexOf(':');
+      if (separator <= 0 || separator + 1 >= reviewRef.length()) {
+        continue;
+      }
+      String courtCaseId = reviewRef.substring(0, separator);
+      String revisionId = reviewRef.substring(separator + 1);
+      ClaimCourtRecord courtRecord;
+      ClaimProofRevisionRecord revision;
+      try {
+        courtRecord = claimCourt.get(courtCaseId);
+        revision = claimProofRevisions.get(revisionId);
+      } catch (IllegalArgumentException ignored) {
+        continue;
+      }
+      if (courtRecord.outcome() == ClaimCourtOutcome.VERIFIED
+          && courtRecord.currentProofRevisionId().equals(revision.revisionId())
+          && revision.status() == ClaimProofRevisionStatus.BLIND_VERIFIED
+          && revision.claimSemanticHash().equals(courtRecord.frozenClaim().claimSemanticHash())) {
+        return new VerifiedCourtFactProjection(courtRecord.frozenClaim(), revision);
+      }
+    }
+    return null;
   }
 
   private ArtifactDependencyResolution resolveArtifactDependencies(
@@ -5838,6 +6028,72 @@ final class DesktopSolveCoordinator {
   }
 
   private MessageEnvelope factMessage(
+      FrozenClaimSnapshot frozen,
+      ClaimProofRevisionRecord verifiedRevision,
+      ClaimCard claim,
+      RouteState route,
+      AttemptArtifactRecord artifact,
+      ClaimReviewDecision decision,
+      boolean counterexample) {
+    List<String> artifactRefs =
+        artifact.evidenceRefs().stream()
+            .filter(DesktopSolveCoordinator::runScopedArtifactReference)
+            .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+    verifiedRevision.evidenceRefs().stream()
+        .map(EvidenceRef::artifactRef)
+        .filter(DesktopSolveCoordinator::runScopedArtifactReference)
+        .forEach(reference -> addDistinct(artifactRefs, reference));
+    if (route.claimReview != null
+        && runScopedArtifactReference(route.claimReview.rawArtifactRef())) {
+      addDistinct(artifactRefs, route.claimReview.rawArtifactRef());
+    }
+    String rawSourceRef =
+        artifactRefs.stream()
+            .findFirst()
+            .orElseGet(
+                () ->
+                    runScopedArtifactReference(route.attempt.rawArtifactRef())
+                        ? route.attempt.rawArtifactRef()
+                        : null);
+    return new MessageEnvelope(
+        artifactRefs,
+        frozen.assumptions(),
+        frozen.conclusion(),
+        "",
+        null,
+        frozen.dependencyClaimIds(),
+        claim.dependencyRefs(),
+        counterexample ? EvidenceType.COUNTEREXAMPLE : EvidenceType.NATURAL_PROOF_AUDITED,
+        MemoryTier.FACT,
+        claim.claimId(),
+        counterexample ? MessageType.COUNTEREXAMPLE : MessageType.VERIFIED_LEMMA,
+        1.0d,
+        topology.mathNormalize(frozen.statement()),
+        frozen.problemHash(),
+        frozen.quantifiers(),
+        rawSourceRef,
+        roundIndex.get(),
+        config.topology().typedCommunication().schemaVersion(),
+        frozen.scopeLimitations(),
+        frozen.authorAgentId(),
+        counterexample ? RouteRole.SKEPTIC : RouteRole.PROVER,
+        route.routeId,
+        frozen.statement(),
+        List.of("*"),
+        config.topology().crossRoute().messageTtlRounds(),
+        frozen.variableBindings(),
+        decision.confidence(),
+        ClaimStatus.VERIFIED,
+        frozen.claimStatementHash(),
+        frozen.claimSemanticHash(),
+        frozen.polarity());
+  }
+
+  private static boolean runScopedArtifactReference(String reference) {
+    return reference != null && reference.startsWith("artifact://");
+  }
+
+  private MessageEnvelope legacyFactMessage(
       ClaimCard claim,
       RouteState route,
       AttemptArtifactRecord artifact,
@@ -12006,7 +12262,9 @@ final class DesktopSolveCoordinator {
         source.seed(),
         source.targetClaim(),
         source.typedToolGap(),
-        source.whyComputationIsNeeded());
+        source.whyComputationIsNeeded(),
+        source.targetClaimId(),
+        source.claimEvidenceSemanticBinding());
   }
 
   private static ProofAttempt bindAttempt(
@@ -12040,7 +12298,11 @@ final class DesktopSolveCoordinator {
         source.status(),
         strategyId,
         source.unresolvedGaps(),
-        call.usage());
+        call.usage(),
+        source.claimSemanticContextManifestVersion() == 1
+            ? source.claimSemanticContextBindings()
+            : List.of(),
+        1);
   }
 
   private static VerificationReport bindReview(
@@ -12453,6 +12715,29 @@ final class DesktopSolveCoordinator {
 
   private static ProofAttempt withProposedResearchClaims(
       ProofAttempt source, List<ClaimCard> proposedLemmas) {
+    List<ClaimSemanticContextBinding> bindings = source.claimSemanticContextBindings();
+    if (source.claimSemanticContextManifestVersion() == 1) {
+      LinkedHashSet<String> originalClaimIds =
+          source.proposedLemmas().stream()
+              .map(ClaimCard::claimId)
+              .collect(
+                  java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+      ArrayList<ClaimSemanticContextBinding> expanded = new ArrayList<>(bindings);
+      proposedLemmas.stream()
+          .filter(claim -> !originalClaimIds.contains(claim.claimId()))
+          .forEach(
+              claim ->
+                  expanded.add(
+                      new ClaimSemanticContextBinding(
+                          claim.claimId(),
+                          null,
+                          claim.assumptions(),
+                          List.of(),
+                          List.of(),
+                          claim.scopeLimitations(),
+                          "positive")));
+      bindings = List.copyOf(expanded);
+    }
     return new ProofAttempt(
         source.agentId(),
         source.attemptId(),
@@ -12476,7 +12761,9 @@ final class DesktopSolveCoordinator {
         source.status(),
         source.strategyId(),
         source.unresolvedGaps(),
-        source.usage());
+        source.usage(),
+        bindings,
+        source.claimSemanticContextManifestVersion());
   }
 
   private static String roleForStage(String stage, AgentRuntime agent) {
@@ -12661,6 +12948,14 @@ final class DesktopSolveCoordinator {
       view.put("authority", authority.name().toLowerCase(Locale.ROOT));
       view.put("replay_valid", replayValid);
       return Map.copyOf(view);
+    }
+  }
+
+  private record VerifiedCourtFactProjection(
+      FrozenClaimSnapshot frozen, ClaimProofRevisionRecord revision) {
+    private VerifiedCourtFactProjection {
+      frozen = Objects.requireNonNull(frozen, "frozen");
+      revision = Objects.requireNonNull(revision, "revision");
     }
   }
 

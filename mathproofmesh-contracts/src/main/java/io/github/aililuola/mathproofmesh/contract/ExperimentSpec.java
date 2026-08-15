@@ -1,6 +1,7 @@
 package io.github.aililuola.mathproofmesh.contract;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -31,7 +32,12 @@ public record ExperimentSpec(
     @JsonProperty(value = "seed") @ContractNonNull Integer seed,
     @JsonProperty(value = "target_claim", required = true) @ContractNonNull String targetClaim,
     @JsonProperty(value = "typed_tool_gap") String typedToolGap,
-    @JsonProperty(value = "why_computation_is_needed", required = true) @ContractNonNull String whyComputationIsNeeded
+    @JsonProperty(value = "why_computation_is_needed", required = true) @ContractNonNull String whyComputationIsNeeded,
+    @JsonProperty(value = "target_claim_id") @JsonInclude(JsonInclude.Include.NON_NULL)
+        String targetClaimId,
+    @JsonProperty(value = "claim_evidence_semantic_binding")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        ClaimEvidenceSemanticBinding claimEvidenceSemanticBinding
 ) implements StrictContract {
 
   public ExperimentSpec {
@@ -95,6 +101,22 @@ public record ExperimentSpec(
     targetClaim = ContractStrings.trim(targetClaim);
     targetClaim = ContractStrings.required("target_claim", targetClaim);
     ContractValues.minimumLength("target_claim", targetClaim, 1);
+    targetClaimId = ContractStrings.trim(targetClaimId);
+    if (claimEvidenceSemanticBinding != null) {
+      if (targetClaimId == null
+          || !targetClaimId.equals(claimEvidenceSemanticBinding.claimId())) {
+        throw new ContractValidationException(
+            "claim evidence binding requires an exact target_claim_id");
+      }
+      if (!assumptions.equals(claimEvidenceSemanticBinding.assumptions())) {
+        throw new ContractValidationException(
+            "claim evidence binding assumptions must match the computation request");
+      }
+      if (!domains.equals(claimEvidenceSemanticBinding.computationDomains())) {
+        throw new ContractValidationException(
+            "claim evidence binding domains must match the computation request");
+      }
+    }
     typedToolGap = ContractStrings.trim(typedToolGap);
     whyComputationIsNeeded = ContractStrings.trim(whyComputationIsNeeded);
     whyComputationIsNeeded = ContractStrings.required("why_computation_is_needed", whyComputationIsNeeded);
@@ -126,7 +148,7 @@ public record ExperimentSpec(
             "request_hash",
             requestHash,
             CanonicalJson.stableHash(
-                ContractHashes.experimentRequestPayload(
+                requestPayload(
                     purpose,
                     targetClaim,
                     assumptions,
@@ -143,7 +165,61 @@ public record ExperimentSpec(
                     typedToolGap,
                     maxCases,
                     seed,
-                    runtimeFingerprint)));
+                    runtimeFingerprint,
+                    targetClaimId,
+                    claimEvidenceSemanticBinding)));
+  }
+
+  public ExperimentSpec(
+      ObjectNode arguments,
+      List<String> assumptions,
+      Boolean broadSearch,
+      String decisionIfConfirmed,
+      String decisionIfRefuted,
+      ObjectNode domains,
+      Boolean exactArithmetic,
+      String executionHash,
+      String experimentId,
+      Integer maxCases,
+      ComputationMethod method,
+      String noncomputationalAlternative,
+      String parentCheckpointId,
+      String pathId,
+      ComputationPurpose purpose,
+      String reasoningBasis,
+      String requestHash,
+      String requestedBy,
+      ObjectNode runtimeFingerprint,
+      Integer seed,
+      String targetClaim,
+      String typedToolGap,
+      String whyComputationIsNeeded) {
+    this(
+        arguments,
+        assumptions,
+        broadSearch,
+        decisionIfConfirmed,
+        decisionIfRefuted,
+        domains,
+        exactArithmetic,
+        executionHash,
+        experimentId,
+        maxCases,
+        method,
+        noncomputationalAlternative,
+        parentCheckpointId,
+        pathId,
+        purpose,
+        reasoningBasis,
+        requestHash,
+        requestedBy,
+        runtimeFingerprint,
+        seed,
+        targetClaim,
+        typedToolGap,
+        whyComputationIsNeeded,
+        null,
+        null);
   }
 
   @JsonIgnore
@@ -154,7 +230,7 @@ public record ExperimentSpec(
 
   @JsonIgnore
   public ObjectNode normalizedPayload() {
-    return ContractHashes.experimentRequestPayload(
+    return requestPayload(
         purpose,
         targetClaim,
         assumptions,
@@ -171,7 +247,9 @@ public record ExperimentSpec(
         typedToolGap,
         maxCases,
         seed,
-        runtimeFingerprint);
+        runtimeFingerprint,
+        targetClaimId,
+        claimEvidenceSemanticBinding);
   }
 
   public ExperimentSpec bindRuntimeFingerprint(ObjectNode fingerprint) {
@@ -198,7 +276,57 @@ public record ExperimentSpec(
         seed,
         targetClaim,
         typedToolGap,
-        whyComputationIsNeeded);
+        whyComputationIsNeeded,
+        targetClaimId,
+        claimEvidenceSemanticBinding);
+  }
+
+  private static ObjectNode requestPayload(
+      ComputationPurpose purpose,
+      String targetClaim,
+      List<String> assumptions,
+      String reasoningBasis,
+      String whyComputationIsNeeded,
+      String decisionIfConfirmed,
+      String decisionIfRefuted,
+      String noncomputationalAlternative,
+      ComputationMethod method,
+      ObjectNode domains,
+      ObjectNode arguments,
+      Boolean exactArithmetic,
+      Boolean broadSearch,
+      String typedToolGap,
+      Integer maxCases,
+      Integer seed,
+      ObjectNode runtimeFingerprint,
+      String targetClaimId,
+      ClaimEvidenceSemanticBinding binding) {
+    ObjectNode payload =
+        ContractHashes.experimentRequestPayload(
+            purpose,
+            targetClaim,
+            assumptions,
+            reasoningBasis,
+            whyComputationIsNeeded,
+            decisionIfConfirmed,
+            decisionIfRefuted,
+            noncomputationalAlternative,
+            method,
+            domains,
+            arguments,
+            exactArithmetic,
+            broadSearch,
+            typedToolGap,
+            maxCases,
+            seed,
+            runtimeFingerprint);
+    if (targetClaimId != null) {
+      payload.put("target_claim_id", targetClaimId);
+    }
+    if (binding != null) {
+      payload.set("claim_evidence_semantic_binding", ContractObjectMapper.toTree(binding));
+    }
+    return payload;
   }
 
   // BEGIN GENERATED DEFENSIVE ACCESSORS

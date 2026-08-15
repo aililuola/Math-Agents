@@ -1,6 +1,7 @@
 package io.github.aililuola.mathproofmesh.contract;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -36,7 +37,12 @@ public record MessageEnvelope(
     @JsonProperty(value = "ttl_rounds") @ContractNonNull Integer ttlRounds,
     @JsonProperty(value = "variable_bindings") @ContractNonNull List<VariableBinding> variableBindings,
     @JsonProperty(value = "verification_confidence") @ContractNonNull Double verificationConfidence,
-    @JsonProperty(value = "verification_status", required = true) @ContractNonNull ClaimStatus verificationStatus
+    @JsonProperty(value = "verification_status", required = true) @ContractNonNull ClaimStatus verificationStatus,
+    @JsonProperty(value = "claim_statement_hash") @JsonInclude(JsonInclude.Include.NON_NULL)
+        String claimStatementHash,
+    @JsonProperty(value = "claim_semantic_hash") @JsonInclude(JsonInclude.Include.NON_NULL)
+        String claimSemanticHash,
+    @JsonProperty(value = "polarity") @JsonInclude(JsonInclude.Include.NON_NULL) String polarity
 ) implements StrictContract {
 
   public MessageEnvelope {
@@ -128,21 +134,114 @@ public record MessageEnvelope(
     ContractValues.minimum("verification_confidence", verificationConfidence, 0.0);
     ContractValues.maximum("verification_confidence", verificationConfidence, 1.0);
     verificationStatus = ContractValues.required("verification_status", verificationStatus);
+    claimStatementHash = ContractStrings.trim(claimStatementHash);
+    claimSemanticHash = ContractStrings.trim(claimSemanticHash);
+    polarity = ContractStrings.trim(polarity);
+    boolean claimBound = claimSemanticHash != null;
+    if (claimBound) {
+      claimStatementHash =
+          ContractStrings.required("claim_statement_hash", claimStatementHash);
+      polarity = ContractStrings.required("polarity", polarity);
+      ContractValues.oneOf("polarity", polarity, "positive", "negative");
+    } else if (claimStatementHash != null || polarity != null) {
+      throw new ContractValidationException(
+          "claim_statement_hash and polarity require claim_semantic_hash");
+    }
     contentHash =
         ContractHashes.checked(
             "message content_hash",
             contentHash,
-            ContractHashes.messageContentHash(
-                problemHash,
-                sourceRouteId,
-                messageType,
-                normalizedStatement,
-                assumptions,
-                conclusion,
-                quantifiers,
-                dependencies,
-                evidenceType,
-                memoryTier));
+            claimBound
+                ? ContractHashes.claimBoundMessageContentHash(
+                    problemHash,
+                    sourceRouteId,
+                    messageType,
+                    normalizedStatement,
+                    assumptions,
+                    conclusion,
+                    quantifiers,
+                    dependencies,
+                    evidenceType,
+                    memoryTier,
+                    variableBindings,
+                    scopeLimitations,
+                    claimStatementHash,
+                    claimSemanticHash,
+                    polarity)
+                : ContractHashes.messageContentHash(
+                    problemHash,
+                    sourceRouteId,
+                    messageType,
+                    normalizedStatement,
+                    assumptions,
+                    conclusion,
+                    quantifiers,
+                    dependencies,
+                    evidenceType,
+                    memoryTier));
+  }
+
+  public MessageEnvelope(
+      List<String> artifactRefs,
+      List<String> assumptions,
+      String conclusion,
+      String contentHash,
+      String createdAt,
+      List<String> dependencies,
+      List<JsonNode> dependencyRefs,
+      EvidenceType evidenceType,
+      MemoryTier memoryTier,
+      String messageId,
+      MessageType messageType,
+      Double normalizationConfidence,
+      String normalizedStatement,
+      String problemHash,
+      List<QuantifierSpec> quantifiers,
+      String rawSourceRef,
+      Integer roundCreated,
+      String schemaVersion,
+      List<String> scopeLimitations,
+      String sourceAgentId,
+      RouteRole sourceRole,
+      String sourceRouteId,
+      String statement,
+      List<String> targetRouteIds,
+      Integer ttlRounds,
+      List<VariableBinding> variableBindings,
+      Double verificationConfidence,
+      ClaimStatus verificationStatus) {
+    this(
+        artifactRefs,
+        assumptions,
+        conclusion,
+        contentHash,
+        createdAt,
+        dependencies,
+        dependencyRefs,
+        evidenceType,
+        memoryTier,
+        messageId,
+        messageType,
+        normalizationConfidence,
+        normalizedStatement,
+        problemHash,
+        quantifiers,
+        rawSourceRef,
+        roundCreated,
+        schemaVersion,
+        scopeLimitations,
+        sourceAgentId,
+        sourceRole,
+        sourceRouteId,
+        statement,
+        targetRouteIds,
+        ttlRounds,
+        variableBindings,
+        verificationConfidence,
+        verificationStatus,
+        null,
+        null,
+        null);
   }
 
   public ObjectNode immutablePayload() {
@@ -157,10 +256,35 @@ public record MessageEnvelope(
     payload.set("dependencies", ContractObjectMapper.toTree(dependencies));
     payload.put("evidence_type", evidenceType.value());
     payload.put("memory_tier", memoryTier.value());
+    if (claimSemanticHash != null) {
+      payload.set("variable_bindings", ContractObjectMapper.toTree(variableBindings));
+      payload.set("scope_limitations", ContractObjectMapper.toTree(scopeLimitations));
+      payload.put("claim_statement_hash", claimStatementHash);
+      payload.put("claim_semantic_hash", claimSemanticHash);
+      payload.put("polarity", polarity);
+    }
     return payload;
   }
 
   public String expectedContentHash() {
+    if (claimSemanticHash != null) {
+      return ContractHashes.claimBoundMessageContentHash(
+          problemHash,
+          sourceRouteId,
+          messageType,
+          normalizedStatement,
+          assumptions,
+          conclusion,
+          quantifiers,
+          dependencies,
+          evidenceType,
+          memoryTier,
+          variableBindings,
+          scopeLimitations,
+          claimStatementHash,
+          claimSemanticHash,
+          polarity);
+    }
     return ContractHashes.messageContentHash(
         problemHash,
         sourceRouteId,
@@ -175,6 +299,9 @@ public record MessageEnvelope(
   }
 
   public String expectedSemanticHash() {
+    if (claimSemanticHash != null) {
+      return claimSemanticHash;
+    }
     return ContractHashes.messageSemanticHash(
         assumptions, conclusion, quantifiers, variableBindings);
   }

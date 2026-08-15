@@ -619,3 +619,172 @@ Generated `target`, logs, checkpoints, and refreshed Phase 17 report files are n
 Root Goal, Negative Knowledge registry, research-finding authority, canonical graph/convergence,
 Semantic Pivot, strategy portfolio, provider, concurrency, budget, Temporal, PostgreSQL schema, or
 Python Sidecar behavior was changed. Issue 008 is closed; Issue 009 remains untouched.
+
+## 18. End-to-end evidence and local-context follow-up
+
+A second independent audit of remote head
+`6629d3a6e31b8a58ccb16224a69366953642d812` followed the complete path from computation or Fact
+evidence through Claim Court and back into Typed Memory. It found three remaining Issue 008
+boundaries: the computation capability issuer did not bind every Claim dimension, Court Fact
+projection discarded structured context, and a new attempt-local Claim could silently inherit the
+root context. This follow-up closes all three on the same Issue 008 branch. Issue 009 was not
+started.
+
+### 18.1 Pre-fix behavioral evidence
+
+The first black-box tests were written and run before changing production code:
+
+- `DesktopCourtVerifiedFactPreservesContextTest` failed because a Court-verified Fact lost its
+  ordered quantifiers and variable bindings during projection.
+- `DesktopFactEvidenceConclusionIsolationTest` failed with `expected false but was true`: a Fact
+  with the wrong conclusion could be accepted as exact evidence for the current frozen Claim.
+
+These are direct behavioral failures of the old production path, not missing-API compilation
+evidence.
+
+### 18.2 Exact computation evidence binding
+
+`ClaimEvidenceSemanticBinding` is now carried by both `ExperimentSpec` and `ExperimentResult` and
+is covered by their request/result hashes. It binds:
+
+- problem, Claim ID, statement hash, and full Claim semantic hash;
+- statement and conclusion;
+- assumptions, ordered quantifiers, variable bindings, scope limitations, and polarity;
+- dependency Claim IDs;
+- the exact computation domains.
+
+The Desktop capability issuer now requires a nonblank exact target Claim ID, an identical request
+and result binding, an independently replay-valid verified result, an exact server-recomputed
+binding for the frozen Claim, and an exact result-scope/domain match. It no longer copies the
+current frozen semantic hash onto an unbound or partially bound old computation result. Contract
+repair and runtime rebinding preserve this immutable binding, and cached results are rehashed for
+the requesting binding rather than retaining a stale result identity.
+
+    COMPUTATION EVIDENCE CONTEXT DIAGNOSTIC
+    EXACT_CONTEXT_COMPUTATION_CAPABILITIES=1
+    BLANK_TARGET_CLAIM_ID_EVIDENCE_ACCEPTS=0
+    QUANTIFIER_MISMATCH_EVIDENCE_ACCEPTS=0
+    SCOPE_MISMATCH_EVIDENCE_ACCEPTS=0
+    POLARITY_MISMATCH_EVIDENCE_ACCEPTS=0
+    MISSING_RESULT_BINDING_EVIDENCE_ACCEPTS=0
+    RESULT=PASS
+
+### 18.3 Lossless Court Fact projection
+
+A modern verified Fact is now projected from the authoritative `FrozenClaimSnapshot` plus the
+blind-verified `ClaimProofRevisionRecord`, not merely from the reduced `ClaimCard`. The projection
+retains statement, conclusion, assumptions, ordered quantifiers, variable bindings, scope,
+dependencies, statement hash, semantic hash, and polarity. Only run-scoped `artifact://`
+references are promoted as Fact artifacts.
+
+`MessageEnvelope` has backward-compatible optional Claim statement hash, semantic hash, and
+polarity fields. Claim-bound content identity now includes variable bindings and scope as well as
+the other Claim dimensions. `requireSameClaim`, receipt validation, and memory-tier transitions
+preserve and compare the complete identity. Legacy envelopes retain their original JSON and hash
+vectors because absent optional fields use the legacy hash path.
+
+The JDBC repository needed no schema migration: it persists and restores the complete envelope as
+JSONB, so the new fields survive PostgreSQL storage without a parallel column mapping. Checkpoint
+round-trip tests independently verify the same property through Typed Memory restore.
+
+    COURT FACT CONTEXT DIAGNOSTIC
+    CONCLUSION_MISMATCH_FACT_ACCEPTS=0
+    POLARITY_MISMATCH_FACT_ACCEPTS=0
+    VERIFIED_FACT_QUANTIFIER_LOSSES=0
+    VERIFIED_FACT_BINDING_LOSSES=0
+    VERIFIED_FACT_SCOPE_LOSSES=0
+    VERIFIED_FACT_POLARITY_LOSSES=0
+    CONTEXT_DISTINCT_FACT_COLLISIONS=0
+    FACT_EVIDENCE_ROUND_TRIP_FAILURES=0
+    RESULT=PASS
+
+### 18.4 Explicit attempt-local Claim context
+
+`ProofAttempt` now carries a versioned list of `ClaimSemanticContextBinding` records. Manifest
+version 1 requires every modern attempt-local proposed Claim to have one explicit binding. Missing,
+duplicate, unknown-target, or version-inconsistent bindings fail closed. A bound local Claim enters
+Court with its own assumptions, ordered quantifiers, variable bindings, scope, and polarity;
+absence cannot silently fall back to the root context.
+
+Old serialized attempts with neither field restore as manifest version 0. Their Claims are marked
+`LEGACY_INCOMPLETE_SEMANTIC_CONTEXT`; they may remain visible for compatibility but cannot mint a
+new exact Claim-bound Fact capability. Route-theorem Claims retain the immutable root context.
+Server-generated Research Finding and Pivot Claim additions receive explicit non-authoritative
+bindings and still require the existing Issue 003 review path.
+
+    ATTEMPT-LOCAL CLAIM CONTEXT DIAGNOSTIC
+    UNBOUND_MODERN_LOCAL_CLAIM_ADMISSIONS=0
+    UNBOUND_MODERN_LOCAL_CLAIM_ROOT_FALLBACKS=0
+    BOUND_LOCAL_CLAIM_COURT_CASES=1
+    LOCAL_CLAIM_QUANTIFIER_FALSE_REFUTATIONS=0
+    LOCAL_CLAIM_POLARITY_FALSE_REFUTATIONS=0
+    RESULT=PASS
+
+### 18.5 New tests
+
+Contracts:
+
+- `ClaimSemanticBindingContractsTest` (4 tests)
+- `ProofAttemptSemanticContextMigrationTest` (1 test)
+
+Core:
+
+- `ClaimBoundMessageReceiptTest` (2 tests)
+
+Desktop production path:
+
+- `DesktopComputationEvidenceFullContextBindingTest`
+- `DesktopBlankTargetClaimIdEvidenceRejectedTest`
+- `DesktopFactEvidenceConclusionIsolationTest`
+- `DesktopFactEvidencePolarityIsolationTest`
+- `DesktopCourtVerifiedFactPreservesContextTest`
+- `DesktopCourtFactEvidenceRoundTripTest`
+- `DesktopContextDistinctFactCollisionTest`
+- `DesktopAttemptLocalClaimContextBindingTest`
+- `DesktopUnboundLocalClaimFailsClosedTest`
+- `DesktopLocalClaimQuantifierIsolationTest`
+- `DesktopLocalClaimPolarityIsolationTest`
+
+The Desktop tests invoke the real coordinator capability issuer, Claim Court integration, Fact
+projection, Typed Memory, and checkpoint restore through the production harness. They do not call
+a real model provider or external network.
+
+### 18.6 Validation
+
+The initial complete verification correctly failed the unchanged Contracts coverage gate after the
+new records were introduced:
+
+    contracts_adjusted_line_ge_90=FAIL
+    contracts_adjusted_branch_ge_85=FAIL
+
+No threshold or exclusion was changed. Additional Contract behavior and rejection-branch tests
+raised the final measured coverage to:
+
+    CONTRACTS_ADJUSTED_LINE=91.831140%
+    CONTRACTS_ADJUSTED_BRANCH=85.952012%
+
+The final module results were:
+
+| Module | Tests | Failures | Errors | Skipped |
+|---|---:|---:|---:|---:|
+| Contracts | 59 | 0 | 0 | 0 |
+| Core | 1174 | 0 | 0 | 0 |
+| Server | 859 | 0 | 0 | 3 |
+| Desktop | 203 | 0 | 0 | 1 |
+| Compatibility | 149 | 0 | 0 | 0 |
+
+The final `scripts/verify-all.ps1 -Offline` run used Docker Server 29.6.2 and exited 0:
+
+- 2444 unit/compatibility tests plus 26 Failsafe integration tests: 2470 total;
+- 0 failures and 0 errors, with 4 conditional unit-test skips;
+- all seven integration suites passed, including `JdbcMessageRepositoryIT`,
+  `MemoryProofGraphPostgresIT`, `PersistencePostgresIT`,
+  `Phase17CheckpointOutboxPerformanceIT`, and `ProviderCallPostgresIT`;
+- SpotBugs/FindSecBugs, OWASP, licenses, secret scan, coverage, frozen-source, and Python Sidecar
+  gates all passed without changing thresholds.
+
+Generated `target`, logs, checkpoints, and refreshed Phase 17 report JSON files are not committed.
+There is no PostgreSQL migration or checkpoint schema bump. Root Goal, permanent Negative
+Knowledge, Claim lifecycle, Research Finding authority, canonical graph/convergence, Semantic
+Pivot, strategy diversity, provider, concurrency, budget, Temporal, and Python Sidecar behavior
+remain protected by the full regression. Issue 008 is closed; Issue 009 remains untouched.

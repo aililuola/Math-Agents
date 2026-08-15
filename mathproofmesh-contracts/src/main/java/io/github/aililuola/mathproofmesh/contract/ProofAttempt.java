@@ -31,7 +31,11 @@ public record ProofAttempt(
     @JsonProperty(value = "status", required = true) @ContractNonNull AttemptStatus status,
     @JsonProperty(value = "strategy_id", required = true) @ContractNonNull String strategyId,
     @JsonProperty(value = "unresolved_gaps") @ContractNonNull List<String> unresolvedGaps,
-    @JsonProperty(value = "usage") @ContractNonNull UsageRecord usage
+    @JsonProperty(value = "usage") @ContractNonNull UsageRecord usage,
+    @JsonProperty(value = "claim_semantic_context_bindings") @ContractNonNull
+        List<ClaimSemanticContextBinding> claimSemanticContextBindings,
+    @JsonProperty(value = "claim_semantic_context_manifest_version")
+        @ContractNonNull Integer claimSemanticContextManifestVersion
 ) implements StrictContract {
 
   public ProofAttempt {
@@ -102,6 +106,98 @@ public record ProofAttempt(
     if (usage == null) {
       usage = new UsageRecord();
     }
+    boolean legacyManifest = claimSemanticContextManifestVersion == null;
+    if (legacyManifest) {
+      if (claimSemanticContextBindings != null && !claimSemanticContextBindings.isEmpty()) {
+        throw new ContractValidationException(
+            "claim semantic context bindings require a manifest version");
+      }
+      claimSemanticContextManifestVersion = 0;
+      claimSemanticContextBindings = List.of();
+    } else {
+      if (claimSemanticContextManifestVersion != 0
+          && claimSemanticContextManifestVersion != 1) {
+        throw new ContractValidationException(
+            "claim_semantic_context_manifest_version must be 0 or 1");
+      }
+      if (claimSemanticContextBindings == null) {
+        claimSemanticContextBindings = List.of();
+      }
+      claimSemanticContextBindings =
+          ImmutableCollections.listOrEmpty(claimSemanticContextBindings);
+      if (claimSemanticContextManifestVersion == 0
+          && !claimSemanticContextBindings.isEmpty()) {
+        throw new ContractValidationException(
+            "legacy claim semantic context manifest cannot contain bindings");
+      }
+      java.util.LinkedHashSet<String> boundClaimIds = new java.util.LinkedHashSet<>();
+      for (ClaimSemanticContextBinding binding : claimSemanticContextBindings) {
+        if (!boundClaimIds.add(binding.claimId())) {
+          throw new ContractValidationException(
+              "duplicate claim semantic context binding: " + binding.claimId());
+        }
+      }
+      java.util.Set<String> proposedClaimIds =
+          proposedLemmas.stream()
+              .map(ClaimCard::claimId)
+              .collect(java.util.stream.Collectors.toSet());
+      if (!proposedClaimIds.containsAll(boundClaimIds)) {
+        throw new ContractValidationException(
+            "claim semantic context binding targets an unknown proposed claim");
+      }
+    }
+  }
+
+  public ProofAttempt(
+      String agentId,
+      String attemptId,
+      List<CandidateConjecture> candidateConjectures,
+      List<String> checkpointIds,
+      List<String> deadEnds,
+      List<String> failoverChain,
+      List<String> falsificationChecks,
+      String finalAnswer,
+      String latestCheckpointId,
+      String pathId,
+      String problemHash,
+      String proofSketch,
+      List<ProofStep> proofSteps,
+      List<ClaimCard> proposedLemmas,
+      String rawArtifactRef,
+      String resumedFromCheckpointId,
+      Integer roundIndex,
+      Integer segmentCount,
+      Double selfConfidence,
+      AttemptStatus status,
+      String strategyId,
+      List<String> unresolvedGaps,
+      UsageRecord usage) {
+    this(
+        agentId,
+        attemptId,
+        candidateConjectures,
+        checkpointIds,
+        deadEnds,
+        failoverChain,
+        falsificationChecks,
+        finalAnswer,
+        latestCheckpointId,
+        pathId,
+        problemHash,
+        proofSketch,
+        proofSteps,
+        proposedLemmas,
+        rawArtifactRef,
+        resumedFromCheckpointId,
+        roundIndex,
+        segmentCount,
+        selfConfidence,
+        status,
+        strategyId,
+        unresolvedGaps,
+        usage,
+        null,
+        null);
   }
 
   // BEGIN GENERATED DEFENSIVE ACCESSORS
@@ -135,6 +231,12 @@ public record ProofAttempt(
 
   public List<String> unresolvedGaps() {
     return unresolvedGaps == null ? null : List.copyOf(unresolvedGaps);
+  }
+
+  public List<ClaimSemanticContextBinding> claimSemanticContextBindings() {
+    return claimSemanticContextBindings == null
+        ? null
+        : List.copyOf(claimSemanticContextBindings);
   }
   // END GENERATED DEFENSIVE ACCESSORS
 }

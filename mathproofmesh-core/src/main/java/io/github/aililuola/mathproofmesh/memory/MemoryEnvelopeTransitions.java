@@ -61,6 +61,9 @@ public final class MemoryEnvelopeTransitions {
         source.ttlRounds(),
         source.variableBindings(),
         confidence,
-        status);
+        status,
+        source.claimStatementHash(),
+        source.claimSemanticHash(),
+        source.polarity());
   }
 }

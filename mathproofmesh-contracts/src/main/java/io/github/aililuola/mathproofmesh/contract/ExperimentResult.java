@@ -1,6 +1,7 @@
 package io.github.aililuola.mathproofmesh.contract;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -33,7 +34,10 @@ public record ExperimentResult(
     @JsonProperty(value = "target_claim_id") String targetClaimId,
     @JsonProperty(value = "tool_name", required = true) @ContractNonNull String toolName,
     @JsonProperty(value = "tool_version", required = true) @ContractNonNull String toolVersion,
-    @JsonProperty(value = "verification_notes") @ContractNonNull List<String> verificationNotes
+    @JsonProperty(value = "verification_notes") @ContractNonNull List<String> verificationNotes,
+    @JsonProperty(value = "claim_evidence_semantic_binding")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        ClaimEvidenceSemanticBinding claimEvidenceSemanticBinding
 ) implements StrictContract {
 
   public ExperimentResult {
@@ -86,6 +90,13 @@ public record ExperimentResult(
     targetClaim = ContractStrings.trim(targetClaim);
     targetClaim = ContractStrings.required("target_claim", targetClaim);
     targetClaimId = ContractStrings.trim(targetClaimId);
+    if (claimEvidenceSemanticBinding != null) {
+      if (targetClaimId == null
+          || !targetClaimId.equals(claimEvidenceSemanticBinding.claimId())) {
+        throw new ContractValidationException(
+            "claim evidence result requires an exact target_claim_id");
+      }
+    }
     toolName = ContractStrings.trim(toolName);
     toolName = ContractStrings.required("tool_name", toolName);
     toolVersion = ContractStrings.trim(toolVersion);
@@ -135,7 +146,7 @@ public record ExperimentResult(
         ContractHashes.checked(
             "result_hash",
             resultHash,
-            ContractHashes.experimentResultHash(
+            resultHash(
                 requestHash,
                 targetClaim,
                 method,
@@ -151,7 +162,110 @@ public record ExperimentResult(
                 programHash,
                 independentlyVerified,
                 verificationNotes,
-                error));
+                error,
+                targetClaimId,
+                claimEvidenceSemanticBinding));
+  }
+
+  public ExperimentResult(
+      List<EvidenceRef> artifactRefs,
+      Boolean cached,
+      Integer casesChecked,
+      ObjectNode certificate,
+      ObjectNode counterexample,
+      String createdAt,
+      String error,
+      EvidenceStrength evidenceStrength,
+      Boolean exactArithmetic,
+      String experimentId,
+      Boolean independentlyVerified,
+      ComputationMethod method,
+      ExperimentOutcome outcome,
+      String parentCheckpointId,
+      String pathId,
+      String programHash,
+      String requestHash,
+      String resultHash,
+      Double runtimeSeconds,
+      ObjectNode scope,
+      String targetClaim,
+      String targetClaimId,
+      String toolName,
+      String toolVersion,
+      List<String> verificationNotes) {
+    this(
+        artifactRefs,
+        cached,
+        casesChecked,
+        certificate,
+        counterexample,
+        createdAt,
+        error,
+        evidenceStrength,
+        exactArithmetic,
+        experimentId,
+        independentlyVerified,
+        method,
+        outcome,
+        parentCheckpointId,
+        pathId,
+        programHash,
+        requestHash,
+        resultHash,
+        runtimeSeconds,
+        scope,
+        targetClaim,
+        targetClaimId,
+        toolName,
+        toolVersion,
+        verificationNotes,
+        null);
+  }
+
+  private static String resultHash(
+      String requestHash,
+      String targetClaim,
+      ComputationMethod method,
+      ExperimentOutcome outcome,
+      EvidenceStrength evidenceStrength,
+      ObjectNode scope,
+      ObjectNode counterexample,
+      ObjectNode certificate,
+      Boolean exactArithmetic,
+      Integer casesChecked,
+      String toolName,
+      String toolVersion,
+      String programHash,
+      Boolean independentlyVerified,
+      List<String> verificationNotes,
+      String error,
+      String targetClaimId,
+      ClaimEvidenceSemanticBinding binding) {
+    ObjectNode payload =
+        ContractHashes.experimentResultPayload(
+            requestHash,
+            targetClaim,
+            method,
+            outcome,
+            evidenceStrength,
+            scope,
+            counterexample,
+            certificate,
+            exactArithmetic,
+            casesChecked,
+            toolName,
+            toolVersion,
+            programHash,
+            independentlyVerified,
+            verificationNotes,
+            error);
+    if (binding != null && targetClaimId != null) {
+      payload.put("target_claim_id", targetClaimId);
+    }
+    if (binding != null) {
+      payload.set("claim_evidence_semantic_binding", ContractObjectMapper.toTree(binding));
+    }
+    return CanonicalJson.stableHash(payload);
   }
 
   // BEGIN GENERATED DEFENSIVE ACCESSORS

@@ -34,6 +34,7 @@ import io.github.aililuola.mathproofmesh.contract.ClaimProofPatchOperation;
 import io.github.aililuola.mathproofmesh.contract.ClaimProofPatchOperationType;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewBatch;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimSemanticContextBinding;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatementFalsificationBatch;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatementFalsificationDecision;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatus;
@@ -43,6 +44,7 @@ import io.github.aililuola.mathproofmesh.contract.CriticalClaimContextBinding;
 import io.github.aililuola.mathproofmesh.contract.EvidenceRef;
 import io.github.aililuola.mathproofmesh.contract.InitialExplorationAction;
 import io.github.aililuola.mathproofmesh.contract.InitialExplorationTurn;
+import io.github.aililuola.mathproofmesh.contract.MessageEnvelope;
 import io.github.aililuola.mathproofmesh.contract.ObligationKind;
 import io.github.aililuola.mathproofmesh.contract.ProofAttempt;
 import io.github.aililuola.mathproofmesh.contract.ProofAuditIssue;
@@ -231,6 +233,21 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
                 proofJustification)));
   }
 
+  void installModernLocalClaimRound(
+      int round,
+      String claimId,
+      String statement,
+      ClaimSemanticContextBinding binding)
+      throws Exception {
+    List<ClaimSemanticContextBinding> bindings =
+        binding == null ? List.of() : List.of(binding);
+    installFailedAttempt(
+        round,
+        List.of(claim(claimId, statement, List.of("local_lemma"))),
+        bindings,
+        1);
+  }
+
   void integrateInstalledRound() throws Exception {
     invoke("integrateCommittedRoutes");
   }
@@ -248,6 +265,15 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
   }
 
   private void installFailedAttempt(int round, List<ClaimCard> claims)
+      throws ReflectiveOperationException {
+    installFailedAttempt(round, claims, List.of(), null);
+  }
+
+  private void installFailedAttempt(
+      int round,
+      List<ClaimCard> claims,
+      List<ClaimSemanticContextBinding> contextBindings,
+      Integer contextManifestVersion)
       throws ReflectiveOperationException {
     setRound(round);
     Object route = route();
@@ -277,7 +303,9 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
             AttemptStatus.FAILED,
             strategy.strategyId(),
             List.of("main bridge remains unproved"),
-            new UsageRecord());
+            new UsageRecord(),
+            contextBindings,
+            contextManifestVersion);
     setField(route, "attempt", attempt);
     setField(route, "status", "unverified");
     setField(route, "failureReason", "the route theorem does not follow");
@@ -415,6 +443,29 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
         .filter(frozen -> frozen.claimId().equals(claimId))
         .findFirst()
         .orElseThrow();
+  }
+
+  boolean factMatchesFrozenClaim(MessageEnvelope fact, FrozenClaimSnapshot frozen)
+      throws Exception {
+    return (boolean)
+        invoke(
+            "exactVerifiedFactForFrozenClaim",
+            new Class<?>[] {MessageEnvelope.class, FrozenClaimSnapshot.class},
+            new Object[] {fact, frozen});
+  }
+
+  List<io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.TrustedClaimEvidence>
+      trustedComputationEvidence(
+          io.github.aililuola.mathproofmesh.contract.ExperimentSpec spec,
+          io.github.aililuola.mathproofmesh.contract.ExperimentResult result,
+          FrozenClaimSnapshot frozen) {
+    return coordinator.trustedComputationEvidenceForTest(
+        spec,
+        result,
+        frozen,
+        io.github.aililuola.mathproofmesh.computation.ComputationEvidenceGate.EvidenceAuthority
+            .VERIFIED,
+        true);
   }
 
   ClaimProofRevisionLedger claimProofRevisions() {

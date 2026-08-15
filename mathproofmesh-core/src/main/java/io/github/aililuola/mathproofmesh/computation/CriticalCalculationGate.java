@@ -332,7 +332,9 @@ public final class CriticalCalculationGate {
         spec.seed(),
         spec.targetClaim(),
         spec.typedToolGap(),
-        spec.whyComputationIsNeeded());
+        spec.whyComputationIsNeeded(),
+        spec.targetClaimId(),
+        spec.claimEvidenceSemanticBinding());
   }
 
   private static EvidenceRef evidenceRef(ExperimentResult result) {

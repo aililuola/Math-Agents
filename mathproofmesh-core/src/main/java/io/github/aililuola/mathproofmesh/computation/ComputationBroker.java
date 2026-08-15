@@ -250,14 +250,16 @@ public final class ComputationBroker {
         runtimeSeconds,
         evidence.scope(),
         spec.targetClaim(),
-        null,
+        spec.targetClaimId(),
         spec.method().value(),
         identity,
-        evidence.verificationNotes());
+        evidence.verificationNotes(),
+        spec.claimEvidenceSemanticBinding());
   }
 
   private static ExperimentResult cachedForRequest(
       ExperimentResult canonical, ExperimentSpec requested) {
+    boolean claimBound = requested.claimEvidenceSemanticBinding() != null;
     return new ExperimentResult(
         canonical.artifactRefs(),
         true,
@@ -275,15 +277,16 @@ public final class ComputationBroker {
         requested.parentCheckpointId(),
         requested.pathId(),
         canonical.programHash(),
-        canonical.requestHash(),
-        canonical.resultHash(),
+        claimBound ? requested.requestHash() : canonical.requestHash(),
+        claimBound ? null : canonical.resultHash(),
         canonical.runtimeSeconds(),
         canonical.scope(),
         canonical.targetClaim(),
-        canonical.targetClaimId(),
+        claimBound ? requested.targetClaimId() : canonical.targetClaimId(),
         canonical.toolName(),
         canonical.toolVersion(),
-        canonical.verificationNotes());
+        canonical.verificationNotes(),
+        claimBound ? requested.claimEvidenceSemanticBinding() : null);
   }
 
   private static int evidenceSize(HandlerEvidence evidence) {
