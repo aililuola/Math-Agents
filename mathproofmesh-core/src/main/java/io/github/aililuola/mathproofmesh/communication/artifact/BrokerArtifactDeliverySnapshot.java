@@ -1,8 +1,12 @@
 package io.github.aililuola.mathproofmesh.communication.artifact;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.List;
 import java.util.Map;
 
+@SuppressFBWarnings(
+    value = "EI_EXPOSE_REP",
+    justification = "The compact constructor stores immutable defensive copies.")
 public record BrokerArtifactDeliverySnapshot(
     Map<String, BrokerArtifactDelivery> deliveries,
     Map<String, BrokerDeliveryBaseline> baselines,

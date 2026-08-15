@@ -1,5 +1,6 @@
 package io.github.aililuola.mathproofmesh.communication.artifact;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactEnvelope;
 import java.util.Comparator;
 import java.util.List;
@@ -47,6 +48,9 @@ public final class BrokerArtifactPublicationService {
     return new Publication(artifact, record, decisions);
   }
 
+  @SuppressFBWarnings(
+      value = "EI_EXPOSE_REP",
+      justification = "The compact constructor stores immutable defensive copies.")
   public record Publication(
       BrokerArtifactEnvelope artifact,
       BrokerArtifactPublicationRecord publication,

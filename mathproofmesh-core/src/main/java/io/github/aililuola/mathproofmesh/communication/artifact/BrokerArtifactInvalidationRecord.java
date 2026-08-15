@@ -1,7 +1,11 @@
 package io.github.aililuola.mathproofmesh.communication.artifact;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.List;
 
+@SuppressFBWarnings(
+    value = "EI_EXPOSE_REP",
+    justification = "The compact constructor stores immutable defensive copies.")
 public record BrokerArtifactInvalidationRecord(
     String invalidationId,
     String artifactId,

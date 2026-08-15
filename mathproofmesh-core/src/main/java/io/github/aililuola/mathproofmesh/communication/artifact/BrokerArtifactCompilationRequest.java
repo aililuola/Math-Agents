@@ -1,11 +1,15 @@
 package io.github.aililuola.mathproofmesh.communication.artifact;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactPayload;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactType;
 import io.github.aililuola.mathproofmesh.contract.BrokerBlockedInference;
 import io.github.aililuola.mathproofmesh.contract.BrokerReusableConsequence;
 import java.util.List;
 
+@SuppressFBWarnings(
+    value = "EI_EXPOSE_REP",
+    justification = "The compact constructor stores immutable defensive copies.")
 public record BrokerArtifactCompilationRequest(
     String problemHash,
     String rootGoalHash,

@@ -1,5 +1,6 @@
 package io.github.aililuola.mathproofmesh.communication.artifact;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactUseKind;
 import io.github.aililuola.mathproofmesh.contract.BrokerVerifiedEffectType;
 import java.util.LinkedHashSet;
@@ -71,6 +72,9 @@ public final class BrokerArtifactEffectVerifier {
     return declared.stream().anyMatch(actual::contains);
   }
 
+  @SuppressFBWarnings(
+      value = "EI_EXPOSE_REP",
+      justification = "The compact constructor stores immutable defensive copies.")
   public record Verification(
       List<BrokerVerifiedEffectType> effectTypes,
       List<String> affectedDownstreamIds,

@@ -48,7 +48,7 @@ public final class BrokerArtifactPromptProjectionService {
 
   public static List<BrokerArtifactUseKind> allowedUses(BrokerArtifactType type) {
     return switch (type) {
-      case VERIFIED_CLAIM -> List.of(
+      case VERIFIED_CLAIM, FORMAL_CERTIFICATE -> List.of(
           BrokerArtifactUseKind.PREMISE_IN_PROOF_STEP,
           BrokerArtifactUseKind.SUPPORTS_CLAIM,
           BrokerArtifactUseKind.CITED_IN_FINAL_PROOF);
@@ -69,10 +69,6 @@ public final class BrokerArtifactPromptProjectionService {
           BrokerArtifactUseKind.SUPPORTS_CLAIM);
       case EXACT_EXAMPLE, BOUNDED_OBSERVATION ->
           List.of(BrokerArtifactUseKind.SUPPORTS_COMPUTATION_PLAN);
-      case FORMAL_CERTIFICATE -> List.of(
-          BrokerArtifactUseKind.PREMISE_IN_PROOF_STEP,
-          BrokerArtifactUseKind.SUPPORTS_CLAIM,
-          BrokerArtifactUseKind.CITED_IN_FINAL_PROOF);
     };
   }
 

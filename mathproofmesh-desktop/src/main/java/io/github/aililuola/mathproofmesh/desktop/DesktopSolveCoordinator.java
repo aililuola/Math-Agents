@@ -187,9 +187,7 @@ import io.github.aililuola.mathproofmesh.memory.TypedMemory;
 import io.github.aililuola.mathproofmesh.memory.TypedMemorySnapshot;
 import io.github.aililuola.mathproofmesh.orchestration.AdaptiveBudgetManager;
 import io.github.aililuola.mathproofmesh.orchestration.AttemptEvidence;
-import io.github.aililuola.mathproofmesh.orchestration.BrokerPhaseService;
 import io.github.aililuola.mathproofmesh.orchestration.ContinuationFunctions;
-import io.github.aililuola.mathproofmesh.orchestration.CrossRoutePhaseService;
 import io.github.aililuola.mathproofmesh.orchestration.DeepExplorationRegistry;
 import io.github.aililuola.mathproofmesh.orchestration.ExplorationAdmission;
 import io.github.aililuola.mathproofmesh.orchestration.ExplorationEvidence;
@@ -540,8 +538,6 @@ final class DesktopSolveCoordinator {
   private final FailureControlService failureControl = new FailureControlService();
   private final NearMissLedger nearMisses = new NearMissLedger();
   private final StrategyArchive strategyArchive = new StrategyArchive();
-  private final CrossRoutePhaseService crossRoute =
-      new CrossRoutePhaseService(new BrokerPhaseService());
   private final SynthesisPhaseService synthesisPhase = new SynthesisPhaseService();
   private final RouteTeam routeTeam;
   private final RoleRunner roleRunner;

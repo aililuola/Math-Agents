@@ -1,7 +1,11 @@
 package io.github.aililuola.mathproofmesh.communication.artifact;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.Set;
 
+@SuppressFBWarnings(
+    value = "EI_EXPOSE_REP",
+    justification = "The compact constructor stores immutable defensive copies.")
 public record RouteMathematicalNeedProfile(
     String routeId,
     Set<String> activeCanonicalTargetIds,

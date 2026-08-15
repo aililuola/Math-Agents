@@ -1,5 +1,6 @@
 package io.github.aililuola.mathproofmesh.communication.artifact;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.communication.MessageStoreSnapshot;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactEnvelope;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactReceiptStatus;
@@ -13,6 +14,8 @@ import io.github.aililuola.mathproofmesh.contract.MessageEnvelope;
 import io.github.aililuola.mathproofmesh.contract.MessageType;
 import io.github.aililuola.mathproofmesh.contract.VerifiedClaimPayload;
 import io.github.aililuola.mathproofmesh.contract.VerifiedCounterexamplePayload;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -23,6 +26,10 @@ import java.util.Optional;
 import java.util.Set;
 
 /** Modern broker for server-compiled mathematical artifacts. */
+@SuppressFBWarnings(
+    value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
+    justification =
+        "Transactional rollback paths deliberately rethrow the original validation or injected failure.")
 public final class MathematicalArtifactBroker {
   private final BrokerArtifactRegistry registry = new BrokerArtifactRegistry();
   private final BrokerArtifactPublicationLedger publications = new BrokerArtifactPublicationLedger();
@@ -312,7 +319,7 @@ public final class MathematicalArtifactBroker {
 
   private static BrokerArtifactCompilationRequest legacyRequest(
       MessageEnvelope message, String problemHash, String rootGoalHash) {
-    if (!problemHash.equals(message.problemHash())
+    if (!sameHash(problemHash, message.problemHash())
         || message.claimSemanticHash() == null
         || message.claimStatementHash() == null
         || message.polarity() == null) return null;
@@ -338,6 +345,11 @@ public final class MathematicalArtifactBroker {
           BrokerArtifactSourceKind.VERIFIED_COUNTEREXAMPLE);
     }
     return null;
+  }
+
+  private static boolean sameHash(String expected, String actual) {
+    return MessageDigest.isEqual(
+        expected.getBytes(StandardCharsets.UTF_8), actual.getBytes(StandardCharsets.UTF_8));
   }
 
   private static BrokerArtifactCompilationRequest request(
