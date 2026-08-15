@@ -3,12 +3,14 @@ package io.github.aililuola.mathproofmesh.desktop;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactEffectObservation;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerControlBoundaryPolicy;
 import io.github.aililuola.mathproofmesh.communication.artifact.RouteMathematicalNeedProfile;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactEnvelope;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactReceiptStatus;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactType;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactUseKind;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
+import io.github.aililuola.mathproofmesh.contract.MessageType;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -47,7 +49,7 @@ class DesktopBrokerMultiRoundRestoreTest {
     String utilityHashBeforeRestore = "";
     String utilityHashAfterRestore = "";
     List<BrokerArtifactEnvelope> admitted = new ArrayList<>();
-    DesktopBrokerLegacyBlackBoxFixture legacy = new DesktopBrokerLegacyBlackBoxFixture();
+    BrokerControlBoundaryPolicy controlBoundary = new BrokerControlBoundaryPolicy();
 
     try (DesktopClaimSalvageTestHarness harness =
         DesktopClaimSalvageTestHarness.open(temporaryDirectory, "broker-multi-round")) {
@@ -88,14 +90,29 @@ class DesktopBrokerMultiRoundRestoreTest {
         }
 
         controlAttempts++;
-        int controlsBefore = legacy.repository.snapshot().messages().size();
-        legacy.broker.publish(legacy.genericFailure("generic-failure-" + round), "referee-a", round);
-        int controlsAfter = legacy.repository.snapshot().messages().size();
-        controlRejections += controlsAfter == controlsBefore ? 1 : 0;
+        var controlDecision =
+            controlBoundary.audit(
+                MessageType.FAILURE_RECORD,
+                "Route failure: BRIDGE. recommended action: create_minimal_bridge");
+        controlRejections +=
+            !controlDecision.allowed()
+                    && "GENERIC_FAILURE_RECORD".equals(controlDecision.code())
+                ? 1
+                : 0;
         controlPromptLeaks +=
-            legacy.broker
-                .consumeForPrompt("route-b", "control-prompt-" + round, round, 8)
-                .messages()
+            fixture.broker
+                .consumeForPrompt(
+                    "control-route-" + round,
+                    "control-prompt-" + round,
+                    round,
+                    8,
+                    1.0d,
+                    Set.of(),
+                    Set.of(),
+                    Set.of(),
+                    "control-strategy-" + round,
+                    null)
+                .artifacts()
                 .size();
 
         List<Scenario> scenarios = new ArrayList<>();

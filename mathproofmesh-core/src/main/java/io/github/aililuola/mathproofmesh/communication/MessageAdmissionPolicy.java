@@ -60,17 +60,6 @@ public final class MessageAdmissionPolicy {
           AdmissionRejection.SOURCE_OWNERSHIP,
           "source agent/role does not belong to route");
     }
-    if (Set.of(
-            MessageType.FAILURE_RECORD,
-            MessageType.REPAIR_REQUEST,
-            MessageType.BRIDGE_LEMMA_REQUEST,
-            MessageType.STRATEGY_REWRITE_REQUEST)
-        .contains(message.messageType())) {
-      return AdmissionResult.reject(
-          AdmissionRejection.EVIDENCE_TIER,
-          "legacy control records are local audit data and cannot enter the cross-route broker");
-    }
-
     TargetSelection selection = selectTargets(message);
     if (currentRound - message.roundCreated() > message.ttlRounds()) {
       return AdmissionResult.reject(AdmissionRejection.TTL, "message TTL expired");
@@ -328,19 +317,14 @@ public final class MessageAdmissionPolicy {
   }
 
   private boolean crossRouteShareAllowed(MessageEnvelope message) {
-    if (Set.of(
-            MessageType.FAILURE_RECORD,
-            MessageType.REPAIR_REQUEST,
-            MessageType.BRIDGE_LEMMA_REQUEST,
-            MessageType.STRATEGY_REWRITE_REQUEST)
-        .contains(message.messageType())) {
-      return false;
-    }
     if (message.evidenceType() == EvidenceType.COUNTEREXAMPLE) {
       return policy.shareCounterexamples();
     }
     if (message.messageType() == MessageType.PROOF_OBLIGATION) {
       return policy.shareOpenObligations();
+    }
+    if (message.messageType() == MessageType.FAILURE_RECORD) {
+      return policy.shareFailureRecords();
     }
     if (message.memoryTier() == MemoryTier.FACT) {
       return policy.shareVerifiedFacts();

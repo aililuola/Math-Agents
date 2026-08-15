@@ -69,6 +69,9 @@ public final class PromptCatalog {
             + "Broker artifacts are server-compiled mathematical sidecars: merely receiving one does not mean it was used. "
             + "Any mathematical use must cite its artifact_id in broker_artifact_use_manifest with a typed use and real downstream IDs. "
             + "A REVIEWED_OPEN obstruction is not a proved premise, and BOUNDED evidence cannot prove an unrestricted claim. "
+            + "Only VERIFIED_CLAIM and FORMAL_CERTIFICATE artifacts may use CITED_IN_FINAL_PROOF. "
+            + "REVIEWED_OBSTRUCTION artifacts cannot use PREMISE_IN_PROOF_STEP or CITED_IN_FINAL_PROOF; "
+            + "BOUNDED_OBSERVATION artifacts are limited to SUPPORTS_COMPUTATION_PLAN. "
             + "Prefer registered typed computation methods. sandboxed_python is a last resort: arguments must contain exactly one input field whose value is the complete bounded JSON object supplied to run(data), domains must be empty, and typed_tool_gap must state why no typed method applies.");
     stages.put("proof_continuation", "Continue only from the verified checkpoint with a bounded auditable proof delta.");
     stages.put("route_prove", "Continue the assigned route from verified state; Insights are hints and never premises.");
