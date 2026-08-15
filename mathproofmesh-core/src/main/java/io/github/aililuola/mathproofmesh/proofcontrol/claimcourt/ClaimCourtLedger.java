@@ -13,6 +13,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** Monotonic, checkpointable authority record for Claim Court cases. */
 public final class ClaimCourtLedger {
@@ -351,6 +352,26 @@ public final class ClaimCourtLedger {
     return required(courtCaseId);
   }
 
+  /** Resolves both current proof-bound IDs and legacy case IDs by exact proof identity. */
+  public synchronized Optional<ClaimCourtRecord> findProofCase(FrozenClaimSnapshot frozen) {
+    java.util.Objects.requireNonNull(frozen, "frozen");
+    ClaimCourtRecord direct = records.get(frozen.courtCaseId());
+    if (direct != null) {
+      if (!sameIdentity(direct.frozenClaim(), frozen)) {
+        throw new IllegalStateException("claim court case identity collision");
+      }
+      return Optional.of(direct);
+    }
+    List<ClaimCourtRecord> matches =
+        records.values().stream()
+            .filter(record -> sameIdentity(record.frozenClaim(), frozen))
+            .toList();
+    if (matches.size() > 1) {
+      throw new IllegalStateException("duplicate claim court proof identity");
+    }
+    return matches.stream().findFirst();
+  }
+
   public synchronized List<ClaimCourtRecord> records() {
     return records.values().stream()
         .sorted(Comparator.comparing(ClaimCourtRecord::courtCaseId))
@@ -475,7 +496,15 @@ public final class ClaimCourtLedger {
   }
 
   private static boolean sameIdentity(ClaimCourtRecord left, ClaimCourtRecord right) {
-    return left.frozenClaim().claimSemanticHash().equals(right.frozenClaim().claimSemanticHash())
-        && left.frozenClaim().rootGoalHash().equals(right.frozenClaim().rootGoalHash());
+    return sameIdentity(left.frozenClaim(), right.frozenClaim());
+  }
+
+  private static boolean sameIdentity(
+      FrozenClaimSnapshot left, FrozenClaimSnapshot right) {
+    return left.claimSemanticHash().equals(right.claimSemanticHash())
+        && left.rootGoalHash().equals(right.rootGoalHash())
+        && left.problemHash().equals(right.problemHash())
+        && left.statementCaseId().equals(right.statementCaseId())
+        && left.initialProofRevisionId().equals(right.initialProofRevisionId());
   }
 }

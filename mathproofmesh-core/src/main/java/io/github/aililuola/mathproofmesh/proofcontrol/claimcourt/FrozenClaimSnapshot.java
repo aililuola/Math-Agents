@@ -1,5 +1,6 @@
 package io.github.aililuola.mathproofmesh.proofcontrol.claimcourt;
 
+import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
 import io.github.aililuola.mathproofmesh.contract.QuantifierSpec;
 import io.github.aililuola.mathproofmesh.contract.VariableBinding;
 import java.util.List;
@@ -72,5 +73,11 @@ public record FrozenClaimSnapshot(
   @Override
   public List<String> dependencyClaimIds() {
     return List.copyOf(dependencyClaimIds);
+  }
+
+  public String statementCaseId() {
+    return "claim-statement-"
+        + CanonicalJson.stableHash(List.of(problemHash, rootGoalHash, claimSemanticHash))
+            .substring(0, 24);
   }
 }

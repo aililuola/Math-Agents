@@ -441,3 +441,181 @@ Implementation-only diff before this documentation commit:
     120 files changed, 9304 insertions(+), 275 deletions(-)
 
 The final worktree and remote branch state are verified after the documentation commit and push.
+
+## 17. Authority-binding follow-up
+
+An independent review of the first Issue 008 implementation found three remaining authority
+boundaries. They were closed on the same `fix/008-claim-proof-repair-court` branch; Issue 009 was
+not started. The baseline for this follow-up is
+`a5a539c8780bc735a3e9a273d7c370151491ff04`, and the previously committed Issue 008 head was
+`966957e1bd026d716c48bfdb361ab88842d2b3f6`.
+
+### 17.1 Pre-fix behavioral evidence
+
+The new black-box tests were written and run before the production changes. They failed against
+the old production behavior as follows:
+
+- `ClaimProofPatchUntrustedEvidenceInjectionTest`: an arbitrary Repairer-supplied `EvidenceRef`
+  was accepted (`expected false but was true`).
+- `ClaimCounterexampleFullContextExactnessTest`: the frozen quantifier list was empty instead of
+  retaining the Claim-local quantifiers.
+- `ClaimCourtProofRevisionIdentityTest`: two different proof revisions produced the same Court ID,
+  `claim-court-50ff354395ec2d227054855e`.
+
+These are behavioral failures, not merely missing-type compilation failures.
+
+### 17.2 Trusted repair evidence
+
+`ClaimTrustedEvidenceResolver` now resolves every `ADD_VERIFIED_EVIDENCE_REF` against a
+server-owned `TrustedClaimEvidence` capability. Resolution binds artifact reference, content hash,
+problem hash, exact frozen Claim semantic hash, verification state, replay state, active state,
+and proof-step use permission. The stable rejection codes are:
+
+- `UNKNOWN_EVIDENCE_REF`
+- `EVIDENCE_CONTENT_HASH_MISMATCH`
+- `EVIDENCE_PROBLEM_SCOPE_MISMATCH`
+- `EVIDENCE_CLAIM_SCOPE_MISMATCH`
+- `EVIDENCE_NOT_VERIFIED`
+- `EVIDENCE_REPLAY_NOT_VERIFIED`
+- `EVIDENCE_AUTHORITY_ESCALATION`
+
+The patch validator replaces model text with the canonical server reference. The Blind packet
+factory resolves the revision and every step-level reference again, so restore-time revocation or
+scope changes fail closed. Desktop production exposes only exact verified Fact evidence and
+replay-valid verified computation evidence. A Repairer cannot mint authority by writing an
+`EvidenceRef` into JSON.
+
+    REPAIR EVIDENCE AUTHORITY DIAGNOSTIC
+    UNTRUSTED_EVIDENCE_PATCH_ATTEMPTS=1
+    UNTRUSTED_EVIDENCE_PATCH_ACCEPTS=0
+    UNTRUSTED_EVIDENCE_IN_BLIND_PACKETS=0
+    DIRECT_EVIDENCE_AUTHORITY_ESCALATIONS=0
+    VERIFIED_EVIDENCE_PATCH_ATTEMPTS=1
+    VERIFIED_EVIDENCE_PATCH_ACCEPTS=1
+    RESULT=PASS
+
+### 17.3 Complete Claim-local semantic freeze
+
+`ClaimCourtSemanticContextCompiler` now receives the server-compiled context and freezes its
+assumptions, ordered quantifiers, variable bindings, scope limitations, and polarity. Desktop
+reuses the Issue 007 critical-Claim context compiler and verifies the bound statement before
+freezing. Legacy fallback is explicitly marked `LEGACY_INCOMPLETE_SEMANTIC_CONTEXT`; it is not
+silently represented as a complete modern context. Quantifier variables without bindings and
+duplicate bindings fail closed.
+
+    CLAIM CONTEXT EXACTNESS DIAGNOSTIC
+    CLAIM_CONTEXTS=6
+    DISTINCT_SEMANTIC_HASHES=6
+    QUANTIFIER_FALSE_REFUTATIONS=0
+    POLARITY_FALSE_REFUTATIONS=0
+    ASSUMPTION_FALSE_REFUTATIONS=0
+    SCOPE_FALSE_REFUTATIONS=0
+    VARIABLE_BINDING_FALSE_REFUTATIONS=0
+    RESULT=PASS
+
+### 17.4 Statement identity and proof-revision identity
+
+The stable Statement identity is now:
+
+    statementCaseId = hash(problemHash, rootGoalHash, claimSemanticHash)
+
+Each proof is reviewed under its own identity:
+
+    proofCourtCaseId = hash(statementCaseId, initialProofRevisionId, proofHash)
+
+`ClaimCourtLedger.findProofCase` resolves exact current identities and legacy v16 IDs without
+allowing identity collisions. A corrected proof for the same Statement opens a new Court case;
+resubmitting the identical corrected proof reuses the existing case and does not repeat provider
+calls or Fact promotion. Restore retains both revisions and their outcomes.
+
+    CORRECTED PROOF COURT IDENTITY DIAGNOSTIC
+    STATEMENT_IDENTITIES=1
+    PROOF_REVISIONS=2
+    PROOF_COURT_CASES=2
+    V1_OUTCOME=PROOF_INVALID_BUT_CLAIM_OPEN
+    V2_OUTCOME=VERIFIED
+    CORRECTED_PROOF_REVIEW_CALLS=1
+    CORRECTED_PROOF_SKIPPED_BY_OLD_TERMINAL_CASE=0
+    DUPLICATE_V2_COURT_CASES=0
+    DUPLICATE_V2_PROOF_REVISIONS=0
+    DUPLICATE_V2_PROVIDER_CALLS=0
+    DUPLICATE_V2_FACT_PROMOTIONS=0
+    CORRECTED_PROOF_POST_RESTORE_CASE_LOSSES=0
+    CORRECTED_PROOF_POST_RESTORE_REVISION_LOSSES=0
+    CORRECTED_PROOF_POST_RESTORE_FACT_LOSSES=0
+    ROOT_HASH_CHANGES=0
+    NEGATIVE_REGISTRY_HASH_CHANGES=0
+    RESULT=PASS
+
+The production Claim lookup deliberately separates the source proof from the canonical Lemma
+authority projection. This preserves corrected proof steps even when Lemma Memory deduplicates the
+Statement, while an already verified canonical Claim cannot be downgraded. A permanent Negative
+Knowledge rejection during positive Fact projection now rolls back the staged Court projection,
+records an admission rejection on the artifact, and leaks no positive state.
+
+### 17.5 Follow-up tests
+
+New Core tests:
+
+- `ClaimProofPatchUntrustedEvidenceInjectionTest`
+- `ClaimProofPatchEvidenceHashMismatchTest`
+- `ClaimCounterexampleFullContextExactnessTest`
+- `ClaimCourtProofRevisionIdentityTest`
+
+New Desktop production tests:
+
+- `DesktopBlindPacketTrustedEvidenceOnlyTest`
+- `DesktopRepairEvidenceRestoreRevalidationTest`
+- `DesktopRepairerEvidenceAuthorityBoundaryTest`
+- `DesktopClaimCourtSemanticContextBindingTest`
+- `DesktopClaimCourtQuantifierIsolationTest`
+- `DesktopClaimCourtPolarityIsolationTest`
+- `DesktopClaimCourtVariableBindingIsolationTest`
+- `DesktopCorrectedProofReopensCourtTest`
+- `DesktopDuplicateProofRevisionExactlyOnceTest`
+- `DesktopCorrectedProofRestoreTest`
+
+The existing `ClaimProofPatchValidatorBoundaryTest` positive case now supplies an explicit trusted
+evidence capability. No old assertion was deleted or weakened. The existing
+`ClaimSalvageProjectionAtomicityTest` also caught an intermediate negative-projection exception;
+the final implementation preserves its original zero-leak behavior.
+
+Focused results after the final code:
+
+| Invocation | Tests | Failures | Errors | Skipped | Result |
+|---|---:|---:|---:|---:|---|
+| Contracts selected by Core Claim suite | 4 | 0 | 0 | 0 | PASS |
+| Core Claim/Claim Court suite | 53 | 0 | 0 | 0 | PASS |
+| Server Claim Court prompt suite | 7 | 0 | 0 | 0 | PASS |
+| Core dependency selected by Desktop suite | 1 | 0 | 0 | 0 | PASS |
+| Desktop Issue 008 production suite | 25 | 0 | 0 | 0 | PASS |
+
+### 17.6 Final regression and quality gate
+
+The final module run passed:
+
+| Module | Tests | Failures | Errors | Skipped |
+|---|---:|---:|---:|---:|
+| Contracts | 54 | 0 | 0 | 0 |
+| Core | 1172 | 0 | 0 | 0 |
+| Server | 859 | 0 | 0 | 3 |
+| Desktop | 192 | 0 | 0 | 1 |
+
+This is 2277 unit tests with zero failures and zero errors. It includes all Issue 001-008
+regressions, including Root Goal, permanent Negative Knowledge, Claim lifecycle, incremental
+research persistence, canonical convergence, Semantic Pivot, and strategy-mechanism diversity.
+
+The final `scripts/verify-all.ps1 -Offline` run used Docker Server 29.6.2 and exited 0:
+
+- 2426 unit/compatibility tests plus 26 Failsafe integration tests: 2452 total.
+- 0 failures, 0 errors, and 4 conditional unit-test skips.
+- All seven integration suites passed, including all five PostgreSQL Testcontainers suites:
+  `JdbcMessageRepositoryIT`, `MemoryProofGraphPostgresIT`, `PersistencePostgresIT`,
+  `Phase17CheckpointOutboxPerformanceIT`, and `ProviderCallPostgresIT`.
+- SpotBugs/FindSecBugs, dependency/security, license, coverage, frozen-source, and Python Sidecar
+  gates passed without changing their thresholds.
+
+Generated `target`, logs, checkpoints, and refreshed Phase 17 report files are not committed. No
+Root Goal, Negative Knowledge registry, research-finding authority, canonical graph/convergence,
+Semantic Pivot, strategy portfolio, provider, concurrency, budget, Temporal, PostgreSQL schema, or
+Python Sidecar behavior was changed. Issue 008 is closed; Issue 009 remains untouched.

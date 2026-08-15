@@ -23,6 +23,10 @@ public final class ClaimFreezeService {
     String attempt = ClaimCourtValues.required(claim.sourceAttemptId(), "sourceAttemptId");
     String author = ClaimCourtValues.required(claim.sourceAgentId(), "authorAgentId");
     List<String> dependencies = claimDependencies(claim);
+    LinkedHashSet<String> frozenAssumptions =
+        new LinkedHashSet<>(semanticContext.assumptions());
+    frozenAssumptions.addAll(claim.assumptions());
+    List<String> assumptions = List.copyOf(frozenAssumptions);
     String statementHash = CanonicalJson.stableHash(claim.statement());
     String dependencyHash = CanonicalJson.stableHash(dependencies);
     String semanticHash =
@@ -30,7 +34,7 @@ public final class ClaimFreezeService {
             Map.of(
                 "statement", ClaimCourtValues.normalizedSemanticText(claim.statement()),
                 "conclusion", ClaimCourtValues.normalizedSemanticText(claim.conclusion()),
-                "assumptions", claim.assumptions(),
+                "assumptions", assumptions,
                 "quantifiers", semanticContext.quantifiers(),
                 "variable_bindings", semanticContext.variableBindings(),
                 "scope_limitations", semanticContext.scopeLimitations(),
@@ -38,9 +42,12 @@ public final class ClaimFreezeService {
                 "dependencies", dependencies));
     String proofHash = CanonicalJson.stableHash(claim.proofSteps());
     String initialRevisionId = "claim-proof-original-" + proofHash.substring(0, 24);
+    String statementCaseId =
+        "claim-statement-"
+            + CanonicalJson.stableHash(List.of(problem, root, semanticHash)).substring(0, 24);
     String caseId =
         "claim-court-"
-            + CanonicalJson.stableHash(List.of(problem, root, route, claim.claimId(), semanticHash))
+            + CanonicalJson.stableHash(List.of(statementCaseId, initialRevisionId, proofHash))
                 .substring(0, 24);
     return new FrozenClaimSnapshot(
         caseId,
@@ -51,7 +58,7 @@ public final class ClaimFreezeService {
         semanticHash,
         claim.statement(),
         claim.conclusion(),
-        claim.assumptions(),
+        assumptions,
         semanticContext.quantifiers(),
         semanticContext.variableBindings(),
         semanticContext.scopeLimitations(),

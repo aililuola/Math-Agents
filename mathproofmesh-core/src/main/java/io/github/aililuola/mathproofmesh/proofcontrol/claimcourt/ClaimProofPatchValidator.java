@@ -10,6 +10,7 @@ import io.github.aililuola.mathproofmesh.contract.ProofRepairability;
 import io.github.aililuola.mathproofmesh.contract.ProofStep;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -67,6 +68,22 @@ public final class ClaimProofPatchValidator {
       ClaimProofAuditDecision audit,
       ClaimProofPatch patch,
       Set<String> verifiedDependencyClaimIds) {
+    return validate(
+        frozen,
+        base,
+        audit,
+        patch,
+        verifiedDependencyClaimIds,
+        List.of());
+  }
+
+  public ValidationResult validate(
+      FrozenClaimSnapshot frozen,
+      ClaimProofRevisionRecord base,
+      ClaimProofAuditDecision audit,
+      ClaimProofPatch patch,
+      Set<String> verifiedDependencyClaimIds,
+      Collection<TrustedClaimEvidence> trustedEvidence) {
     java.util.Objects.requireNonNull(frozen, "frozen");
     java.util.Objects.requireNonNull(base, "base");
     java.util.Objects.requireNonNull(audit, "audit");
@@ -79,6 +96,8 @@ public final class ClaimProofPatchValidator {
 
     Map<String, ProofStep> original = index(base.proofSteps(), failures);
     Set<String> operationTargets = new LinkedHashSet<>();
+    Map<ClaimProofPatchOperation, EvidenceRef> resolvedEvidence = new HashMap<>();
+    ClaimTrustedEvidenceResolver evidenceResolver = new ClaimTrustedEvidenceResolver();
     int insertedCount = 0;
     for (ClaimProofPatchOperation operation : patch.operations()) {
       operationTargets.add(operation.targetStepId());
@@ -106,6 +125,17 @@ public final class ClaimProofPatchValidator {
           && hasEvidence(original.get(operation.targetStepId()))) {
         failures.add("VALID_EVIDENCE_DELETION");
       }
+      if (operation.operationType()
+          == io.github.aililuola.mathproofmesh.contract.ClaimProofPatchOperationType
+              .ADD_VERIFIED_EVIDENCE_REF) {
+        ClaimTrustedEvidenceResolver.Resolution resolution =
+            evidenceResolver.resolve(frozen, operation.evidenceRef(), trustedEvidence);
+        if (!resolution.accepted()) {
+          failures.add(resolution.failureCode());
+        } else {
+          resolvedEvidence.put(operation, resolution.evidence().evidenceRef());
+        }
+      }
     }
     if (!operationTargets.equals(new LinkedHashSet<>(patch.changedStepIds()))) {
       failures.add("CHANGED_STEP_DECLARATION_MISMATCH");
@@ -126,7 +156,7 @@ public final class ClaimProofPatchValidator {
     List<ProofStep> updated = new ArrayList<>(base.proofSteps());
     List<EvidenceRef> evidence = new ArrayList<>(base.evidenceRefs());
     for (ClaimProofPatchOperation operation : patch.operations()) {
-      applyOperation(updated, evidence, operation);
+      applyOperation(updated, evidence, operation, resolvedEvidence);
     }
     validateUniqueStepIds(updated, failures);
     validateDependencies(updated, verifiedDependencies, failures);
@@ -216,7 +246,8 @@ public final class ClaimProofPatchValidator {
   private static void applyOperation(
       List<ProofStep> steps,
       List<EvidenceRef> evidence,
-      ClaimProofPatchOperation operation) {
+      ClaimProofPatchOperation operation,
+      Map<ClaimProofPatchOperation, EvidenceRef> resolvedEvidence) {
     int targetIndex = indexOf(steps, operation.targetStepId());
     ProofStep target = steps.get(targetIndex);
     switch (operation.operationType()) {
@@ -257,12 +288,15 @@ public final class ClaimProofPatchValidator {
                 target.calculationEvidenceRefs()));
       }
       case ADD_VERIFIED_EVIDENCE_REF -> {
+        EvidenceRef trustedRef =
+            java.util.Objects.requireNonNull(
+                resolvedEvidence.get(operation), "validated evidence resolution");
         List<EvidenceRef> refs = new ArrayList<>(target.calculationEvidenceRefs());
-        if (!refs.contains(operation.evidenceRef())) {
-          refs.add(operation.evidenceRef());
+        if (!refs.contains(trustedRef)) {
+          refs.add(trustedRef);
         }
-        if (!evidence.contains(operation.evidenceRef())) {
-          evidence.add(operation.evidenceRef());
+        if (!evidence.contains(trustedRef)) {
+          evidence.add(trustedRef);
         }
         steps.set(
             targetIndex,

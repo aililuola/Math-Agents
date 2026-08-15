@@ -38,6 +38,9 @@ import io.github.aililuola.mathproofmesh.contract.ClaimStatementFalsificationBat
 import io.github.aililuola.mathproofmesh.contract.ClaimStatementFalsificationDecision;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatus;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
+import io.github.aililuola.mathproofmesh.contract.CriticalClaim;
+import io.github.aililuola.mathproofmesh.contract.CriticalClaimContextBinding;
+import io.github.aililuola.mathproofmesh.contract.EvidenceRef;
 import io.github.aililuola.mathproofmesh.contract.InitialExplorationAction;
 import io.github.aililuola.mathproofmesh.contract.InitialExplorationTurn;
 import io.github.aililuola.mathproofmesh.contract.ObligationKind;
@@ -157,11 +160,15 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
   }
 
   void freezeAndCreateRoute() throws Exception {
+    freezeAndCreateRoute(validStrategy());
+  }
+
+  void freezeAndCreateRoute(StrategyCard strategy) throws Exception {
     invoke("freezeProblem");
     setField(
         coordinator,
         "strategySet",
-        new StrategySet("A bounded production route.", List.of(), List.of(validStrategy())));
+        new StrategySet("A bounded production route.", List.of(), List.of(strategy)));
     invoke("generateAndAdmitStrategies");
     invoke("ensureInitialRoutes");
   }
@@ -210,6 +217,18 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
 
   void installSingleClaimRound(int round, String claimId, String statement) throws Exception {
     installFailedAttempt(round, List.of(claim(claimId, statement, List.of("local_lemma"))));
+  }
+
+  void installSingleClaimProofRound(
+      int round, String claimId, String statement, String proofJustification) throws Exception {
+    installFailedAttempt(
+        round,
+        List.of(
+            claim(
+                claimId,
+                statement,
+                List.of("local_lemma"),
+                proofJustification)));
   }
 
   void integrateInstalledRound() throws Exception {
@@ -300,13 +319,30 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
   }
 
   private static ClaimCard claim(String id, String statement, List<String> tags) {
+    return claim(
+        id,
+        statement,
+        tags,
+        "The supplied proof justifies the asserted local conclusion.");
+  }
+
+  private static ClaimCard claim(
+      String id, String statement, List<String> tags, String proofJustification) {
     return new ClaimCard(
         List.of(), id, statement, "", "bounded", List.of(), List.of(), List.of(),
-        List.of(proofStep(id, statement)),
+        List.of(proofStep(id, statement, proofJustification)),
         List.of(), 0.9d, null, null, null, statement, ClaimStatus.PROPOSED, tags, null);
   }
 
   private static ProofStep proofStep(String claimId, String statement) {
+    return proofStep(
+        claimId,
+        statement,
+        "The supplied proof justifies the asserted local conclusion.");
+  }
+
+  private static ProofStep proofStep(
+      String claimId, String statement, String proofJustification) {
     return new ProofStep(
         null,
         List.of(),
@@ -317,7 +353,7 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
         List.of(),
         List.of(),
         true,
-        "The supplied proof justifies the asserted local conclusion.",
+        proofJustification,
         statement,
         "step-" + claimId,
         "derivation");
@@ -371,6 +407,14 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
 
   ClaimCourtLedger claimCourt() {
     return uncheckedField(coordinator, "claimCourt", ClaimCourtLedger.class);
+  }
+
+  FrozenClaimSnapshot frozenClaim(String claimId) {
+    return claimCourt().records().stream()
+        .map(record -> record.frozenClaim())
+        .filter(frozen -> frozen.claimId().equals(claimId))
+        .findFirst()
+        .orElseThrow();
   }
 
   ClaimProofRevisionLedger claimProofRevisions() {
@@ -580,6 +624,35 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
         strategyId,
             List.of("claim_scoped_review"),
             "Claim salvage route"));
+  }
+
+  static StrategyCard strategyWithCriticalClaim(
+      String strategyId,
+      CriticalClaim criticalClaim,
+      CriticalClaimContextBinding contextBinding) {
+    return DesktopStrategyMetadataTestSupport.complete(
+        new StrategyCard(
+            null,
+            criticalClaim.statement(),
+            List.of(),
+            List.of(),
+            List.of(),
+            "Use the explicitly bound critical Claim context.",
+            List.of(criticalClaim),
+            0.2d,
+            0.9d,
+            List.of(criticalClaim.statement()),
+            criticalClaim.falsificationTest(),
+            "The route uses a distinct typed context.",
+            null,
+            null,
+            List.of(),
+            List.of(),
+            strategyId,
+            List.of("claim_context_test"),
+            "Bound critical Claim",
+            List.of(),
+            List.of(contextBinding)));
   }
 
   private static RunExecutionBackend.ProgressSink noOpProgress() {
@@ -800,10 +873,17 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
           ContractObjectMapper.read(context.path("frozen_claim"), FrozenClaimSnapshot.class);
       JsonNode revision = context.path("proof_revision");
       String statement = frozen.statement();
+      String proofText =
+          revision.path("proofSteps").findValuesAsText("justification").stream()
+              .collect(java.util.stream.Collectors.joining(" "));
       ClaimProofAuditVerdict verdict =
-          statement.contains("BAD_PROOF") || statement.contains("UNREPAIRABLE")
+          proofText.contains("UNREPAIRABLE_PROOF")
+                  || statement.contains("BAD_PROOF")
+                  || statement.contains("UNREPAIRABLE")
               ? ClaimProofAuditVerdict.INVALID_UNREPAIRABLE
-              : statement.contains("REPAIRABLE")
+              : proofText.contains("CORRECTED_PROOF")
+                  ? ClaimProofAuditVerdict.VALID
+                  : statement.contains("REPAIRABLE")
                   ? ClaimProofAuditVerdict.INVALID_REPAIRABLE
                   : ClaimProofAuditVerdict.VALID;
       List<ProofAuditIssue> issues =
@@ -847,6 +927,31 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
       JsonNode issue = audit.path("issues").get(0);
       String issueId = text(issue, "issueId", "issue_id");
       String stepId = text(issue, "stepId", "step_id");
+      boolean injectEvidence = frozen.statement().contains("EVIDENCE_INJECTION");
+      ClaimProofPatchOperation operation =
+          injectEvidence
+              ? new ClaimProofPatchOperation(
+                  "patch-operation-" + frozen.claimId(),
+                  ClaimProofPatchOperationType.ADD_VERIFIED_EVIDENCE_REF,
+                  stepId,
+                  null,
+                  null,
+                  null,
+                  null,
+                  new EvidenceRef(
+                      "artifact://repairer-invented",
+                      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "certificate",
+                      "Repairer claims this artifact is verified."))
+              : new ClaimProofPatchOperation(
+                  "patch-operation-" + frozen.claimId(),
+                  ClaimProofPatchOperationType.REPLACE_STEP_JUSTIFICATION,
+                  stepId,
+                  null,
+                  "A bounded counting or kernel bridge supplies the missing implication.",
+                  null,
+                  null,
+                  null);
       ClaimProofPatch patch =
           new ClaimProofPatch(
               "patch-" + frozen.claimId(),
@@ -856,16 +961,7 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
               base.path("proofHash").asText(),
               List.of(issueId),
               List.of(stepId),
-              List.of(
-                  new ClaimProofPatchOperation(
-                      "patch-operation-" + frozen.claimId(),
-                      ClaimProofPatchOperationType.REPLACE_STEP_JUSTIFICATION,
-                      stepId,
-                      null,
-                      "A bounded counting or kernel bridge supplies the missing implication.",
-                      null,
-                      null,
-                      null)),
+              List.of(operation),
               List.of(issueId));
       ClaimMinimalRepairBatch batch =
           new ClaimMinimalRepairBatch(

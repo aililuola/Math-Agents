@@ -236,6 +236,7 @@ import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtConfi
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtRecord;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtRolePolicy;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtSemanticContextCompiler;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtSnapshot;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtStage;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtStageExecutionLedger;
@@ -250,8 +251,10 @@ import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevis
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimRefutationEvidence;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimRefutationEvidenceType;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimStatementAuthorityService;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimTrustedEvidenceAuthority;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.FrozenClaimSemanticContext;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.FrozenClaimSnapshot;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.TrustedClaimEvidence;
 import io.github.aililuola.mathproofmesh.proofgraph.BottleneckFamilyRecord;
 import io.github.aililuola.mathproofmesh.proofgraph.BottleneckRelationType;
 import io.github.aililuola.mathproofmesh.proofgraph.CanonicalObligationRecord;
@@ -475,6 +478,8 @@ final class DesktopSolveCoordinator {
       new AttemptArtifactHarvester();
   private AttemptArtifactLedger attemptArtifacts = new AttemptArtifactLedger();
   private final ClaimFreezeService claimFreezeService = new ClaimFreezeService();
+  private final ClaimCourtSemanticContextCompiler claimCourtSemanticContexts =
+      new ClaimCourtSemanticContextCompiler();
   private final ClaimStatementAuthorityService claimStatementAuthority =
       new ClaimStatementAuthorityService();
   private final ClaimCourtRolePolicy claimCourtRolePolicy = new ClaimCourtRolePolicy();
@@ -1360,6 +1365,17 @@ final class DesktopSolveCoordinator {
       StrategyBlueprintCompiler.Compilation blueprint,
       ProofControlModels.ScopeSignature rootScope,
       boolean requireExplicitBindings) {
+    CriticalClaimContext rootContext =
+        rootCriticalClaimContext(strategy, blueprint, rootScope);
+    return requireExplicitBindings
+        ? criticalClaimContextCompiler.compileNewCandidate(strategy, blueprint, rootContext)
+        : criticalClaimContextCompiler.compile(strategy, blueprint, rootContext);
+  }
+
+  private CriticalClaimContext rootCriticalClaimContext(
+      StrategyCard strategy,
+      StrategyBlueprintCompiler.Compilation blueprint,
+      ProofControlModels.ScopeSignature rootScope) {
     LinkedHashSet<String> assumptions = new LinkedHashSet<>(controlGoal().assumptions());
     assumptions.addAll(strategy.prerequisites());
     List<QuantifierSpec> quantifiers = new ArrayList<>();
@@ -1402,12 +1418,8 @@ final class DesktopSolveCoordinator {
     if (!blueprint.blueprint().completePathToMainGoal()) {
       scope.add("incomplete_blueprint");
     }
-    CriticalClaimContext rootContext =
-        new CriticalClaimContext(
-            List.copyOf(assumptions), quantifiers, scope, bindings, "positive");
-    return requireExplicitBindings
-        ? criticalClaimContextCompiler.compileNewCandidate(strategy, blueprint, rootContext)
-        : criticalClaimContextCompiler.compile(strategy, blueprint, rootContext);
+    return new CriticalClaimContext(
+        List.copyOf(assumptions), quantifiers, scope, bindings, "positive");
   }
 
   private Map<String, CriticalClaimPreflightEvidence> executeRegisteredStrategyPreflight(
@@ -4259,6 +4271,14 @@ final class DesktopSolveCoordinator {
       try {
         ClaimCourtReviewResult result = conductClaimCourt(route, artifact);
         projectClaimCourtOutcome(route, artifact, result);
+      } catch (NegativeKnowledgeBlockedException exception) {
+        restoreClaimCourtMutation(fallback);
+        attemptArtifacts.markAdmissionRejected(artifact.artifactId(), exception.getMessage());
+        recordNegativeKnowledgeRejection(
+            "claim_projection_rejected",
+            "claim_memory_graph",
+            artifact.claimId(),
+            exception);
       } catch (RuntimeException exception) {
         restoreClaimCourtDurableState(fallback, exception);
         throw exception;
@@ -4269,32 +4289,30 @@ final class DesktopSolveCoordinator {
 
   private ClaimCourtReviewResult conductClaimCourt(
       RouteState route, AttemptArtifactRecord artifact) {
-    ClaimCard claim = claimForArtifact(artifact);
+    ClaimCard claim = proofClaimForArtifact(artifact);
     FrozenClaimSnapshot frozen =
         claimFreezeService.freeze(
             problemHash,
             rootGoal().sourceStatementHash(),
             route.routeId,
             claim,
-            FrozenClaimSemanticContext.root(effectiveClaimScope(claim)));
+            claimCourtSemanticContext(route, claim));
     ClaimProofRevisionRecord original =
         claimProofRevisions.createOriginal(frozen, claim.proofSteps(), claim.evidenceRefs());
-    route.courtCaseIds.add(frozen.courtCaseId());
     failClaimCourtAt(ClaimCourtFailurePoint.AFTER_CLAIM_FREEZE);
 
-    ClaimCourtRecord existing =
-        claimCourt.records().stream()
-            .filter(record -> record.courtCaseId().equals(frozen.courtCaseId()))
-            .findFirst()
-            .orElse(null);
+    ClaimCourtRecord existing = claimCourt.findProofCase(frozen).orElse(null);
+    route.courtCaseIds.add(existing == null ? frozen.courtCaseId() : existing.courtCaseId());
     ClaimCourtRolePolicy.Assignment assignment =
         existing == null ? claimCourtAssignment(frozen.authorAgentId()).orElse(null) : existing.roleAssignment();
-    if (assignment == null) {
+    if (existing == null && assignment == null) {
       ClaimCourtRecord deferred = claimCourt.deferIndependence(frozen);
       return claimCourtResult(deferred, original, "claim-court");
     }
-    claimCourtRolePolicy.requireIndependent(assignment);
-    ClaimCourtRecord record = claimCourt.open(frozen, assignment);
+    if (assignment != null) {
+      claimCourtRolePolicy.requireIndependent(assignment);
+    }
+    ClaimCourtRecord record = existing == null ? claimCourt.open(frozen, assignment) : existing;
 
     while (!record.status().terminal()) {
       try {
@@ -4306,6 +4324,59 @@ final class DesktopSolveCoordinator {
     ClaimProofRevisionRecord revision =
         claimProofRevisions.get(record.currentProofRevisionId());
     return claimCourtResult(record, revision, finalAuthorityAgent(record));
+  }
+
+  private FrozenClaimSemanticContext claimCourtSemanticContext(
+      RouteState route, ClaimCard claim) {
+    StrategyBlueprintCompiler.Compilation blueprint =
+        strategyBlueprints.get(route.strategy.strategyId());
+    if (blueprint == null) {
+      throw new IllegalArgumentException(
+          "MISSING_CLAIM_COURT_SEMANTIC_CONTEXT_BINDING:" + claim.claimId());
+    }
+    ProofControlModels.ScopeSignature rootScope =
+        proofControl
+            .scopeGuard()
+            .extract("goal-scope", rootGoal().sourceStatement(), List.of(), 1.0d);
+    CriticalClaimContext root =
+        rootCriticalClaimContext(route.strategy, blueprint, rootScope);
+    Map<String, CriticalClaimContext> compiled =
+        criticalClaimContextCompiler.compile(route.strategy, blueprint, root);
+    CriticalClaim boundClaim =
+        route.strategy.criticalClaims().stream()
+            .filter(value -> value.claimId().equals(claim.claimId()))
+            .findFirst()
+            .orElse(null);
+    if (boundClaim != null
+        && !topology.mathNormalize(boundClaim.statement())
+            .equals(topology.mathNormalize(claim.statement()))) {
+      throw new IllegalArgumentException(
+          "CLAIM_COURT_CONTEXT_STATEMENT_MISMATCH:" + claim.claimId());
+    }
+    CriticalClaimContext bound = compiled.getOrDefault(claim.claimId(), root);
+    boolean explicitBinding =
+        route.strategy.criticalClaimContextBindings().stream()
+            .anyMatch(value -> value.claimId().equals(claim.claimId()));
+    if (boundClaim != null && !explicitBinding) {
+      LinkedHashSet<String> legacyScope =
+          new LinkedHashSet<>(bound.scopeLimitations());
+      legacyScope.add("LEGACY_INCOMPLETE_SEMANTIC_CONTEXT");
+      bound =
+          new CriticalClaimContext(
+              bound.assumptions(),
+              bound.quantifiers(),
+              List.copyOf(legacyScope),
+              bound.variableBindings(),
+              bound.polarity());
+    }
+    return claimCourtSemanticContexts.compile(
+        claim,
+        new FrozenClaimSemanticContext(
+            bound.assumptions(),
+            bound.quantifiers(),
+            bound.variableBindings(),
+            bound.scopeLimitations(),
+            bound.polarity()));
   }
 
   private ClaimCourtRecord advanceClaimCourt(
@@ -4448,7 +4519,8 @@ final class DesktopSolveCoordinator {
                   base,
                   audit,
                   decision.patch(),
-                  verifiedClaimIdSet());
+                  verifiedClaimIdSet(),
+                  trustedClaimEvidence(record.frozenClaim()));
       failClaimCourtAt(ClaimCourtFailurePoint.AFTER_REPAIR_PATCH_VALIDATION);
       if (!validation.passed()) {
         updated =
@@ -4486,9 +4558,23 @@ final class DesktopSolveCoordinator {
           record.repairAttempts() > 0,
           "blind adjudication blocked by unverified dependency");
     }
-    ClaimBlindReviewPacket packet =
-        claimBlindPackets.create(
-            record.frozenClaim(), revision, verifiedClaims, revision.evidenceRefs());
+    ClaimBlindReviewPacket packet;
+    try {
+      packet =
+          claimBlindPackets.create(
+              record.frozenClaim(),
+              revision,
+              verifiedClaims,
+              trustedClaimEvidence(record.frozenClaim()));
+    } catch (IllegalArgumentException exception) {
+      if (claimEvidenceFailure(exception.getMessage())) {
+        return claimCourt.recordRepairFailure(
+            record.courtCaseId(),
+            record.repairAttempts() > 0,
+            exception.getMessage());
+      }
+      throw exception;
+    }
     AgentRuntime adjudicator = requireAgent(assignment.blindAdjudicatorAgentId());
     Map<String, ?> context =
         Map.ofEntries(
@@ -4538,6 +4624,110 @@ final class DesktopSolveCoordinator {
     claimCourtExecutions.complete(stage.executionId());
     failClaimCourtAt(ClaimCourtFailurePoint.AFTER_BLIND_RESULT_DURABLE);
     return updated;
+  }
+
+  private List<TrustedClaimEvidence> trustedClaimEvidence(
+      FrozenClaimSnapshot frozen) {
+    List<TrustedClaimEvidence> trusted = new ArrayList<>();
+    synchronized (computationTraces) {
+      for (ComputationTrace trace : computationTraces) {
+        if (trace.result() == null
+            || !trace.replayValid()
+            || (trace.authority() != ComputationEvidenceGate.EvidenceAuthority.VERIFIED
+                && trace.authority()
+                    != ComputationEvidenceGate.EvidenceAuthority.VERIFIED_BOUNDED)
+            || !computationTargetsFrozenClaim(trace, frozen)) {
+          continue;
+        }
+        for (EvidenceRef reference : trace.result().artifactRefs()) {
+          if (reference.contentHash() == null || reference.contentHash().isBlank()) {
+            continue;
+          }
+          trusted.add(
+              new TrustedClaimEvidence(
+                  "claim-evidence-" + trace.result().experimentId() + "-"
+                      + CanonicalJson.stableHash(reference).substring(0, 12),
+                  reference,
+                  problemHash,
+                  frozen.claimSemanticHash(),
+                  ClaimTrustedEvidenceAuthority.REPLAYED_COMPUTATION,
+                  true,
+                  true,
+                  true,
+                  true));
+        }
+      }
+    }
+    typedMemory.facts().stream()
+        .filter(fact -> exactVerifiedFactForFrozenClaim(fact, frozen))
+        .forEach(
+            fact -> {
+              String reference = "memory://fact/" + fact.messageId();
+              EvidenceRef evidenceRef =
+                  new EvidenceRef(
+                      reference,
+                      fact.contentHash(),
+                      null,
+                      "Server-resolved verified Fact evidence.");
+              trusted.add(
+                  new TrustedClaimEvidence(
+                      "claim-evidence-fact-" + fact.messageId(),
+                      evidenceRef,
+                      problemHash,
+                      frozen.claimSemanticHash(),
+                      fact.evidenceType() == EvidenceType.FORMAL_KERNEL_CERTIFICATE
+                          ? ClaimTrustedEvidenceAuthority.FORMAL_CERTIFICATE
+                          : ClaimTrustedEvidenceAuthority.VERIFIED_FACT,
+                      true,
+                      true,
+                      true,
+                      true));
+            });
+    return List.copyOf(trusted);
+  }
+
+  private boolean computationTargetsFrozenClaim(
+      ComputationTrace trace, FrozenClaimSnapshot frozen) {
+    String targetClaimId = trace.result().targetClaimId();
+    boolean exactClaimId =
+        targetClaimId == null
+            || targetClaimId.isBlank()
+            || targetClaimId.equals(frozen.claimId());
+    boolean exactStatement =
+        topology.mathNormalize(trace.result().targetClaim())
+                .equals(topology.mathNormalize(frozen.statement()))
+            || topology.mathNormalize(trace.result().targetClaim())
+                .equals(topology.mathNormalize(frozen.conclusion()));
+    return exactClaimId
+        && exactStatement
+        && new LinkedHashSet<>(trace.spec().assumptions())
+            .equals(new LinkedHashSet<>(frozen.assumptions()));
+  }
+
+  private boolean exactVerifiedFactForFrozenClaim(
+      MessageEnvelope fact, FrozenClaimSnapshot frozen) {
+    return fact.memoryTier() == MemoryTier.FACT
+        && fact.verificationStatus() == ClaimStatus.VERIFIED
+        && fact.problemHash().equals(frozen.problemHash())
+        && topology.mathNormalize(fact.statement())
+            .equals(topology.mathNormalize(frozen.statement()))
+        && fact.assumptions().equals(frozen.assumptions())
+        && fact.quantifiers().equals(frozen.quantifiers())
+        && fact.variableBindings().equals(frozen.variableBindings())
+        && fact.scopeLimitations().equals(frozen.scopeLimitations());
+  }
+
+  private static boolean claimEvidenceFailure(String message) {
+    if (message == null) {
+      return false;
+    }
+    return message.startsWith("UNKNOWN_EVIDENCE_REF")
+        || message.startsWith("EVIDENCE_CONTENT_HASH_MISMATCH")
+        || message.startsWith("EVIDENCE_PROBLEM_SCOPE_MISMATCH")
+        || message.startsWith("EVIDENCE_CLAIM_SCOPE_MISMATCH")
+        || message.startsWith("EVIDENCE_NOT_VERIFIED")
+        || message.startsWith("EVIDENCE_REPLAY_NOT_VERIFIED")
+        || message.startsWith("EVIDENCE_AUTHORITY_ESCALATION");
   }
 
   private List<ClaimRefutationEvidence> reviewCounterexampleWitnesses(
@@ -4669,7 +4859,7 @@ final class DesktopSolveCoordinator {
       throw new IllegalStateException("Claim Court projection requires a terminal outcome");
     }
     failClaimCourtAt(ClaimCourtFailurePoint.AFTER_FINAL_OUTCOME_BEFORE_PROJECTION);
-    ClaimCard canonicalClaim = claimForArtifact(artifact);
+    ClaimCard canonicalClaim = lemmaClaimForArtifact(artifact);
     String canonicalClaimId = canonicalClaim.claimId();
     ClaimCourtOutcome projectionOutcome =
         preservedAuthorityOutcome(canonicalClaim, courtRecord.outcome());
@@ -5452,6 +5642,29 @@ final class DesktopSolveCoordinator {
     return selectIndependentAgent(Set.of(route.attempt.agentId()), "detailed_verifier");
   }
 
+  private ClaimCard proofClaimForArtifact(AttemptArtifactRecord artifact) {
+    ClaimCard sourceClaim =
+        routes.stream()
+            .filter(route -> route.routeId.equals(artifact.routeId()))
+            .map(route -> route.attempt)
+            .filter(Objects::nonNull)
+            .filter(attempt -> attempt.attemptId().equals(artifact.sourceAttemptId()))
+            .flatMap(attempt -> attempt.proposedLemmas().stream())
+            .filter(claim -> claim.claimId().equals(artifact.claimId()))
+            .filter(claim -> claim.contentHash().equals(artifact.contentHash()))
+            .findFirst()
+            .orElse(null);
+    if (sourceClaim != null) {
+      RouteState sourceRoute =
+          routes.stream()
+              .filter(route -> route.routeId.equals(artifact.routeId()))
+              .findFirst()
+              .orElseThrow();
+      return bindClaim(sourceClaim, sourceRoute);
+    }
+    return claimForArtifact(artifact);
+  }
+
   private ClaimCard claimForArtifact(AttemptArtifactRecord artifact) {
     String claimId = lemmaMemory.resolveClaimId(artifact.claimId());
     return lemmaMemory.claims().stream()
@@ -5461,6 +5674,10 @@ final class DesktopSolveCoordinator {
             () ->
                 new IllegalStateException(
                     "attempt artifact has no lemma-memory projection: " + artifact.artifactId()));
+  }
+
+  private ClaimCard lemmaClaimForArtifact(AttemptArtifactRecord artifact) {
+    return claimForArtifact(artifact);
   }
 
   private ClaimReviewDecision claimDecision(
@@ -10414,7 +10631,7 @@ final class DesktopSolveCoordinator {
               rootGoal().sourceStatementHash(),
               routeId,
               bound,
-              FrozenClaimSemanticContext.root(effectiveClaimScope(bound)));
+              FrozenClaimSemanticContext.legacyIncomplete(effectiveClaimScope(bound)));
       claimProofRevisions.createOriginal(frozen, bound.proofSteps(), bound.evidenceRefs());
     }
   }

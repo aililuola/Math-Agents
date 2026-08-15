@@ -139,7 +139,18 @@ final class ClaimProofPatchValidatorBoundaryTest {
                 base,
                 audit(claim.claimId(), ClaimProofAuditVerdict.INVALID_REPAIRABLE, issues),
                 patch,
-                Set.of("verified-claim"));
+                Set.of("verified-claim"),
+                List.of(
+                    new TrustedClaimEvidence(
+                        "trusted-boundary-evidence",
+                        evidence,
+                        frozen.problemHash(),
+                        frozen.claimSemanticHash(),
+                        ClaimTrustedEvidenceAuthority.FORMAL_CERTIFICATE,
+                        true,
+                        true,
+                        true,
+                        true)));
 
     assertThat(result.passed()).isTrue();
     assertThat(result.failureCodes()).isEmpty();

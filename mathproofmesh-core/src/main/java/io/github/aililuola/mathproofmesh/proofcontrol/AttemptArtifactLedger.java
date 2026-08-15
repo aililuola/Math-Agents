@@ -69,6 +69,18 @@ public final class AttemptArtifactLedger {
         required(reason, "reason"));
   }
 
+  /** Records a deterministic admission rejection without granting a Claim truth verdict. */
+  public synchronized AttemptArtifactRecord markAdmissionRejected(
+      String artifactId, String reason) {
+    AttemptArtifactRecord record = requireRecord(artifactId);
+    return transition(
+        record,
+        AttemptArtifactStatus.REJECTED,
+        null,
+        null,
+        "positive projection rejected: " + required(reason, "reason"));
+  }
+
   /** Legacy single-verdict adapter. New Claim Court production paths use applyCourtOutcome. */
   public synchronized List<AttemptArtifactRecord> applyReviewBatch(
       ClaimReviewBatch batch, double passThreshold) {
