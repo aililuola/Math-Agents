@@ -445,7 +445,8 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
   }
 
   private static StrategyCard strategy() {
-    return new StrategyCard(
+    return DesktopStrategyMetadataTestSupport.complete(
+        new StrategyCard(
         null,
         "Find a reusable local representation before attempting the exact theorem.",
         List.of(),
@@ -463,8 +464,8 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
         List.of(),
         List.of(),
         "research-checkpoint-black-box-strategy",
-        List.of("bounded_research"),
-        "Durable intermediate research");
+            List.of("bounded_research"),
+            "Durable intermediate research"));
   }
 
   private static TriageResult triage() {

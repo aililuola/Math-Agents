@@ -108,6 +108,7 @@ public final class StrategyCandidateLedger {
           REJECTED_NEGATIVE,
           REJECTED_REFUTED_REQUIRED_CLAIM,
           QUARANTINED_PREFLIGHT_ERROR,
+          QUARANTINED_MECHANISM_UNRESOLVED,
           QUARANTINED_COMMON_MODE,
           SHADOW_DUPLICATE,
           LEGACY_ACTIVE -> true;

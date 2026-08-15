@@ -126,6 +126,7 @@ public final class StrategyPortfolioOptimizer {
       StrategyPortfolioConstraint constraint) {
     if (candidate.preflight().hardRejected()
         || candidate.preflight().requiresRegeneration()
+        || !candidate.signature().operationGraphKnown()
         || belowQualityGate(candidate, constraint)
         || constraint.activeStructuralSignatures().contains(
             candidate.signature().structuralSignatureHash())) {
@@ -184,6 +185,9 @@ public final class StrategyPortfolioOptimizer {
       StrategyPortfolioCandidate candidate,
       List<StrategyPortfolioCandidate> selected,
       StrategyPortfolioConstraint constraint) {
+    if (!candidate.signature().operationGraphKnown()) {
+      return "QUARANTINED_MECHANISM_UNRESOLVED";
+    }
     if (candidate.preflight().hardRejected()) {
       return candidate.preflight().claims().stream()
           .filter(
@@ -224,9 +228,32 @@ public final class StrategyPortfolioOptimizer {
                 existing ->
                     existing.signature().structuralSignatureHash()
                         .equals(candidate.signature().structuralSignatureHash()))) {
-      return "SAME_STRUCTURAL_MECHANISM";
+      return selected.stream().anyMatch(existing -> declarationKindConflict(candidate, existing))
+          ? "MECHANISM_DECLARATION_CONFLICT"
+          : "SAME_STRUCTURAL_MECHANISM";
     }
     return "LOWER_GLOBAL_PORTFOLIO_OBJECTIVE";
+  }
+
+  private static boolean declarationKindConflict(
+      StrategyPortfolioCandidate left, StrategyPortfolioCandidate right) {
+    if (!left.signature().operationGraphKnown()
+        || !right.signature().operationGraphKnown()
+        || !left.signature().structuralSignatureHash()
+            .equals(right.signature().structuralSignatureHash())) {
+      return false;
+    }
+    List<String> leftKinds =
+        left.strategy().mechanismOperations().stream()
+            .map(operation -> operation.kind().name())
+            .sorted()
+            .toList();
+    List<String> rightKinds =
+        right.strategy().mechanismOperations().stream()
+            .map(operation -> operation.kind().name())
+            .sorted()
+            .toList();
+    return !leftKinds.equals(rightKinds);
   }
 
   private static boolean belowQualityGate(

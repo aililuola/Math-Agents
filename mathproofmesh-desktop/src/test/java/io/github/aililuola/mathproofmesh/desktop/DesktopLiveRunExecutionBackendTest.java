@@ -582,26 +582,30 @@ final class DesktopLiveRunExecutionBackendTest {
           case "strategy-b" -> "Construct the two-element disjoint union and count it.";
           default -> "Assume the equality fails and contradict successor injectivity.";
         };
-    return new StrategyCard(
-        null,
-        "Establish the exact target using " + mechanism,
-        List.of(),
-        List.of(),
-        List.of(),
-        mechanism,
-        List.of(),
-        0.1d,
-        0.95d,
-        List.of(),
-        "Try the smallest admissible model against this mechanism.",
-        "This route has a distinct proof mechanism and falsification test.",
-        null,
-        null,
-        List.of(),
-        List.of(),
-        id,
-        List.of(id),
-        "Independent route " + id);
+    int stepCount = "strategy-a".equals(id) ? 1 : "strategy-b".equals(id) ? 2 : 3;
+    return DesktopStrategyMetadataTestSupport.complete(
+        new StrategyCard(
+            null,
+            "Establish the exact target using " + mechanism,
+            List.of(),
+            List.of(),
+            List.of(),
+            mechanism,
+            List.of(),
+            0.1d,
+            0.95d,
+            java.util.stream.IntStream.range(0, stepCount)
+                .mapToObj(index -> "Explicit route step " + index + " for " + id + '.')
+                .toList(),
+            "Try the smallest admissible model against this mechanism.",
+            "This route has a distinct proof mechanism and falsification test.",
+            null,
+            null,
+            List.of(),
+            List.of(),
+            id,
+            List.of(id),
+            "Independent route " + id));
   }
 
   private static StrategyCard inspirationStrategy(String prompt) {
@@ -609,7 +613,8 @@ final class DesktopLiveRunExecutionBackendTest {
         prompt.contains("reverse_goal_analysis")
             ? "Work backward from the exact conclusion while keeping forward facts separate."
             : "Switch to a reversible structural representation and preserve every obligation.";
-    return new StrategyCard(
+    return DesktopStrategyMetadataTestSupport.complete(
+        new StrategyCard(
         null,
         "Test one new bridge for the still-open main obligation.",
         List.of(),
@@ -627,8 +632,8 @@ final class DesktopLiveRunExecutionBackendTest {
         List.of(),
         List.of(),
         "inspired-strategy",
-        List.of("inspiration"),
-        "Scripted inspiration proposal");
+            List.of("inspiration"),
+            "Scripted inspiration proposal"));
   }
 
   private static SemanticPivotProposal textOnlySemanticPivot(String prompt) {

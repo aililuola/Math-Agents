@@ -460,7 +460,8 @@ final class DesktopNegativeKnowledgeTestHarness implements AutoCloseable {
   }
 
   private static StrategyCard validStrategy() {
-    return new StrategyCard(
+    return DesktopStrategyMetadataTestSupport.complete(
+        new StrategyCard(
         null,
         "Prove bounded gaps from multiples of Q=rad(a_1).",
         List.of(),
@@ -478,12 +479,13 @@ final class DesktopNegativeKnowledgeTestHarness implements AutoCloseable {
         List.of(),
         List.of(),
         "valid-production-strategy",
-        List.of("bounded_gaps", "finite_state_bridge"),
-        "Valid bounded-gap route");
+            List.of("bounded_gaps", "finite_state_bridge"),
+            "Valid bounded-gap route"));
   }
 
   private static StrategyCard invalidStrategy(String id, String statement) {
-    return new StrategyCard(
+    return DesktopStrategyMetadataTestSupport.complete(
+        new StrategyCard(
         null,
         "Derive the target after establishing a load-bearing shortcut.",
         List.of(),
@@ -501,8 +503,8 @@ final class DesktopNegativeKnowledgeTestHarness implements AutoCloseable {
         List.of(),
         List.of(),
         id,
-        List.of("candidate_shortcut"),
-        "Rejected shortcut " + id);
+            List.of("candidate_shortcut"),
+            "Rejected shortcut " + id));
   }
 
   private static MessageEnvelope fact(String id, String statement, int round) {

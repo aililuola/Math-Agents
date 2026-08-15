@@ -413,26 +413,35 @@ final class DesktopSolveCoordinatorRootGoalPropagationTest {
           case "strategy-b" -> "Construct a finite-state recurrence invariant.";
           default -> "Use a contradiction from a minimal failed translation.";
         };
-    return new StrategyCard(
-        null,
-        "Establish the exact target using " + mechanism,
-        List.of(),
-        List.of(),
-        List.of(),
-        mechanism,
-        List.of(),
-        0.1d,
-        0.95d,
-        List.of(),
-        "Test the smallest admissible instance against this mechanism.",
-        "The route preserves the exact quantified root and has a separate mechanism.",
-        null,
-        null,
-        List.of(),
-        List.of(),
-        id,
-        List.of(id),
-        "Independent route " + id);
+    int stepCount =
+        switch (id) {
+          case "strategy-a" -> 1;
+          case "strategy-b" -> 2;
+          default -> 3;
+        };
+    return DesktopStrategyMetadataTestSupport.complete(
+        new StrategyCard(
+            null,
+            "Establish the exact target using " + mechanism,
+            List.of(),
+            List.of(),
+            List.of(),
+            mechanism,
+            List.of(),
+            0.1d,
+            0.95d,
+            java.util.stream.IntStream.range(0, stepCount)
+                .mapToObj(index -> "Bounded structural step " + index + " for " + id + '.')
+                .toList(),
+            "Test the smallest admissible instance against this mechanism.",
+            "The route preserves the exact quantified root and has a separate mechanism.",
+            null,
+            null,
+            List.of(),
+            List.of(),
+            id,
+            List.of(id),
+            "Independent route " + id));
   }
 
   private static RunExecutionBackend.ProgressSink noOpProgress() {

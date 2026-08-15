@@ -18,6 +18,7 @@ final class StrategyDiversityTestFixtures {
 
   static StrategyCard strategy(
       String id, String title, String mechanism, String requiredClaim, double prior) {
+    MechanismOperationKind kind = operationKind(mechanism);
     return new StrategyCard(
         null,
         "Establish the route-specific bridge for " + mechanism + ".",
@@ -28,7 +29,7 @@ final class StrategyDiversityTestFixtures {
         List.of(claim(id + "-required", requiredClaim, "required")),
         0.2d,
         prior,
-        List.of("Use " + mechanism + " to derive the target from " + requiredClaim + "."),
+        expectedLemmas(kind),
         "Search finite structures for a counterexample to " + requiredClaim + ".",
         "Independent structural route",
         null,
@@ -41,10 +42,29 @@ final class StrategyDiversityTestFixtures {
         List.of(
             new MechanismOperationDeclaration(
                 "declared-mechanism",
-                operationKind(mechanism),
+                kind,
                 List.of("@roots"),
                 List.of("@direct_targets"))),
         List.of());
+  }
+
+  static List<String> expectedLemmas(MechanismOperationKind kind) {
+    int steps =
+        switch (kind) {
+          case DIRECT -> 1;
+          case REDUCTION -> 2;
+          case EXTREMAL_SELECTION -> 3;
+          case COUNTING -> 4;
+          case MINIMAL_COUNTEREXAMPLE -> 5;
+          default -> 2;
+        };
+    return java.util.stream.IntStream.range(0, steps)
+        .mapToObj(
+            index ->
+                index == steps - 1
+                    ? "Declared structural bridge to the required claim."
+                    : "Declared structural preparation step " + (index + 1) + '.')
+        .toList();
   }
 
   private static MechanismOperationKind operationKind(String mechanism) {
@@ -53,9 +73,6 @@ final class StrategyDiversityTestFixtures {
         || normalized.contains("geodesic")
         || normalized.contains("extremal")) {
       return MechanismOperationKind.EXTREMAL_SELECTION;
-    }
-    if (normalized.contains("count") || normalized.contains("degree sum")) {
-      return MechanismOperationKind.COUNTING;
     }
     if (normalized.contains("smallest counterexample")
         || normalized.contains("minimal counterexample")) {
@@ -67,6 +84,9 @@ final class StrategyDiversityTestFixtures {
         || normalized.contains("pendant")
         || normalized.contains("endpoint")) {
       return MechanismOperationKind.REDUCTION;
+    }
+    if (normalized.contains("count") || normalized.contains("degree sum")) {
+      return MechanismOperationKind.COUNTING;
     }
     return MechanismOperationKind.DIRECT;
   }

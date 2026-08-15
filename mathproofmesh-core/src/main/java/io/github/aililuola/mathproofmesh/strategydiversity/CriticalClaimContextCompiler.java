@@ -20,12 +20,36 @@ public final class CriticalClaimContextCompiler {
       StrategyCard strategy,
       StrategyBlueprintCompiler.Compilation compilation,
       CriticalClaimContext rootContext) {
+    return compile(strategy, compilation, rootContext, false);
+  }
+
+  /** Compiles a newly generated strategy and fails closed when any claim lacks a binding. */
+  public Map<String, CriticalClaimContext> compileNewCandidate(
+      StrategyCard strategy,
+      StrategyBlueprintCompiler.Compilation compilation,
+      CriticalClaimContext rootContext) {
+    return compile(strategy, compilation, rootContext, true);
+  }
+
+  private static Map<String, CriticalClaimContext> compile(
+      StrategyCard strategy,
+      StrategyBlueprintCompiler.Compilation compilation,
+      CriticalClaimContext rootContext,
+      boolean requireExplicitBindings) {
     java.util.Objects.requireNonNull(strategy, "strategy");
     java.util.Objects.requireNonNull(compilation, "compilation");
     CriticalClaimContext root =
         rootContext == null ? CriticalClaimContext.empty() : rootContext;
     StrategyBlueprintCompiler.Blueprint blueprint = compilation.blueprint();
     Map<String, CriticalClaimContextBinding> bindings = bindings(strategy);
+    if (requireExplicitBindings) {
+      for (CriticalClaim claim : strategy.criticalClaims()) {
+        if (!bindings.containsKey(claim.claimId())) {
+          throw new IllegalArgumentException(
+              "MISSING_CRITICAL_CLAIM_CONTEXT_BINDING:" + claim.claimId());
+        }
+      }
+    }
     Map<String, StrategyBlueprintCompiler.Node> nodes = nodes(blueprint);
     List<StrategyBlueprintCompiler.Node> claimNodes =
         blueprint.nodes().stream()
@@ -136,7 +160,7 @@ public final class CriticalClaimContextCompiler {
       }
       if (result.putIfAbsent(binding.claimId(), binding) != null) {
         throw new IllegalArgumentException(
-            "duplicate critical claim context binding: " + binding.claimId());
+            "DUPLICATE_CRITICAL_CLAIM_CONTEXT_BINDING:" + binding.claimId());
       }
     }
     return result;
@@ -156,7 +180,8 @@ public final class CriticalClaimContextCompiler {
       if (!blueprint.directTargetNodeIds().isEmpty()) {
         return blueprint.directTargetNodeIds().getFirst();
       }
-      throw new IllegalArgumentException("claim binding has no server-compiled target node");
+      throw new IllegalArgumentException(
+          "UNBOUND_CRITICAL_CLAIM:" + binding.claimId());
     }
     if ("@main_goal".equals(reference)) {
       return blueprint.mainGoalNodeId();

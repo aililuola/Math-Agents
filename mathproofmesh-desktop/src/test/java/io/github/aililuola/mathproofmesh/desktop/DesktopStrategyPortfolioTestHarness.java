@@ -20,6 +20,7 @@ import io.github.aililuola.mathproofmesh.contract.ClaimCard;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatus;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
 import io.github.aililuola.mathproofmesh.contract.CriticalClaim;
+import io.github.aililuola.mathproofmesh.contract.CriticalClaimContextBinding;
 import io.github.aililuola.mathproofmesh.contract.Difficulty;
 import io.github.aililuola.mathproofmesh.contract.EvidenceType;
 import io.github.aililuola.mathproofmesh.contract.MemoryTier;
@@ -28,15 +29,12 @@ import io.github.aililuola.mathproofmesh.contract.MechanismOperationKind;
 import io.github.aililuola.mathproofmesh.contract.MessageEnvelope;
 import io.github.aililuola.mathproofmesh.contract.MessageType;
 import io.github.aililuola.mathproofmesh.contract.ProblemKind;
-import io.github.aililuola.mathproofmesh.contract.ProblemContract;
-import io.github.aililuola.mathproofmesh.contract.QuantifierSpec;
 import io.github.aililuola.mathproofmesh.contract.RouteRole;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
 import io.github.aililuola.mathproofmesh.contract.StrategyPreflightPlan;
 import io.github.aililuola.mathproofmesh.contract.StrategySet;
 import io.github.aililuola.mathproofmesh.contract.TaskRequirement;
 import io.github.aililuola.mathproofmesh.contract.TriageResult;
-import io.github.aililuola.mathproofmesh.contract.VariableBinding;
 import io.github.aililuola.mathproofmesh.memory.LemmaMemory;
 import io.github.aililuola.mathproofmesh.memory.TypedMemory;
 import io.github.aililuola.mathproofmesh.memory.VerifiedCounterexampleAuthority;
@@ -45,7 +43,6 @@ import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlFacade;
 import io.github.aililuola.mathproofmesh.proofcontrol.RootGoalContract;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlModels;
-import io.github.aililuola.mathproofmesh.proofcontrol.ScopeGuard;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyArchive;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyBlueprintCompiler;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphConvergenceMonitor;
@@ -76,7 +73,6 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -329,54 +325,9 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
 
   private CriticalClaimContext productionClaimContext(StrategyCard strategy) {
     try {
-      ProblemContract problem = field("frozenProblem", ProblemContract.class);
-      LinkedHashSet<String> assumptions = new LinkedHashSet<>(problem.hardConstraints());
-      assumptions.addAll(strategy.prerequisites());
-      List<QuantifierSpec> quantifiers = new ArrayList<>();
-      List<VariableBinding> bindings = new ArrayList<>();
-      int order = 0;
-      for (var atom : rootGoal().signature().quantifierSkeleton()) {
-        for (String variable : atom.variables()) {
-          String variableId = "root-q" + order;
-          quantifiers.add(
-              new QuantifierSpec(
-                  variable,
-                  "root-goal quantified domain",
-                  atom.kind(),
-                  order,
-                  List.of(),
-                  variableId));
-          bindings.add(
-              new VariableBinding(
-                  List.of(variable),
-                  variable,
-                  "root-goal quantified domain",
-                  "root-goal",
-                  variableId));
-          order++;
-        }
-      }
-      var scope =
-          new ScopeGuard()
-              .extract("test-root", rootGoal().sourceStatement(), List.of(), 1.0d);
-      List<String> limitations = new ArrayList<>();
-      if (scope.indexScope() != ProofControlModels.IndexScope.UNKNOWN) {
-        limitations.add(
-            "index_scope=" + scope.indexScope().name().toLowerCase(java.util.Locale.ROOT));
-      }
-      if (scope.uniformity() != ProofControlModels.UniformityScope.UNKNOWN) {
-        limitations.add(
-            "uniformity=" + scope.uniformity().name().toLowerCase(java.util.Locale.ROOT));
-      }
-      if (scope.objectScope() != ProofControlModels.ObjectScope.UNKNOWN) {
-        limitations.add(
-            "object_scope=" + scope.objectScope().name().toLowerCase(java.util.Locale.ROOT));
-      }
-      limitations.addAll(scope.domainConstraints());
-      limitations.addAll(scope.exceptionalCases());
-      return new CriticalClaimContext(
-          List.copyOf(assumptions), quantifiers, limitations, bindings, "positive");
-    } catch (ReflectiveOperationException exception) {
+      String claimId = strategy.criticalClaims().getFirst().claimId();
+      return productionClaimContexts(strategy).get(claimId);
+    } catch (Exception exception) {
       throw new IllegalStateException(exception);
     }
   }
@@ -414,36 +365,12 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
   }
 
   void registerVerifiedClaimForStrategy(StrategyCard strategy, String id) {
-    try {
-      ProblemContract problem = field("frozenProblem", ProblemContract.class);
-      LinkedHashSet<String> assumptions = new LinkedHashSet<>(problem.hardConstraints());
-      assumptions.addAll(strategy.prerequisites());
-      var scope =
-          new ScopeGuard()
-              .extract("test-root", rootGoal().sourceStatement(), List.of(), 1.0d);
-      List<String> limitations = new ArrayList<>();
-      if (scope.indexScope() != ProofControlModels.IndexScope.UNKNOWN) {
-        limitations.add(
-            "index_scope=" + scope.indexScope().name().toLowerCase(java.util.Locale.ROOT));
-      }
-      if (scope.uniformity() != ProofControlModels.UniformityScope.UNKNOWN) {
-        limitations.add(
-            "uniformity=" + scope.uniformity().name().toLowerCase(java.util.Locale.ROOT));
-      }
-      if (scope.objectScope() != ProofControlModels.ObjectScope.UNKNOWN) {
-        limitations.add(
-            "object_scope=" + scope.objectScope().name().toLowerCase(java.util.Locale.ROOT));
-      }
-      limitations.addAll(scope.domainConstraints());
-      limitations.addAll(scope.exceptionalCases());
-      registerVerifiedClaim(
-          strategy.criticalClaims().getFirst().statement(),
-          id,
-          List.copyOf(assumptions),
-          limitations);
-    } catch (ReflectiveOperationException exception) {
-      throw new IllegalStateException(exception);
-    }
+    CriticalClaimContext context = productionClaimContext(strategy);
+    registerVerifiedClaim(
+        strategy.criticalClaims().getFirst().statement(),
+        id,
+        context.assumptions(),
+        context.scopeLimitations());
   }
 
   DesktopSolveCheckpoint checkpointRoundTrip() throws Exception {
@@ -655,6 +582,7 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
 
   static StrategyCard strategy(
       String id, String title, String mechanism, String requiredClaim, double prior) {
+    MechanismOperationKind kind = operationKind(mechanism);
     return new StrategyCard(
         null,
         "Establish the finite-tree target through " + mechanism + '.',
@@ -673,7 +601,7 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
                 "needs_check")),
         0.2d,
         prior,
-        List.of("Derive the leaf conclusion using " + mechanism + '.'),
+        expectedLemmas(kind),
         "Search the smallest finite trees for a counterexample.",
         "The route uses a separately stated finite-structure mechanism.",
         null,
@@ -686,10 +614,19 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
         List.of(
             new MechanismOperationDeclaration(
                 "declared-mechanism",
-                operationKind(mechanism),
+                kind,
                 List.of("@roots"),
                 List.of("@direct_targets"))),
-        List.of());
+        List.of(
+            new CriticalClaimContextBinding(
+                id + "-required",
+                "@claim",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                "positive")));
   }
 
   static StrategyCard withOperation(
@@ -704,7 +641,7 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
         source.criticalClaims(),
         source.estimatedCost(),
         source.estimatedSuccess(),
-        source.expectedLemmas(),
+        expectedLemmas(kind),
         source.falsificationTest(),
         source.independenceBasis(),
         source.inspirationProposalId(),
@@ -720,15 +657,31 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
         source.criticalClaimContextBindings());
   }
 
+  private static List<String> expectedLemmas(MechanismOperationKind kind) {
+    int steps =
+        switch (kind) {
+          case DIRECT -> 1;
+          case REDUCTION -> 2;
+          case EXTREMAL_SELECTION -> 3;
+          case COUNTING -> 4;
+          case MINIMAL_COUNTEREXAMPLE -> 5;
+          default -> 2;
+        };
+    return java.util.stream.IntStream.range(0, steps)
+        .mapToObj(
+            index ->
+                index == steps - 1
+                    ? "Declared structural bridge to the required claim."
+                    : "Declared structural preparation step " + (index + 1) + '.')
+        .toList();
+  }
+
   private static MechanismOperationKind operationKind(String mechanism) {
     String normalized = mechanism.toLowerCase(java.util.Locale.ROOT);
     if (normalized.contains("longest")
         || normalized.contains("geodesic")
         || normalized.contains("extremal")) {
       return MechanismOperationKind.EXTREMAL_SELECTION;
-    }
-    if (normalized.contains("count") || normalized.contains("degree sum")) {
-      return MechanismOperationKind.COUNTING;
     }
     if (normalized.contains("smallest counterexample")
         || normalized.contains("minimal counterexample")) {
@@ -740,6 +693,9 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
         || normalized.contains("pendant")
         || normalized.contains("endpoint")) {
       return MechanismOperationKind.REDUCTION;
+    }
+    if (normalized.contains("count") || normalized.contains("degree sum")) {
+      return MechanismOperationKind.COUNTING;
     }
     return MechanismOperationKind.DIRECT;
   }

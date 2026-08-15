@@ -321,25 +321,27 @@ class DesktopStrategyPortfolioMultiRoundRestoreTest {
             null,
             VERIFIED_FACT,
             "verified"));
-    return new StrategyCard(
-        source.assignedAgentId(),
-        source.bottleneck(),
-        source.calculationChecks(),
-        source.calculationEvidenceRefs(),
-        source.computationHints(),
-        source.coreIdea(),
-        claims,
-        source.estimatedCost(),
-        source.estimatedSuccess(),
-        source.expectedLemmas(),
-        source.falsificationTest(),
-        source.independenceBasis(),
-        source.inspirationProposalId(),
-        source.keyOriginalStep(),
-        source.parentStrategyIds(),
-        source.prerequisites(),
-        source.strategyId(),
-        source.tags(),
-        source.title());
+    return DesktopStrategyMetadataTestSupport.inherit(
+        new StrategyCard(
+            source.assignedAgentId(),
+            source.bottleneck(),
+            source.calculationChecks(),
+            source.calculationEvidenceRefs(),
+            source.computationHints(),
+            source.coreIdea(),
+            claims,
+            source.estimatedCost(),
+            source.estimatedSuccess(),
+            source.expectedLemmas(),
+            source.falsificationTest(),
+            source.independenceBasis(),
+            source.inspirationProposalId(),
+            source.keyOriginalStep(),
+            source.parentStrategyIds(),
+            source.prerequisites(),
+            source.strategyId(),
+            source.tags(),
+            source.title()),
+        source);
   }
 }

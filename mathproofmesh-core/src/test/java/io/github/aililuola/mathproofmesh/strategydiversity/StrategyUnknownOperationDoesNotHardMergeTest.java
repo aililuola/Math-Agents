@@ -2,13 +2,16 @@ package io.github.aililuola.mathproofmesh.strategydiversity;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.aililuola.mathproofmesh.contract.MechanismOperationDeclaration;
+import io.github.aililuola.mathproofmesh.contract.MechanismOperationKind;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class StrategyUnknownOperationDoesNotHardMergeTest {
   @Test
-  void absentTypedOperationGraphNeverCreatesHardEquivalence() {
+  void absentOrExplicitlyUnknownOperationGraphNeverCreatesHardEquivalence() {
     StrategyCard first =
         unknown(
             StrategyDiversityTestFixtures.strategy(
@@ -16,7 +19,8 @@ class StrategyUnknownOperationDoesNotHardMergeTest {
     StrategyCard second =
         unknown(
             StrategyDiversityTestFixtures.strategy(
-                "unknown-b", "Unknown B", "Use another unnamed transformation.", "P holds.", 0.7d));
+                "unknown-b", "Unknown B", "Use another unnamed transformation.", "P holds.", 0.7d),
+            false);
     StrategyMechanismAnalyzer analyzer = new StrategyMechanismAnalyzer();
     var firstBlueprint = StrategyDiversityTestFixtures.blueprint(first);
     var secondBlueprint = StrategyDiversityTestFixtures.blueprint(second);
@@ -49,6 +53,10 @@ class StrategyUnknownOperationDoesNotHardMergeTest {
   }
 
   private static StrategyCard unknown(StrategyCard source) {
+    return unknown(source, true);
+  }
+
+  private static StrategyCard unknown(StrategyCard source, boolean empty) {
     return new StrategyCard(
         source.assignedAgentId(),
         source.bottleneck(),
@@ -69,7 +77,14 @@ class StrategyUnknownOperationDoesNotHardMergeTest {
         source.strategyId(),
         source.tags(),
         source.title(),
-        java.util.List.of(),
-        java.util.List.of());
+        empty
+            ? List.of()
+            : List.of(
+                new MechanismOperationDeclaration(
+                    "explicit-unknown",
+                    MechanismOperationKind.UNKNOWN,
+                    List.of("@roots"),
+                    List.of("@direct_targets"))),
+        List.of());
   }
 }

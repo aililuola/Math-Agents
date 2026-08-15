@@ -51,7 +51,8 @@ class StrategyMechanismOutOfVocabularyParaphraseTest {
         source.criticalClaims(),
         source.estimatedCost(),
         source.estimatedSuccess(),
-        source.expectedLemmas(),
+        StrategyDiversityTestFixtures.expectedLemmas(
+            MechanismOperationKind.EXTREMAL_SELECTION),
         source.falsificationTest(),
         source.independenceBasis(),
         source.inspirationProposalId(),

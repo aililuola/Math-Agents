@@ -81,7 +81,8 @@ class DesktopRegisteredContractPreflightExecutionTest {
             "bounded_integer_search",
             claim,
             "needs_check");
-    return new StrategyCard(
+    return DesktopStrategyMetadataTestSupport.complete(
+        new StrategyCard(
         null,
         "Use the declared finite-domain assertion as the load-bearing bridge.",
         List.of(request),
@@ -99,7 +100,7 @@ class DesktopRegisteredContractPreflightExecutionTest {
         List.of(),
         List.of(),
         strategyId,
-        List.of("finite-set"),
-        "Finite-domain bridge");
+            List.of("finite-set"),
+            "Finite-domain bridge"));
   }
 }

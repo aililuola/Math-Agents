@@ -474,7 +474,8 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
   }
 
   private static StrategyCard validStrategy(String strategyId) {
-    return new StrategyCard(
+    return DesktopStrategyMetadataTestSupport.complete(
+        new StrategyCard(
         null,
         "Prove the exact target through independently checked local lemmas.",
         List.of(),
@@ -492,8 +493,8 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
         List.of(),
         List.of(),
         strategyId,
-        List.of("claim_scoped_review"),
-        "Claim salvage route");
+            List.of("claim_scoped_review"),
+            "Claim salvage route"));
   }
 
   private static RunExecutionBackend.ProgressSink noOpProgress() {

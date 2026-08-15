@@ -63,10 +63,10 @@ public final class TrustedStrategyPreflightEvidenceSource
                 NegativeKnowledgeTargetType.CLAIM,
                 spec.claim().statement(),
                 key.normalizedStatement(),
-                key.assumptions(),
+                spec.context().assumptions(),
                 spec.context().quantifiers(),
                 spec.context().variableBindings(),
-                key.scopeLimitations(),
+                spec.context().scopeLimitations(),
                 NegativeKnowledgeSurface.STRATEGY_ADMISSION,
                 NegativeCandidateIntent.POSITIVE_DEPENDENCY),
             currentRound);

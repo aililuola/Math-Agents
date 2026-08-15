@@ -46,10 +46,10 @@ final class StrategyMechanismStructureCompiler {
                     operation ->
                         StrategySemanticNormalizer.hash(
                             Map.of(
-                                "kind", operation.kind().name(),
                                 "inputs", operation.inputRoleIds().stream().sorted().toList(),
                                 "outputs",
                                     operation.outputRoleIds().stream().sorted().toList())))
+                .distinct()
                 .sorted()
                 .toList());
     String falsificationHash =

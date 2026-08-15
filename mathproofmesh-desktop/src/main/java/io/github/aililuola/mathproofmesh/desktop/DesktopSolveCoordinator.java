@@ -965,6 +965,16 @@ final class DesktopSolveCoordinator {
             "INVALID_TYPED_MECHANISM_OR_CLAIM_CONTEXT:" + exception.getMessage());
         continue;
       }
+      if (!signature.operationGraphKnown()) {
+        strategyCandidates.transition(
+            strategy.strategyId(),
+            StrategyCandidateStatus.QUARANTINED_MECHANISM_UNRESOLVED,
+            signature.structuralSignatureHash(),
+            "",
+            0.0d,
+            "QUARANTINED_MECHANISM_UNRESOLVED");
+        continue;
+      }
       StrategyPreflightReport report = strategyPreflights.find(strategy.strategyId()).orElse(null);
       if (report == null) {
         StrategyPreflightPlan plan = prepareStrategyPreflightPlan(strategy, claimContexts);
@@ -1283,6 +1293,14 @@ final class DesktopSolveCoordinator {
       StrategyCard strategy,
       StrategyBlueprintCompiler.Compilation blueprint,
       ProofControlModels.ScopeSignature rootScope) {
+    return criticalClaimContexts(strategy, blueprint, rootScope, true);
+  }
+
+  private Map<String, CriticalClaimContext> criticalClaimContexts(
+      StrategyCard strategy,
+      StrategyBlueprintCompiler.Compilation blueprint,
+      ProofControlModels.ScopeSignature rootScope,
+      boolean requireExplicitBindings) {
     LinkedHashSet<String> assumptions = new LinkedHashSet<>(controlGoal().assumptions());
     assumptions.addAll(strategy.prerequisites());
     List<QuantifierSpec> quantifiers = new ArrayList<>();
@@ -1328,7 +1346,9 @@ final class DesktopSolveCoordinator {
     CriticalClaimContext rootContext =
         new CriticalClaimContext(
             List.copyOf(assumptions), quantifiers, scope, bindings, "positive");
-    return criticalClaimContextCompiler.compile(strategy, blueprint, rootContext);
+    return requireExplicitBindings
+        ? criticalClaimContextCompiler.compileNewCandidate(strategy, blueprint, rootContext)
+        : criticalClaimContextCompiler.compile(strategy, blueprint, rootContext);
   }
 
   private Map<String, CriticalClaimPreflightEvidence> executeRegisteredStrategyPreflight(
@@ -1843,6 +1863,7 @@ final class DesktopSolveCoordinator {
           REJECTED_NEGATIVE,
           REJECTED_REFUTED_REQUIRED_CLAIM,
           QUARANTINED_PREFLIGHT_ERROR,
+          QUARANTINED_MECHANISM_UNRESOLVED,
           QUARANTINED_COMMON_MODE,
           SHADOW_DUPLICATE,
           LEGACY_ACTIVE -> true;
@@ -10630,7 +10651,8 @@ final class DesktopSolveCoordinator {
                   proofControl
                       .scopeGuard()
                       .extract(
-                          "goal-scope", rootGoal.sourceStatement(), List.of(), 1.0d)),
+                          "goal-scope", rootGoal.sourceStatement(), List.of(), 1.0d),
+                  false),
               strategyCanonicalTargetIds());
       strategyCandidates.capture(
           strategyPortfolioEpisodeId(), strategy.strategyId(), order++, false);

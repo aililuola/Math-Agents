@@ -491,25 +491,27 @@ class DesktopSemanticPivotMultiRoundRestoreTest {
   }
 
   private static StrategyCard finitePrimeSupportStrategy(StrategyCard source) {
-    return new StrategyCard(
-        null,
-        source.bottleneck(),
-        source.calculationChecks(),
-        source.calculationEvidenceRefs(),
-        source.computationHints(),
-        "The sequence has finite prime support.",
-        source.criticalClaims(),
-        source.estimatedCost(),
-        source.estimatedSuccess(),
-        source.expectedLemmas(),
-        source.falsificationTest(),
-        source.independenceBasis(),
-        source.inspirationProposalId(),
-        source.keyOriginalStep(),
-        source.parentStrategyIds(),
-        source.prerequisites(),
-        source.strategyId(),
-        source.tags(),
-        source.title());
+    return DesktopStrategyMetadataTestSupport.inherit(
+        new StrategyCard(
+            null,
+            source.bottleneck(),
+            source.calculationChecks(),
+            source.calculationEvidenceRefs(),
+            source.computationHints(),
+            "The sequence has finite prime support.",
+            source.criticalClaims(),
+            source.estimatedCost(),
+            source.estimatedSuccess(),
+            source.expectedLemmas(),
+            source.falsificationTest(),
+            source.independenceBasis(),
+            source.inspirationProposalId(),
+            source.keyOriginalStep(),
+            source.parentStrategyIds(),
+            source.prerequisites(),
+            source.strategyId(),
+            source.tags(),
+            source.title()),
+        source);
   }
 }

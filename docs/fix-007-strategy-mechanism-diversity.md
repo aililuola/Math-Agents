@@ -597,3 +597,148 @@ Issue 001 Root Goal authority, Issue 002 Negative Knowledge, Issue 003 Claim lif
 Issue 004 Research Checkpoints, Issue 005 canonicalization/convergence, and Issue 006 Semantic
 Pivot behavior remained protected by the full regression. No Issue 008 production work was
 introduced.
+
+## 13. Unresolved-mechanism and explicit Claim-binding closure
+
+This final Issue 007 follow-up closes three additional admission loopholes without changing the
+checkpoint schema or starting Issue 008.
+
+### 13.1 Test-first behavioral evidence
+
+The new tests were first run against the preceding implementation and exposed three behavioral
+failures:
+
+- six candidates with no operation graph produced six distinct admissions, padded a requested
+  portfolio to four, and caused no replenishment request;
+- a five-Claim candidate with only four context bindings reached `SELECTED` instead of failing
+  closed;
+- identical Blueprint operation subgraphs relabeled `INDUCTION` and `REDUCTION` produced two hard
+  mechanism admissions.
+
+These are behavioral failures against the existing production path, not merely missing-API
+compile failures.
+
+### 13.2 Production behavior
+
+For newly generated candidates, an empty operation declaration list or any declaration whose
+kind is `UNKNOWN` now transitions to `QUARANTINED_MECHANISM_UNRESOLVED` before preflight,
+optimization, Archive mutation, or Route creation. `StrategyPortfolioOptimizer` repeats the
+same check as a defense-in-depth boundary. Such candidates remain auditable and trigger the
+existing one-shot gap replenishment, but they cannot count toward portfolio size or mechanism
+diversity. Existing V12 strategies restored as `LEGACY_ACTIVE` retain the compatibility compiler
+path and are not retroactively deleted.
+
+Hard operation identity now hashes the canonical input/output role subgraph, deduplicates repeated
+declarations of the same subgraph, and does not trust the model-proposed operation-kind label.
+When equal structural signatures carry different declared kinds, the second candidate is rejected
+with `MECHANISM_DECLARATION_CONFLICT`; the kind remains available as non-authoritative descriptive
+metadata.
+
+Every Critical Claim on a new candidate must have exactly one explicit
+`CriticalClaimContextBinding`. Missing and duplicate bindings fail closed with stable codes
+`MISSING_CRITICAL_CLAIM_CONTEXT_BINDING` and
+`DUPLICATE_CRITICAL_CLAIM_CONTEXT_BINDING`; an unresolved bound Claim uses
+`UNBOUND_CRITICAL_CLAIM`. The legacy compiler retains its Root Context fallback solely for
+checkpoint migration. Trusted negative preflight matching now uses the same raw claim-local
+context that was bound into the verified counterexample, preventing canonicalized display fields
+from changing the Negative Knowledge semantic key.
+
+### 13.3 Focused diagnostics
+
+The unknown-mechanism test mixes empty operation lists and explicit `UNKNOWN` declarations. The
+eight quarantines are the six initial candidates plus two candidates returned by the one allowed
+replenishment request.
+
+```text
+UNKNOWN_MECHANISM_CANDIDATES=6
+UNKNOWN_MECHANISM_QUARANTINES=8
+UNKNOWN_MECHANISM_DISTINCT_ADMISSIONS=0
+UNKNOWN_MECHANISM_PORTFOLIO_PADDING=0
+REPLENISHMENT_REQUESTS=1
+
+MISSING_BINDINGS=1
+INCOMPLETE_CANDIDATE_ADMISSIONS=0
+ACTIVE_STATE_LEAKS=0
+COMPLETE_CANDIDATE_ADMISSIONS=1
+
+UNREVIEWED_KIND_CONFLICTS=1
+DISTINCT_MECHANISM_ADMISSIONS=0
+```
+
+Core coverage additionally executes missing, duplicate, complete, legacy-fallback, unknown-node,
+empty-operation, and explicit-`UNKNOWN` branches. Existing production-path fixtures were upgraded
+to provide explicit typed metadata; the intentional missing/unknown tests remain uncompleted so
+they exercise the fail-closed path.
+
+### 13.4 Restore and protected-authority regression
+
+The final 20-round restore diagnostic remained clean:
+
+```text
+ROUNDS=20
+RESTORE_ROUND=10
+RAW_STRATEGY_CANDIDATES=160
+PREFLIGHTED_CANDIDATES=160
+VERIFIED_REFUTED_REQUIRED_CLAIMS=20
+REFUTED_REQUIRED_STRATEGY_ADMISSIONS=0
+SAME_MECHANISM_MULTI_ADMISSIONS=0
+UNRESOLVED_COMMON_MODE_CAP_VIOLATIONS=0
+DISTINCT_MECHANISM_PORTFOLIOS=20
+PORTFOLIO_SIZE_SHORTFALLS=0
+POST_RESTORE_CANDIDATE_LOSSES=0
+POST_RESTORE_PREFLIGHT_REPLAYS=0
+POST_RESTORE_PORTFOLIO_CHANGES=0
+POST_RESTORE_DUPLICATE_ROUTES=0
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+ATTEMPT_ARTIFACT_LEDGER_HASH_CHANGES=0
+CLAIM_LIFECYCLE_HASH_CHANGES=0
+RESEARCH_CHECKPOINT_LEDGER_HASH_CHANGES=0
+CANONICALIZATION_REGISTRY_HASH_CHANGES=0
+CONVERGENCE_STATE_HASH_CHANGES=0
+SEMANTIC_PIVOT_LEDGER_HASH_CHANGES=0
+RESULT=PASS
+```
+
+```text
+CANDIDATE_HASH_BEFORE_RESTORE=6db0779acf73b4775ae6814c3fdafa426546e7442847b14c2f23345bc046fc19
+CANDIDATE_HASH_AFTER_RESTORE=6db0779acf73b4775ae6814c3fdafa426546e7442847b14c2f23345bc046fc19
+MECHANISM_HASH_BEFORE_RESTORE=39adef4292fe0677dab9f71ca7a32027bf3bf43d8b3e4bdcbe3a3a02f4219a72
+MECHANISM_HASH_AFTER_RESTORE=39adef4292fe0677dab9f71ca7a32027bf3bf43d8b3e4bdcbe3a3a02f4219a72
+PORTFOLIO_HASH_BEFORE_RESTORE=ca591fa59b0191dc5eeccb9bcdd60f7b8f429812bad8fe1bc17b8b4c405687ad
+PORTFOLIO_HASH_AFTER_RESTORE=ca591fa59b0191dc5eeccb9bcdd60f7b8f429812bad8fe1bc17b8b4c405687ad
+```
+
+### 13.5 Final gates
+
+The first full verification run stopped at the unchanged Core branch-coverage gate:
+`74.987825% < 75%`. No threshold or performance gate was weakened. Adding direct tests for the
+new strict compiler branches raised final Core branch coverage to `75.280023%`.
+
+Final `verify-all.ps1 -Offline` results:
+
+```text
+Contracts: 50 tests, 0 failures, 0 errors, 0 skipped
+Core:      1126 tests, 0 failures, 0 errors, 0 skipped
+Server:     878 tests, 0 failures, 0 errors, 3 conditional skips
+Desktop:    168 tests, 0 failures, 0 errors, 1 conditional skip
+Java total: 2222 tests, 0 failures, 0 errors, 4 conditional skips
+Compatibility: 149 tests, 0 failures, 0 errors, 0 skipped
+
+CONTRACTS_ADJUSTED_BRANCH_COVERAGE=85.245220%
+CORE_BRANCH_COVERAGE=75.280023%
+CRITICAL_SCENARIOS=9/9
+FULL_VERIFICATION=PASS
+```
+
+All five Docker-backed PostgreSQL suites passed with no skip:
+`JdbcMessageRepositoryIT`, `MemoryProofGraphPostgresIT`, `PersistencePostgresIT`,
+`Phase17CheckpointOutboxPerformanceIT`, and `ProviderCallPostgresIT`. SpotBugs and FindSecBugs
+reported zero findings across all five Java modules; 115 dependencies had zero visible or CVSS 7+
+findings; 111 license components had zero missing or unreviewed entries; and the secret scan found
+zero findings in 1510 files.
+
+Issues 001-006 remained protected by the complete module and full-verification regressions. No
+Root Goal, Negative Knowledge authority, Claim lifecycle, Research Checkpoint, canonicalization,
+convergence, Semantic Pivot, Provider, concurrency, budget, Temporal, or Python Sidecar production
+semantics were changed.

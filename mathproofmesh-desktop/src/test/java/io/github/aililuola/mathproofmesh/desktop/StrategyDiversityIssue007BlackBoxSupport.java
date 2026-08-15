@@ -48,7 +48,8 @@ final class StrategyDiversityIssue007BlackBoxSupport {
       String requiredClaim,
       double estimatedSuccess,
       String tag) {
-    return new StrategyCard(
+    return DesktopStrategyMetadataTestSupport.complete(
+        new StrategyCard(
         null,
         "Close the finite graph target through " + mechanism + ".",
         List.of(),
@@ -68,8 +69,8 @@ final class StrategyDiversityIssue007BlackBoxSupport {
         List.of(),
         List.of("The graph is finite."),
         id,
-        List.of(tag),
-        title);
+            List.of(tag),
+            title));
   }
 
   static CriticalClaim claim(String id, String statement, String necessity, String status) {

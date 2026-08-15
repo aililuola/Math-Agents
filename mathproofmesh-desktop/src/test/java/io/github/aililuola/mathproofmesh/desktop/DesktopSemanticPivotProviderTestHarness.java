@@ -254,7 +254,8 @@ final class DesktopSemanticPivotProviderTestHarness implements AutoCloseable {
   }
 
   private static StrategyCard validStrategy() {
-    return new StrategyCard(
+    return DesktopStrategyMetadataTestSupport.complete(
+        new StrategyCard(
         null,
         "Prove bounded gaps from multiples of Q=rad(a_1).",
         List.of(),
@@ -272,13 +273,14 @@ final class DesktopSemanticPivotProviderTestHarness implements AutoCloseable {
         List.of(),
         List.of(),
         "valid-production-strategy",
-        List.of("bounded_gaps", "finite_state_bridge"),
-        "Valid bounded-gap route");
+            List.of("bounded_gaps", "finite_state_bridge"),
+            "Valid bounded-gap route"));
   }
 
   private static StrategyCard invalidStrategy() {
     String statement = GreedyGcdNegativeKnowledgeSeeds.finitePrimeSupport().trustedAliases().getFirst();
-    return new StrategyCard(
+    return DesktopStrategyMetadataTestSupport.complete(
+        new StrategyCard(
         null,
         "Derive the target after establishing a load-bearing shortcut.",
         List.of(),
@@ -296,8 +298,8 @@ final class DesktopSemanticPivotProviderTestHarness implements AutoCloseable {
         List.of(),
         List.of(),
         "setup-invalid-strategy",
-        List.of("candidate_shortcut"),
-        "Rejected setup shortcut");
+            List.of("candidate_shortcut"),
+            "Rejected setup shortcut"));
   }
 
   private static SystemConfig mockConfig(SystemConfig source) {

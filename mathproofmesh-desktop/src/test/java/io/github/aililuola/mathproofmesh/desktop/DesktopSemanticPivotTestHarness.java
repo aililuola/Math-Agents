@@ -162,26 +162,28 @@ final class DesktopSemanticPivotTestHarness implements AutoCloseable {
     StrategyCard source = field(route, "strategy", StrategyCard.class);
     PivotObstructionRef obstruction = obstructionRefs(route).values().stream().findFirst().orElseThrow();
     StrategyCard prose =
-        new StrategyCard(
-            null,
-            source.bottleneck(),
-            source.calculationChecks(),
-            source.calculationEvidenceRefs(),
-            source.computationHints(),
-            source.coreIdea() + " Restated without changing mathematical state.",
-            source.criticalClaims(),
-            source.estimatedCost(),
-            source.estimatedSuccess(),
-            source.expectedLemmas(),
-            source.falsificationTest(),
-            source.independenceBasis(),
-            source.inspirationProposalId(),
-            source.keyOriginalStep(),
-            List.of(source.strategyId()),
-            source.prerequisites(),
-            "semantic-text-only-" + ordinal,
-            source.tags(),
-            source.title() + " restated");
+        DesktopStrategyMetadataTestSupport.inherit(
+            new StrategyCard(
+                null,
+                source.bottleneck(),
+                source.calculationChecks(),
+                source.calculationEvidenceRefs(),
+                source.computationHints(),
+                source.coreIdea() + " Restated without changing mathematical state.",
+                source.criticalClaims(),
+                source.estimatedCost(),
+                source.estimatedSuccess(),
+                source.expectedLemmas(),
+                source.falsificationTest(),
+                source.independenceBasis(),
+                source.inspirationProposalId(),
+                source.keyOriginalStep(),
+                List.of(source.strategyId()),
+                source.prerequisites(),
+                "semantic-text-only-" + ordinal,
+                source.tags(),
+                source.title() + " restated"),
+            source);
     return PivotDelta.create(
         DesktopNegativeKnowledgeTestHarness.PROBLEM_HASH,
         rootHash(),
@@ -640,26 +642,30 @@ final class DesktopSemanticPivotTestHarness implements AutoCloseable {
   }
 
   private static StrategyCard proposedStrategy(StrategyCard source, String suffix) {
-    return new StrategyCard(
-        null,
-        "Reduce large primes in the global support family, case " + suffix,
-        source.calculationChecks(),
-        source.calculationEvidenceRefs(),
-        source.computationHints(),
-        "Study inclusion-minimal hitting sets for the global support family.",
-        source.criticalClaims(),
-        source.estimatedCost(),
-        source.estimatedSuccess(),
-        List.of("Prove the global large-prime support reduction, case " + suffix),
-        "Search for a global minimal support containing a forbidden large prime.",
-        "A trusted obstruction replaces the local object with a global one.",
-        source.inspirationProposalId(),
-        source.keyOriginalStep(),
-        List.of(source.strategyId()),
-        source.prerequisites(),
-        "semantic-pivot-strategy-" + suffix,
-        source.tags(),
-        "Global support pivot " + suffix);
+    return DesktopStrategyMetadataTestSupport.inherit(
+        new StrategyCard(
+            null,
+            "Reduce large primes in the global support family, case " + suffix,
+            source.calculationChecks(),
+            source.calculationEvidenceRefs(),
+            source.computationHints(),
+            "Study inclusion-minimal hitting sets for the global support family.",
+            source.criticalClaims(),
+            source.estimatedCost(),
+            source.estimatedSuccess(),
+            List.of(
+                "Classify inclusion-minimal support families, case " + suffix,
+                "Prove the global large-prime support reduction, case " + suffix),
+            "Search for a global minimal support containing a forbidden large prime.",
+            "A trusted obstruction replaces the local object with a global one.",
+            source.inspirationProposalId(),
+            source.keyOriginalStep(),
+            List.of(source.strategyId()),
+            source.prerequisites(),
+            "semantic-pivot-strategy-" + suffix,
+            source.tags(),
+            "Global support pivot " + suffix),
+        source);
   }
 
   record State(
