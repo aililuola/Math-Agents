@@ -2,15 +2,16 @@
 
 ## 1. Status and Git provenance
 
-- Status: `CLOSED` after the initial implementation and the structured-mechanism follow-up passed all gates below.
+- Status: `CLOSED` after the initial implementation, structured-mechanism hardening, and final typed-operation/context/preflight recovery follow-up passed all gates below.
 - Branch: `fix/007-strategy-mechanism-diversity`
 - Baseline branch: `java`
 - Baseline commit: `d42c896ef353259707f017d7e2a90dbd706e28b7`
 - Issue 006 prerequisite commit: `c73803297396057c52d4b6ef193ed00240fee9d7`
 - Initial implementation commit: `c1b64e77d1534446eeaa7b67063b15313d3fc297`
 - Follow-up hardening commit: `80c60634ab98d715a68119fabc621db36abfab38`
+- Final closure commit: `34dfa1b`
 - Baseline checkpoint schema: `12`
-- Resulting checkpoint schema: `14`
+- Resulting checkpoint schema: `15`
 
 The work stayed on the Issue 007 branch. It did not modify `main`, commit directly to
 `java`, or start Issue 008.
@@ -78,26 +79,36 @@ ACTUAL_FIRST_SELECTED=A
 
 `StrategyMechanismAnalyzer` builds a deterministic hard signature from the bound problem and
 root hashes, Issue 005 canonical target IDs, required-claim semantic keys, bounded object roles,
-bounded representation kind, the complete directed Blueprint topology, server-classified proof
-operations, and registered falsification-contract kinds. Raw `coreIdea`, `bottleneck`, expected
-lemma prose, falsification prose, and prerequisite prose are not serialized into the hard hash.
-The server classifier emits only `ProofOperationKind` and `MechanismOperationNode` values.
-It excludes title, strategy ID, route ID, agent ID, estimated success/cost, and free-form tag
-order.
+bounded representation kind, the complete directed Blueprint topology, server-validated typed
+operation declarations, and registered falsification-contract kinds. The hard path no longer
+calls `classifyOperations(strategy.coreIdea())`. Raw `coreIdea`, `bottleneck`, expected lemma
+prose, falsification prose, and prerequisite prose are not serialized into the hard hash.
 
-`StrategyMechanismProfile` records broad mechanism primitives only as non-authoritative
-coverage information. It cannot establish equivalence, Claim truth, Negative Knowledge, or
-proof closure. `SAME_STRUCTURAL_MECHANISM` is produced only by the hard signature.
+`MechanismOperationDeclaration` binds a fixed `MechanismOperationKind` to existing Blueprint
+inputs and outputs. The server resolves bounded selectors, validates node existence and directed
+reachability, rejects duplicate operation IDs and contradictory declarations on the same edge,
+and compiles only bounded `ProofOperationKind` values. An absent or `UNKNOWN` graph is marked
+unknown and receives a conservative candidate-local identity; it cannot hard-merge two
+strategies. Title, route, agent, model score, and tag order remain excluded.
+
+`StrategyMechanismProfile` may still classify prose for non-authoritative coverage information.
+It cannot establish equivalence, Claim truth, Negative Knowledge, proof closure, or a hard
+merge. `SAME_STRUCTURAL_MECHANISM` is produced only when both typed operation graphs are known
+and their server-compiled hard signatures match.
 
 ### 4.2 Critical Claim authority
 
 `CriticalClaimKeyCompiler` binds each Claim to the problem hash, normalized statement,
 assumptions, ordered quantifiers, variable bindings, scope, polarity, and required/supporting
-necessity. Production constructs `CriticalClaimContext` from the immutable Root Goal, strategy
-prerequisites, Blueprint completeness, and the Root Goal's quantifier/scope projection. Exact
-alpha-renaming is supported, but conditional, differently quantified, or differently scoped
-facts do not support the Claim. `TrustedStrategyPreflightEvidenceSource` reads only existing
-authoritative sources:
+necessity. Production no longer assigns one global context to every Claim.
+`CriticalClaimContextBinding` and `CriticalClaimContextCompiler` bind each Claim to its own
+server-compiled Blueprint node, incoming dependency edges, local assumptions, ordered
+quantifiers, variable bindings, scope limitations, and polarity, layered over the immutable Root
+Goal and strategy prerequisites. Context-only Claim nodes remain auditable Blueprint metadata
+and are not duplicated as Proof Graph obligations. Exact alpha-renaming is supported, but
+conditional, differently quantified, differently scoped, or opposite-polarity facts do not
+support the Claim. `TrustedStrategyPreflightEvidenceSource` reads only existing authoritative
+sources:
 
 - Permanent Negative Knowledge and verified counterexamples from Issue 002.
 - Verified Claim and Fact projections from Issue 003.
@@ -119,8 +130,13 @@ claim-to-contract binding and pass `StrategyPreflightPlanValidator`. The existin
 `ComputationBroker` executes the bounded read-only falsification request, audits independent
 replay, and records a durable `StrategyPreflightExecutionRecord` before admission. Unknown
 contracts are `UNTESTABLE`; invalid inputs are `ERROR`; bounded non-refutation is never upgraded
-to verified support. A persisted reservation or completed execution is never run twice after
-restore, and arbitrary code, shell commands, dependencies, and Docker images remain forbidden.
+to verified support. The durable frontier is explicitly typed as `RESERVED`, `RUNNING`,
+`RESULT_DURABLE`, `COMPLETED`, or `ABORTED` and binds execution ID, action key, typed input hash,
+artifact reference, and replay hash. An empty reservation can safely execute once after restore;
+a durable result rolls forward without recomputation; an uncertain running frontier is
+quarantined rather than converted into a false mathematical rejection. Completed executions are
+never replayed, and arbitrary code, shell commands, dependencies, and Docker images remain
+forbidden.
 
 ### 4.4 Calibration, common mode, and global selection
 
@@ -171,6 +187,11 @@ Checkpoint schema `13 -> 14` extends `StrategyPreflightSnapshot` with immutable 
 and exactly-once execution records. Missing V13 fields restore as empty; existing Issue 007
 candidate, mechanism, portfolio, and route projections remain unchanged.
 
+Checkpoint schema `14 -> 15` upgrades each execution record to the typed durable frontier above.
+Legacy `started` records migrate conservatively to `RUNNING` quarantine; legacy `completed`
+records derive replayable artifact and evidence hashes and keep their completed authority. Newer
+weaker snapshots cannot downgrade a durable or completed frontier.
+
 ## 5. Domain neutrality
 
 The new Core production package has zero references to `GreedyGcd`,
@@ -188,6 +209,11 @@ detector, and is not a dependency of the Issue 007 Core or its tests.
 
 - `CriticalClaimPreflightPlan.java`: bounded non-authoritative preflight request contract.
 - `StrategyPreflightPlan.java`: candidate-bound collection of preflight plans.
+- `MechanismOperationKind.java` and `MechanismOperationDeclaration.java`: bounded typed operation
+  vocabulary and Blueprint bindings.
+- `CriticalClaimContextBinding.java`: Claim-local assumptions, quantifiers, variables, scope,
+  polarity, and Blueprint-node sidecar.
+- `StrategyCard.java`: backward-compatible optional typed operation and Claim-context metadata.
 
 ### Core production
 
@@ -197,13 +223,13 @@ The new `strategydiversity` package contains:
   `StrategyMechanismProfile`, `StrategyMechanismPrimitive`, `StrategyMechanismRelation`,
   `StrategyMechanismRegistry`, `StrategyMechanismSnapshot`.
 - Critical Claim preflight: `CriticalClaimSemanticKey`, `CriticalClaimKeyCompiler`,
-  `CriticalClaimContext`,
+  `CriticalClaimContext`, `CriticalClaimContextCompiler`,
   `CriticalClaimPreflightSpec`, `CriticalClaimPreflightEvidence`,
   `CriticalClaimPreflightResult`, `CriticalClaimPreflightStatus`,
   `StrategyPreflightEvidenceSource`, `TrustedStrategyPreflightEvidenceSource`,
   `StrategyCriticalClaimPreflight`, `StrategyPreflightPlanCompiler`,
-  `StrategyPreflightExecutionRecord`, `StrategyPreflightReport`, `StrategyPreflightRegistry`,
-  `StrategyPreflightSnapshot`.
+  `StrategyPreflightExecutionRecord`, `StrategyPreflightExecutionStatus`,
+  `StrategyPreflightReport`, `StrategyPreflightRegistry`, `StrategyPreflightSnapshot`.
 - Structured hard identity: `StructuredRepresentationKind`, `ProofOperationKind`,
   `MechanismOperationNode`, and `StrategyMechanismStructureCompiler`.
 - Candidate and common-mode state: `StrategyCandidateStatus`, `StrategyCandidateRecord`,
@@ -226,8 +252,9 @@ The new `strategydiversity` package contains:
   cross-problem plans, and model authority fields.
 - `DesktopSolveCoordinator.java`: production pipeline, one-shot replenishment, atomic commit,
   restore, and whole-portfolio widening gate.
-- `DesktopSolveCheckpoint.java`: schema 14 and durable Issue 007 plan/execution state.
+- `DesktopSolveCheckpoint.java`: schema 15 and crash-recoverable Issue 007 plan/execution state.
 - `StrategyPortfolioFailurePoint.java`: deterministic exception and hard-crash injection points.
+- `StrategyPreflightFailurePoint.java`: reservation/result-frontier process-crash injection points.
 - `GreedyGcdDomainStrategySeedProvider.java`: isolated optional legacy domain extension.
 
 ### Tests
@@ -357,12 +384,13 @@ All explicit Issue 001-006 suites passed before the final full gate:
 Final `verify-all.ps1 -Offline` result:
 
 - `FULL VERIFICATION: PASS`.
-- Maven module total: 2348 tests, 0 failures, 0 errors; 4 pre-existing conditional skips.
+- Java module total: 2216 tests, 0 failures, 0 errors; 4 pre-existing conditional skips.
 - All nine critical scenario groups passed with zero critical skips.
 - PostgreSQL Testcontainers passed:
   `JdbcMessageRepositoryIT`, `MemoryProofGraphPostgresIT`, `PersistencePostgresIT`,
   `Phase17CheckpointOutboxPerformanceIT`, and `ProviderCallPostgresIT`.
-- Core branch coverage: `7534 / 10020 = 75.189621%`, above the unchanged 75% gate.
+- Contracts adjusted branch coverage: `1991 / 2282 = 87.248028%`, above the unchanged 85% gate.
+- Core branch coverage: `5188 / 6911 = 75.068731%`, above the unchanged 75% gate.
 - SpotBugs and FindSecBugs: 0 findings in all five Java modules.
 - OWASP dependency gate: 115 dependencies scanned, 0 visible findings, 0 findings at CVSS 7+.
 - License gate: 111 components, 0 missing and 0 unreviewed licenses.
@@ -464,3 +492,108 @@ PORTFOLIO_HASH_AFTER_RESTORE=0eb903f2d647ce80b8488eb1f5ffd2c839b38fe4d08797ff8ff
 The final `verify-all.ps1 -Offline` run completed with exit code 0, including all five PostgreSQL
 Testcontainers suites, unchanged coverage/security/license/SpotBugs gates, and the frozen 401-file
 source manifest. The three generated Phase 17 report files were intentionally not committed.
+
+## 12. Final typed-operation, Claim-context, and preflight recovery closure
+
+Commit `34dfa1b` closes the three remaining Issue 007 gaps without starting Issue 008.
+
+### 12.1 Hard signature authority
+
+The hard signature is now independent of Strategy-author prose. The six out-of-vocabulary
+paraphrases use identical server-validated typed operation graphs and collapse to one admission.
+Unknown operation graphs do not hard-merge. Invalid nodes, reversed reachability, duplicate
+operation IDs, and contradictory edge kinds fail deterministic compilation.
+
+```text
+OUT_OF_VOCABULARY_SAME_MECHANISM_CANDIDATES=6
+ADMISSIONS=1
+PARAPHRASE_BYPASS_LEAKS=0
+UNKNOWN_OPERATION_HARD_MERGES=0
+```
+
+### 12.2 Claim-local production context
+
+The tests invoke the actual Desktop `controlStrategy -> StrategyBlueprintCompiler ->
+criticalClaimContexts` path. Five identical `P(x)` statements receive five real
+`critical_claim` Blueprint bindings and distinct semantic contexts. Context-only Claim nodes do
+not enter the Proof Graph mutation path, so they cannot create duplicate obligations or
+canonical self-edges.
+
+```text
+PER_CLAIM_CONTEXTS=5
+DISTINCT_CONTEXT_KEYS=5
+CLAIM_BLUEPRINT_BINDINGS=5
+LOCAL_ASSUMPTION_FALSE_SUPPORTS=0
+LOCAL_QUANTIFIER_FALSE_SUPPORTS=0
+POLARITY_FALSE_SUPPORTS=0
+```
+
+### 12.3 Crash-safe registered preflight
+
+Two simulated process terminations cover the durable windows after reservation and after result
+persistence but before completion. Restore safely runs an empty reservation once, rolls a
+durable result forward without executing the computation again, and preserves the selected
+portfolio. A persisted uncertain `RUNNING` record is quarantined rather than hard-rejected.
+
+```text
+PREFLIGHT_CRASHES_INJECTED=2
+SAFE_REEXECUTIONS_AFTER_EMPTY_RESERVATION=1
+INCOMPLETE_FRONTIER_HARD_REJECTIONS=0
+RESULT_DURABLE_FRONTIERS=1
+RESULT_ROLL_FORWARDS=1
+DUPLICATE_COMPUTATION_EXECUTIONS=0
+DUPLICATE_PREFLIGHT_EVIDENCE=0
+POST_RESTORE_STRATEGY_SELECTION_CHANGES=0
+```
+
+Legacy snapshot coverage confirms `started -> RUNNING` and `completed -> COMPLETED` migration,
+including derived replay data. Registry merge tests confirm that a later weaker or higher-version
+frontier cannot downgrade a completed result.
+
+### 12.4 Test-first evidence and final gates
+
+Before production implementation, the first new Core tests failed compilation with seven errors
+because `MechanismOperationDeclaration`, `MechanismOperationKind`, and
+`operationGraphKnown` did not exist. This is recorded as pre-fix architecture-missing evidence,
+not misrepresented as a complete old-system behavioral replay.
+
+The final focused follow-up suites were:
+
+| Module | Tests | Failures | Errors | Skipped | Result |
+|---|---:|---:|---:|---:|---|
+| Contracts | 2 | 0 | 0 | 0 | PASS |
+| Core | 10 | 0 | 0 | 0 | PASS |
+| Desktop | 8 | 0 | 0 | 0 | PASS |
+
+The first broad regression correctly exposed that context-only Claim nodes were being projected
+as ordinary Proof Graph obligations. The final implementation keeps them in the auditable
+Blueprint while excluding duplicate graph writes; both the bounded-non-refutation test and the
+20-round Semantic Pivot canonicalization test then passed with zero graph/canonicalization
+leaks.
+
+Final `verify-all.ps1 -Offline` results:
+
+```text
+Contracts: 50 tests, 0 failures, 0 errors, 0 skipped
+Core:      1122 tests, 0 failures, 0 errors, 0 skipped
+Server:     878 tests, 0 failures, 0 errors, 3 conditional skips
+Desktop:    166 tests, 0 failures, 0 errors, 1 conditional skip
+Java total: 2216 tests, 0 failures, 0 errors, 4 conditional skips
+
+CONTRACTS_ADJUSTED_BRANCH_COVERAGE=87.248028%
+CORE_BRANCH_COVERAGE=75.068731%
+CRITICAL_SCENARIOS=9/9
+FULL_VERIFICATION=PASS
+```
+
+All five PostgreSQL suites passed through Docker:
+`JdbcMessageRepositoryIT`, `MemoryProofGraphPostgresIT`, `PersistencePostgresIT`,
+`Phase17CheckpointOutboxPerformanceIT`, and `ProviderCallPostgresIT`. SpotBugs initially caught
+ordinary String comparisons on the new hash fields; the implementation now uses the existing
+constant-time hash comparator. No SpotBugs suppression or coverage/performance threshold was
+added or weakened.
+
+Issue 001 Root Goal authority, Issue 002 Negative Knowledge, Issue 003 Claim lifecycle,
+Issue 004 Research Checkpoints, Issue 005 canonicalization/convergence, and Issue 006 Semantic
+Pivot behavior remained protected by the full regression. No Issue 008 production work was
+introduced.
