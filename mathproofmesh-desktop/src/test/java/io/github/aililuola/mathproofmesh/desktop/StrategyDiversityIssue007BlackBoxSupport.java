@@ -177,13 +177,6 @@ final class StrategyDiversityIssue007BlackBoxSupport {
           new CandidateParts(
               strategy, blueprint, signature, analyzer.profile(strategy, blueprint), report));
     }
-    Map<String, Long> signatureCounts =
-        parts.values().stream()
-            .collect(
-                java.util.stream.Collectors.groupingBy(
-                    candidate -> candidate.signature().structuralSignatureHash(),
-                    LinkedHashMap::new,
-                    java.util.stream.Collectors.counting()));
     StrategyFeasibilityCalibrator calibrator =
         new StrategyFeasibilityCalibrator(StrategyDiversityConfig.defaults());
     List<StrategyPortfolioCandidate> candidates =
@@ -201,10 +194,7 @@ final class StrategyDiversityIssue007BlackBoxSupport {
                             candidate.blueprint(),
                             candidate.preflight(),
                             1.0d,
-                            signatureCounts.get(candidate.signature().structuralSignatureHash())
-                                        == 1L
-                                ? 1.0d
-                                : 0.0d,
+                            1.0d,
                             1.0d,
                             commonMode.groupsFor(candidate.strategy().strategyId()).isEmpty()
                                 ? 0.0d

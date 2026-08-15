@@ -11,7 +11,10 @@ public record StrategyDiversityConfig(
     double portfolioComplementarityWeight,
     double commonModePenaltyWeight,
     double costPenaltyWeight,
-    double maximumModelPriorContribution) {
+    double maximumModelPriorContribution,
+    double minimumAdmissibleFeasibility,
+    double minimumBlueprintCompleteness,
+    double minimumRequiredClaimEvidenceForPrimaryRoute) {
   public StrategyDiversityConfig {
     if (maxExactPortfolioCandidates < 1 || minPortfolioSize < 1) {
       throw new IllegalArgumentException("portfolio sizes must be positive");
@@ -25,6 +28,11 @@ public record StrategyDiversityConfig(
     unit(commonModePenaltyWeight, "commonModePenaltyWeight");
     unit(costPenaltyWeight, "costPenaltyWeight");
     unit(maximumModelPriorContribution, "maximumModelPriorContribution");
+    unit(minimumAdmissibleFeasibility, "minimumAdmissibleFeasibility");
+    unit(minimumBlueprintCompleteness, "minimumBlueprintCompleteness");
+    unit(
+        minimumRequiredClaimEvidenceForPrimaryRoute,
+        "minimumRequiredClaimEvidenceForPrimaryRoute");
     if (maximumModelPriorContribution > 0.10d) {
       throw new IllegalArgumentException("model prior contribution cannot exceed 10 percent");
     }
@@ -42,7 +50,29 @@ public record StrategyDiversityConfig(
         0.15d,
         0.20d,
         0.05d,
-        0.10d);
+        0.10d,
+        0.30d,
+        0.20d,
+        0.0d);
+  }
+
+  public StrategyDiversityConfig withQualityGate(
+      double feasibility, double blueprintCompleteness, double requiredClaimEvidence) {
+    return new StrategyDiversityConfig(
+        maxExactPortfolioCandidates,
+        minPortfolioSize,
+        unknownRequiredClaimUpperBound,
+        rootGoalAlignmentWeight,
+        blueprintCompletenessWeight,
+        requiredClaimEvidenceWeight,
+        mechanismNoveltyWeight,
+        portfolioComplementarityWeight,
+        commonModePenaltyWeight,
+        costPenaltyWeight,
+        maximumModelPriorContribution,
+        feasibility,
+        blueprintCompleteness,
+        requiredClaimEvidence);
   }
 
   private static void unit(double value, String name) {

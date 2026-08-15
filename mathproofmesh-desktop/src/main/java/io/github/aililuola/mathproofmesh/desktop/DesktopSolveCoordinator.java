@@ -34,6 +34,7 @@ import io.github.aililuola.mathproofmesh.computation.ComputationBroker.Computati
 import io.github.aililuola.mathproofmesh.computation.ComputationContext;
 import io.github.aililuola.mathproofmesh.computation.ComputationEvidenceGate;
 import io.github.aililuola.mathproofmesh.computation.ContractsFunctions;
+import io.github.aililuola.mathproofmesh.computation.ToolBroker;
 import io.github.aililuola.mathproofmesh.config.BudgetConfig;
 import io.github.aililuola.mathproofmesh.config.GoalPreflightService;
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
@@ -50,12 +51,15 @@ import io.github.aililuola.mathproofmesh.contract.ClaimCard;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewBatch;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewDecision;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatus;
+import io.github.aililuola.mathproofmesh.contract.ComputationPurpose;
 import io.github.aililuola.mathproofmesh.contract.ComputationDecision;
 import io.github.aililuola.mathproofmesh.contract.ComputationDecisionStatus;
 import io.github.aililuola.mathproofmesh.contract.ComputationContractRepair;
 import io.github.aililuola.mathproofmesh.contract.ComputationContractRepairAction;
 import io.github.aililuola.mathproofmesh.contract.ComputationContractRepairStatus;
 import io.github.aililuola.mathproofmesh.contract.ComputationMethod;
+import io.github.aililuola.mathproofmesh.contract.CriticalClaim;
+import io.github.aililuola.mathproofmesh.contract.CriticalClaimPreflightPlan;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
 import io.github.aililuola.mathproofmesh.contract.EvidenceRef;
 import io.github.aililuola.mathproofmesh.contract.EvidenceType;
@@ -92,6 +96,7 @@ import io.github.aililuola.mathproofmesh.contract.ProofAttempt;
 import io.github.aililuola.mathproofmesh.contract.ProofGraphEdge;
 import io.github.aililuola.mathproofmesh.contract.ProofObligation;
 import io.github.aililuola.mathproofmesh.contract.ProofStep;
+import io.github.aililuola.mathproofmesh.contract.QuantifierSpec;
 import io.github.aililuola.mathproofmesh.contract.ReceiptStatus;
 import io.github.aililuola.mathproofmesh.contract.ResearchFindingDispositionAction;
 import io.github.aililuola.mathproofmesh.contract.ResearchFindingKind;
@@ -102,13 +107,16 @@ import io.github.aililuola.mathproofmesh.contract.RouteStatus;
 import io.github.aililuola.mathproofmesh.contract.SemanticPivotProposal;
 import io.github.aililuola.mathproofmesh.contract.SemanticPivotReviewBatch;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
+import io.github.aililuola.mathproofmesh.contract.StrategyPreflightPlan;
 import io.github.aililuola.mathproofmesh.contract.StrategySet;
 import io.github.aililuola.mathproofmesh.contract.TaskRequirement;
 import io.github.aililuola.mathproofmesh.contract.TriageResult;
 import io.github.aililuola.mathproofmesh.contract.ToolAuditReport;
+import io.github.aililuola.mathproofmesh.contract.ToolRequest;
 import io.github.aililuola.mathproofmesh.contract.VerificationReport;
 import io.github.aililuola.mathproofmesh.contract.VerificationStage;
 import io.github.aililuola.mathproofmesh.contract.VerificationVerdict;
+import io.github.aililuola.mathproofmesh.contract.VariableBinding;
 import io.github.aililuola.mathproofmesh.inspiration.InspirationAssignmentPlanner;
 import io.github.aililuola.mathproofmesh.inspiration.InspirationEngine;
 import io.github.aililuola.mathproofmesh.inspiration.InspirationMechanismRegistry;
@@ -238,7 +246,9 @@ import io.github.aililuola.mathproofmesh.provider.AgentRuntime;
 import io.github.aililuola.mathproofmesh.provider.ProviderErrorKind;
 import io.github.aililuola.mathproofmesh.topology.SparseTopologyRouter;
 import io.github.aililuola.mathproofmesh.strategydiversity.CommonModeRiskRegistry;
+import io.github.aililuola.mathproofmesh.strategydiversity.CriticalClaimContext;
 import io.github.aililuola.mathproofmesh.strategydiversity.CriticalClaimKeyCompiler;
+import io.github.aililuola.mathproofmesh.strategydiversity.CriticalClaimPreflightEvidence;
 import io.github.aililuola.mathproofmesh.strategydiversity.CriticalClaimPreflightStatus;
 import io.github.aililuola.mathproofmesh.strategydiversity.GenericStrategyGenerationPolicy;
 import io.github.aililuola.mathproofmesh.strategydiversity.PortfolioReplenishmentLedger;
@@ -261,9 +271,12 @@ import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioDeci
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioOptimizer;
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioRegistry;
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPreflightRegistry;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPreflightExecutionRecord;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPreflightPlanCompiler;
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPreflightReport;
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategySemanticNormalizer;
 import io.github.aililuola.mathproofmesh.strategydiversity.TrustedStrategyPreflightEvidenceSource;
+import io.github.aililuola.mathproofmesh.agent.StrategyPreflightPlanValidator;
 import io.github.aililuola.mathproofmesh.verification.BlindReviewPacketFactory;
 import io.github.aililuola.mathproofmesh.verification.EscalationPlan;
 import io.github.aililuola.mathproofmesh.verification.FormalizationCoverage;
@@ -358,12 +371,15 @@ final class DesktopSolveCoordinator {
   private final Map<String, StrategyBlueprintCompiler.Compilation> strategyBlueprints =
       new LinkedHashMap<>();
   private final Map<String, ProofControlModels.GoalLink> goalLinks = new LinkedHashMap<>();
-  private final StrategyDiversityConfig strategyDiversityConfig =
-      StrategyDiversityConfig.defaults();
+  private StrategyDiversityConfig strategyDiversityConfig = StrategyDiversityConfig.defaults();
   private final StrategyMechanismAnalyzer strategyMechanismAnalyzer =
       new StrategyMechanismAnalyzer();
   private final StrategyPortfolioOptimizer strategyPortfolioOptimizer =
       new StrategyPortfolioOptimizer();
+  private final StrategyPreflightPlanCompiler strategyPreflightPlanCompiler =
+      new StrategyPreflightPlanCompiler();
+  private final StrategyPreflightPlanValidator strategyPreflightPlanValidator =
+      new StrategyPreflightPlanValidator();
   private StrategyCandidateLedger strategyCandidates = new StrategyCandidateLedger();
   private StrategyMechanismRegistry strategyMechanisms = new StrategyMechanismRegistry();
   private StrategyPreflightRegistry strategyPreflights = new StrategyPreflightRegistry();
@@ -774,8 +790,15 @@ final class DesktopSolveCoordinator {
           Math.min(
               strategyDiversityConfig.minPortfolioSize(),
               Math.min(budget.strategiesToGenerate(), budget.maxPaths()));
-      if (preparation.decision().selectedStrategyIds().size()
-              < effectiveMinimumPortfolioSize
+      int requestedPortfolioSize =
+          Math.min(budget.strategiesToGenerate(), budget.maxPaths());
+      int qualifiedPortfolioTarget =
+          Math.min(requestedPortfolioSize, distinctStrategies(strategySet.strategies()).size());
+      boolean qualifiedPortfolioShortfall =
+          preparation.decision().selectedStrategyIds().size() < qualifiedPortfolioTarget;
+      if ((preparation.decision().selectedStrategyIds().size()
+                  < effectiveMinimumPortfolioSize
+              || qualifiedPortfolioShortfall)
           && strategySet.strategies().size() >= effectiveMinimumPortfolioSize
           && initialBatchGeneratedHere
           && portfolioReplenishments.mayRequest(episodeId)) {
@@ -839,9 +862,11 @@ final class DesktopSolveCoordinator {
       return prepared;
     } finally {
       if (!completed) {
+        var durablePreflights = strategyPreflights.snapshot();
         strategyCandidates = StrategyCandidateLedger.restore(candidatesBefore);
         strategyMechanisms = StrategyMechanismRegistry.restore(mechanismsBefore);
         strategyPreflights = StrategyPreflightRegistry.restore(preflightsBefore);
+        strategyPreflights.mergeDurable(durablePreflights);
       }
     }
   }
@@ -856,7 +881,6 @@ final class DesktopSolveCoordinator {
             .scopeGuard()
             .extract("goal-scope", rootGoal().sourceStatement(), List.of(), 1.0d);
     ProofControlModels.Mode mode = proofControlMode();
-    StrategyCriticalClaimPreflight preflight = trustedStrategyPreflight();
     CommonModeRiskRegistry commonMode = new CommonModeRiskRegistry();
     int captureOrder = 0;
     for (StrategyCard strategy : raw) {
@@ -905,6 +929,8 @@ final class DesktopSolveCoordinator {
             strategy, StrategyCandidateStatus.REJECTED_INVALID, exception.getClass().getSimpleName());
         continue;
       }
+      Map<String, CriticalClaimContext> claimContexts =
+          criticalClaimContexts(strategy, blueprint, scope);
       StrategyMechanismSignature signature =
           strategyMechanisms
               .signature(strategy.strategyId())
@@ -915,25 +941,35 @@ final class DesktopSolveCoordinator {
                           rootGoal().sourceStatementHash(),
                           strategy,
                           controlStrategy,
-                          blueprint));
+                          blueprint,
+                          claimContexts,
+                          strategyCanonicalTargetIds()));
       StrategyMechanismProfile profile =
           strategyMechanisms
               .profile(strategy.strategyId())
               .orElseGet(() -> strategyMechanismAnalyzer.profile(strategy, blueprint));
       strategyMechanisms.register(strategy.strategyId(), signature, profile, false);
-      StrategyPreflightReport report =
-          strategyPreflights
-              .find(strategy.strategyId())
-              .orElseGet(() -> strategyPreflights.record(preflight.evaluate(problemHash, strategy)));
-      StrategyCandidateStatus preflightStatus = preflightStatus(report);
+      StrategyPreflightReport report = strategyPreflights.find(strategy.strategyId()).orElse(null);
+      if (report == null) {
+        StrategyPreflightPlan plan = prepareStrategyPreflightPlan(strategy, claimContexts);
+        Map<String, CriticalClaimPreflightEvidence> computationEvidence =
+            executeRegisteredStrategyPreflight(strategy, plan, claimContexts);
+        report =
+            strategyPreflights.record(
+                trustedStrategyPreflight(computationEvidence)
+                    .evaluate(problemHash, strategy, claimContexts, plan));
+      }
+      StrategyPreflightReport resolvedReport = report;
+      StrategyCandidateStatus preflightStatus = preflightStatus(resolvedReport);
       if (preflightStatus != StrategyCandidateStatus.PREFLIGHTED) {
         strategyCandidates.transition(
             strategy.strategyId(),
             preflightStatus,
             signature.structuralSignatureHash(),
-            report.reportHash(),
+            resolvedReport.reportHash(),
             null,
-            preflightDetail(report));
+            preflightDetail(resolvedReport));
+        continue;
       }
       try {
         negativeKnowledgeGate.requireAllAllowed(
@@ -948,9 +984,6 @@ final class DesktopSolveCoordinator {
             "route_admission_and_team",
             strategy.title(),
             exception);
-        continue;
-      }
-      if (preflightStatus != StrategyCandidateStatus.PREFLIGHTED) {
         continue;
       }
       var baseDecision =
@@ -973,46 +1006,43 @@ final class DesktopSolveCoordinator {
                     strategy.strategyId(),
                     StrategyCandidateStatus.BASE_VALIDATED,
                     signature.structuralSignatureHash(),
-                    report.reportHash(),
+                    resolvedReport.reportHash(),
                     null,
                     "BASE_VALIDATED");
                 strategyCandidates.transition(
                     strategy.strategyId(),
                     StrategyCandidateStatus.PREFLIGHTED,
                     signature.structuralSignatureHash(),
-                    report.reportHash(),
+                    resolvedReport.reportHash(),
                     null,
-                    preflightDetail(report));
+                    preflightDetail(resolvedReport));
               });
-      commonMode.observe(report);
+      commonMode.observe(resolvedReport);
       prepared.put(
           strategy.strategyId(),
           new PreparedStrategyCandidate(
-              strategy, controlStrategy, blueprint, link, signature, profile, report));
+              strategy,
+              controlStrategy,
+              blueprint,
+              link,
+              signature,
+              profile,
+              resolvedReport));
     }
     failStrategyPortfolioAt(StrategyPortfolioFailurePoint.AFTER_PREFLIGHT);
 
-    Map<String, Long> signatureCounts =
-        prepared.values().stream()
-            .collect(
-                java.util.stream.Collectors.groupingBy(
-                    candidate -> candidate.signature().structuralSignatureHash(),
-                    LinkedHashMap::new,
-                    java.util.stream.Collectors.counting()));
     List<StrategyPortfolioCandidate> candidates = new ArrayList<>();
     StrategyFeasibilityCalibrator calibrator =
         new StrategyFeasibilityCalibrator(strategyDiversityConfig);
     for (PreparedStrategyCandidate candidate : prepared.values()) {
       int commonGroups = commonMode.groupsFor(candidate.strategy().strategyId()).size();
-      double novelty =
-          signatureCounts.get(candidate.signature().structuralSignatureHash()) == 1L ? 1.0d : 0.0d;
       var score =
           calibrator.calibrate(
               candidate.strategy(),
               candidate.blueprint(),
               candidate.preflight(),
               candidate.goalLink().confidence(),
-              novelty,
+              1.0d,
               1.0d,
               commonGroups == 0 ? 0.0d : 1.0d);
       strategyCandidates
@@ -1048,7 +1078,10 @@ final class DesktopSolveCoordinator {
                 Math.min(strategyDiversityConfig.minPortfolioSize(), requested),
                 strategyDiversityConfig.maxExactPortfolioCandidates(),
                 Set.of(),
-                Set.of()));
+                Set.of(),
+                strategyDiversityConfig.minimumAdmissibleFeasibility(),
+                strategyDiversityConfig.minimumBlueprintCompleteness(),
+                strategyDiversityConfig.minimumRequiredClaimEvidenceForPrimaryRoute()));
     failStrategyPortfolioAt(StrategyPortfolioFailurePoint.AFTER_PORTFOLIO_SELECTION);
     return new StrategyPortfolioPreparation(candidates, prepared, decision);
   }
@@ -1098,7 +1131,7 @@ final class DesktopSolveCoordinator {
     int needed =
         Math.max(
             1,
-            strategyDiversityConfig.minPortfolioSize()
+            Math.min(config.budget().strategiesToGenerate(), config.budget().maxPaths())
                 - preparation.decision().selectedStrategyIds().size());
     Map<String, Object> gap = new LinkedHashMap<>();
     gap.put("episode_id", episodeId);
@@ -1155,6 +1188,13 @@ final class DesktopSolveCoordinator {
   }
 
   private StrategyCriticalClaimPreflight trustedStrategyPreflight() {
+    return trustedStrategyPreflight(Map.of());
+  }
+
+  private StrategyCriticalClaimPreflight trustedStrategyPreflight(
+      Map<String, CriticalClaimPreflightEvidence> computationEvidence) {
+    Map<String, CriticalClaimPreflightEvidence> safeEvidence =
+        computationEvidence == null ? Map.of() : Map.copyOf(computationEvidence);
     return new StrategyCriticalClaimPreflight(
         new CriticalClaimKeyCompiler(),
         List.of(
@@ -1163,7 +1203,295 @@ final class DesktopSolveCoordinator {
                 negativeKnowledgeGate,
                 lemmaMemory.verified(),
                 typedMemory.facts(),
-                roundIndex.get())));
+                roundIndex.get()),
+            (key, spec) -> Optional.ofNullable(safeEvidence.get(spec.claim().claimId()))));
+  }
+
+  private StrategyPreflightPlan prepareStrategyPreflightPlan(
+      StrategyCard strategy, Map<String, CriticalClaimContext> claimContexts) {
+    Optional<StrategyPreflightPlan> existing = strategyPreflights.plan(strategy.strategyId());
+    if (existing.isPresent()) {
+      return validateStrategyPreflightPlan(strategy, existing.get());
+    }
+    StrategyPreflightPlan serverBinding =
+        strategyPreflightPlanCompiler.compile(problemHash, strategy);
+    StrategyPreflightPlan plan = serverBinding;
+    if (!strategyPreflightPlanCompiler.registeredContractIds(strategy).isEmpty()) {
+      AgentRuntime planner =
+          pool.select("planner", Set.of(), List.of("problem_decomposition"), null, true);
+      plan =
+          callStage(
+                  "strategy-preflight-plan-" + strategy.strategyId(),
+                  "strategy_preflight_plan",
+                  StrategyPreflightPlan.class,
+                  Map.of(
+                      "immutable_problem", frozenProblem,
+                      "problem_hash", problemHash,
+                      "strategy_candidate", strategy,
+                      "critical_claim_contexts", claimContexts,
+                      "registered_computation_contracts", strategy.calculationChecks(),
+                      "server_binding_candidates", serverBinding),
+                  planner,
+                  "verification",
+                  "Binding load-bearing claims to registered computation contracts")
+              .value();
+      requireServerAuthorizedPreflightBindings(serverBinding, plan);
+    }
+    validateStrategyPreflightPlan(strategy, plan);
+    return strategyPreflights.recordPlan(plan);
+  }
+
+  private StrategyPreflightPlan validateStrategyPreflightPlan(
+      StrategyCard strategy, StrategyPreflightPlan plan) {
+    Set<String> claimIds =
+        strategy.criticalClaims().stream()
+            .map(CriticalClaim::claimId)
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    return strategyPreflightPlanValidator.validate(
+        plan,
+        problemHash,
+        strategy.strategyId(),
+        claimIds,
+        strategyPreflightPlanCompiler.registeredContractIds(strategy));
+  }
+
+  private static void requireServerAuthorizedPreflightBindings(
+      StrategyPreflightPlan expected, StrategyPreflightPlan candidate) {
+    if (!CanonicalJson.stableHash(expected).equals(CanonicalJson.stableHash(candidate))) {
+      throw new IllegalArgumentException(
+          "strategy preflight plan changed a server-authorized claim binding");
+    }
+  }
+
+  private Map<String, CriticalClaimContext> criticalClaimContexts(
+      StrategyCard strategy,
+      StrategyBlueprintCompiler.Compilation blueprint,
+      ProofControlModels.ScopeSignature rootScope) {
+    LinkedHashSet<String> assumptions = new LinkedHashSet<>(controlGoal().assumptions());
+    assumptions.addAll(strategy.prerequisites());
+    List<QuantifierSpec> quantifiers = new ArrayList<>();
+    List<VariableBinding> bindings = new ArrayList<>();
+    int order = 0;
+    for (ExactGoalContractChecker.QuantifierAtom atom :
+        rootGoal().signature().quantifierSkeleton()) {
+      for (String variable : atom.variables()) {
+        String variableId = "root-q" + order;
+        quantifiers.add(
+            new QuantifierSpec(
+                variable,
+                "root-goal quantified domain",
+                atom.kind(),
+                order,
+                List.of(),
+                variableId));
+        bindings.add(
+            new VariableBinding(
+                List.of(variable),
+                variable,
+                "root-goal quantified domain",
+                "root-goal",
+                variableId));
+        order++;
+      }
+    }
+    List<String> scope = new ArrayList<>();
+    if (rootScope.indexScope() != ProofControlModels.IndexScope.UNKNOWN) {
+      scope.add("index_scope=" + rootScope.indexScope().name().toLowerCase(Locale.ROOT));
+    }
+    if (rootScope.uniformity() != ProofControlModels.UniformityScope.UNKNOWN) {
+      scope.add("uniformity=" + rootScope.uniformity().name().toLowerCase(Locale.ROOT));
+    }
+    if (rootScope.objectScope() != ProofControlModels.ObjectScope.UNKNOWN) {
+      scope.add("object_scope=" + rootScope.objectScope().name().toLowerCase(Locale.ROOT));
+    }
+    scope.addAll(rootScope.domainConstraints());
+    scope.addAll(rootScope.exceptionalCases());
+    if (!blueprint.blueprint().completePathToMainGoal()) {
+      scope.add("incomplete_blueprint");
+    }
+    CriticalClaimContext context =
+        new CriticalClaimContext(
+            List.copyOf(assumptions), quantifiers, scope, bindings, "positive");
+    Map<String, CriticalClaimContext> result = new LinkedHashMap<>();
+    strategy.criticalClaims().forEach(claim -> result.put(claim.claimId(), context));
+    return Map.copyOf(result);
+  }
+
+  private Map<String, CriticalClaimPreflightEvidence> executeRegisteredStrategyPreflight(
+      StrategyCard strategy,
+      StrategyPreflightPlan plan,
+      Map<String, CriticalClaimContext> contexts) {
+    String planHash = CanonicalJson.stableHash(plan);
+    Map<String, CriticalClaim> claims =
+        strategy.criticalClaims().stream()
+            .collect(
+                java.util.stream.Collectors.toMap(
+                    CriticalClaim::claimId,
+                    value -> value,
+                    (left, right) -> left,
+                    LinkedHashMap::new));
+    Map<String, CriticalClaimPreflightEvidence> evidence = new LinkedHashMap<>();
+    for (CriticalClaimPreflightPlan claimPlan : plan.claimPlans()) {
+      if (claimPlan.computationContractId() == null
+          || claimPlan.computationContractId().isBlank()) {
+        continue;
+      }
+      CriticalClaim claim = claims.get(claimPlan.claimId());
+      if (claim == null) {
+        continue;
+      }
+      String executionId =
+          StrategyPreflightRegistry.executionId(
+              problemHash, strategy.strategyId(), claim.claimId(), planHash);
+      Optional<StrategyPreflightExecutionRecord> existing =
+          strategyPreflights.execution(executionId);
+      if (existing.isPresent()) {
+        evidence.put(
+            claim.claimId(),
+            existing.get().completed()
+                ? existing.get().evidence()
+                : new CriticalClaimPreflightEvidence(
+                    CriticalClaimPreflightStatus.ERROR,
+                    "registered-computation-preflight",
+                    List.of(executionId),
+                    "INCOMPLETE_PREFLIGHT_EXECUTION_FRONTIER"));
+        continue;
+      }
+      StrategyPreflightExecutionRecord reservation =
+          strategyPreflights.beginExecution(
+              problemHash,
+              strategy.strategyId(),
+              claim.claimId(),
+              planHash,
+              roundIndex.get());
+      persistUnchecked("strategy_preflight_execution_reserved", false);
+      CriticalClaimPreflightEvidence result =
+          executeRegisteredClaimPreflight(
+              strategy,
+              claim,
+              claimPlan,
+              contexts.getOrDefault(claim.claimId(), CriticalClaimContext.empty()),
+              reservation.executionId());
+      strategyPreflights.completeExecution(
+          reservation.executionId(), result, roundIndex.get());
+      persistUnchecked("strategy_preflight_execution_completed", false);
+      evidence.put(claim.claimId(), result);
+    }
+    return Map.copyOf(evidence);
+  }
+
+  private CriticalClaimPreflightEvidence executeRegisteredClaimPreflight(
+      StrategyCard strategy,
+      CriticalClaim claim,
+      CriticalClaimPreflightPlan claimPlan,
+      CriticalClaimContext context,
+      String executionId) {
+    ToolRequest request = strategyPreflightPlanCompiler.request(strategy, claimPlan);
+    if (request == null) {
+      return new CriticalClaimPreflightEvidence(
+          CriticalClaimPreflightStatus.UNTESTABLE,
+          "registered-computation-preflight",
+          List.of(executionId),
+          "UNREGISTERED_COMPUTATION_CONTRACT");
+    }
+    try {
+      ExperimentSpec compiled = new ToolBroker(computation).compile(request);
+      ExperimentSpec spec =
+          new ExperimentSpec(
+              compiled.arguments(),
+              context.assumptions(),
+              false,
+              "Retain only evidence authorized by the computation evidence gate.",
+              "Reject this strategy before any route mutation.",
+              compiled.domains(),
+              compiled.exactArithmetic(),
+              null,
+              executionId,
+              compiled.maxCases(),
+              compiled.method(),
+              "Leave the claim unresolved and use another proof route.",
+              null,
+              "strategy-preflight:" + strategy.strategyId(),
+              ComputationPurpose.FALSIFY_CLAIM,
+              "A load-bearing strategy claim has an exact registered typed check.",
+              null,
+              "deterministic-strategy-preflight",
+              JsonNodeFactory.instance.objectNode(),
+              compiled.seed(),
+              claim.statement(),
+              null,
+              "Refute a load-bearing claim before route admission.");
+      ComputationBroker.PreparedDecision prepared =
+          computation.decide(
+              spec,
+              ComputationContext.initial(
+                  "strategy-preflight:" + strategy.strategyId(),
+                  safeInt(ledger.remainingCalls())));
+      if (prepared.decision().decision() != ComputationDecisionStatus.ALLOW) {
+        return new CriticalClaimPreflightEvidence(
+            CriticalClaimPreflightStatus.ERROR,
+            "registered-computation-preflight",
+            List.of(executionId),
+            "COMPUTATION_POLICY_REJECTED:" + prepared.decision().reason());
+      }
+      ExperimentResult result =
+          computation.runExperiment(prepared.spec(), prepared.decision());
+      ComputationAudit audit =
+          computation.auditExperiment(prepared.spec(), prepared.decision(), null, result);
+      ComputationEvidenceGate.EvidenceAuthority authority =
+          ComputationEvidenceGate.authority(result);
+      computationTraces.add(
+          new ComputationTrace(
+              "strategy-preflight:" + strategy.strategyId(),
+              prepared.spec(),
+              prepared.decision(),
+              null,
+              result,
+              claim.claimId(),
+              authority,
+              audit.valid()));
+      computationAudits.add(audit);
+      List<String> refs = List.of(executionId, result.resultHash());
+      if (!audit.valid()) {
+        return new CriticalClaimPreflightEvidence(
+            CriticalClaimPreflightStatus.ERROR,
+            "registered-computation-replay",
+            refs,
+            "INDEPENDENT_REPLAY_FAILED:" + audit.diagnostic());
+      }
+      return switch (authority) {
+        case REFUTED ->
+            new CriticalClaimPreflightEvidence(
+                CriticalClaimPreflightStatus.VERIFIED_REFUTED,
+                "registered-computation-replay",
+                refs,
+                "INDEPENDENTLY_REPLAYED_COUNTEREXAMPLE");
+        case NOT_REFUTED ->
+            new CriticalClaimPreflightEvidence(
+                CriticalClaimPreflightStatus.NOT_REFUTED_IN_BOUNDED_SCOPE,
+                "registered-computation-replay",
+                refs,
+                "BOUNDED_SEARCH_DID_NOT_REFUTE");
+        case VERIFIED, VERIFIED_BOUNDED ->
+            new CriticalClaimPreflightEvidence(
+                CriticalClaimPreflightStatus.VERIFIED_SUPPORTED,
+                "registered-computation-replay",
+                refs,
+                "COMPLETE_REGISTERED_CERTIFICATE");
+        case INCONCLUSIVE ->
+            new CriticalClaimPreflightEvidence(
+                CriticalClaimPreflightStatus.ERROR,
+                "registered-computation-replay",
+                refs,
+                "INCONCLUSIVE_REGISTERED_COMPUTATION");
+      };
+    } catch (RuntimeException exception) {
+      return new CriticalClaimPreflightEvidence(
+          CriticalClaimPreflightStatus.ERROR,
+          "registered-computation-preflight",
+          List.of(executionId),
+          "PREFLIGHT_EXECUTION_ERROR:" + exception.getClass().getSimpleName());
+    }
   }
 
   private void rejectStrategyCandidate(
@@ -7066,6 +7394,13 @@ final class DesktopSolveCoordinator {
         .orElse(null);
   }
 
+  private Set<String> strategyCanonicalTargetIds() {
+    String canonicalRoot = canonicalTargetId(MAIN_GOAL_ID);
+    return canonicalRoot == null || canonicalRoot.isBlank()
+        ? Set.of("main-goal:" + rootGoal().sourceStatementHash())
+        : Set.of(canonicalRoot);
+  }
+
   private boolean verifiedClaim(String claimId) {
     return proofControl.claims().entries().stream()
         .anyMatch(
@@ -9698,12 +10033,26 @@ final class DesktopSolveCoordinator {
                         rootGoal().sourceStatementHash(),
                         strategy,
                         controlStrategy(strategy, "widen-candidate"),
-                        blueprint));
+                        blueprint,
+                        criticalClaimContexts(
+                            strategy,
+                            blueprint,
+                            proofControl
+                                .scopeGuard()
+                                .extract(
+                                    "goal-scope",
+                                    rootGoal().sourceStatement(),
+                                    List.of(),
+                                    1.0d)),
+                        strategyCanonicalTargetIds()));
     StrategyMechanismProfile profile =
         strategyMechanisms
             .profile(strategy.strategyId())
             .orElseGet(() -> strategyMechanismAnalyzer.profile(strategy, blueprint));
-    StrategyPreflightReport preflight = trustedStrategyPreflight().evaluate(problemHash, strategy);
+    StrategyPreflightReport preflight =
+        strategyPreflights
+            .find(strategy.strategyId())
+            .orElseGet(() -> trustedStrategyPreflight().evaluate(problemHash, strategy));
     Set<String> activeSignatures = new LinkedHashSet<>();
     Set<String> activeUnresolvedRequiredClaims = new LinkedHashSet<>();
     StrategyCriticalClaimPreflight livePreflight = trustedStrategyPreflight();
@@ -9716,8 +10065,10 @@ final class DesktopSolveCoordinator {
                   .map(StrategyMechanismSignature::structuralSignatureHash)
                   .ifPresent(activeSignatures::add);
               activeUnresolvedRequiredClaims.addAll(
-                  livePreflight
-                      .evaluate(problemHash, route.strategy)
+                  strategyPreflights
+                      .find(route.strategy.strategyId())
+                      .orElseGet(
+                          () -> livePreflight.evaluate(problemHash, route.strategy))
                       .unresolvedRequiredClaimKeys());
             });
     var score =
@@ -9744,7 +10095,10 @@ final class DesktopSolveCoordinator {
                 0,
                 strategyDiversityConfig.maxExactPortfolioCandidates(),
                 activeSignatures,
-                activeUnresolvedRequiredClaims));
+                activeUnresolvedRequiredClaims,
+                strategyDiversityConfig.minimumAdmissibleFeasibility(),
+                strategyDiversityConfig.minimumBlueprintCompleteness(),
+                strategyDiversityConfig.minimumRequiredClaimEvidenceForPrimaryRoute()));
     return decision.selectedStrategyIds().contains(strategy.strategyId());
   }
 
@@ -10168,7 +10522,15 @@ final class DesktopSolveCoordinator {
               rootGoal.sourceStatementHash(),
               strategy,
               control,
-              blueprint);
+              blueprint,
+              criticalClaimContexts(
+                  strategy,
+                  blueprint,
+                  proofControl
+                      .scopeGuard()
+                      .extract(
+                          "goal-scope", rootGoal.sourceStatement(), List.of(), 1.0d)),
+              strategyCanonicalTargetIds());
       strategyCandidates.capture(
           strategyPortfolioEpisodeId(), strategy.strategyId(), order++, false);
       strategyCandidates.transition(

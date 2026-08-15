@@ -95,7 +95,7 @@ class StrategyPortfolioOptimizerTest {
         .containsEntry("active", "SAME_STRUCTURAL_MECHANISM")
         .containsEntry("active-claim", "SHARED_UNRESOLVED_REQUIRED_CLAIM")
         .containsEntry("regenerate", "SUPPORTING_CLAIM_REQUIRES_REGENERATION")
-        .containsEntry("zero", "LOWER_GLOBAL_PORTFOLIO_OBJECTIVE")
+        .containsEntry("zero", "NOT_SELECTED_LOW_FEASIBILITY")
         .containsEntry("refuted", "VERIFIED_REFUTED");
   }
 

@@ -1,7 +1,9 @@
 package io.github.aililuola.mathproofmesh.strategydiversity;
 
 import io.github.aililuola.mathproofmesh.contract.CriticalClaim;
+import io.github.aililuola.mathproofmesh.contract.CriticalClaimPreflightPlan;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
+import io.github.aililuola.mathproofmesh.contract.StrategyPreflightPlan;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -22,7 +24,25 @@ public final class StrategyCriticalClaimPreflight {
   }
 
   public StrategyPreflightReport evaluate(String problemHash, StrategyCard strategy) {
+    return evaluate(problemHash, strategy, Map.of(), null);
+  }
+
+  public StrategyPreflightReport evaluate(
+      String problemHash,
+      StrategyCard strategy,
+      Map<String, CriticalClaimContext> contexts,
+      StrategyPreflightPlan plan) {
     java.util.Objects.requireNonNull(strategy, "strategy");
+    Map<String, CriticalClaimContext> safeContexts =
+        contexts == null ? Map.of() : Map.copyOf(contexts);
+    Map<String, CriticalClaimPreflightPlan> claimPlans = new LinkedHashMap<>();
+    if (plan != null) {
+      if (!StrategySemanticNormalizer.hashEquals(problemHash, plan.problemHash())
+          || !strategy.strategyId().equals(plan.strategyId())) {
+        throw new IllegalArgumentException("preflight plan crosses problem or strategy authority");
+      }
+      plan.claimPlans().forEach(value -> claimPlans.put(value.claimId(), value));
+    }
     List<CriticalClaimPreflightResult> results = new ArrayList<>();
     Set<String> unresolvedRequired = new LinkedHashSet<>();
     boolean hardRejected = false;
@@ -30,14 +50,18 @@ public final class StrategyCriticalClaimPreflight {
     int requiredCount = 0;
     int supportedRequired = 0;
     for (CriticalClaim claim : strategy.criticalClaims()) {
-      CriticalClaimSemanticKey key = keyCompiler.compile(problemHash, claim);
+      CriticalClaimContext context =
+          safeContexts.getOrDefault(claim.claimId(), CriticalClaimContext.empty());
+      CriticalClaimSemanticKey key = keyCompiler.compile(problemHash, claim, context);
+      CriticalClaimPreflightPlan claimPlan = claimPlans.get(claim.claimId());
       CriticalClaimPreflightSpec spec =
           new CriticalClaimPreflightSpec(
               problemHash,
               claim,
               key,
-              claim.preferredTool() == null ? "" : claim.preferredTool(),
-              claim.evidenceRefs());
+              context,
+              claimPlan == null ? "" : claimPlan.computationContractId(),
+              claimPlan == null ? claim.evidenceRefs() : claimPlan.typedInputRefs());
       List<CriticalClaimPreflightEvidence> evidence =
           evidenceSources.stream()
               .map(source -> safelyEvaluate(source, key, spec))
@@ -130,6 +154,8 @@ public final class StrategyCriticalClaimPreflight {
       return CriticalClaimPreflightStatus.NOT_REFUTED_IN_BOUNDED_SCOPE;
     }
     return spec.computationContractId().isBlank()
+            && (spec.claim().preferredTool() == null
+                || spec.claim().preferredTool().isBlank())
         ? CriticalClaimPreflightStatus.UNKNOWN
         : CriticalClaimPreflightStatus.UNTESTABLE;
   }

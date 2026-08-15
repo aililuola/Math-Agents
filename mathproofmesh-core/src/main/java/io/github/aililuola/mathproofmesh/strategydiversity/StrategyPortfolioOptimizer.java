@@ -126,7 +126,7 @@ public final class StrategyPortfolioOptimizer {
       StrategyPortfolioConstraint constraint) {
     if (candidate.preflight().hardRejected()
         || candidate.preflight().requiresRegeneration()
-        || candidate.feasibility().total() <= 0.0d
+        || belowQualityGate(candidate, constraint)
         || constraint.activeStructuralSignatures().contains(
             candidate.signature().structuralSignatureHash())) {
       return false;
@@ -170,7 +170,7 @@ public final class StrategyPortfolioOptimizer {
             .mapToDouble(candidate -> candidate.preflight().requiredClaimEvidenceCoverage())
             .sum();
     double scores = candidates.stream().mapToDouble(candidate -> candidate.feasibility().total()).sum();
-    return candidates.size() * 10.0d + scores + profiles.size() * 0.01d + evidence * 0.01d;
+    return scores + profiles.size() * 0.01d + evidence * 0.01d;
   }
 
   private static String strategyIdKey(List<StrategyPortfolioCandidate> candidates) {
@@ -198,14 +198,13 @@ public final class StrategyPortfolioOptimizer {
     if (candidate.preflight().requiresRegeneration()) {
       return "SUPPORTING_CLAIM_REQUIRES_REGENERATION";
     }
-    if (constraint.activeStructuralSignatures().contains(
-        candidate.signature().structuralSignatureHash())
-        || selected.stream()
-            .anyMatch(
-                existing ->
-                    existing.signature().structuralSignatureHash()
-                        .equals(candidate.signature().structuralSignatureHash()))) {
-      return "SAME_STRUCTURAL_MECHANISM";
+    if (belowQualityGate(candidate, constraint)) {
+      return candidate.feasibility().total() < constraint.minimumAdmissibleFeasibility()
+          ? "NOT_SELECTED_LOW_FEASIBILITY"
+          : candidate.feasibility().blueprintCompleteness()
+                  < constraint.minimumBlueprintCompleteness()
+              ? "NOT_SELECTED_INCOMPLETE_BLUEPRINT"
+              : "NOT_SELECTED_INSUFFICIENT_REQUIRED_CLAIM_EVIDENCE";
     }
     if (!java.util.Collections.disjoint(
             candidate.preflight().unresolvedRequiredClaimKeys(),
@@ -218,7 +217,25 @@ public final class StrategyPortfolioOptimizer {
                         candidate.preflight().unresolvedRequiredClaimKeys()))) {
       return "SHARED_UNRESOLVED_REQUIRED_CLAIM";
     }
+    if (constraint.activeStructuralSignatures().contains(
+        candidate.signature().structuralSignatureHash())
+        || selected.stream()
+            .anyMatch(
+                existing ->
+                    existing.signature().structuralSignatureHash()
+                        .equals(candidate.signature().structuralSignatureHash()))) {
+      return "SAME_STRUCTURAL_MECHANISM";
+    }
     return "LOWER_GLOBAL_PORTFOLIO_OBJECTIVE";
+  }
+
+  private static boolean belowQualityGate(
+      StrategyPortfolioCandidate candidate, StrategyPortfolioConstraint constraint) {
+    return candidate.feasibility().total() < constraint.minimumAdmissibleFeasibility()
+        || candidate.feasibility().blueprintCompleteness()
+            < constraint.minimumBlueprintCompleteness()
+        || candidate.preflight().requiredClaimEvidenceCoverage()
+            < constraint.minimumRequiredClaimEvidence();
   }
 
   private static final class SearchState {

@@ -26,11 +26,15 @@ import io.github.aililuola.mathproofmesh.contract.MemoryTier;
 import io.github.aililuola.mathproofmesh.contract.MessageEnvelope;
 import io.github.aililuola.mathproofmesh.contract.MessageType;
 import io.github.aililuola.mathproofmesh.contract.ProblemKind;
+import io.github.aililuola.mathproofmesh.contract.ProblemContract;
+import io.github.aililuola.mathproofmesh.contract.QuantifierSpec;
 import io.github.aililuola.mathproofmesh.contract.RouteRole;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
+import io.github.aililuola.mathproofmesh.contract.StrategyPreflightPlan;
 import io.github.aililuola.mathproofmesh.contract.StrategySet;
 import io.github.aililuola.mathproofmesh.contract.TaskRequirement;
 import io.github.aililuola.mathproofmesh.contract.TriageResult;
+import io.github.aililuola.mathproofmesh.contract.VariableBinding;
 import io.github.aililuola.mathproofmesh.memory.LemmaMemory;
 import io.github.aililuola.mathproofmesh.memory.TypedMemory;
 import io.github.aililuola.mathproofmesh.memory.VerifiedCounterexampleAuthority;
@@ -38,6 +42,8 @@ import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlFacade;
 import io.github.aililuola.mathproofmesh.proofcontrol.RootGoalContract;
+import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlModels;
+import io.github.aililuola.mathproofmesh.proofcontrol.ScopeGuard;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyArchive;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphConvergenceMonitor;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
@@ -48,11 +54,14 @@ import io.github.aililuola.mathproofmesh.provider.MockResponder;
 import io.github.aililuola.mathproofmesh.provider.ProviderClientRegistry;
 import io.github.aililuola.mathproofmesh.provider.ProviderRequest;
 import io.github.aililuola.mathproofmesh.research.ResearchCheckpointLedger;
+import io.github.aililuola.mathproofmesh.strategydiversity.CriticalClaimContext;
 import io.github.aililuola.mathproofmesh.strategydiversity.PortfolioReplenishmentLedger;
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyCandidateLedger;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyDiversityConfig;
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyMechanismRegistry;
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioRegistry;
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPreflightRegistry;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPreflightPlanCompiler;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -63,6 +72,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -104,7 +114,8 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
         new DesktopRuntimeLocator(projectRoot(), null)
             .loadProfile("proof-control-active.yaml");
     SystemConfig config = mockConfig(source);
-    RecordingResponder responder = new RecordingResponder(providerStrategySets);
+    RecordingResponder responder =
+        new RecordingResponder(providerStrategySets, sha256(sourceStatement));
     Map<String, MockResponder> responders = new LinkedHashMap<>();
     config.agents().forEach(agent -> responders.put(agent.id(), responder));
     ProviderClientRegistry providers =
@@ -172,13 +183,27 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
   }
 
   void setStrategies(List<StrategyCard> strategies) throws ReflectiveOperationException {
+    responder.registerStrategies(strategies);
     setField(
         "strategySet",
         new StrategySet("Finite-structure mechanism candidates.", List.of(), strategies));
   }
 
+  void setDiversityConfig(StrategyDiversityConfig config)
+      throws ReflectiveOperationException {
+    setField("strategyDiversityConfig", config);
+  }
+
   void generateAndAdmit() throws Exception {
     invoke("generateAndAdmitStrategies");
+  }
+
+  void prepareAgain(String episodeId, StrategyCard strategy) throws Exception {
+    invoke(
+        "prepareStrategyPortfolio",
+        new Class<?>[] {String.class, StrategySet.class},
+        episodeId,
+        new StrategySet("Replay captured candidate.", List.of(), List.of(strategy)));
   }
 
   boolean widen() throws Exception {
@@ -230,13 +255,20 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
     coordinator.setStrategyPortfolioHardCrashPointForTest(point);
   }
 
-  void registerVerifiedCounterexample(String statement, String id) {
+  void registerVerifiedCounterexample(StrategyCard strategy, String id) {
+    CriticalClaim claim =
+        strategy.criticalClaims().stream()
+            .filter(value -> "required".equals(value.necessity()))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("strategy has no required claim"));
+    CriticalClaimContext context = productionClaimContext(strategy);
+    String statement = claim.statement();
     String artifact = "experiment://finite-graph/" + id;
     String raw = "artifact://finite-graph/" + id;
     MessageEnvelope envelope =
         new MessageEnvelope(
             List.of(artifact),
-            List.of(),
+            context.assumptions(),
             "A replayed finite structure refutes the exact claim.",
             "",
             null,
@@ -249,18 +281,18 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
             1.0d,
             statement,
             PROBLEM_HASH,
-            List.of(),
+            context.quantifiers(),
             raw,
             0,
             "1",
-            List.of(),
+            context.scopeLimitations(),
             "independent-computation-replay",
             RouteRole.SKEPTIC,
             "route-counterexample",
             statement,
             List.of(),
             2,
-            List.of(),
+            context.variableBindings(),
             1.0d,
             ClaimStatus.REJECTED);
     typedMemory()
@@ -276,10 +308,72 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
                 List.of()));
   }
 
+  private CriticalClaimContext productionClaimContext(StrategyCard strategy) {
+    try {
+      ProblemContract problem = field("frozenProblem", ProblemContract.class);
+      LinkedHashSet<String> assumptions = new LinkedHashSet<>(problem.hardConstraints());
+      assumptions.addAll(strategy.prerequisites());
+      List<QuantifierSpec> quantifiers = new ArrayList<>();
+      List<VariableBinding> bindings = new ArrayList<>();
+      int order = 0;
+      for (var atom : rootGoal().signature().quantifierSkeleton()) {
+        for (String variable : atom.variables()) {
+          String variableId = "root-q" + order;
+          quantifiers.add(
+              new QuantifierSpec(
+                  variable,
+                  "root-goal quantified domain",
+                  atom.kind(),
+                  order,
+                  List.of(),
+                  variableId));
+          bindings.add(
+              new VariableBinding(
+                  List.of(variable),
+                  variable,
+                  "root-goal quantified domain",
+                  "root-goal",
+                  variableId));
+          order++;
+        }
+      }
+      var scope =
+          new ScopeGuard()
+              .extract("test-root", rootGoal().sourceStatement(), List.of(), 1.0d);
+      List<String> limitations = new ArrayList<>();
+      if (scope.indexScope() != ProofControlModels.IndexScope.UNKNOWN) {
+        limitations.add(
+            "index_scope=" + scope.indexScope().name().toLowerCase(java.util.Locale.ROOT));
+      }
+      if (scope.uniformity() != ProofControlModels.UniformityScope.UNKNOWN) {
+        limitations.add(
+            "uniformity=" + scope.uniformity().name().toLowerCase(java.util.Locale.ROOT));
+      }
+      if (scope.objectScope() != ProofControlModels.ObjectScope.UNKNOWN) {
+        limitations.add(
+            "object_scope=" + scope.objectScope().name().toLowerCase(java.util.Locale.ROOT));
+      }
+      limitations.addAll(scope.domainConstraints());
+      limitations.addAll(scope.exceptionalCases());
+      return new CriticalClaimContext(
+          List.copyOf(assumptions), quantifiers, limitations, bindings, "positive");
+    } catch (ReflectiveOperationException exception) {
+      throw new IllegalStateException(exception);
+    }
+  }
+
   void registerVerifiedClaim(String statement, String id) {
+    registerVerifiedClaim(statement, id, List.of(), List.of());
+  }
+
+  void registerVerifiedClaim(
+      String statement,
+      String id,
+      List<String> assumptions,
+      List<String> scopeLimitations) {
     ClaimCard claim =
         new ClaimCard(
-            List.of(),
+            assumptions,
             id,
             statement,
             "",
@@ -288,7 +382,7 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
             List.of(),
             List.of(),
             List.of(),
-            List.of(),
+            scopeLimitations,
             0.95d,
             "trusted-referee",
             "attempt-verified",
@@ -298,6 +392,39 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
             List.of("verified-fact"),
             1.0d);
     lemmaMemory().addMany(List.of(claim));
+  }
+
+  void registerVerifiedClaimForStrategy(StrategyCard strategy, String id) {
+    try {
+      ProblemContract problem = field("frozenProblem", ProblemContract.class);
+      LinkedHashSet<String> assumptions = new LinkedHashSet<>(problem.hardConstraints());
+      assumptions.addAll(strategy.prerequisites());
+      var scope =
+          new ScopeGuard()
+              .extract("test-root", rootGoal().sourceStatement(), List.of(), 1.0d);
+      List<String> limitations = new ArrayList<>();
+      if (scope.indexScope() != ProofControlModels.IndexScope.UNKNOWN) {
+        limitations.add(
+            "index_scope=" + scope.indexScope().name().toLowerCase(java.util.Locale.ROOT));
+      }
+      if (scope.uniformity() != ProofControlModels.UniformityScope.UNKNOWN) {
+        limitations.add(
+            "uniformity=" + scope.uniformity().name().toLowerCase(java.util.Locale.ROOT));
+      }
+      if (scope.objectScope() != ProofControlModels.ObjectScope.UNKNOWN) {
+        limitations.add(
+            "object_scope=" + scope.objectScope().name().toLowerCase(java.util.Locale.ROOT));
+      }
+      limitations.addAll(scope.domainConstraints());
+      limitations.addAll(scope.exceptionalCases());
+      registerVerifiedClaim(
+          strategy.criticalClaims().getFirst().statement(),
+          id,
+          List.copyOf(assumptions),
+          limitations);
+    } catch (ReflectiveOperationException exception) {
+      throw new IllegalStateException(exception);
+    }
   }
 
   DesktopSolveCheckpoint checkpointRoundTrip() throws Exception {
@@ -405,6 +532,20 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
 
   StrategyPreflightRegistry preflights() throws ReflectiveOperationException {
     return field("strategyPreflights", StrategyPreflightRegistry.class);
+  }
+
+  int preflightExecutionCount() throws ReflectiveOperationException {
+    return preflights().executionCount();
+  }
+
+  int preflightPlanCount() throws ReflectiveOperationException {
+    return preflights().snapshot().plans().size();
+  }
+
+  long preflightPlanProviderCalls() {
+    return responder.requests().stream()
+        .filter(request -> "StrategyPreflightPlan".equals(request.schemaName()))
+        .count();
   }
 
   StrategyPortfolioRegistry portfolios() throws ReflectiveOperationException {
@@ -658,20 +799,47 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
 
   private static final class RecordingResponder implements MockResponder {
     private final List<StrategySet> strategySets;
+    private final String problemHash;
+    private final Map<String, StrategyCard> strategies = new LinkedHashMap<>();
     private final List<ProviderRequest> requests = new ArrayList<>();
     private int cursor;
 
-    private RecordingResponder(List<StrategySet> strategySets) {
+    private RecordingResponder(List<StrategySet> strategySets, String problemHash) {
       this.strategySets = List.copyOf(strategySets);
+      this.problemHash = problemHash;
+      strategySets.forEach(value -> registerStrategies(value.strategies()));
+    }
+
+    private void registerStrategies(List<StrategyCard> values) {
+      values.forEach(value -> strategies.put(value.strategyId(), value));
     }
 
     @Override
     public LLMResponse respond(ProviderRequest request) {
       requests.add(request);
+      if ("StrategyPreflightPlan".equals(request.schemaName())) {
+        StrategyCard strategy =
+            strategies.values().stream()
+                .filter(
+                    value ->
+                        request.messages().stream()
+                            .anyMatch(message -> message.content().contains(value.strategyId())))
+                .findFirst()
+                .orElseThrow(
+                    () -> new AssertionError("preflight request omitted its strategy id"));
+        StrategyPreflightPlan payload =
+            new StrategyPreflightPlanCompiler().compile(problemHash, strategy);
+        return response(payload, "strategy-preflight-plan-" + strategy.strategyId());
+      }
       if (!"StrategySet".equals(request.schemaName()) || cursor >= strategySets.size()) {
         throw new AssertionError("unexpected provider call: " + request.schemaName());
       }
       StrategySet payload = strategySets.get(cursor++);
+      registerStrategies(payload.strategies());
+      return response(payload, "strategy-portfolio-request-" + cursor);
+    }
+
+    private static LLMResponse response(Object payload, String requestId) {
       return new LLMResponse(
           ContractObjectMapper.write(payload),
           "scripted-model",
@@ -679,7 +847,7 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
           11,
           17,
           0.0d,
-          "strategy-portfolio-request-" + cursor,
+          requestId,
           "stop",
           false,
           JsonNodeFactory.instance.objectNode());

@@ -57,7 +57,7 @@ class DesktopV12StrategyDiversityMigrationTest {
                   profile.primitives().equals(java.util.Set.of(StrategyMechanismPrimitive.UNKNOWN)));
       assertThat(restored.providerStrategyCalls()).isZero();
       migrated = restored.checkpointRoundTrip();
-      assertThat(migrated.schemaVersion()).isEqualTo(13);
+      assertThat(migrated.schemaVersion()).isEqualTo(DesktopSolveCheckpoint.CURRENT_SCHEMA_VERSION);
     }
 
     try (DesktopStrategyPortfolioTestHarness restoredAgain =

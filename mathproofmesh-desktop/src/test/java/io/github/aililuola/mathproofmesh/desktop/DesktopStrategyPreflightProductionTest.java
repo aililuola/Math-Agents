@@ -35,7 +35,7 @@ class DesktopStrategyPreflightProductionTest {
         DesktopStrategyPortfolioTestHarness.open(
             temporaryDirectory.resolve("preflight"), "strategy-preflight-production")) {
       harness.freeze();
-      harness.registerVerifiedCounterexample(REFUTED, "path-p4-counterexample");
+      harness.registerVerifiedCounterexample(rejected, "path-p4-counterexample");
       harness.setStrategies(candidates);
       harness.generateAndAdmit();
 

@@ -75,7 +75,7 @@ class DesktopStrategyPortfolioMultiRoundRestoreTest {
         harness.freeze();
         String frozenRoot = harness.rootGoal().sourceStatementHash();
         harness.registerVerifiedClaim(VERIFIED_FACT, "verified-foundation-" + round);
-        harness.registerVerifiedCounterexample(REFUTED, "path-p4-" + round);
+        harness.registerVerifiedCounterexample(candidates.getLast(), "path-p4-" + round);
         String negativeBefore =
             harness.typedMemory().negativeKnowledgeRegistry().registryHash();
         harness.setStrategies(candidates);

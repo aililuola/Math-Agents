@@ -14,13 +14,20 @@ import java.util.Set;
 /** Compiles server-owned structural identities; presentation metadata never enters the hard hash. */
 public final class StrategyMechanismAnalyzer {
   private final CriticalClaimKeyCompiler claimKeys;
+  private final StrategyMechanismStructureCompiler structures;
 
   public StrategyMechanismAnalyzer() {
-    this(new CriticalClaimKeyCompiler());
+    this(new CriticalClaimKeyCompiler(), new StrategyMechanismStructureCompiler());
   }
 
   public StrategyMechanismAnalyzer(CriticalClaimKeyCompiler claimKeys) {
+    this(claimKeys, new StrategyMechanismStructureCompiler());
+  }
+
+  StrategyMechanismAnalyzer(
+      CriticalClaimKeyCompiler claimKeys, StrategyMechanismStructureCompiler structures) {
     this.claimKeys = java.util.Objects.requireNonNull(claimKeys, "claimKeys");
+    this.structures = java.util.Objects.requireNonNull(structures, "structures");
   }
 
   public StrategyMechanismSignature signature(
@@ -29,91 +36,83 @@ public final class StrategyMechanismAnalyzer {
       StrategyCard strategy,
       ProofControlModels.Strategy controlStrategy,
       StrategyBlueprintCompiler.Compilation compilation) {
+    return signature(
+        problemHash,
+        rootGoalHash,
+        strategy,
+        controlStrategy,
+        compilation,
+        Map.of());
+  }
+
+  public StrategyMechanismSignature signature(
+      String problemHash,
+      String rootGoalHash,
+      StrategyCard strategy,
+      ProofControlModels.Strategy controlStrategy,
+      StrategyBlueprintCompiler.Compilation compilation,
+      Map<String, CriticalClaimContext> claimContexts) {
+    return signature(
+        problemHash,
+        rootGoalHash,
+        strategy,
+        controlStrategy,
+        compilation,
+        claimContexts,
+        Set.of("main-goal:" + rootGoalHash));
+  }
+
+  public StrategyMechanismSignature signature(
+      String problemHash,
+      String rootGoalHash,
+      StrategyCard strategy,
+      ProofControlModels.Strategy controlStrategy,
+      StrategyBlueprintCompiler.Compilation compilation,
+      Map<String, CriticalClaimContext> claimContexts,
+      Set<String> canonicalTargetIds) {
     java.util.Objects.requireNonNull(strategy, "strategy");
     java.util.Objects.requireNonNull(controlStrategy, "controlStrategy");
     java.util.Objects.requireNonNull(compilation, "compilation");
     StrategyBlueprintCompiler.Blueprint blueprint = compilation.blueprint();
-
-    Map<String, StrategyBlueprintCompiler.Node> nodes = new LinkedHashMap<>();
-    blueprint.nodes().forEach(node -> nodes.put(node.id(), node));
-    Set<String> targets = new LinkedHashSet<>();
-    for (String targetId : blueprint.directTargetNodeIds()) {
-      StrategyBlueprintCompiler.Node target = nodes.get(targetId);
-      if (target != null) {
-        targets.add(StrategySemanticNormalizer.hash(StrategySemanticNormalizer.normalize(target.statement())));
-      }
-    }
-    if (targets.isEmpty()) {
-      StrategyBlueprintCompiler.Node main = nodes.get(blueprint.mainGoalNodeId());
-      if (main != null) {
-        targets.add(StrategySemanticNormalizer.hash(StrategySemanticNormalizer.normalize(main.statement())));
-      }
-    }
+    StrategyMechanismStructureCompiler.Structure structure =
+        structures.compile(canonicalTargetIds, strategy, blueprint);
 
     Set<String> requiredClaims = new LinkedHashSet<>();
     strategy.criticalClaims().stream()
         .filter(claim -> "required".equals(claim.necessity()))
-        .map(claim -> claimKeys.compile(problemHash, claim).semanticKey())
+        .map(
+            claim ->
+                claimKeys
+                    .compile(
+                        problemHash,
+                        claim,
+                        claimContexts == null
+                            ? CriticalClaimContext.empty()
+                            : claimContexts.getOrDefault(
+                                claim.claimId(), CriticalClaimContext.empty()))
+                    .semanticKey())
         .forEach(requiredClaims::add);
 
-    String domainRole =
-        StrategySemanticNormalizer.hash(
-            Map.of(
-                "domain_objects", StrategySemanticNormalizer.normalizedSet(controlStrategy.domainObjects()),
-                "roles", blueprint.nodes().stream().map(node -> node.kind().name()).sorted().toList()));
-    String representation =
-        StrategySemanticNormalizer.hash(
-            Map.of(
-                "objects", StrategySemanticNormalizer.normalizedSet(controlStrategy.domainObjects()),
-                "prerequisites", StrategySemanticNormalizer.normalizedSet(strategy.prerequisites())));
-    String dagShape =
-        StrategySemanticNormalizer.hash(
-            Map.of(
-                "node_kinds", blueprint.nodes().stream().map(node -> node.kind().name()).sorted().toList(),
-                "edges", blueprint.edges().stream().map(edge -> edge.relation().toLowerCase(Locale.ROOT)).sorted().toList(),
-                "roots", blueprint.rootEntryNodeIds().size(),
-                "targets", blueprint.directTargetNodeIds().size()));
-    String transformation =
-        StrategySemanticNormalizer.hash(
-            Map.of(
-                "mechanism", StrategySemanticNormalizer.normalize(strategy.coreIdea()),
-                "lemmas", StrategySemanticNormalizer.normalizedSet(strategy.expectedLemmas()),
-                "bottleneck", StrategySemanticNormalizer.normalize(strategy.bottleneck())));
-    String falsification =
-        StrategySemanticNormalizer.hash(
-            Map.of(
-                "strategy_test", StrategySemanticNormalizer.normalize(strategy.falsificationTest()),
-                "claim_tests",
-                    strategy.criticalClaims().stream()
-                        .map(claim -> StrategySemanticNormalizer.normalize(claim.falsificationTest()))
-                        .sorted()
-                        .toList(),
-                "preferred_tools",
-                    strategy.criticalClaims().stream()
-                        .map(claim -> StrategySemanticNormalizer.normalize(claim.preferredTool()))
-                        .filter(value -> !value.isBlank())
-                        .sorted()
-                        .toList()));
     Map<String, Object> structural = new LinkedHashMap<>();
     structural.put("problem_hash", problemHash);
     structural.put("root_goal_hash", rootGoalHash);
-    structural.put("targets", targets.stream().sorted().toList());
+    structural.put("targets", structure.canonicalTargetIds().stream().sorted().toList());
     structural.put("required_claims", requiredClaims.stream().sorted().toList());
-    structural.put("domain_roles", domainRole);
-    structural.put("representation", representation);
-    structural.put("dependency_dag", dagShape);
-    structural.put("transformation", transformation);
-    structural.put("falsification", falsification);
+    structural.put("domain_roles", structure.domainRoleHash());
+    structural.put("representation", structure.representation().name());
+    structural.put("dependency_dag", structure.topologyHash());
+    structural.put("operations", structure.operationHash());
+    structural.put("falsification", structure.falsificationHash());
     return new StrategyMechanismSignature(
         problemHash,
         rootGoalHash,
-        targets,
+        structure.canonicalTargetIds(),
         requiredClaims,
-        domainRole,
-        representation,
-        dagShape,
-        transformation,
-        falsification,
+        structure.domainRoleHash(),
+        structure.representation().name(),
+        structure.topologyHash(),
+        structure.operationHash(),
+        structure.falsificationHash(),
         StrategySemanticNormalizer.hash(structural));
   }
 

@@ -27,6 +27,7 @@ public final class TrustedStrategyPreflightEvidenceSource
   private final List<ClaimCard> verifiedClaims;
   private final List<MessageEnvelope> verifiedFacts;
   private final int currentRound;
+  private final CriticalClaimKeyCompiler keyCompiler = new CriticalClaimKeyCompiler();
 
   public TrustedStrategyPreflightEvidenceSource(
       String problemHash,
@@ -63,8 +64,8 @@ public final class TrustedStrategyPreflightEvidenceSource
                 spec.claim().statement(),
                 key.normalizedStatement(),
                 key.assumptions(),
-                List.of(),
-                List.of(),
+                spec.context().quantifiers(),
+                spec.context().variableBindings(),
                 key.scopeLimitations(),
                 NegativeKnowledgeSurface.STRATEGY_ADMISSION,
                 NegativeCandidateIntent.POSITIVE_DEPENDENCY),
@@ -100,11 +101,17 @@ public final class TrustedStrategyPreflightEvidenceSource
     LinkedHashSet<String> refs = new LinkedHashSet<>();
     verifiedClaims.stream()
         .filter(claim -> claim.status() == ClaimStatus.VERIFIED)
-        .filter(claim -> exact(claim.statement(), key.normalizedStatement()))
         .filter(
             claim ->
-                StrategySemanticNormalizer.normalizedSet(claim.assumptions())
-                    .equals(key.assumptions()))
+                keyCompiler.exactEvidenceMatch(
+                    key,
+                    claim.statement(),
+                    new CriticalClaimContext(
+                        claim.assumptions(),
+                        List.of(),
+                        claim.scopeLimitations(),
+                        List.of(),
+                        "positive")))
         .map(ClaimCard::claimId)
         .forEach(refs::add);
     verifiedFacts.stream()
@@ -113,8 +120,24 @@ public final class TrustedStrategyPreflightEvidenceSource
         .filter(fact -> fact.verificationStatus() == ClaimStatus.VERIFIED)
         .filter(
             fact ->
-                exact(fact.statement(), key.normalizedStatement())
-                    || exact(fact.normalizedStatement(), key.normalizedStatement()))
+                keyCompiler.exactEvidenceMatch(
+                        key,
+                        fact.statement(),
+                        new CriticalClaimContext(
+                            fact.assumptions(),
+                            fact.quantifiers(),
+                            fact.scopeLimitations(),
+                            fact.variableBindings(),
+                            "positive"))
+                    || keyCompiler.exactEvidenceMatch(
+                        key,
+                        fact.normalizedStatement(),
+                        new CriticalClaimContext(
+                            fact.assumptions(),
+                            fact.quantifiers(),
+                            fact.scopeLimitations(),
+                            fact.variableBindings(),
+                            "positive")))
         .map(MessageEnvelope::messageId)
         .forEach(refs::add);
     if (!refs.isEmpty()) {
@@ -128,7 +151,4 @@ public final class TrustedStrategyPreflightEvidenceSource
     return Optional.empty();
   }
 
-  private static boolean exact(String statement, String normalized) {
-    return StrategySemanticNormalizer.normalize(statement).equals(normalized);
-  }
 }
