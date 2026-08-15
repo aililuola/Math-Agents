@@ -2,6 +2,7 @@ package io.github.aililuola.mathproofmesh.proofcontrol;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
+import io.github.aililuola.mathproofmesh.contract.ClaimCourtOutcome;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewBatch;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewDecision;
 import io.github.aililuola.mathproofmesh.contract.VerificationVerdict;
@@ -68,6 +69,7 @@ public final class AttemptArtifactLedger {
         required(reason, "reason"));
   }
 
+  /** Legacy single-verdict adapter. New Claim Court production paths use applyCourtOutcome. */
   public synchronized List<AttemptArtifactRecord> applyReviewBatch(
       ClaimReviewBatch batch, double passThreshold) {
     Objects.requireNonNull(batch, "batch");
@@ -120,8 +122,8 @@ public final class AttemptArtifactLedger {
         next = AttemptArtifactStatus.UNCERTAIN;
         event = "claim review decision missing";
       } else if (decision.verdict() == VerificationVerdict.FAIL) {
-        next = AttemptArtifactStatus.REJECTED;
-        event = "claim review rejected: " + decision.conciseFeedback();
+        next = AttemptArtifactStatus.UNCERTAIN;
+        event = "legacy proof failure preserved claim truth: " + decision.conciseFeedback();
       } else if (decision.verdict() == VerificationVerdict.PASS
           && decision.confidence() >= passThreshold
           && decision.authorityDimensionsValid()
@@ -137,6 +139,47 @@ public final class AttemptArtifactLedger {
     }
     attemptReviewReportIds.put(batch.attemptId(), batch.reportId());
     return List.copyOf(reviewed);
+  }
+
+  /** Applies a fully adjudicated Claim Court outcome to exactly one harvested artifact. */
+  public synchronized AttemptArtifactRecord applyCourtOutcome(
+      String artifactId,
+      ClaimCourtOutcome outcome,
+      String courtCaseId,
+      String proofRevisionId,
+      String detail) {
+    AttemptArtifactRecord record = requireRecord(artifactId);
+    ClaimCourtOutcome resolved = java.util.Objects.requireNonNull(outcome, "outcome");
+    AttemptArtifactStatus next =
+        switch (resolved) {
+          case VERIFIED -> AttemptArtifactStatus.VERIFIED_LOCAL;
+          case REFUTED -> AttemptArtifactStatus.REJECTED;
+          case PROOF_INVALID_BUT_CLAIM_OPEN,
+              REPAIR_EXHAUSTED,
+              INCONCLUSIVE,
+              DEFERRED_INDEPENDENCE_UNAVAILABLE -> AttemptArtifactStatus.UNCERTAIN;
+        };
+    if (record.status() == next) {
+      return record;
+    }
+    if (record.status() == AttemptArtifactStatus.VERIFIED_LOCAL
+        || record.status() == AttemptArtifactStatus.PROMOTED_FACT
+        || record.status() == AttemptArtifactStatus.APPLIED_COUNTEREXAMPLE) {
+      return record;
+    }
+    String courtRef =
+        required(courtCaseId, "courtCaseId")
+            + ":"
+            + required(proofRevisionId, "proofRevisionId");
+    return transition(
+        record,
+        next,
+        courtRef,
+        null,
+        "claim court "
+            + resolved.name().toLowerCase(java.util.Locale.ROOT)
+            + ": "
+            + required(detail, "detail"));
   }
 
   public synchronized AttemptArtifactRecord markPromoted(
@@ -257,6 +300,8 @@ public final class AttemptArtifactLedger {
   private static boolean allowed(AttemptArtifactStatus from, AttemptArtifactStatus to) {
     return switch (from) {
       case HARVESTED -> to == AttemptArtifactStatus.REVIEW_PENDING
+          || to == AttemptArtifactStatus.VERIFIED_LOCAL
+          || to == AttemptArtifactStatus.REJECTED
           || to == AttemptArtifactStatus.UNCERTAIN;
       case REVIEW_PENDING -> to == AttemptArtifactStatus.VERIFIED_LOCAL
           || to == AttemptArtifactStatus.REJECTED

@@ -2,8 +2,10 @@ package io.github.aililuola.mathproofmesh.memory;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.contract.ClaimCard;
+import io.github.aililuola.mathproofmesh.contract.ClaimCourtOutcome;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewDecision;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatus;
+import io.github.aililuola.mathproofmesh.contract.ProofStep;
 import io.github.aililuola.mathproofmesh.contract.Severity;
 import io.github.aililuola.mathproofmesh.contract.VerificationIssue;
 import io.github.aililuola.mathproofmesh.contract.VerificationReport;
@@ -68,6 +70,7 @@ public final class LemmaMemory {
     return List.copyOf(added);
   }
 
+  /** Legacy single-verdict adapter. Proof failure is non-authoritative for statement truth. */
   public synchronized ClaimCard applyClaimReport(VerificationReport report) {
     String claimId = resolveClaimId(report.targetId());
     ClaimCard claim = claims.get(claimId);
@@ -77,7 +80,7 @@ public final class LemmaMemory {
     ClaimStatus status =
         switch (report.verdict()) {
           case PASS -> ClaimStatus.VERIFIED;
-          case FAIL -> ClaimStatus.REJECTED;
+          case FAIL -> ClaimStatus.UNCERTAIN;
           case UNCERTAIN, SKIPPED -> ClaimStatus.UNCERTAIN;
         };
     Double confidence =
@@ -88,7 +91,7 @@ public final class LemmaMemory {
     return claims.get(claimId);
   }
 
-  /** Applies exactly one independently authored decision to exactly one claim. */
+  /** Legacy single-verdict adapter retained for old checkpoint and contract compatibility. */
   public synchronized ClaimCard applyClaimReviewDecision(
       String claimId, ClaimReviewDecision decision) {
     String resolvedId = resolveClaimId(claimId);
@@ -114,7 +117,7 @@ public final class LemmaMemory {
               decision.authorityDimensionsValid()
                   ? ClaimStatus.VERIFIED
                   : ClaimStatus.UNCERTAIN;
-          case FAIL -> ClaimStatus.REJECTED;
+          case FAIL -> ClaimStatus.UNCERTAIN;
           case UNCERTAIN, SKIPPED -> ClaimStatus.UNCERTAIN;
         };
     Double confidence =
@@ -124,6 +127,81 @@ public final class LemmaMemory {
     replace(
         copy(claim, status, confidence, claim.scopeLimitations()),
         "claim_scoped_review_applied");
+    reconcileDependencies();
+    return claims.get(resolvedId);
+  }
+
+  /** Projects a server-authoritative Claim Court outcome without conflating proof and truth. */
+  public synchronized ClaimCard applyClaimCourtOutcome(
+      String claimId,
+      ClaimCourtOutcome outcome,
+      String courtCaseId,
+      String proofRevisionId,
+      double verificationConfidence) {
+    String resolvedId = resolveClaimId(claimId);
+    ClaimCard claim = claims.get(resolvedId);
+    if (claim == null) {
+      return null;
+    }
+    ClaimCourtOutcome resolved = java.util.Objects.requireNonNull(outcome, "outcome");
+    if (claim.status() == ClaimStatus.VERIFIED && resolved != ClaimCourtOutcome.VERIFIED) {
+      record(
+          "claim_court_verified_authority_preserved",
+          claim.claimId(),
+          Map.of("court_case_id", courtCaseId, "outcome", resolved.name()));
+      return claim;
+    }
+    if (claim.status() == ClaimStatus.REJECTED && resolved != ClaimCourtOutcome.REFUTED) {
+      return claim;
+    }
+    ClaimStatus status =
+        switch (resolved) {
+          case VERIFIED -> ClaimStatus.VERIFIED;
+          case REFUTED -> ClaimStatus.REJECTED;
+          case PROOF_INVALID_BUT_CLAIM_OPEN,
+              REPAIR_EXHAUSTED,
+              INCONCLUSIVE,
+              DEFERRED_INDEPENDENCE_UNAVAILABLE -> ClaimStatus.UNCERTAIN;
+        };
+    Double confidence =
+        status == ClaimStatus.VERIFIED
+            ? Math.max(0.0d, Math.min(1.0d, verificationConfidence))
+            : claim.verificationConfidence();
+    replace(
+        copy(claim, status, confidence, claim.scopeLimitations()),
+        "claim_court_outcome_"
+            + resolved.name().toLowerCase(java.util.Locale.ROOT)
+            + "_"
+            + courtCaseId
+            + "_"
+            + proofRevisionId);
+    reconcileDependencies();
+    return claims.get(resolvedId);
+  }
+
+  /** Installs a repaired proof only after an independent blind PASS has granted authority. */
+  public synchronized ClaimCard applyVerifiedProofRevision(
+      String claimId,
+      List<ProofStep> proofSteps,
+      String proofRevisionId,
+      double verificationConfidence) {
+    String resolvedId = resolveClaimId(claimId);
+    ClaimCard claim = claims.get(resolvedId);
+    if (claim == null) {
+      return null;
+    }
+    List<ProofStep> revisionSteps = proofSteps == null ? List.of() : List.copyOf(proofSteps);
+    if (revisionSteps.isEmpty()) {
+      throw new IllegalArgumentException("verified proof revision requires proof steps");
+    }
+    ClaimCard updated =
+        copy(
+            claim,
+            ClaimStatus.VERIFIED,
+            Math.max(0.0d, Math.min(1.0d, verificationConfidence)),
+            claim.scopeLimitations(),
+            revisionSteps);
+    replace(updated, "blind_verified_proof_revision_" + proofRevisionId);
     reconcileDependencies();
     return claims.get(resolvedId);
   }
@@ -153,7 +231,7 @@ public final class LemmaMemory {
         updated =
             copy(
                 claim,
-                ClaimStatus.REJECTED,
+                ClaimStatus.UNCERTAIN,
                 claim.verificationConfidence(),
                 claim.scopeLimitations());
       }
@@ -434,6 +512,33 @@ public final class LemmaMemory {
         source.dependencyRefs(),
         source.evidenceRefs(),
         source.proofSteps(),
+        scopeLimitations,
+        source.selfConfidence(),
+        source.sourceAgentId(),
+        source.sourceAttemptId(),
+        source.sourceDeltaId(),
+        source.statement(),
+        status,
+        source.tags(),
+        verificationConfidence);
+  }
+
+  private static ClaimCard copy(
+      ClaimCard source,
+      ClaimStatus status,
+      Double verificationConfidence,
+      List<String> scopeLimitations,
+      List<ProofStep> proofSteps) {
+    return new ClaimCard(
+        source.assumptions(),
+        source.claimId(),
+        source.conclusion(),
+        source.contentHash(),
+        source.counterexampleRisk(),
+        source.dependencies(),
+        source.dependencyRefs(),
+        source.evidenceRefs(),
+        proofSteps,
         scopeLimitations,
         source.selfConfidence(),
         source.sourceAgentId(),

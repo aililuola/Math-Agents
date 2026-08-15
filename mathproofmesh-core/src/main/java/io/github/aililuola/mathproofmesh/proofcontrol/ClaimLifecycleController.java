@@ -39,6 +39,8 @@ public final class ClaimLifecycleController {
       String sourceRouteStatus,
       String invalidationReason,
       List<String> invalidatingEvidenceIds,
+      List<String> proofAuditIds,
+      List<String> proofRevisionIds,
       List<String> history) {
     public Entry {
       dependencies = List.copyOf(dependencies);
@@ -46,6 +48,9 @@ public final class ClaimLifecycleController {
       independentReportIds = List.copyOf(independentReportIds);
       refereeReviewIds = List.copyOf(refereeReviewIds);
       invalidatingEvidenceIds = List.copyOf(invalidatingEvidenceIds);
+      proofAuditIds = proofAuditIds == null ? List.of() : List.copyOf(proofAuditIds);
+      proofRevisionIds =
+          proofRevisionIds == null ? List.of() : List.copyOf(proofRevisionIds);
       history = List.copyOf(history);
     }
   }
@@ -212,6 +217,46 @@ public final class ClaimLifecycleController {
     return entry.snapshot();
   }
 
+  /** Records a proof failure while leaving statement authority open and non-rejected. */
+  public Entry recordProofInvalidOpen(
+      String claimId, String proofAuditId, String reason) {
+    MutableEntry entry = entry(claimId);
+    entry.add(entry.proofAudits, proofAuditId);
+    entry.history.add(
+        "proof-invalid-open:"
+            + ProofControlModels.required(reason, "reason")
+            + ":authority_preserved_"
+            + entry.state.name().toLowerCase(java.util.Locale.ROOT));
+    return entry.snapshot();
+  }
+
+  /** Records a repaired revision after blind adjudication, without itself granting authority. */
+  public Entry recordProofRevision(String claimId, String proofRevisionId) {
+    MutableEntry entry = entry(claimId);
+    entry.add(entry.proofRevisions, proofRevisionId);
+    entry.history.add("proof revision recorded " + proofRevisionId);
+    return entry.snapshot();
+  }
+
+  /** The only Claim Court interface that can project a trusted statement refutation. */
+  public Entry recordVerifiedRefutation(
+      String claimId, String refutationEvidenceId, String statementHash) {
+    MutableEntry entry = entry(claimId);
+    if (entry.state.ordinal() >= State.LOCALLY_VERIFIED.ordinal()
+        && entry.state != State.INVALIDATED
+        && entry.state != State.REJECTED) {
+      entry.history.add(
+          "verified refutation requires existing issue-003 invalidation authority:"
+              + ProofControlModels.required(refutationEvidenceId, "refutationEvidenceId"));
+      return entry.snapshot();
+    }
+    entry.reject(
+        "verified exact statement refutation "
+            + ProofControlModels.required(statementHash, "statementHash"),
+        refutationEvidenceId);
+    return entry.snapshot();
+  }
+
   /**
    * Reconstructs the minimal authority projection for a Fact already admitted by a pre-v7
    * checkpoint. The caller must first verify matching LemmaMemory, TypedMemory, and ProofGraph
@@ -320,6 +365,8 @@ public final class ClaimLifecycleController {
     private final String sourceRouteStatus;
     private String invalidationReason;
     private final List<String> invalidatingEvidence = new ArrayList<>();
+    private final List<String> proofAudits = new ArrayList<>();
+    private final List<String> proofRevisions = new ArrayList<>();
     private final List<String> history = new ArrayList<>(List.of("registered:proposed"));
 
     private MutableEntry(
@@ -357,6 +404,8 @@ public final class ClaimLifecycleController {
       this.sourceRouteStatus = entry.sourceRouteStatus();
       this.invalidationReason = entry.invalidationReason();
       this.invalidatingEvidence.addAll(entry.invalidatingEvidenceIds());
+      this.proofAudits.addAll(entry.proofAuditIds());
+      this.proofRevisions.addAll(entry.proofRevisionIds());
       this.history.clear();
       this.history.addAll(entry.history());
     }
@@ -409,6 +458,8 @@ public final class ClaimLifecycleController {
           sourceRouteStatus,
           invalidationReason,
           invalidatingEvidence,
+          proofAudits,
+          proofRevisions,
           history);
     }
   }
