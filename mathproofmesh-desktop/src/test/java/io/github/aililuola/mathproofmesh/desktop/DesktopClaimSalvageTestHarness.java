@@ -17,16 +17,38 @@ import io.github.aililuola.mathproofmesh.config.AgentConfig;
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
 import io.github.aililuola.mathproofmesh.contract.AttemptStatus;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
+import io.github.aililuola.mathproofmesh.contract.ClaimBlindAdjudicationBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimBlindAdjudicationDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimBlindAdjudicationVerdict;
 import io.github.aililuola.mathproofmesh.contract.ClaimCard;
+import io.github.aililuola.mathproofmesh.contract.ClaimCounterexampleWitnessReviewBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimCounterexampleWitnessReviewDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimMinimalRepairBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimMinimalRepairDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimMinimalRepairDisposition;
+import io.github.aililuola.mathproofmesh.contract.ClaimProofAuditBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimProofAuditDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimProofAuditVerdict;
+import io.github.aililuola.mathproofmesh.contract.ClaimProofPatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimProofPatchOperation;
+import io.github.aililuola.mathproofmesh.contract.ClaimProofPatchOperationType;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewBatch;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimStatementFalsificationBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimStatementFalsificationDecision;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatus;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
 import io.github.aililuola.mathproofmesh.contract.InitialExplorationAction;
 import io.github.aililuola.mathproofmesh.contract.InitialExplorationTurn;
 import io.github.aililuola.mathproofmesh.contract.ObligationKind;
 import io.github.aililuola.mathproofmesh.contract.ProofAttempt;
+import io.github.aililuola.mathproofmesh.contract.ProofAuditIssue;
+import io.github.aililuola.mathproofmesh.contract.ProofIssueKind;
 import io.github.aililuola.mathproofmesh.contract.ProofObligation;
+import io.github.aililuola.mathproofmesh.contract.ProofRepairability;
+import io.github.aililuola.mathproofmesh.contract.ProofStep;
+import io.github.aililuola.mathproofmesh.contract.StatementCounterexampleCandidate;
+import io.github.aililuola.mathproofmesh.contract.StatementFalsificationDisposition;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
 import io.github.aililuola.mathproofmesh.contract.StrategySet;
 import io.github.aililuola.mathproofmesh.contract.UsageRecord;
@@ -37,6 +59,11 @@ import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleController;
 import io.github.aililuola.mathproofmesh.proofcontrol.RootGoalContract;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionRecord;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtLedger;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtStageExecutionLedger;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionLedger;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.FrozenClaimSnapshot;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
 import io.github.aililuola.mathproofmesh.provider.AgentPool;
 import io.github.aililuola.mathproofmesh.provider.AgentRuntime;
@@ -181,6 +208,14 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
     invoke("integrateCommittedRoutes");
   }
 
+  void installSingleClaimRound(int round, String claimId, String statement) throws Exception {
+    installFailedAttempt(round, List.of(claim(claimId, statement, List.of("local_lemma"))));
+  }
+
+  void integrateInstalledRound() throws Exception {
+    invoke("integrateCommittedRoutes");
+  }
+
   List<String> exploreSubsequentRouteAndCaptureVerifiedFacts() throws Exception {
     invoke(
         "addRoute",
@@ -266,8 +301,26 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
 
   private static ClaimCard claim(String id, String statement, List<String> tags) {
     return new ClaimCard(
-        List.of(), id, statement, "", "bounded", List.of(), List.of(), List.of(), List.of(),
+        List.of(), id, statement, "", "bounded", List.of(), List.of(), List.of(),
+        List.of(proofStep(id, statement)),
         List.of(), 0.9d, null, null, null, statement, ClaimStatus.PROPOSED, tags, null);
+  }
+
+  private static ProofStep proofStep(String claimId, String statement) {
+    return new ProofStep(
+        null,
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        0.7d,
+        List.of(),
+        List.of(),
+        true,
+        "The supplied proof justifies the asserted local conclusion.",
+        statement,
+        "step-" + claimId,
+        "derivation");
   }
 
   DesktopSolveCheckpoint checkpointRoundTrip() throws Exception {
@@ -284,6 +337,11 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
 
   void restore(DesktopSolveCheckpoint checkpoint) throws Exception {
     invoke("restore", DesktopSolveCheckpoint.class, checkpoint);
+  }
+
+  DesktopSolveCheckpoint readPersistedCheckpoint() throws Exception {
+    Path state = runDirectory.resolve("structured").resolve("desktop-solve-state.json");
+    return ContractObjectMapper.read(Files.readString(state), DesktopSolveCheckpoint.class);
   }
 
   TypedMemory typedMemory() {
@@ -309,6 +367,33 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
     } catch (ReflectiveOperationException exception) {
       throw new IllegalStateException(exception);
     }
+  }
+
+  ClaimCourtLedger claimCourt() {
+    return uncheckedField(coordinator, "claimCourt", ClaimCourtLedger.class);
+  }
+
+  ClaimProofRevisionLedger claimProofRevisions() {
+    return uncheckedField(coordinator, "claimProofRevisions", ClaimProofRevisionLedger.class);
+  }
+
+  ClaimCourtStageExecutionLedger claimCourtExecutions() {
+    return uncheckedField(
+        coordinator, "claimCourtExecutions", ClaimCourtStageExecutionLedger.class);
+  }
+
+  void setFailurePoint(ClaimCourtFailurePoint point) {
+    coordinator.setClaimCourtFailurePointForTest(point);
+  }
+
+  void setHardCrashPoint(ClaimCourtFailurePoint point) {
+    coordinator.setClaimCourtHardCrashPointForTest(point);
+  }
+
+  long callsForSchema(String schemaName) {
+    return claimReviewRequests().stream()
+        .filter(request -> request.schemaName().equals(schemaName))
+        .count();
   }
 
   RootGoalContract rootGoal() {
@@ -567,6 +652,21 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
                 "verified facts captured for the next route");
         return response(request, ContractObjectMapper.write(turn));
       }
+      if ("ClaimStatementFalsificationBatch".equals(request.schemaName())) {
+        return statementFalsification(request);
+      }
+      if ("ClaimCounterexampleWitnessReviewBatch".equals(request.schemaName())) {
+        return counterexampleWitnessReview(request);
+      }
+      if ("ClaimProofAuditBatch".equals(request.schemaName())) {
+        return proofAudit(request);
+      }
+      if ("ClaimMinimalRepairBatch".equals(request.schemaName())) {
+        return minimalRepair(request);
+      }
+      if ("ClaimBlindAdjudicationBatch".equals(request.schemaName())) {
+        return blindAdjudication(request);
+      }
       if (!"ClaimReviewBatch".equals(request.schemaName())) {
         throw new AssertionError("unexpected claim-salvage schema: " + request.schemaName());
       }
@@ -613,6 +713,213 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
               "artifact://claim-review/" + attemptId,
               new UsageRecord());
       return response(request, ContractObjectMapper.write(batch));
+    }
+
+    private LLMResponse statementFalsification(ProviderRequest request) {
+      requests.add(request);
+      JsonNode context = sanitizedContext(request);
+      FrozenClaimSnapshot frozen =
+          ContractObjectMapper.read(context.path("frozen_claim"), FrozenClaimSnapshot.class);
+      String statement = frozen.statement();
+      boolean falseStatement =
+          statement.contains("REFUTED")
+              || (statement.contains("FALSE_LOCAL_R")
+                  && !statement.contains("REPAIRABLE")
+                  && !statement.contains("BAD_PROOF"));
+      List<StatementCounterexampleCandidate> candidates =
+          falseStatement
+              ? List.of(
+                  new StatementCounterexampleCandidate(
+                      "candidate-" + frozen.claimId(),
+                      frozen.claimId(),
+                      frozen.claimStatementHash(),
+                      "An exact finite witness refutes this frozen statement.",
+                      frozen.assumptions(),
+                      frozen.quantifiers(),
+                      frozen.scopeLimitations(),
+                      frozen.polarity(),
+                      List.of("artifact://exact-witness/" + frozen.claimId())))
+              : List.of();
+      ClaimStatementFalsificationDecision decision =
+          new ClaimStatementFalsificationDecision(
+              frozen.claimId(),
+              statement.contains("UNSUPPORTED_LOCAL")
+                  ? StatementFalsificationDisposition.INCONCLUSIVE
+                  : falseStatement
+                      ? StatementFalsificationDisposition.COUNTEREXAMPLE_CANDIDATE
+                      : StatementFalsificationDisposition.NO_COUNTEREXAMPLE_FOUND,
+              candidates,
+              falseStatement ? "exact counterexample candidate" : "no counterexample found");
+      String attemptId = context.path("proof_revision").path("revisionId").asText();
+      reviewCalls.putIfAbsent(frozen.sourceAttemptId(), 1);
+      ClaimStatementFalsificationBatch batch =
+          new ClaimStatementFalsificationBatch(
+              "statement-batch-" + frozen.claimId(),
+              "model-falsifier",
+              frozen.sourceRouteId(),
+              frozen.sourceAttemptId(),
+              List.of(decision),
+              "artifact://statement/" + attemptId,
+              new UsageRecord());
+      return response(request, ContractObjectMapper.write(batch));
+    }
+
+    private LLMResponse counterexampleWitnessReview(ProviderRequest request) {
+      requests.add(request);
+      JsonNode context = sanitizedContext(request);
+      List<ClaimCounterexampleWitnessReviewDecision> decisions = new ArrayList<>();
+      for (JsonNode node : context.path("counterexample_candidates")) {
+        decisions.add(
+            new ClaimCounterexampleWitnessReviewDecision(
+                text(node, "candidateId", "candidate_id"),
+                text(node, "claimId", "claim_id"),
+                text(node, "statementHash", "statement_hash"),
+                VerificationVerdict.PASS,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                "exact witness independently replayed"));
+      }
+      ClaimCounterexampleWitnessReviewBatch batch =
+          new ClaimCounterexampleWitnessReviewBatch(
+              null,
+              "model-witness-reviewer",
+              decisions,
+              "artifact://witness-review",
+              new UsageRecord());
+      return response(request, ContractObjectMapper.write(batch));
+    }
+
+    private LLMResponse proofAudit(ProviderRequest request) {
+      requests.add(request);
+      JsonNode context = sanitizedContext(request);
+      FrozenClaimSnapshot frozen =
+          ContractObjectMapper.read(context.path("frozen_claim"), FrozenClaimSnapshot.class);
+      JsonNode revision = context.path("proof_revision");
+      String statement = frozen.statement();
+      ClaimProofAuditVerdict verdict =
+          statement.contains("BAD_PROOF") || statement.contains("UNREPAIRABLE")
+              ? ClaimProofAuditVerdict.INVALID_UNREPAIRABLE
+              : statement.contains("REPAIRABLE")
+                  ? ClaimProofAuditVerdict.INVALID_REPAIRABLE
+                  : ClaimProofAuditVerdict.VALID;
+      List<ProofAuditIssue> issues =
+          verdict == ClaimProofAuditVerdict.VALID
+              ? List.of()
+              : List.of(
+                  new ProofAuditIssue(
+                      "issue-" + frozen.claimId(),
+                      frozen.claimId(),
+                      text(revision.path("proofSteps").get(0), "stepId", "step_id"),
+                      "The supplied premise.",
+                      "The asserted local conclusion.",
+                      ProofIssueKind.MISSING_JUSTIFICATION,
+                      verdict == ClaimProofAuditVerdict.INVALID_REPAIRABLE
+                          ? ProofRepairability.LOCAL_PATCH
+                          : ProofRepairability.NONLOCAL_REWRITE_REQUIRED,
+                      List.of(),
+                      false,
+                      "The proof bridge is incomplete."));
+      ClaimProofAuditBatch batch =
+          new ClaimProofAuditBatch(
+              "audit-batch-" + frozen.claimId(),
+              "model-auditor",
+              frozen.sourceRouteId(),
+              frozen.sourceAttemptId(),
+              List.of(
+                  new ClaimProofAuditDecision(
+                      frozen.claimId(), verdict, issues, "proof validity classified")),
+              "artifact://proof-audit/" + frozen.claimId(),
+              new UsageRecord());
+      return response(request, ContractObjectMapper.write(batch));
+    }
+
+    private LLMResponse minimalRepair(ProviderRequest request) {
+      requests.add(request);
+      JsonNode context = sanitizedContext(request);
+      FrozenClaimSnapshot frozen =
+          ContractObjectMapper.read(context.path("frozen_claim"), FrozenClaimSnapshot.class);
+      JsonNode base = context.path("base_proof_revision");
+      JsonNode audit = context.path("proof_audit");
+      JsonNode issue = audit.path("issues").get(0);
+      String issueId = text(issue, "issueId", "issue_id");
+      String stepId = text(issue, "stepId", "step_id");
+      ClaimProofPatch patch =
+          new ClaimProofPatch(
+              "patch-" + frozen.claimId(),
+              frozen.claimId(),
+              frozen.claimSemanticHash(),
+              base.path("revisionId").asText(),
+              base.path("proofHash").asText(),
+              List.of(issueId),
+              List.of(stepId),
+              List.of(
+                  new ClaimProofPatchOperation(
+                      "patch-operation-" + frozen.claimId(),
+                      ClaimProofPatchOperationType.REPLACE_STEP_JUSTIFICATION,
+                      stepId,
+                      null,
+                      "A bounded counting or kernel bridge supplies the missing implication.",
+                      null,
+                      null,
+                      null)),
+              List.of(issueId));
+      ClaimMinimalRepairBatch batch =
+          new ClaimMinimalRepairBatch(
+              "repair-batch-" + frozen.claimId(),
+              "model-repairer",
+              frozen.sourceRouteId(),
+              frozen.sourceAttemptId(),
+              List.of(
+                  new ClaimMinimalRepairDecision(
+                      frozen.claimId(),
+                      ClaimMinimalRepairDisposition.PATCH_PROPOSED,
+                      patch,
+                      "one local proof step repaired")),
+              "artifact://minimal-repair/" + frozen.claimId(),
+              new UsageRecord());
+      return response(request, ContractObjectMapper.write(batch));
+    }
+
+    private LLMResponse blindAdjudication(ProviderRequest request) {
+      requests.add(request);
+      JsonNode context = sanitizedContext(request);
+      String claimId = context.path("blind_claim_packet").path("claimId").asText();
+      ClaimBlindAdjudicationBatch batch =
+          new ClaimBlindAdjudicationBatch(
+              "blind-batch-" + claimId,
+              "model-blind-adjudicator",
+              context.path("blind_claim_packet").path("sourceRouteId").asText("route-1"),
+              attemptIdFromClaim(claimId),
+              List.of(
+                  new ClaimBlindAdjudicationDecision(
+                      claimId,
+                      ClaimBlindAdjudicationVerdict.PASS,
+                      List.of(),
+                      "identity-scrubbed proof passed")),
+              "artifact://blind/" + claimId,
+              new UsageRecord());
+      return response(request, ContractObjectMapper.write(batch));
+    }
+
+    private static String attemptIdFromClaim(String claimId) {
+      int marker = claimId.lastIndexOf('-');
+      if (marker >= 0 && marker + 1 < claimId.length()) {
+        try {
+          return attemptId(Integer.parseInt(claimId.substring(marker + 1)));
+        } catch (NumberFormatException ignored) {
+          // Stable non-round Claim IDs use the current synthetic attempt below.
+        }
+      }
+      return "claim-court-attempt";
+    }
+
+    private static String text(JsonNode node, String canonicalName, String contractName) {
+      String canonical = node.path(canonicalName).asText();
+      return canonical.isBlank() ? node.path(contractName).asText() : canonical;
     }
 
     private static LLMResponse response(ProviderRequest request, String body) {

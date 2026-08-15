@@ -165,7 +165,7 @@ public final class LemmaMemory {
         };
     Double confidence =
         status == ClaimStatus.VERIFIED
-            ? Math.max(0.0d, Math.min(1.0d, verificationConfidence))
+            ? Double.valueOf(Math.max(0.0d, Math.min(1.0d, verificationConfidence)))
             : claim.verificationConfidence();
     replace(
         copy(claim, status, confidence, claim.scopeLimitations()),

@@ -49,7 +49,7 @@ final class AttemptArtifactLedgerSnapshotTest {
   @Test
   void reviewBatchKeepsMissingFailedAndWeakClaimsDistinct() {
     var missing = AttemptArtifactFixtures.claim("missing", "A missing decision.", List.of());
-    var failed = AttemptArtifactFixtures.claim("failed", "A rejected claim.", List.of());
+    var failed = AttemptArtifactFixtures.claim("failed", "A claim with an invalid proof.", List.of());
     var weak = AttemptArtifactFixtures.claim("weak", "A weakly supported claim.", List.of());
     AttemptArtifactLedger ledger =
         AttemptArtifactFixtures.ledger(AttemptStatus.FAILED, missing, failed, weak);
@@ -79,8 +79,9 @@ final class AttemptArtifactLedgerSnapshotTest {
         .extracting(AttemptArtifactRecord::claimId, AttemptArtifactRecord::status)
         .containsExactlyInAnyOrder(
             org.assertj.core.groups.Tuple.tuple("missing", AttemptArtifactStatus.UNCERTAIN),
-            org.assertj.core.groups.Tuple.tuple("failed", AttemptArtifactStatus.REJECTED),
+            org.assertj.core.groups.Tuple.tuple("failed", AttemptArtifactStatus.UNCERTAIN),
             org.assertj.core.groups.Tuple.tuple("weak", AttemptArtifactStatus.UNCERTAIN));
+    assertThat(reviewed).noneMatch(record -> record.status() == AttemptArtifactStatus.REJECTED);
     assertThat(reviewed).allSatisfy(record -> assertThat(record.terminal()).isTrue());
   }
 

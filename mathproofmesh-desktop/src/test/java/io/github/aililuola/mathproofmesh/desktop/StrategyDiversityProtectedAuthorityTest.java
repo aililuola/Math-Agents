@@ -16,6 +16,7 @@ class StrategyDiversityProtectedAuthorityTest {
   @Test
   void issue007DoesNotAlterEarlierAuthorityOwnersOrUseTheLegacySelector() throws Exception {
     Path root = projectRoot();
+    // Issue 008 intentionally extends the shared attempt-artifact and Claim lifecycle adapters.
     List<String> protectedPaths =
         List.of(
             "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/proofcontrol/ExactGoalContractChecker.java",
@@ -23,8 +24,6 @@ class StrategyDiversityProtectedAuthorityTest {
             "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/proofcontrol/ProblemSemanticViewService.java",
             "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/memory/NegativeKnowledgeRegistry.java",
             "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/memory/NegativeKnowledgeAdmissionGate.java",
-            "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/proofcontrol/AttemptArtifactLedger.java",
-            "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/proofcontrol/ClaimLifecycleController.java",
             "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/research/ResearchCheckpointLedger.java",
             "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/proofcontrol/SemanticPivotLedger.java");
     List<String> command = new java.util.ArrayList<>();

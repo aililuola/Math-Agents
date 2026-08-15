@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
 import io.github.aililuola.mathproofmesh.provider.ProviderRequest;
 import java.nio.file.Path;
-import java.util.stream.StreamSupport;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -22,47 +22,39 @@ final class DesktopClaimReviewPromptIsolationTest {
       harness.addCounterexampleTargets();
       harness.runFailedRound(0);
 
-      assertThat(harness.claimReviewRequests()).hasSize(1);
-      ProviderRequest request = harness.claimReviewRequests().getFirst();
-      JsonNode context = sanitizedContext(request);
-      assertThat(context.properties().stream().map(java.util.Map.Entry::getKey).toList())
-          .containsExactlyInAnyOrder(
-              "immutable_problem",
-              "problem_hash",
-              "route_id",
-              "attempt_id",
-              "attempt_status",
-              "route_status",
-              "candidate_artifacts",
-              "candidate_claims",
-              "required_claim_ids",
-              "author_excluded",
-              "review_rule");
-      assertThat(context.path("immutable_problem").path("exact_statement").asText())
-          .isEqualTo(DesktopClaimSalvageTestHarness.SOURCE);
-      assertThat(context.path("candidate_artifacts")).hasSize(4);
-      assertThat(context.path("candidate_claims")).hasSize(4);
-      assertThat(
-              StreamSupport.stream(
-                      context.path("required_claim_ids").spliterator(), false)
-                  .map(JsonNode::asText)
-                  .toList())
-          .containsExactlyInAnyOrder(
-              "correct-local-0",
-              "false-local-0",
-              "unsupported-local-0",
-              "counterexample-0");
+      List<ProviderRequest> requests = harness.claimReviewRequests();
+      assertThat(requests).hasSize(9);
+      assertThat(requests)
+          .filteredOn(request -> "ClaimStatementFalsificationBatch".equals(request.schemaName()))
+          .hasSize(4);
+      assertThat(requests)
+          .filteredOn(
+              request -> "ClaimCounterexampleWitnessReviewBatch".equals(request.schemaName()))
+          .hasSize(1);
+      assertThat(requests)
+          .filteredOn(request -> "ClaimProofAuditBatch".equals(request.schemaName()))
+          .hasSize(2);
+      assertThat(requests)
+          .filteredOn(request -> "ClaimBlindAdjudicationBatch".equals(request.schemaName()))
+          .hasSize(2);
+      assertThat(requests)
+          .extracting(ProviderRequest::schemaName)
+          .doesNotContain("ClaimReviewBatch");
 
-      String prompt = request.messages().getLast().content();
-      assertThat(prompt)
-          .doesNotContain(
-              "The route contains bounded local results but its main bridge fails.",
-              "the route theorem does not follow",
-              "FALSE_ROUTE_THEOREM_R0",
-              "detailedReview",
-              "detailed_review",
-              "proofSketch",
-              "proof_sketch");
+      for (ProviderRequest request : requests) {
+        JsonNode context = sanitizedContext(request);
+        assertThat(context.path("immutable_problem").path("exact_statement").asText())
+            .isEqualTo(DesktopClaimSalvageTestHarness.SOURCE);
+        assertThat(request.messages().getLast().content())
+            .doesNotContain(
+                "The route contains bounded local results but its main bridge fails.",
+                "the route theorem does not follow",
+                "FALSE_ROUTE_THEOREM_R0",
+                "detailedReview",
+                "detailed_review",
+                "proofSketch",
+                "proof_sketch");
+      }
     }
   }
 

@@ -46,7 +46,7 @@ class Phase17LemmaMemoryHardeningTest {
         .isNull();
     assertThat(memory.applyClaimReport(
             MemoryFixtures.report("canonical", "claim", VerificationVerdict.FAIL, List.of())).status())
-        .isEqualTo(ClaimStatus.REJECTED);
+        .isEqualTo(ClaimStatus.UNCERTAIN);
     assertThat(memory.applyClaimReport(
             MemoryFixtures.report("canonical", "claim", VerificationVerdict.UNCERTAIN, List.of())).status())
         .isEqualTo(ClaimStatus.UNCERTAIN);
@@ -92,7 +92,8 @@ class Phase17LemmaMemoryHardeningTest {
                     List.of(critical, warning, noClaim))))
         .extracting(ClaimCard::claimId)
         .containsExactlyInAnyOrder("proposed", "already");
-    assertThat(memory.rejected()).extracting(ClaimCard::claimId).contains("proposed");
+    assertThat(memory.uncertain()).extracting(ClaimCard::claimId).contains("proposed");
+    assertThat(memory.rejected()).extracting(ClaimCard::claimId).doesNotContain("proposed");
     assertThat(memory.verified()).extracting(ClaimCard::claimId).contains("already");
 
     ClaimCard passCandidate =

@@ -48,8 +48,24 @@ import io.github.aililuola.mathproofmesh.contract.BudgetDecision;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
 import io.github.aililuola.mathproofmesh.contract.CandidateAssessment;
 import io.github.aililuola.mathproofmesh.contract.ClaimCard;
+import io.github.aililuola.mathproofmesh.contract.ClaimBlindAdjudicationBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimBlindAdjudicationDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimBlindAdjudicationVerdict;
+import io.github.aililuola.mathproofmesh.contract.ClaimCounterexampleWitnessReviewBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimCounterexampleWitnessReviewDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimCourtOutcome;
+import io.github.aililuola.mathproofmesh.contract.ClaimMinimalRepairBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimMinimalRepairDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimMinimalRepairDisposition;
+import io.github.aililuola.mathproofmesh.contract.ClaimProofAuditBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimProofAuditDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimProofAuditVerdict;
+import io.github.aililuola.mathproofmesh.contract.ClaimProofPatch;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewBatch;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimStatementAssessment;
+import io.github.aililuola.mathproofmesh.contract.ClaimStatementFalsificationBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimStatementFalsificationDecision;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatus;
 import io.github.aililuola.mathproofmesh.contract.ComputationPurpose;
 import io.github.aililuola.mathproofmesh.contract.ComputationDecision;
@@ -93,9 +109,11 @@ import io.github.aililuola.mathproofmesh.contract.ObligationKind;
 import io.github.aililuola.mathproofmesh.contract.ProblemContract;
 import io.github.aililuola.mathproofmesh.contract.ProblemKind;
 import io.github.aililuola.mathproofmesh.contract.ProofAttempt;
+import io.github.aililuola.mathproofmesh.contract.ProofAuditIssue;
 import io.github.aililuola.mathproofmesh.contract.ProofGraphEdge;
 import io.github.aililuola.mathproofmesh.contract.ProofObligation;
 import io.github.aililuola.mathproofmesh.contract.ProofStep;
+import io.github.aililuola.mathproofmesh.contract.ProofRepairability;
 import io.github.aililuola.mathproofmesh.contract.QuantifierSpec;
 import io.github.aililuola.mathproofmesh.contract.ReceiptStatus;
 import io.github.aililuola.mathproofmesh.contract.ResearchFindingDispositionAction;
@@ -109,10 +127,13 @@ import io.github.aililuola.mathproofmesh.contract.SemanticPivotReviewBatch;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
 import io.github.aililuola.mathproofmesh.contract.StrategyPreflightPlan;
 import io.github.aililuola.mathproofmesh.contract.StrategySet;
+import io.github.aililuola.mathproofmesh.contract.StatementCounterexampleCandidate;
+import io.github.aililuola.mathproofmesh.contract.StatementFalsificationDisposition;
 import io.github.aililuola.mathproofmesh.contract.TaskRequirement;
 import io.github.aililuola.mathproofmesh.contract.TriageResult;
 import io.github.aililuola.mathproofmesh.contract.ToolAuditReport;
 import io.github.aililuola.mathproofmesh.contract.ToolRequest;
+import io.github.aililuola.mathproofmesh.contract.UsageRecord;
 import io.github.aililuola.mathproofmesh.contract.VerificationReport;
 import io.github.aililuola.mathproofmesh.contract.VerificationStage;
 import io.github.aililuola.mathproofmesh.contract.VerificationVerdict;
@@ -169,7 +190,9 @@ import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactHarvester;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactKind;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactRecord;
+import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactSnapshot;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactStatus;
+import io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleSnapshot;
 import io.github.aililuola.mathproofmesh.proofcontrol.ExactGoalContractChecker;
 import io.github.aililuola.mathproofmesh.proofcontrol.FailureControlService;
 import io.github.aililuola.mathproofmesh.proofcontrol.MetaPivotController;
@@ -207,6 +230,28 @@ import io.github.aililuola.mathproofmesh.proofcontrol.ProblemSemanticViewService
 import io.github.aililuola.mathproofmesh.proofcontrol.RootGoalContract;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyArchive;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyBlueprintCompiler;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimBlindReviewPacket;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimBlindReviewPacketFactory;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtConfig;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtLedger;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtRecord;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtRolePolicy;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtSnapshot;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtStage;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtStageExecutionLedger;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtStageExecutionRecord;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtStageExecutionSnapshot;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtStageExecutionStatus;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimFreezeService;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofPatchValidator;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionLedger;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionRecord;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionSnapshot;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimRefutationEvidence;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimRefutationEvidenceType;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimStatementAuthorityService;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.FrozenClaimSemanticContext;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.FrozenClaimSnapshot;
 import io.github.aililuola.mathproofmesh.proofgraph.BottleneckFamilyRecord;
 import io.github.aililuola.mathproofmesh.proofgraph.BottleneckRelationType;
 import io.github.aililuola.mathproofmesh.proofgraph.CanonicalObligationRecord;
@@ -315,6 +360,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 /** Executes every migrated proof-control phase on the live desktop path. */
 final class DesktopSolveCoordinator {
@@ -428,6 +474,19 @@ final class DesktopSolveCoordinator {
   private final AttemptArtifactHarvester attemptArtifactHarvester =
       new AttemptArtifactHarvester();
   private AttemptArtifactLedger attemptArtifacts = new AttemptArtifactLedger();
+  private final ClaimFreezeService claimFreezeService = new ClaimFreezeService();
+  private final ClaimStatementAuthorityService claimStatementAuthority =
+      new ClaimStatementAuthorityService();
+  private final ClaimCourtRolePolicy claimCourtRolePolicy = new ClaimCourtRolePolicy();
+  private final ClaimBlindReviewPacketFactory claimBlindPackets =
+      new ClaimBlindReviewPacketFactory();
+  private final ClaimCourtConfig claimCourtConfig = ClaimCourtConfig.defaults();
+  private ClaimProofRevisionLedger claimProofRevisions = new ClaimProofRevisionLedger();
+  private ClaimCourtLedger claimCourt = new ClaimCourtLedger();
+  private ClaimCourtStageExecutionLedger claimCourtExecutions =
+      new ClaimCourtStageExecutionLedger();
+  private ClaimCourtFailurePoint claimCourtFailurePoint = ClaimCourtFailurePoint.NONE;
+  private ClaimCourtFailurePoint claimCourtHardCrashPoint = ClaimCourtFailurePoint.NONE;
   private ResearchCheckpointLedger researchCheckpoints = new ResearchCheckpointLedger();
   private TypedMemory typedMemory;
   private ProofGraphStore proofGraph;
@@ -4167,105 +4226,995 @@ final class DesktopSolveCoordinator {
     return stored;
   }
 
+  @SuppressFBWarnings(
+      value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
+      justification =
+          "The original court failure must be rethrown after restoring the durable mutation snapshot.")
   private List<AttemptArtifactRecord> reviewAttemptArtifacts(
       RouteState route, List<AttemptArtifactRecord> harvested) {
-    List<AttemptArtifactRecord> pending =
-        harvested.stream()
-            .filter(record -> record.status() == AttemptArtifactStatus.HARVESTED)
-            .toList();
-    pending.stream()
-        .skip(ClaimReviewBatch.MAX_DECISIONS)
-        .map(
-            record ->
-                attemptArtifacts.markUncertain(
-                    record.artifactId(), "claim review batch capacity exceeded"))
-        .forEach(
-            record -> {
-              applyClaimDecision(
-                  record,
-                  uncertainDecision(record.claimId(), "claim review batch capacity exceeded"));
-              addDistinct(route.uncertainClaimIds, record.claimId());
-            });
     List<AttemptArtifactRecord> reviewable =
-        pending.stream().limit(ClaimReviewBatch.MAX_DECISIONS).toList();
+        harvested.stream()
+            .filter(
+                record ->
+                    record.status() == AttemptArtifactStatus.HARVESTED
+                        || record.status() == AttemptArtifactStatus.REVIEW_PENDING)
+            .limit(ClaimReviewBatch.MAX_DECISIONS)
+            .toList();
     harvested.stream()
         .filter(record -> record.status() == AttemptArtifactStatus.UNCERTAIN)
         .forEach(
             record -> {
-              applyClaimDecision(record, uncertainDecision(record.claimId(), "invalid artifact targeting"));
+              lemmaMemory.applyClaimReviewDecision(
+                  record.claimId(),
+                  uncertainDecision(record.claimId(), "invalid artifact targeting"));
               addDistinct(route.uncertainClaimIds, record.claimId());
             });
-    if (reviewable.isEmpty() || attemptArtifacts.reviewed(route.attempt.attemptId())) {
+    if (reviewable.isEmpty()) {
       return attemptArtifacts.recordsForAttempt(route.attempt.attemptId());
     }
 
     attemptArtifacts.markReviewPending(route.attempt.attemptId());
-    AgentRuntime reviewer = claimReviewer(route);
-    StructuredCallResult<ClaimReviewBatch> call =
-        callStage(
-            "claim-salvage-review-" + route.attempt.attemptId(),
-            "claim_salvage_review",
-            ClaimReviewBatch.class,
-            Map.ofEntries(
-                Map.entry("immutable_problem", frozenProblem),
-                Map.entry("problem_hash", problemHash),
-                Map.entry("route_id", route.routeId),
-                Map.entry("attempt_id", route.attempt.attemptId()),
-                Map.entry("attempt_status", route.attempt.status().value()),
-                Map.entry("route_status", route.status),
-                Map.entry("candidate_artifacts", reviewable),
-                Map.entry("candidate_claims", candidateClaims(route, reviewable)),
-                Map.entry(
-                    "required_claim_ids",
-                    reviewable.stream().map(AttemptArtifactRecord::claimId).toList()),
-                Map.entry("author_excluded", route.attempt.agentId()),
-                Map.entry(
-                    "review_rule",
-                    "Judge every claim independently; route failure and attempt PASS are not claim verdicts.")),
-            reviewer,
-            "verification",
-            "Independently reviewing bounded claims from " + route.routeId);
-    ClaimReviewBatch source = call.value();
-    ClaimReviewBatch bound =
-        new ClaimReviewBatch(
-            source.reportId(),
-            reviewer.id(),
-            route.routeId,
-            route.attempt.attemptId(),
-            source.decisions(),
-            call.responseArtifactRef(),
-            call.usage());
-    ClaimReviewBatch audited = applyNegativeKnowledgeBoundary(route, bound, reviewable);
-    route.claimReview = audited;
-    List<AttemptArtifactRecord> reviewed =
-        attemptArtifacts.applyReviewBatch(
-            audited, config.budget().verificationPassThreshold());
-    Map<String, ClaimReviewDecision> decisions = decisionsByClaim(audited);
-    for (AttemptArtifactRecord record : reviewed) {
-      ClaimReviewDecision decision = decisions.get(record.claimId());
-      applyClaimDecision(
-          record,
-          decisionForArtifactStatus(
-              record,
-              decision == null
-                  ? uncertainDecision(record.claimId(), "claim review decision missing")
-                  : decision));
-      switch (record.status()) {
-        case VERIFIED_LOCAL -> {
-          if (record.kind() == AttemptArtifactKind.COUNTEREXAMPLE) {
-            addDistinct(route.salvagedCounterexampleIds, record.claimId());
-          } else if (record.kind() == AttemptArtifactKind.LOCAL_LEMMA) {
-            addDistinct(route.salvagedVerifiedClaimIds, record.claimId());
-          }
-        }
-        case REJECTED -> addDistinct(route.rejectedClaimIds, record.claimId());
-        case UNCERTAIN -> addDistinct(route.uncertainClaimIds, record.claimId());
-        default -> {
-          // REVIEW_PENDING is resolved atomically by applyReviewBatch.
-        }
+    for (AttemptArtifactRecord artifact : reviewable) {
+      ClaimCourtMutationSnapshot fallback = captureClaimCourtMutation(route);
+      try {
+        ClaimCourtReviewResult result = conductClaimCourt(route, artifact);
+        projectClaimCourtOutcome(route, artifact, result);
+      } catch (RuntimeException exception) {
+        restoreClaimCourtDurableState(fallback, exception);
+        throw exception;
       }
     }
     return attemptArtifacts.recordsForAttempt(route.attempt.attemptId());
+  }
+
+  private ClaimCourtReviewResult conductClaimCourt(
+      RouteState route, AttemptArtifactRecord artifact) {
+    ClaimCard claim = claimForArtifact(artifact);
+    FrozenClaimSnapshot frozen =
+        claimFreezeService.freeze(
+            problemHash,
+            rootGoal().sourceStatementHash(),
+            route.routeId,
+            claim,
+            FrozenClaimSemanticContext.root(effectiveClaimScope(claim)));
+    ClaimProofRevisionRecord original =
+        claimProofRevisions.createOriginal(frozen, claim.proofSteps(), claim.evidenceRefs());
+    route.courtCaseIds.add(frozen.courtCaseId());
+    failClaimCourtAt(ClaimCourtFailurePoint.AFTER_CLAIM_FREEZE);
+
+    ClaimCourtRecord existing =
+        claimCourt.records().stream()
+            .filter(record -> record.courtCaseId().equals(frozen.courtCaseId()))
+            .findFirst()
+            .orElse(null);
+    ClaimCourtRolePolicy.Assignment assignment =
+        existing == null ? claimCourtAssignment(frozen.authorAgentId()).orElse(null) : existing.roleAssignment();
+    if (assignment == null) {
+      ClaimCourtRecord deferred = claimCourt.deferIndependence(frozen);
+      return claimCourtResult(deferred, original, "claim-court");
+    }
+    claimCourtRolePolicy.requireIndependent(assignment);
+    ClaimCourtRecord record = claimCourt.open(frozen, assignment);
+
+    while (!record.status().terminal()) {
+      try {
+        record = advanceClaimCourt(route, artifact, record, assignment);
+      } catch (ClaimCourtStageQuarantinedException exception) {
+        record = claimCourt.defer(record.courtCaseId(), exception.getMessage());
+      }
+    }
+    ClaimProofRevisionRecord revision =
+        claimProofRevisions.get(record.currentProofRevisionId());
+    return claimCourtResult(record, revision, finalAuthorityAgent(record));
+  }
+
+  private ClaimCourtRecord advanceClaimCourt(
+      RouteState route,
+      AttemptArtifactRecord artifact,
+      ClaimCourtRecord record,
+      ClaimCourtRolePolicy.Assignment assignment) {
+    return switch (record.status()) {
+      case FROZEN -> claimCourt.beginStatementScreening(record.courtCaseId());
+      case STATEMENT_SCREENING -> screenClaimStatement(route, artifact, record, assignment);
+      case PROOF_AUDIT_PENDING -> auditClaimProof(route, artifact, record, assignment);
+      case PROOF_VALID, REPAIRED_PENDING_ADJUDICATION ->
+          claimCourt.beginBlindAdjudication(record.courtCaseId());
+      case PROOF_INVALID_REPAIRABLE -> claimCourt.beginRepair(record.courtCaseId(), claimCourtConfig);
+      case REPAIR_PENDING -> repairClaimProof(route, artifact, record, assignment);
+      case BLIND_ADJUDICATION_PENDING ->
+          adjudicateClaimProof(route, artifact, record, assignment);
+      default -> throw new IllegalStateException("unsupported active Claim Court status " + record.status());
+    };
+  }
+
+  private ClaimCourtRecord screenClaimStatement(
+      RouteState route,
+      AttemptArtifactRecord artifact,
+      ClaimCourtRecord record,
+      ClaimCourtRolePolicy.Assignment assignment) {
+    FrozenClaimSnapshot frozen = record.frozenClaim();
+    AgentRuntime falsifier = requireAgent(assignment.falsifierAgentId());
+    Map<String, ?> context =
+        Map.ofEntries(
+            Map.entry("immutable_problem", frozenProblem),
+            Map.entry("problem_hash", problemHash),
+            Map.entry("root_goal_hash", rootGoal().sourceStatementHash()),
+            Map.entry("frozen_claim", frozen),
+            Map.entry("proof_revision", claimProofRevisions.get(record.currentProofRevisionId())),
+            Map.entry("counterexample_authority_rule", "Return candidates only; the server verifies exact authority."));
+    CourtStageResult<ClaimStatementFalsificationBatch> stage =
+        executeClaimCourtStage(
+            record.courtCaseId(),
+            ClaimCourtStage.STATEMENT_FALSIFICATION,
+            ClaimStatementFalsificationBatch.class,
+            context,
+            falsifier,
+            call -> bindStatementFalsification(route, call, falsifier.id()));
+    ClaimStatementFalsificationDecision decision =
+        statementDecision(stage.value(), frozen.claimId());
+    List<StatementCounterexampleCandidate> candidates =
+        decision.counterexampleCandidates().stream()
+            .filter(candidate -> exactCounterexampleCandidate(candidate, frozen))
+            .toList();
+    List<ClaimRefutationEvidence> evidence =
+        candidates.isEmpty()
+            ? List.of()
+            : reviewCounterexampleWitnesses(
+                route, record, candidates, requireAgent(assignment.auditorAgentId()), "falsification");
+    ClaimStatementAuthorityService.Result assessment =
+        claimStatementAuthority.assess(
+            frozen,
+            decision,
+            negativeKnowledgeRegistry,
+            roundIndex.get(),
+            evidence);
+    ClaimCourtRecord updated = claimCourt.recordStatementAssessment(record.courtCaseId(), assessment);
+    claimCourtExecutions.complete(stage.executionId());
+    return updated;
+  }
+
+  private ClaimCourtRecord auditClaimProof(
+      RouteState route,
+      AttemptArtifactRecord artifact,
+      ClaimCourtRecord record,
+      ClaimCourtRolePolicy.Assignment assignment) {
+    AgentRuntime auditor = requireAgent(assignment.auditorAgentId());
+    ClaimProofRevisionRecord revision = claimProofRevisions.get(record.currentProofRevisionId());
+    Map<String, ?> context =
+        Map.ofEntries(
+            Map.entry("immutable_problem", frozenProblem),
+            Map.entry("frozen_claim", record.frozenClaim()),
+            Map.entry("proof_revision", revision),
+            Map.entry("candidate_artifact", artifact),
+            Map.entry("verified_dependency_claim_ids", verifiedClaimIdSet()),
+            Map.entry("authority_rule", "Audit proof validity only; do not pronounce the statement false."));
+    CourtStageResult<ClaimProofAuditBatch> stage =
+        executeClaimCourtStage(
+            record.courtCaseId(),
+            ClaimCourtStage.PROOF_AUDIT,
+            ClaimProofAuditBatch.class,
+            context,
+            auditor,
+            call -> bindProofAudit(route, call, auditor.id()));
+    ClaimProofAuditDecision decision =
+        deterministicProofAuditBoundary(
+            proofAuditDecision(stage.value(), record.frozenClaim().claimId()), revision);
+    ClaimCourtRecord updated =
+        claimCourt.recordProofAudit(record.courtCaseId(), stage.value().batchId(), decision);
+    claimCourtExecutions.complete(stage.executionId());
+    failClaimCourtAt(ClaimCourtFailurePoint.AFTER_PROOF_AUDIT_RESULT);
+    return updated;
+  }
+
+  private ClaimCourtRecord repairClaimProof(
+      RouteState route,
+      AttemptArtifactRecord artifact,
+      ClaimCourtRecord record,
+      ClaimCourtRolePolicy.Assignment assignment) {
+    AgentRuntime repairer = requireAgent(assignment.repairerAgentId());
+    ClaimProofRevisionRecord base = claimProofRevisions.get(record.currentProofRevisionId());
+    ClaimProofAuditDecision audit = proofAuditFor(record);
+    Map<String, ?> context =
+        Map.ofEntries(
+            Map.entry("immutable_problem", frozenProblem),
+            Map.entry("frozen_claim", record.frozenClaim()),
+            Map.entry("base_proof_revision", base),
+            Map.entry("proof_audit", audit),
+            Map.entry("candidate_artifact", artifact),
+            Map.entry("verified_dependency_claim_ids", verifiedClaimIdSet()),
+            Map.entry("repair_limits", claimCourtConfig),
+            Map.entry("authority_rule", "Return only a bounded patch; repair never grants Claim authority."));
+    CourtStageResult<ClaimMinimalRepairBatch> stage =
+        executeClaimCourtStage(
+            record.courtCaseId(),
+            ClaimCourtStage.MINIMAL_REPAIR,
+            ClaimMinimalRepairBatch.class,
+            context,
+            repairer,
+            call -> bindMinimalRepair(route, call, repairer.id()));
+    ClaimMinimalRepairDecision decision =
+        minimalRepairDecision(stage.value(), record.frozenClaim().claimId());
+    ClaimCourtRecord updated;
+    if (decision.disposition() != ClaimMinimalRepairDisposition.PATCH_PROPOSED) {
+      boolean exhausted = decision.disposition() == ClaimMinimalRepairDisposition.REPAIR_DECLINED;
+      updated =
+          claimCourt.recordRepairFailure(
+              record.courtCaseId(), exhausted, decision.disposition().name());
+    } else {
+      ClaimProofPatchValidator.ValidationResult validation =
+          new ClaimProofPatchValidator(claimCourtConfig)
+              .validate(
+                  record.frozenClaim(),
+                  base,
+                  audit,
+                  decision.patch(),
+                  verifiedClaimIdSet());
+      failClaimCourtAt(ClaimCourtFailurePoint.AFTER_REPAIR_PATCH_VALIDATION);
+      if (!validation.passed()) {
+        updated =
+            claimCourt.recordRepairFailure(
+                record.courtCaseId(),
+                record.repairAttempts() >= claimCourtConfig.maxRepairAttempts(),
+                String.join(",", validation.failureCodes()));
+      } else {
+        ClaimProofRevisionRecord repaired =
+            claimProofRevisions.createRepaired(
+                record.frozenClaim(),
+                base,
+                decision.patch(),
+                validation.proofSteps(),
+                validation.evidenceRefs(),
+                repairer.id());
+        failClaimCourtAt(ClaimCourtFailurePoint.AFTER_REPAIRED_REVISION_WRITE);
+        updated = claimCourt.recordRepairedRevision(record.courtCaseId(), repaired.revisionId());
+      }
+    }
+    claimCourtExecutions.complete(stage.executionId());
+    return updated;
+  }
+
+  private ClaimCourtRecord adjudicateClaimProof(
+      RouteState route,
+      AttemptArtifactRecord artifact,
+      ClaimCourtRecord record,
+      ClaimCourtRolePolicy.Assignment assignment) {
+    ClaimProofRevisionRecord revision = claimProofRevisions.get(record.currentProofRevisionId());
+    Set<String> verifiedClaims = verifiedClaimIdSet();
+    if (!verifiedClaims.containsAll(revision.dependencyClaimIds())) {
+      return claimCourt.recordRepairFailure(
+          record.courtCaseId(),
+          record.repairAttempts() > 0,
+          "blind adjudication blocked by unverified dependency");
+    }
+    ClaimBlindReviewPacket packet =
+        claimBlindPackets.create(
+            record.frozenClaim(), revision, verifiedClaims, revision.evidenceRefs());
+    AgentRuntime adjudicator = requireAgent(assignment.blindAdjudicatorAgentId());
+    Map<String, ?> context =
+        Map.ofEntries(
+            Map.entry("immutable_problem", frozenProblem),
+            Map.entry("blind_claim_packet", packet),
+            Map.entry("candidate_artifact_kind", artifact.kind().name()),
+            Map.entry("identity_isolation_rule", "No author, falsifier, auditor, repairer, or prior verdict metadata is supplied."));
+    CourtStageResult<ClaimBlindAdjudicationBatch> stage =
+        executeClaimCourtStage(
+            record.courtCaseId(),
+            ClaimCourtStage.BLIND_ADJUDICATION,
+            ClaimBlindAdjudicationBatch.class,
+            context,
+            adjudicator,
+            call -> bindBlindAdjudication(route, call, adjudicator.id()));
+    ClaimBlindAdjudicationDecision decision =
+        blindDecision(stage.value(), record.frozenClaim().claimId());
+    ClaimCourtRecord updated;
+    if (decision.verdict() == ClaimBlindAdjudicationVerdict.COUNTEREXAMPLE_CANDIDATE) {
+      List<StatementCounterexampleCandidate> candidates =
+          decision.counterexampleCandidates().stream()
+              .filter(candidate -> exactCounterexampleCandidate(candidate, record.frozenClaim()))
+              .toList();
+      List<ClaimRefutationEvidence> evidence =
+          candidates.isEmpty()
+              ? List.of()
+              : reviewCounterexampleWitnesses(
+                  route,
+                  record,
+                  candidates,
+                  requireAgent(assignment.auditorAgentId()),
+                  "blind-adjudication");
+      updated =
+          evidence.isEmpty()
+              ? claimCourt.recordBlindAdjudication(
+                  record.courtCaseId(), ClaimBlindAdjudicationVerdict.INCONCLUSIVE)
+              : claimCourt.recordVerifiedRefutation(
+                  record.courtCaseId(), evidence, "independent blind counterexample verified");
+    } else {
+      updated = claimCourt.recordBlindAdjudication(record.courtCaseId(), decision.verdict());
+    }
+    if (updated.outcome() == ClaimCourtOutcome.VERIFIED) {
+      claimProofRevisions.markBlindVerified(revision.revisionId());
+    } else if (decision.verdict() == ClaimBlindAdjudicationVerdict.FAIL_PROOF) {
+      claimProofRevisions.markBlindRejected(revision.revisionId());
+    }
+    claimCourtExecutions.complete(stage.executionId());
+    failClaimCourtAt(ClaimCourtFailurePoint.AFTER_BLIND_RESULT_DURABLE);
+    return updated;
+  }
+
+  private List<ClaimRefutationEvidence> reviewCounterexampleWitnesses(
+      RouteState route,
+      ClaimCourtRecord record,
+      List<StatementCounterexampleCandidate> candidates,
+      AgentRuntime reviewer,
+      String sourceStage) {
+    Map<String, ?> context =
+        Map.ofEntries(
+            Map.entry("immutable_problem", frozenProblem),
+            Map.entry("frozen_claim", record.frozenClaim()),
+            Map.entry("counterexample_candidates", candidates),
+            Map.entry("source_stage", sourceStage),
+            Map.entry("authority_rule", "Accept only a replayable witness exactly bound to the frozen Claim."));
+    CourtStageResult<ClaimCounterexampleWitnessReviewBatch> stage =
+        executeClaimCourtStage(
+            record.courtCaseId(),
+            ClaimCourtStage.COUNTEREXAMPLE_WITNESS_REVIEW,
+            ClaimCounterexampleWitnessReviewBatch.class,
+            context,
+            reviewer,
+            call -> bindWitnessReview(call, reviewer.id()));
+    Map<String, ClaimCounterexampleWitnessReviewDecision> decisions = new LinkedHashMap<>();
+    stage.value().decisions().forEach(decision -> decisions.put(decision.candidateId(), decision));
+    List<ClaimRefutationEvidence> evidence = new ArrayList<>();
+    for (StatementCounterexampleCandidate candidate : candidates) {
+      ClaimCounterexampleWitnessReviewDecision decision = decisions.get(candidate.candidateId());
+      if (decision != null
+          && decision.claimId().equals(record.frozenClaim().claimId())
+          && decision.statementHash().equals(record.frozenClaim().claimStatementHash())
+          && decision.exactWitnessAccepted()) {
+        evidence.add(
+            new ClaimRefutationEvidence(
+                "claim-refutation-"
+                    + CanonicalJson.stableHash(
+                            List.of(
+                                record.courtCaseId(),
+                                candidate.candidateId(),
+                                candidate.witness(),
+                                stage.executionId()))
+                        .substring(0, 24),
+                ClaimRefutationEvidenceType.INDEPENDENT_WITNESS_ADJUDICATION,
+                record.frozenClaim().claimId(),
+                record.frozenClaim().claimStatementHash(),
+                record.frozenClaim().claimSemanticHash(),
+                candidate.witness(),
+                "claim-court-witness://" + stage.executionId(),
+                true,
+                true));
+      }
+    }
+    claimCourtExecutions.complete(stage.executionId());
+    return List.copyOf(evidence);
+  }
+
+  private <T> CourtStageResult<T> executeClaimCourtStage(
+      String courtCaseId,
+      ClaimCourtStage courtStage,
+      Class<T> responseType,
+      Map<String, ?> context,
+      AgentRuntime agent,
+      Function<StructuredCallResult<T>, T> binder) {
+    ClaimCourtStageExecutionRecord execution =
+        claimCourtExecutions.reserve(
+            courtCaseId,
+            courtStage,
+            List.of(claimCourt.get(courtCaseId).frozenClaim().claimId()),
+            claimCourtStageInputHash(context),
+            agent.id());
+    if (execution.status() == ClaimCourtStageExecutionStatus.RESULT_DURABLE
+        || execution.status() == ClaimCourtStageExecutionStatus.COMPLETED) {
+      return new CourtStageResult<>(
+          ContractObjectMapper.read(execution.resultPayload(), responseType), execution.executionId());
+    }
+    if (execution.status() == ClaimCourtStageExecutionStatus.RUNNING) {
+      claimCourtExecutions.quarantineInterrupted(execution.executionId());
+      throw new ClaimCourtStageQuarantinedException(
+          "ambiguous Claim Court provider call quarantined: " + execution.executionId());
+    }
+    if (execution.status() == ClaimCourtStageExecutionStatus.QUARANTINED) {
+      throw new ClaimCourtStageQuarantinedException(
+          "quarantined Claim Court provider call cannot be replayed: " + execution.executionId());
+    }
+    claimCourtExecutions.start(execution.executionId());
+    persistUnchecked("claim_court_" + courtStage.name().toLowerCase(Locale.ROOT) + "_running", false);
+    StructuredCallResult<T> call =
+        callStage(
+            execution.executionId(),
+            claimCourtPromptStage(courtStage),
+            responseType,
+            context,
+            agent,
+            "verification",
+            "Claim Court " + courtStage.name().toLowerCase(Locale.ROOT));
+    T bound = binder.apply(call);
+    claimCourtExecutions.recordResult(execution.executionId(), ContractObjectMapper.toTree(bound));
+    persistUnchecked("claim_court_" + courtStage.name().toLowerCase(Locale.ROOT) + "_result", false);
+    failClaimCourtAt(durableFailurePoint(courtStage));
+    return new CourtStageResult<>(bound, execution.executionId());
+  }
+
+  private static String claimCourtStageInputHash(Map<String, ?> context) {
+    LinkedHashMap<String, Object> stableContext = new LinkedHashMap<>(context);
+    Object candidate = stableContext.get("candidate_artifact");
+    if (candidate instanceof AttemptArtifactRecord artifact) {
+      stableContext.put(
+          "candidate_artifact",
+          Map.ofEntries(
+              Map.entry("artifact_id", artifact.artifactId()),
+              Map.entry("claim_id", artifact.claimId()),
+              Map.entry("content_hash", artifact.contentHash()),
+              Map.entry("kind", artifact.kind().name()),
+              Map.entry("problem_hash", artifact.problemHash()),
+              Map.entry("route_id", artifact.routeId()),
+              Map.entry("source_attempt_id", artifact.sourceAttemptId()),
+              Map.entry("statement", artifact.statement()),
+              Map.entry(
+                  "target_obligation_id",
+                  Objects.toString(artifact.targetObligationId(), ""))));
+    }
+    return CanonicalJson.stableHash(stableContext);
+  }
+
+  private void projectClaimCourtOutcome(
+      RouteState route, AttemptArtifactRecord artifact, ClaimCourtReviewResult result) {
+    ClaimCourtRecord courtRecord = result.record();
+    if (courtRecord.outcome() == null) {
+      throw new IllegalStateException("Claim Court projection requires a terminal outcome");
+    }
+    failClaimCourtAt(ClaimCourtFailurePoint.AFTER_FINAL_OUTCOME_BEFORE_PROJECTION);
+    ClaimCard canonicalClaim = claimForArtifact(artifact);
+    String canonicalClaimId = canonicalClaim.claimId();
+    ClaimCourtOutcome projectionOutcome =
+        preservedAuthorityOutcome(canonicalClaim, courtRecord.outcome());
+    mergeClaimCourtDecision(route, result, projectionOutcome);
+    AttemptArtifactRecord projected =
+        attemptArtifacts.applyCourtOutcome(
+            artifact.artifactId(),
+            projectionOutcome,
+            courtRecord.courtCaseId(),
+            result.revision().revisionId(),
+            String.join("; ", courtRecord.history()));
+    lemmaMemory.applyClaimCourtOutcome(
+        artifact.claimId(),
+        projectionOutcome,
+        courtRecord.courtCaseId(),
+        result.revision().revisionId(),
+        result.confidence());
+    registerClaimLifecycle(route, projected);
+    proofControl
+        .claims()
+        .recordProofRevision(canonicalClaimId, result.revision().revisionId());
+    if (projectionOutcome == ClaimCourtOutcome.VERIFIED) {
+      lemmaMemory.applyVerifiedProofRevision(
+          canonicalClaimId,
+          result.revision().proofSteps(),
+          result.revision().revisionId(),
+          result.confidence());
+    } else if (projectionOutcome == ClaimCourtOutcome.REFUTED) {
+      proofControl
+          .claims()
+          .recordVerifiedRefutation(
+              canonicalClaimId,
+              courtRecord.refutationEvidenceIds().getFirst(),
+              courtRecord.frozenClaim().claimStatementHash());
+    } else {
+      proofControl
+          .claims()
+          .recordProofInvalidOpen(
+              canonicalClaimId,
+              Objects.toString(courtRecord.proofAuditId(), courtRecord.courtCaseId()),
+              courtRecord.outcome().name());
+    }
+    updateRouteClaimProjection(route, projected, projectionOutcome);
+    failClaimCourtAt(ClaimCourtFailurePoint.AFTER_LEMMA_MEMORY_PROJECTION);
+    if (projected.status() == AttemptArtifactStatus.VERIFIED_LOCAL
+        && projected.kind() != AttemptArtifactKind.ROUTE_THEOREM) {
+      integrateVerifiedAttemptArtifacts(route, List.of(projected));
+    }
+    failClaimCourtAt(ClaimCourtFailurePoint.AFTER_FACT_PROJECTION_BEFORE_PERSIST);
+    persistUnchecked("claim_court_projection", false);
+    failClaimCourtAt(ClaimCourtFailurePoint.AFTER_FINAL_CHECKPOINT_PERSIST);
+  }
+
+  private Optional<ClaimCourtRolePolicy.Assignment> claimCourtAssignment(String authorAgentId) {
+    LinkedHashSet<String> excluded = new LinkedHashSet<>();
+    excluded.add(authorAgentId);
+    Optional<AgentRuntime> falsifier =
+        selectClaimCourtAgent(excluded, List.of("counterexample_hunter", "route_skeptic"));
+    if (falsifier.isEmpty()) {
+      return Optional.empty();
+    }
+    excluded.add(falsifier.get().id());
+    Optional<AgentRuntime> auditor =
+        selectClaimCourtAgent(excluded, List.of("detailed_verifier", "route_referee"));
+    if (auditor.isEmpty()) {
+      return Optional.empty();
+    }
+    excluded.add(auditor.get().id());
+    Optional<AgentRuntime> repairer =
+        selectClaimCourtAgent(excluded, List.of("route_prover", "explorer", "bridge_prover"));
+    if (repairer.isEmpty()) {
+      return Optional.empty();
+    }
+    excluded.add(repairer.get().id());
+    Optional<AgentRuntime> adjudicator =
+        selectClaimCourtAgent(excluded, List.of("final_verifier", "detailed_verifier"));
+    if (adjudicator.isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new ClaimCourtRolePolicy.Assignment(
+            authorAgentId,
+            falsifier.get().id(),
+            auditor.get().id(),
+            repairer.get().id(),
+            adjudicator.get().id()));
+  }
+
+  private Optional<AgentRuntime> selectClaimCourtAgent(
+      Set<String> excluded, List<String> preferredRoles) {
+    Optional<AgentRuntime> preferred =
+        pool.agents().stream()
+            .filter(agent -> !excluded.contains(agent.id()))
+            .filter(agent -> preferredRoles.stream().anyMatch(agent::supportsRole))
+            .findFirst();
+    return preferred.isPresent()
+        ? preferred
+        : pool.agents().stream().filter(agent -> !excluded.contains(agent.id())).findFirst();
+  }
+
+  private ClaimStatementFalsificationBatch bindStatementFalsification(
+      RouteState route,
+      StructuredCallResult<ClaimStatementFalsificationBatch> call,
+      String agentId) {
+    ClaimStatementFalsificationBatch source = call.value();
+    return new ClaimStatementFalsificationBatch(
+        source.batchId(),
+        agentId,
+        route.routeId,
+        route.attempt.attemptId(),
+        source.decisions(),
+        call.responseArtifactRef(),
+        call.usage());
+  }
+
+  private ClaimProofAuditBatch bindProofAudit(
+      RouteState route, StructuredCallResult<ClaimProofAuditBatch> call, String agentId) {
+    ClaimProofAuditBatch source = call.value();
+    return new ClaimProofAuditBatch(
+        source.batchId(),
+        agentId,
+        route.routeId,
+        route.attempt.attemptId(),
+        source.decisions(),
+        call.responseArtifactRef(),
+        call.usage());
+  }
+
+  private ClaimMinimalRepairBatch bindMinimalRepair(
+      RouteState route, StructuredCallResult<ClaimMinimalRepairBatch> call, String agentId) {
+    ClaimMinimalRepairBatch source = call.value();
+    return new ClaimMinimalRepairBatch(
+        source.batchId(),
+        agentId,
+        route.routeId,
+        route.attempt.attemptId(),
+        source.decisions(),
+        call.responseArtifactRef(),
+        call.usage());
+  }
+
+  private ClaimBlindAdjudicationBatch bindBlindAdjudication(
+      RouteState route,
+      StructuredCallResult<ClaimBlindAdjudicationBatch> call,
+      String agentId) {
+    ClaimBlindAdjudicationBatch source = call.value();
+    return new ClaimBlindAdjudicationBatch(
+        source.batchId(),
+        agentId,
+        route.routeId,
+        route.attempt.attemptId(),
+        source.decisions(),
+        call.responseArtifactRef(),
+        call.usage());
+  }
+
+  private static ClaimCounterexampleWitnessReviewBatch bindWitnessReview(
+      StructuredCallResult<ClaimCounterexampleWitnessReviewBatch> call, String agentId) {
+    ClaimCounterexampleWitnessReviewBatch source = call.value();
+    return new ClaimCounterexampleWitnessReviewBatch(
+        source.batchId(),
+        agentId,
+        source.decisions(),
+        call.responseArtifactRef(),
+        call.usage());
+  }
+
+  private static ClaimStatementFalsificationDecision statementDecision(
+      ClaimStatementFalsificationBatch batch, String claimId) {
+    List<ClaimStatementFalsificationDecision> matching =
+        batch.decisions().stream().filter(decision -> decision.claimId().equals(claimId)).toList();
+    return matching.size() == 1
+        ? matching.getFirst()
+        : new ClaimStatementFalsificationDecision(
+            claimId,
+            StatementFalsificationDisposition.INCONCLUSIVE,
+            List.of(),
+            "exactly one statement decision was required");
+  }
+
+  private static ClaimProofAuditDecision proofAuditDecision(
+      ClaimProofAuditBatch batch, String claimId) {
+    List<ClaimProofAuditDecision> matching =
+        batch.decisions().stream().filter(decision -> decision.claimId().equals(claimId)).toList();
+    return matching.size() == 1
+        ? matching.getFirst()
+        : new ClaimProofAuditDecision(
+            claimId,
+            ClaimProofAuditVerdict.INCONCLUSIVE,
+            List.of(),
+            "exactly one proof audit decision was required");
+  }
+
+  private static ClaimMinimalRepairDecision minimalRepairDecision(
+      ClaimMinimalRepairBatch batch, String claimId) {
+    List<ClaimMinimalRepairDecision> matching =
+        batch.decisions().stream().filter(decision -> decision.claimId().equals(claimId)).toList();
+    return matching.size() == 1
+        ? matching.getFirst()
+        : new ClaimMinimalRepairDecision(
+            claimId,
+            ClaimMinimalRepairDisposition.REPAIR_DECLINED,
+            null,
+            "exactly one repair decision was required");
+  }
+
+  private static ClaimBlindAdjudicationDecision blindDecision(
+      ClaimBlindAdjudicationBatch batch, String claimId) {
+    List<ClaimBlindAdjudicationDecision> matching =
+        batch.decisions().stream().filter(decision -> decision.claimId().equals(claimId)).toList();
+    return matching.size() == 1
+        ? matching.getFirst()
+        : new ClaimBlindAdjudicationDecision(
+            claimId,
+            ClaimBlindAdjudicationVerdict.INCONCLUSIVE,
+            List.of(),
+            "exactly one blind adjudication decision was required");
+  }
+
+  private ClaimProofAuditDecision deterministicProofAuditBoundary(
+      ClaimProofAuditDecision source, ClaimProofRevisionRecord revision) {
+    Set<String> stepIds =
+        revision.proofSteps().stream()
+            .map(ProofStep::stepId)
+            .collect(java.util.stream.Collectors.toSet());
+    Set<String> verified = verifiedClaimIdSet();
+    boolean malformed =
+        source.issues().stream()
+            .anyMatch(
+                issue ->
+                    !stepIds.contains(issue.stepId())
+                        || issue.touchesClaimStatement()
+                        || issue.issueKind()
+                            == io.github.aililuola.mathproofmesh.contract.ProofIssueKind
+                                .STATEMENT_REFORMULATION_REQUIRED
+                        || (source.verdict() == ClaimProofAuditVerdict.INVALID_REPAIRABLE
+                            && issue.repairability() != ProofRepairability.LOCAL_PATCH
+                            && issue.repairability()
+                                != ProofRepairability.VERIFIED_DEPENDENCY_PATCH)
+                        || !verified.containsAll(issue.requiredVerifiedDependencyIds()));
+    if (!malformed) {
+      return source;
+    }
+    return new ClaimProofAuditDecision(
+        source.claimId(),
+        ClaimProofAuditVerdict.INVALID_UNREPAIRABLE,
+        source.issues(),
+        "deterministic audit boundary rejected a nonlocal or unbound repair");
+  }
+
+  private ClaimProofAuditDecision proofAuditFor(ClaimCourtRecord record) {
+    return claimCourtExecutions.records().stream()
+        .filter(execution -> execution.courtCaseId().equals(record.courtCaseId()))
+        .filter(execution -> execution.stage() == ClaimCourtStage.PROOF_AUDIT)
+        .filter(execution -> execution.resultPayload() != null)
+        .map(
+            execution ->
+                ContractObjectMapper.read(execution.resultPayload(), ClaimProofAuditBatch.class))
+        .map(batch -> proofAuditDecision(batch, record.frozenClaim().claimId()))
+        .map(decision -> deterministicProofAuditBoundary(decision, claimProofRevisions.get(record.currentProofRevisionId())))
+        .findFirst()
+        .orElseThrow(() -> new IllegalStateException("repair requires a durable proof audit"));
+  }
+
+  private static boolean exactCounterexampleCandidate(
+      StatementCounterexampleCandidate candidate, FrozenClaimSnapshot frozen) {
+    return candidate.claimId().equals(frozen.claimId())
+        && candidate.statementHash().equals(frozen.claimStatementHash())
+        && candidate.assumptions().equals(frozen.assumptions())
+        && candidate.quantifiers().equals(frozen.quantifiers())
+        && candidate.scopeLimitations().equals(frozen.scopeLimitations())
+        && candidate.polarity().equals(frozen.polarity());
+  }
+
+  private Set<String> verifiedClaimIdSet() {
+    LinkedHashSet<String> verified =
+        lemmaMemory.verified().stream()
+            .map(ClaimCard::claimId)
+            .collect(
+                java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    typedMemory.facts().stream().map(MessageEnvelope::messageId).forEach(verified::add);
+    return Set.copyOf(verified);
+  }
+
+  private static String claimCourtPromptStage(ClaimCourtStage stage) {
+    return switch (stage) {
+      case STATEMENT_FALSIFICATION -> "claim_statement_falsification";
+      case COUNTEREXAMPLE_WITNESS_REVIEW -> "claim_counterexample_witness_review";
+      case PROOF_AUDIT -> "claim_proof_audit";
+      case MINIMAL_REPAIR -> "claim_minimal_repair";
+      case BLIND_ADJUDICATION -> "claim_blind_adjudication";
+    };
+  }
+
+  private static ClaimCourtFailurePoint durableFailurePoint(ClaimCourtStage stage) {
+    return switch (stage) {
+      case STATEMENT_FALSIFICATION -> ClaimCourtFailurePoint.AFTER_STATEMENT_RESULT_DURABLE;
+      case PROOF_AUDIT -> ClaimCourtFailurePoint.AFTER_PROOF_AUDIT_RESULT;
+      case BLIND_ADJUDICATION -> ClaimCourtFailurePoint.AFTER_BLIND_RESULT_DURABLE;
+      case COUNTEREXAMPLE_WITNESS_REVIEW, MINIMAL_REPAIR -> ClaimCourtFailurePoint.NONE;
+    };
+  }
+
+  private void registerClaimLifecycle(RouteState route, AttemptArtifactRecord artifact) {
+    ClaimCard claim = claimForArtifact(artifact);
+    ArtifactDependencyResolution dependency = resolveArtifactDependencies(route, claim);
+    proofControl
+        .claims()
+        .register(
+            claim.claimId(),
+            artifact.sourceAttemptId(),
+            artifact.sourceDeltaId(),
+            dependency.migration().refs(),
+            artifact.kind(),
+            artifact.sourceAttemptStatus(),
+            artifact.sourceRouteStatus());
+  }
+
+  private static ClaimCourtOutcome preservedAuthorityOutcome(
+      ClaimCard claim, ClaimCourtOutcome proposed) {
+    if (claim.status() == ClaimStatus.VERIFIED && proposed != ClaimCourtOutcome.VERIFIED) {
+      return ClaimCourtOutcome.VERIFIED;
+    }
+    if (claim.status() == ClaimStatus.REJECTED && proposed != ClaimCourtOutcome.REFUTED) {
+      return ClaimCourtOutcome.REFUTED;
+    }
+    return proposed;
+  }
+
+  private void mergeClaimCourtDecision(
+      RouteState route, ClaimCourtReviewResult result, ClaimCourtOutcome outcome) {
+    LinkedHashMap<String, ClaimReviewDecision> decisions = new LinkedHashMap<>();
+    if (route.claimReview != null) {
+      route.claimReview.decisions().forEach(decision -> decisions.put(decision.claimId(), decision));
+    }
+    VerificationVerdict verdict =
+        switch (outcome) {
+          case VERIFIED -> VerificationVerdict.PASS;
+          case REFUTED -> VerificationVerdict.FAIL;
+          default -> VerificationVerdict.UNCERTAIN;
+        };
+    boolean authoritative = outcome == ClaimCourtOutcome.VERIFIED;
+    decisions.put(
+        result.record().frozenClaim().claimId(),
+        new ClaimReviewDecision(
+            result.record().frozenClaim().claimId(),
+            verdict,
+            result.confidence(),
+            result.revision().dependencyClaimIds(),
+            true,
+            authoritative,
+            authoritative,
+            authoritative,
+            outcome == ClaimCourtOutcome.VERIFIED || outcome == ClaimCourtOutcome.REFUTED,
+            List.of(),
+            "server-authoritative Claim Court outcome: " + outcome.name()));
+    List<ClaimReviewDecision> bounded =
+        decisions.values().stream().limit(ClaimReviewBatch.MAX_DECISIONS).toList();
+    route.claimReview =
+        new ClaimReviewBatch(
+            "claim-court-report-"
+                + CanonicalJson.stableHash(
+                        List.of(route.attempt.attemptId(), bounded.stream().map(ClaimReviewDecision::claimId).toList()))
+                    .substring(0, 24),
+            result.authorityAgentId(),
+            route.routeId,
+            route.attempt.attemptId(),
+            bounded,
+            "claim-court://" + result.record().courtCaseId(),
+            new UsageRecord());
+  }
+
+  private void updateRouteClaimProjection(
+      RouteState route, AttemptArtifactRecord artifact, ClaimCourtOutcome outcome) {
+    String claimId = artifact.claimId();
+    switch (outcome) {
+      case VERIFIED -> {
+        route.rejectedClaimIds.remove(claimId);
+        route.uncertainClaimIds.remove(claimId);
+        route.proofInvalidOpenClaimIds.remove(claimId);
+        route.repairExhaustedClaimIds.remove(claimId);
+        if (artifact.kind() == AttemptArtifactKind.COUNTEREXAMPLE) {
+          addDistinct(route.salvagedCounterexampleIds, claimId);
+        } else if (artifact.kind() == AttemptArtifactKind.LOCAL_LEMMA) {
+          addDistinct(route.salvagedVerifiedClaimIds, claimId);
+        }
+      }
+      case REFUTED -> {
+        addDistinct(route.rejectedClaimIds, claimId);
+        route.uncertainClaimIds.remove(claimId);
+      }
+      case PROOF_INVALID_BUT_CLAIM_OPEN -> {
+        addDistinct(route.uncertainClaimIds, claimId);
+        route.proofInvalidOpenClaimIds.add(claimId);
+      }
+      case REPAIR_EXHAUSTED -> {
+        addDistinct(route.uncertainClaimIds, claimId);
+        route.proofInvalidOpenClaimIds.add(claimId);
+        route.repairExhaustedClaimIds.add(claimId);
+      }
+      case INCONCLUSIVE, DEFERRED_INDEPENDENCE_UNAVAILABLE ->
+          addDistinct(route.uncertainClaimIds, claimId);
+    }
+  }
+
+  private static ClaimCourtReviewResult claimCourtResult(
+      ClaimCourtRecord record, ClaimProofRevisionRecord revision, String authorityAgentId) {
+    double confidence = record.outcome() == ClaimCourtOutcome.VERIFIED ? 1.0d : 0.0d;
+    return new ClaimCourtReviewResult(record, revision, authorityAgentId, confidence);
+  }
+
+  private static String finalAuthorityAgent(ClaimCourtRecord record) {
+    if (record.roleAssignment() == null) {
+      return "claim-court";
+    }
+    return switch (record.outcome()) {
+      case VERIFIED, PROOF_INVALID_BUT_CLAIM_OPEN, REPAIR_EXHAUSTED, INCONCLUSIVE ->
+          record.roleAssignment().blindAdjudicatorAgentId();
+      case REFUTED -> record.roleAssignment().auditorAgentId();
+      case DEFERRED_INDEPENDENCE_UNAVAILABLE -> "claim-court";
+    };
+  }
+
+  private ClaimCourtMutationSnapshot captureClaimCourtMutation(RouteState route) {
+    return new ClaimCourtMutationSnapshot(
+        claimCourt.snapshot(),
+        claimProofRevisions.snapshot(),
+        claimCourtExecutions.snapshot(),
+        attemptArtifacts.snapshot(),
+        lemmaMemory.snapshot(),
+        proofControl.claims().snapshot(),
+        typedMemory.snapshot(),
+        proofGraph.snapshot(),
+        checkpoints.snapshot(),
+        List.copyOf(pendingProofTasks),
+        new RouteClaimProjectionSnapshot(
+            route.routeId,
+            route.claimIds,
+            route.salvagedVerifiedClaimIds,
+            route.salvagedCounterexampleIds,
+            route.rejectedClaimIds,
+            route.uncertainClaimIds,
+            route.courtCaseIds,
+            route.proofInvalidOpenClaimIds,
+            route.repairExhaustedClaimIds,
+            route.claimReview));
+  }
+
+  private void restoreClaimCourtDurableState(
+      ClaimCourtMutationSnapshot fallback, RuntimeException original) {
+    try {
+      Optional<DesktopSolveCheckpoint> durable = readCheckpoint();
+      if (durable.isPresent()) {
+        restoreClaimCourtProjection(durable.get());
+        return;
+      }
+    } catch (IOException | RuntimeException restoreFailure) {
+      original.addSuppressed(restoreFailure);
+    }
+    restoreClaimCourtMutation(fallback);
+  }
+
+  private void restoreClaimCourtProjection(DesktopSolveCheckpoint checkpoint) {
+    claimCourt.restore(checkpoint.claimCourt());
+    claimProofRevisions.restore(checkpoint.claimProofRevisions());
+    claimCourtExecutions.restore(checkpoint.claimCourtExecutions());
+    claimCourtExecutions.quarantineInterrupted();
+    attemptArtifacts = AttemptArtifactLedger.restore(checkpoint.attemptArtifacts());
+    lemmaMemory = LemmaMemory.restore(checkpoint.lemmaMemory());
+    proofControl.claims().load(checkpoint.claimLifecycle());
+    typedMemory = TypedMemory.restore(checkpoint.typedMemory(), memoryPolicy());
+    proofGraph = ProofGraphStore.restore(checkpoint.proofGraph(), ProofGraphPolicy.defaults());
+    pendingProofTasks.clear();
+    pendingProofTasks.addAll(checkpoint.pendingProofTasks());
+    for (DesktopSolveCheckpoint.RouteCheckpoint source : checkpoint.routes()) {
+      routes.stream()
+          .filter(route -> route.routeId.equals(source.routeId()))
+          .findFirst()
+          .ifPresent(route -> restoreRouteClaimProjection(route, source));
+    }
+    installNegativeKnowledgeRuntime();
+  }
+
+  private static void restoreRouteClaimProjection(
+      RouteState route, DesktopSolveCheckpoint.RouteCheckpoint source) {
+    replaceCollection(route.claimIds, source.claimIds());
+    replaceCollection(route.artifactIds, source.artifactIds());
+    replaceCollection(route.salvagedVerifiedClaimIds, source.salvagedVerifiedClaimIds());
+    replaceCollection(route.salvagedCounterexampleIds, source.salvagedCounterexampleIds());
+    replaceCollection(route.rejectedClaimIds, source.rejectedClaimIds());
+    replaceCollection(route.uncertainClaimIds, source.uncertainClaimIds());
+    replaceCollection(route.courtCaseIds, source.courtCaseIds());
+    replaceCollection(route.proofInvalidOpenClaimIds, source.proofInvalidOpenClaimIds());
+    replaceCollection(route.repairExhaustedClaimIds, source.repairExhaustedClaimIds());
+    route.claimReview = source.claimReview();
+  }
+
+  private static <T> void replaceCollection(Collection<T> target, Collection<T> source) {
+    target.clear();
+    target.addAll(source);
+  }
+
+  private void restoreClaimCourtMutation(ClaimCourtMutationSnapshot snapshot) {
+    claimCourt.restore(snapshot.court());
+    claimProofRevisions.restore(snapshot.revisions());
+    claimCourtExecutions.restore(snapshot.executions());
+    attemptArtifacts = AttemptArtifactLedger.restore(snapshot.attemptArtifacts());
+    lemmaMemory = LemmaMemory.restore(snapshot.lemmaMemory());
+    proofControl.claims().load(snapshot.claimLifecycle());
+    typedMemory = TypedMemory.restore(snapshot.typedMemory(), memoryPolicy());
+    proofGraph = ProofGraphStore.restore(snapshot.proofGraph(), ProofGraphPolicy.defaults());
+    checkpoints.restore(snapshot.checkpoints());
+    pendingProofTasks.clear();
+    pendingProofTasks.addAll(snapshot.pendingProofTasks());
+    installNegativeKnowledgeRuntime();
+    RouteState route =
+        routes.stream()
+            .filter(candidate -> candidate.routeId.equals(snapshot.route().routeId()))
+            .findFirst()
+            .orElse(null);
+    if (route != null) {
+      snapshot.route().restore(route);
+    }
+  }
+
+  void setClaimCourtFailurePointForTest(ClaimCourtFailurePoint point) {
+    claimCourtFailurePoint = Objects.requireNonNull(point, "point");
+  }
+
+  void setClaimCourtHardCrashPointForTest(ClaimCourtFailurePoint point) {
+    claimCourtHardCrashPoint = Objects.requireNonNull(point, "point");
+  }
+
+  private void failClaimCourtAt(ClaimCourtFailurePoint point) {
+    if (point == ClaimCourtFailurePoint.NONE) {
+      return;
+    }
+    if (claimCourtHardCrashPoint == point) {
+      claimCourtHardCrashPoint = ClaimCourtFailurePoint.NONE;
+      throw new SimulatedClaimCourtProcessTermination(point);
+    }
+    if (claimCourtFailurePoint == point) {
+      claimCourtFailurePoint = ClaimCourtFailurePoint.NONE;
+      throw new IllegalStateException("simulated Claim Court failure at " + point);
+    }
   }
 
   private void integrateVerifiedAttemptArtifacts(
@@ -4503,101 +5452,6 @@ final class DesktopSolveCoordinator {
     return selectIndependentAgent(Set.of(route.attempt.agentId()), "detailed_verifier");
   }
 
-  private List<ClaimCard> candidateClaims(
-      RouteState route, List<AttemptArtifactRecord> artifacts) {
-    Set<String> claimIds =
-        artifacts.stream()
-            .map(AttemptArtifactRecord::claimId)
-            .collect(java.util.stream.Collectors.toSet());
-    List<ClaimCard> candidates = new ArrayList<>();
-    route.attempt.proposedLemmas().stream()
-        .map(source -> bindClaim(source, route))
-        .filter(claim -> claimIds.contains(claim.claimId()))
-        .forEach(candidates::add);
-    artifacts.stream()
-        .filter(artifact -> artifact.kind() == AttemptArtifactKind.ROUTE_THEOREM)
-        .findFirst()
-        .ifPresent(ignored -> candidates.add(routeTheoremClaim(route)));
-    return List.copyOf(candidates);
-  }
-
-  private ClaimReviewBatch applyNegativeKnowledgeBoundary(
-      RouteState route,
-      ClaimReviewBatch batch,
-      List<AttemptArtifactRecord> artifacts) {
-    Map<String, AttemptArtifactRecord> byClaim =
-        artifacts.stream()
-            .collect(
-                java.util.stream.Collectors.toMap(
-                    AttemptArtifactRecord::claimId,
-                    java.util.function.Function.identity(),
-                    (left, right) -> left,
-                    LinkedHashMap::new));
-    List<ClaimReviewDecision> audited = new ArrayList<>();
-    for (ClaimReviewDecision decision : batch.decisions()) {
-      AttemptArtifactRecord artifact = byClaim.get(decision.claimId());
-      if (artifact == null || decision.verdict() != VerificationVerdict.PASS) {
-        audited.add(decision);
-        continue;
-      }
-      ClaimCard claim = claimForArtifact(artifact);
-      MessageEnvelope prospective =
-          factMessage(
-              claim,
-              route,
-              artifact,
-              decision,
-              artifact.kind() == AttemptArtifactKind.COUNTEREXAMPLE);
-      NegativeKnowledgeDecision boundary =
-          negativeKnowledgeGate.evaluate(
-              new NegativeKnowledgeCandidate(
-                  prospective.problemHash(),
-                  NegativeKnowledgeTargetType.CLAIM,
-                  prospective.statement(),
-                  prospective.normalizedStatement(),
-                  prospective.assumptions(),
-                  prospective.quantifiers(),
-                  prospective.variableBindings(),
-                  prospective.scopeLimitations(),
-                  NegativeKnowledgeSurface.FACT_PROMOTION,
-                  artifact.kind() == AttemptArtifactKind.COUNTEREXAMPLE
-                      ? NegativeCandidateIntent.FALSIFICATION_ONLY
-                      : NegativeCandidateIntent.FACT_PROMOTION),
-              roundIndex.get());
-      if (boundary.allowed()) {
-        audited.add(decision);
-      } else {
-        audited.add(
-            new ClaimReviewDecision(
-                decision.claimId(),
-                VerificationVerdict.FAIL,
-                decision.confidence(),
-                decision.checkedDependencies(),
-                decision.problemIntegrityOk(),
-                decision.scopeValid(),
-                decision.quantifiersValid(),
-                decision.evidenceTypeValid(),
-                decision.witnessChecked(),
-                decision.issues(),
-                "deterministic negative-knowledge boundary: " + boundary.code().name()));
-      }
-    }
-    return new ClaimReviewBatch(
-        batch.reportId(),
-        batch.agentId(),
-        batch.routeId(),
-        batch.attemptId(),
-        audited,
-        batch.rawArtifactRef(),
-        batch.usage());
-  }
-
-  private void applyClaimDecision(
-      AttemptArtifactRecord artifact, ClaimReviewDecision decision) {
-    ClaimCard claim = claimForArtifact(artifact);
-    lemmaMemory.applyClaimReviewDecision(claim.claimId(), decision);
-  }
-
   private ClaimCard claimForArtifact(AttemptArtifactRecord artifact) {
     String claimId = lemmaMemory.resolveClaimId(artifact.claimId());
     return lemmaMemory.claims().stream()
@@ -4614,45 +5468,17 @@ final class DesktopSolveCoordinator {
     if (route.claimReview == null) {
       throw new IllegalStateException("claim-scoped review is required before promotion");
     }
+    String canonicalClaimId = lemmaMemory.resolveClaimId(artifact.claimId());
     return route.claimReview.decisions().stream()
-        .filter(decision -> decision.claimId().equals(artifact.claimId()))
+        .filter(
+            decision ->
+                decision.claimId().equals(artifact.claimId())
+                    || decision.claimId().equals(canonicalClaimId))
         .findFirst()
         .orElseThrow(
             () ->
                 new IllegalStateException(
                     "claim-scoped decision is missing for " + artifact.claimId()));
-  }
-
-  private static Map<String, ClaimReviewDecision> decisionsByClaim(
-      ClaimReviewBatch batch) {
-    Map<String, ClaimReviewDecision> decisions = new LinkedHashMap<>();
-    batch.decisions().forEach(decision -> decisions.put(decision.claimId(), decision));
-    return Map.copyOf(decisions);
-  }
-
-  private static ClaimReviewDecision decisionForArtifactStatus(
-      AttemptArtifactRecord artifact, ClaimReviewDecision source) {
-    VerificationVerdict verdict =
-        switch (artifact.status()) {
-          case VERIFIED_LOCAL -> VerificationVerdict.PASS;
-          case REJECTED -> VerificationVerdict.FAIL;
-          default -> VerificationVerdict.UNCERTAIN;
-        };
-    if (source.verdict() == verdict) {
-      return source;
-    }
-    return new ClaimReviewDecision(
-        source.claimId(),
-        verdict,
-        source.confidence(),
-        source.checkedDependencies(),
-        source.problemIntegrityOk(),
-        source.scopeValid(),
-        source.quantifiersValid(),
-        source.evidenceTypeValid(),
-        source.witnessChecked(),
-        source.issues(),
-        source.conciseFeedback());
   }
 
   private static ClaimReviewDecision uncertainDecision(String claimId, String feedback) {
@@ -4827,9 +5653,7 @@ final class DesktopSolveCoordinator {
             : route.claimReview.rawArtifactRef(),
         roundIndex.get(),
         "1",
-        claim.scopeLimitations().isEmpty()
-            ? negativeKnowledgeScope()
-            : claim.scopeLimitations(),
+        effectiveClaimScope(claim),
         artifact.authorAgentId(),
         counterexample ? RouteRole.SKEPTIC : RouteRole.PROVER,
         route.routeId,
@@ -9119,6 +9943,14 @@ final class DesktopSolveCoordinator {
     proofControl.claims().load(checkpoint.claimLifecycle());
     installNegativeKnowledgeRuntime();
     restoreStrategyDiversityState(checkpoint);
+    claimProofRevisions = new ClaimProofRevisionLedger();
+    claimProofRevisions.restore(checkpoint.claimProofRevisions());
+    claimCourt = new ClaimCourtLedger();
+    claimCourt.restore(checkpoint.claimCourt());
+    claimCourtExecutions = new ClaimCourtStageExecutionLedger();
+    claimCourtExecutions.restore(checkpoint.claimCourtExecutions());
+    rebuildVersionFifteenClaimProofRevisions(checkpoint);
+    claimCourtExecutions.quarantineInterrupted();
     typedMemory.revalidateFactsAgainstNegativeKnowledge(roundIndex.get());
     Set<String> restoreBlockedObligations =
         new LinkedHashSet<>(proofGraph.revalidateNegativeKnowledge());
@@ -9190,6 +10022,9 @@ final class DesktopSolveCoordinator {
       route.salvagedCounterexampleIds.addAll(saved.salvagedCounterexampleIds());
       route.rejectedClaimIds.addAll(saved.rejectedClaimIds());
       route.uncertainClaimIds.addAll(saved.uncertainClaimIds());
+      route.courtCaseIds.addAll(saved.courtCaseIds());
+      route.proofInvalidOpenClaimIds.addAll(saved.proofInvalidOpenClaimIds());
+      route.repairExhaustedClaimIds.addAll(saved.repairExhaustedClaimIds());
       route.claimReview = saved.claimReview();
       route.segmentCount = saved.segmentCount();
       route.noProgressSegments = saved.noProgressSegments();
@@ -9528,6 +10363,62 @@ final class DesktopSolveCoordinator {
     }
   }
 
+  private void rebuildVersionFifteenClaimProofRevisions(DesktopSolveCheckpoint checkpoint) {
+    if (checkpoint.schemaVersion() >= 16 || !claimProofRevisions.records().isEmpty()) {
+      return;
+    }
+    Map<String, DesktopSolveCheckpoint.RouteCheckpoint> byAttempt =
+        checkpoint.routes().stream()
+            .filter(route -> route.attempt() != null)
+            .collect(
+                java.util.stream.Collectors.toMap(
+                    route -> route.attempt().attemptId(),
+                    java.util.function.Function.identity(),
+                    (left, right) -> left,
+                    LinkedHashMap::new));
+    for (ClaimCard claim : lemmaMemory.claims()) {
+      if (claim.proofSteps().isEmpty()
+          || claim.sourceAttemptId() == null
+          || claim.sourceAttemptId().isBlank()) {
+        continue;
+      }
+      DesktopSolveCheckpoint.RouteCheckpoint route = byAttempt.get(claim.sourceAttemptId());
+      String routeId = route == null ? "legacy-route-" + claim.claimId() : route.routeId();
+      String authorId =
+          claim.sourceAgentId() == null || claim.sourceAgentId().isBlank()
+              ? route == null ? "legacy-author" : route.authorAgentId()
+              : claim.sourceAgentId();
+      ClaimCard bound =
+          new ClaimCard(
+              claim.assumptions(),
+              claim.claimId(),
+              claim.conclusion(),
+              claim.contentHash(),
+              claim.counterexampleRisk(),
+              claim.dependencies(),
+              claim.dependencyRefs(),
+              claim.evidenceRefs(),
+              claim.proofSteps(),
+              claim.scopeLimitations(),
+              claim.selfConfidence(),
+              authorId,
+              claim.sourceAttemptId(),
+              claim.sourceDeltaId(),
+              claim.statement(),
+              claim.status(),
+              claim.tags(),
+              claim.verificationConfidence());
+      FrozenClaimSnapshot frozen =
+          claimFreezeService.freeze(
+              problemHash,
+              rootGoal().sourceStatementHash(),
+              routeId,
+              bound,
+              FrozenClaimSemanticContext.root(effectiveClaimScope(bound)));
+      claimProofRevisions.createOriginal(frozen, bound.proofSteps(), bound.evidenceRefs());
+    }
+  }
+
   private static boolean matchingLegacyAuthority(
       ClaimCard claim, MessageEnvelope fact, MessageEnvelope graphClaim) {
     return fact != null
@@ -9609,6 +10500,9 @@ final class DesktopSolveCoordinator {
                         route.salvagedCounterexampleIds,
                         route.rejectedClaimIds,
                         route.uncertainClaimIds,
+                        new ArrayList<>(route.courtCaseIds),
+                        new ArrayList<>(route.proofInvalidOpenClaimIds),
+                        new ArrayList<>(route.repairExhaustedClaimIds),
                         route.claimReview,
                         route.segmentCount,
                         route.noProgressSegments,
@@ -9674,6 +10568,9 @@ final class DesktopSolveCoordinator {
             proofGraph.snapshot(),
             attemptArtifacts.snapshot(),
             proofControl.claims().snapshot(),
+            claimProofRevisions.snapshot(),
+            claimCourt.snapshot(),
+            claimCourtExecutions.snapshot(),
             researchCheckpoints.snapshot(),
             messageRepository.snapshot(),
             proofDebtHistory,
@@ -10431,6 +11328,12 @@ final class DesktopSolveCoordinator {
     return isGreedyGcdSequenceProblem()
         ? GreedyGcdNegativeKnowledgeSeeds.problemScope()
         : List.of();
+  }
+
+  private List<String> effectiveClaimScope(ClaimCard claim) {
+    return claim.scopeLimitations().isEmpty()
+        ? negativeKnowledgeScope()
+        : claim.scopeLimitations();
   }
 
   private static InspirationPolicy inspirationPolicy(SystemConfig config) {
@@ -11738,6 +12641,96 @@ final class DesktopSolveCoordinator {
     }
   }
 
+  private record CourtStageResult<T>(T value, String executionId) {
+    private CourtStageResult {
+      Objects.requireNonNull(value, "value");
+      Objects.requireNonNull(executionId, "executionId");
+    }
+  }
+
+  private record ClaimCourtReviewResult(
+      ClaimCourtRecord record,
+      ClaimProofRevisionRecord revision,
+      String authorityAgentId,
+      double confidence) {
+    private ClaimCourtReviewResult {
+      Objects.requireNonNull(record, "record");
+      Objects.requireNonNull(revision, "revision");
+      Objects.requireNonNull(authorityAgentId, "authorityAgentId");
+    }
+  }
+
+  private record ClaimCourtMutationSnapshot(
+      ClaimCourtSnapshot court,
+      ClaimProofRevisionSnapshot revisions,
+      ClaimCourtStageExecutionSnapshot executions,
+      AttemptArtifactSnapshot attemptArtifacts,
+      LemmaMemorySnapshot lemmaMemory,
+      ClaimLifecycleSnapshot claimLifecycle,
+      TypedMemorySnapshot typedMemory,
+      ProofGraphSnapshot proofGraph,
+      ContinuationFunctions.CheckpointLedgerSnapshot checkpoints,
+      List<DesktopSolveCheckpoint.ScheduledProofTask> pendingProofTasks,
+      RouteClaimProjectionSnapshot route) {
+    private ClaimCourtMutationSnapshot {
+      pendingProofTasks = List.copyOf(pendingProofTasks);
+    }
+
+    @Override
+    public List<DesktopSolveCheckpoint.ScheduledProofTask> pendingProofTasks() {
+      return List.copyOf(pendingProofTasks);
+    }
+  }
+
+  private record RouteClaimProjectionSnapshot(
+      String routeId,
+      List<String> claimIds,
+      List<String> salvagedVerifiedClaimIds,
+      List<String> salvagedCounterexampleIds,
+      List<String> rejectedClaimIds,
+      List<String> uncertainClaimIds,
+      Set<String> courtCaseIds,
+      Set<String> proofInvalidOpenClaimIds,
+      Set<String> repairExhaustedClaimIds,
+      ClaimReviewBatch claimReview) {
+    private RouteClaimProjectionSnapshot {
+      Objects.requireNonNull(routeId, "routeId");
+      claimIds = List.copyOf(claimIds);
+      salvagedVerifiedClaimIds = List.copyOf(salvagedVerifiedClaimIds);
+      salvagedCounterexampleIds = List.copyOf(salvagedCounterexampleIds);
+      rejectedClaimIds = List.copyOf(rejectedClaimIds);
+      uncertainClaimIds = List.copyOf(uncertainClaimIds);
+      courtCaseIds = Set.copyOf(courtCaseIds);
+      proofInvalidOpenClaimIds = Set.copyOf(proofInvalidOpenClaimIds);
+      repairExhaustedClaimIds = Set.copyOf(repairExhaustedClaimIds);
+    }
+
+    private void restore(RouteState route) {
+      replace(route.claimIds, claimIds);
+      replace(route.salvagedVerifiedClaimIds, salvagedVerifiedClaimIds);
+      replace(route.salvagedCounterexampleIds, salvagedCounterexampleIds);
+      replace(route.rejectedClaimIds, rejectedClaimIds);
+      replace(route.uncertainClaimIds, uncertainClaimIds);
+      replace(route.courtCaseIds, courtCaseIds);
+      replace(route.proofInvalidOpenClaimIds, proofInvalidOpenClaimIds);
+      replace(route.repairExhaustedClaimIds, repairExhaustedClaimIds);
+      route.claimReview = claimReview;
+    }
+
+    private static <T> void replace(Collection<T> target, Collection<T> source) {
+      target.clear();
+      target.addAll(source);
+    }
+  }
+
+  private static final class ClaimCourtStageQuarantinedException extends RuntimeException {
+    private static final long serialVersionUID = 1L;
+
+    private ClaimCourtStageQuarantinedException(String message) {
+      super(message);
+    }
+  }
+
   private static final class RouteState {
     private final String routeId;
     private final AgentRuntime author;
@@ -11750,6 +12743,9 @@ final class DesktopSolveCoordinator {
     private final List<String> salvagedCounterexampleIds = new ArrayList<>();
     private final List<String> rejectedClaimIds = new ArrayList<>();
     private final List<String> uncertainClaimIds = new ArrayList<>();
+    private final LinkedHashSet<String> courtCaseIds = new LinkedHashSet<>();
+    private final LinkedHashSet<String> proofInvalidOpenClaimIds = new LinkedHashSet<>();
+    private final LinkedHashSet<String> repairExhaustedClaimIds = new LinkedHashSet<>();
     private final List<DesktopSolveCheckpoint.AttemptRevisionCheckpoint> revisionHistory =
         new ArrayList<>();
     private final List<MessageDelivery> pendingDeliveries = new ArrayList<>();

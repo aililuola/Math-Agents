@@ -1,9 +1,13 @@
 package io.github.aililuola.mathproofmesh.proofcontrol.claimcourt;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.text.Normalizer;
 import java.util.List;
 import java.util.Locale;
 
+@SuppressFBWarnings(
+    value = "IMPROPER_UNICODE",
+    justification = "NFKC is intentional for deterministic mathematical semantic identities.")
 final class ClaimCourtValues {
   private ClaimCourtValues() {}
 

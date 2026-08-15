@@ -31,6 +31,9 @@ import io.github.aililuola.mathproofmesh.orchestration.ContinuationFunctions.Del
 import io.github.aililuola.mathproofmesh.orchestration.teams.RouteTeamResult;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactSnapshot;
 import io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleSnapshot;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtSnapshot;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtStageExecutionSnapshot;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionSnapshot;
 import io.github.aililuola.mathproofmesh.proofcontrol.FailureControlService;
 import io.github.aililuola.mathproofmesh.proofcontrol.MetaPivotController;
 import io.github.aililuola.mathproofmesh.proofcontrol.NearMissLedger;
@@ -78,6 +81,9 @@ record DesktopSolveCheckpoint(
     ProofGraphSnapshot proofGraph,
     AttemptArtifactSnapshot attemptArtifacts,
     ClaimLifecycleSnapshot claimLifecycle,
+    ClaimProofRevisionSnapshot claimProofRevisions,
+    ClaimCourtSnapshot claimCourt,
+    ClaimCourtStageExecutionSnapshot claimCourtExecutions,
     ResearchCheckpointSnapshot researchCheckpoints,
     MessageStoreSnapshot messageStore,
     List<Double> proofDebtHistory,
@@ -108,7 +114,7 @@ record DesktopSolveCheckpoint(
     DeferredExpansionSnapshot deferredExpansions,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 15;
+  static final int CURRENT_SCHEMA_VERSION = 16;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {
@@ -125,6 +131,15 @@ record DesktopSolveCheckpoint(
         attemptArtifacts == null ? AttemptArtifactSnapshot.empty() : attemptArtifacts;
     claimLifecycle =
         claimLifecycle == null ? ClaimLifecycleSnapshot.empty() : claimLifecycle;
+    claimProofRevisions =
+        claimProofRevisions == null
+            ? ClaimProofRevisionSnapshot.empty()
+            : claimProofRevisions;
+    claimCourt = claimCourt == null ? ClaimCourtSnapshot.empty() : claimCourt;
+    claimCourtExecutions =
+        claimCourtExecutions == null
+            ? ClaimCourtStageExecutionSnapshot.empty()
+            : claimCourtExecutions;
     researchCheckpoints =
         researchCheckpoints == null ? ResearchCheckpointSnapshot.empty() : researchCheckpoints;
     proofDebtHistory = proofDebtHistory == null ? List.of() : List.copyOf(proofDebtHistory);
@@ -250,6 +265,9 @@ record DesktopSolveCheckpoint(
       List<String> salvagedCounterexampleIds,
       List<String> rejectedClaimIds,
       List<String> uncertainClaimIds,
+      List<String> courtCaseIds,
+      List<String> proofInvalidOpenClaimIds,
+      List<String> repairExhaustedClaimIds,
       ClaimReviewBatch claimReview,
       int segmentCount,
       int noProgressSegments,
@@ -287,6 +305,11 @@ record DesktopSolveCheckpoint(
           salvagedCounterexampleIds == null ? List.of() : List.copyOf(salvagedCounterexampleIds);
       rejectedClaimIds = rejectedClaimIds == null ? List.of() : List.copyOf(rejectedClaimIds);
       uncertainClaimIds = uncertainClaimIds == null ? List.of() : List.copyOf(uncertainClaimIds);
+      courtCaseIds = courtCaseIds == null ? List.of() : List.copyOf(courtCaseIds);
+      proofInvalidOpenClaimIds =
+          proofInvalidOpenClaimIds == null ? List.of() : List.copyOf(proofInvalidOpenClaimIds);
+      repairExhaustedClaimIds =
+          repairExhaustedClaimIds == null ? List.of() : List.copyOf(repairExhaustedClaimIds);
       metaControlReason = metaControlReason == null ? "" : metaControlReason.strip();
       revisionHistory = revisionHistory == null ? List.of() : List.copyOf(revisionHistory);
       focusObligationId = focusObligationId == null ? "" : focusObligationId.strip();
@@ -363,6 +386,21 @@ record DesktopSolveCheckpoint(
     @Override
     public List<String> uncertainClaimIds() {
       return List.copyOf(uncertainClaimIds);
+    }
+
+    @Override
+    public List<String> courtCaseIds() {
+      return List.copyOf(courtCaseIds);
+    }
+
+    @Override
+    public List<String> proofInvalidOpenClaimIds() {
+      return List.copyOf(proofInvalidOpenClaimIds);
+    }
+
+    @Override
+    public List<String> repairExhaustedClaimIds() {
+      return List.copyOf(repairExhaustedClaimIds);
     }
 
     @Override

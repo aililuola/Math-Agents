@@ -75,6 +75,33 @@ public final class PromptCatalog {
         "Review each bounded candidate claim independently of its attempt and route verdict. "
             + "Return exactly one decision per supplied claim, verify scope and quantifiers, and "
             + "check an explicit witness before accepting a counterexample.");
+    stages.put(
+        "claim_statement_falsification",
+        "Try to falsify each frozen statement without auditing or repairing its proof. "
+            + "Return only NO_COUNTEREXAMPLE_FOUND, COUNTEREXAMPLE_CANDIDATE, or INCONCLUSIVE. "
+            + "A model candidate is non-authoritative and must never claim verified refutation, "
+            + "permanent negative knowledge, or statement truth.");
+    stages.put(
+        "claim_counterexample_witness_review",
+        "Independently inspect one exact counterexample witness against the frozen claim hash, "
+            + "assumptions, ordered quantifiers, scope, polarity, and registered evidence. "
+            + "Do not broaden the target or grant authority without replayable exact evidence.");
+    stages.put(
+        "claim_proof_audit",
+        "Audit only the supplied proof revision for the frozen claim. Bind every issue to an exact "
+            + "step ID and classify local repairability. Proof invalidity does not establish that "
+            + "the statement is false, and this stage has no refutation or verification authority.");
+    stages.put(
+        "claim_minimal_repair",
+        "Propose at most one bounded proof-step patch for the supplied audit issues. Preserve the "
+            + "frozen statement, assumptions, quantifiers, variable bindings, scope, polarity, and "
+            + "claim semantic hash. Do not create a revision ID, final proof hash, verified claim, "
+            + "Fact, permanent negative, or unverified dependency.");
+    stages.put(
+        "claim_blind_adjudication",
+        "Independently judge only the identity-scrubbed frozen claim and current proof revision. "
+            + "Return PASS, FAIL_PROOF, INCONCLUSIVE, or COUNTEREXAMPLE_CANDIDATE. Do not infer prior "
+            + "audit results, repair authorship, route outcome, or statement refutation authority.");
     stages.put("final_verification", "Independently audit the final proof against the immutable problem.");
     stages.put("blind_structural_verification", "Use only the supplied packet and independently audit proof structure.");
     stages.put("blind_detailed_verification", "Audit every step using only the blind packet and admitted evidence.");

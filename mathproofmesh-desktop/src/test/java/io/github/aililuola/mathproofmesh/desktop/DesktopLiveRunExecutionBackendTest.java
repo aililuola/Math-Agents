@@ -18,8 +18,16 @@ import io.github.aililuola.mathproofmesh.config.AgentConfig;
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
 import io.github.aililuola.mathproofmesh.contract.AttemptStatus;
 import io.github.aililuola.mathproofmesh.contract.BlindVerificationReport;
+import io.github.aililuola.mathproofmesh.contract.ClaimBlindAdjudicationBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimBlindAdjudicationDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimBlindAdjudicationVerdict;
+import io.github.aililuola.mathproofmesh.contract.ClaimProofAuditBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimProofAuditDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimProofAuditVerdict;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewBatch;
 import io.github.aililuola.mathproofmesh.contract.ClaimReviewDecision;
+import io.github.aililuola.mathproofmesh.contract.ClaimStatementFalsificationBatch;
+import io.github.aililuola.mathproofmesh.contract.ClaimStatementFalsificationDecision;
 import io.github.aililuola.mathproofmesh.contract.ComputationContractRepair;
 import io.github.aililuola.mathproofmesh.contract.ComputationContractRepairAction;
 import io.github.aililuola.mathproofmesh.contract.ComputationMethod;
@@ -39,6 +47,7 @@ import io.github.aililuola.mathproofmesh.contract.Severity;
 import io.github.aililuola.mathproofmesh.contract.SemanticPivotProposal;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
 import io.github.aililuola.mathproofmesh.contract.StrategySet;
+import io.github.aililuola.mathproofmesh.contract.StatementFalsificationDisposition;
 import io.github.aililuola.mathproofmesh.contract.TriageResult;
 import io.github.aililuola.mathproofmesh.contract.ToolAuditReport;
 import io.github.aililuola.mathproofmesh.contract.UsageRecord;
@@ -53,6 +62,7 @@ import io.github.aililuola.mathproofmesh.provider.ProviderClientRegistry;
 import io.github.aililuola.mathproofmesh.provider.ProviderCircuitOpenError;
 import io.github.aililuola.mathproofmesh.provider.ProviderException;
 import io.github.aililuola.mathproofmesh.provider.ProviderRequest;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.FrozenClaimSnapshot;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -491,6 +501,9 @@ final class DesktopLiveRunExecutionBackendTest {
           case "StrategySet" -> strategies();
           case "InitialExplorationTurn" -> exploration(user, mode);
           case "ComputationContractRepair" -> computationRepair(mode);
+          case "ClaimStatementFalsificationBatch" -> claimStatementFalsification(user);
+          case "ClaimProofAuditBatch" -> claimProofAudit(user);
+          case "ClaimBlindAdjudicationBatch" -> claimBlindAdjudication(user);
           case "ClaimReviewBatch" -> claimReview(user);
           case "VerificationReport" -> review(user, mode);
           case "BlindVerificationReport" -> blindReview(user, mode);
@@ -515,18 +528,7 @@ final class DesktopLiveRunExecutionBackendTest {
   }
 
   private static ClaimReviewBatch claimReview(String prompt) {
-    String startMarker = "SANITIZED CONTEXT:\n";
-    String endMarker = "\n\nOUTPUT LANGUAGE:";
-    int start = prompt.indexOf(startMarker);
-    if (start < 0) {
-      throw new AssertionError("claim review prompt has no sanitized context");
-    }
-    start += startMarker.length();
-    int end = prompt.indexOf(endMarker, start);
-    if (end <= start) {
-      throw new AssertionError("claim review prompt has no context terminator");
-    }
-    JsonNode context = ContractObjectMapper.parseTree(prompt.substring(start, end));
+    JsonNode context = sanitizedContext(prompt);
     List<ClaimReviewDecision> decisions = new ArrayList<>();
     for (JsonNode artifact : context.path("candidate_artifacts")) {
       decisions.add(
@@ -551,6 +553,77 @@ final class DesktopLiveRunExecutionBackendTest {
         decisions,
         null,
         new UsageRecord());
+  }
+
+  private static ClaimStatementFalsificationBatch claimStatementFalsification(String prompt) {
+    FrozenClaimSnapshot frozen =
+        ContractObjectMapper.read(
+            sanitizedContext(prompt).path("frozen_claim"), FrozenClaimSnapshot.class);
+    return new ClaimStatementFalsificationBatch(
+        "statement-falsification-" + frozen.claimId(),
+        "scripted-falsifier",
+        frozen.sourceRouteId(),
+        frozen.sourceAttemptId(),
+        List.of(
+            new ClaimStatementFalsificationDecision(
+                frozen.claimId(),
+                StatementFalsificationDisposition.NO_COUNTEREXAMPLE_FOUND,
+                List.of(),
+                "No counterexample was found for the frozen statement.")),
+        "artifact://statement-falsification/" + frozen.claimId(),
+        new UsageRecord());
+  }
+
+  private static ClaimProofAuditBatch claimProofAudit(String prompt) {
+    FrozenClaimSnapshot frozen =
+        ContractObjectMapper.read(
+            sanitizedContext(prompt).path("frozen_claim"), FrozenClaimSnapshot.class);
+    return new ClaimProofAuditBatch(
+        "proof-audit-" + frozen.claimId(),
+        "scripted-proof-auditor",
+        frozen.sourceRouteId(),
+        frozen.sourceAttemptId(),
+        List.of(
+            new ClaimProofAuditDecision(
+                frozen.claimId(),
+                ClaimProofAuditVerdict.VALID,
+                List.of(),
+                "The bounded proof steps establish the frozen statement.")),
+        "artifact://proof-audit/" + frozen.claimId(),
+        new UsageRecord());
+  }
+
+  private static ClaimBlindAdjudicationBatch claimBlindAdjudication(String prompt) {
+    JsonNode packet = sanitizedContext(prompt).path("blind_claim_packet");
+    String claimId = packet.path("claimId").asText();
+    return new ClaimBlindAdjudicationBatch(
+        "blind-adjudication-" + claimId,
+        "scripted-blind-adjudicator",
+        "scripted-route",
+        "scripted-attempt",
+        List.of(
+            new ClaimBlindAdjudicationDecision(
+                claimId,
+                ClaimBlindAdjudicationVerdict.PASS,
+                List.of(),
+                "The identity-scrubbed proof independently passes.")),
+        "artifact://blind-adjudication/" + claimId,
+        new UsageRecord());
+  }
+
+  private static JsonNode sanitizedContext(String prompt) {
+    String startMarker = "SANITIZED CONTEXT:\n";
+    String endMarker = "\n\nOUTPUT LANGUAGE:";
+    int start = prompt.indexOf(startMarker);
+    if (start < 0) {
+      throw new AssertionError("structured prompt has no sanitized context");
+    }
+    start += startMarker.length();
+    int end = prompt.indexOf(endMarker, start);
+    if (end <= start) {
+      throw new AssertionError("structured prompt has no context terminator");
+    }
+    return ContractObjectMapper.parseTree(prompt.substring(start, end));
   }
 
   private static TriageResult triage() {
