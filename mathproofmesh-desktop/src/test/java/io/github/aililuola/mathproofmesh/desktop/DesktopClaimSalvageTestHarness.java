@@ -60,9 +60,12 @@ import io.github.aililuola.mathproofmesh.contract.UsageRecord;
 import io.github.aililuola.mathproofmesh.contract.VerificationVerdict;
 import io.github.aililuola.mathproofmesh.memory.LemmaMemory;
 import io.github.aililuola.mathproofmesh.memory.TypedMemory;
+import io.github.aililuola.mathproofmesh.communication.MessageStoreSnapshot;
+import io.github.aililuola.mathproofmesh.communication.artifact.MathematicalArtifactBroker;
 import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleController;
+import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlFacade;
 import io.github.aililuola.mathproofmesh.proofcontrol.RootGoalContract;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionRecord;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtLedger;
@@ -70,6 +73,7 @@ import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtStage
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.FrozenClaimSnapshot;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
+import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphConvergenceMonitor;
 import io.github.aililuola.mathproofmesh.provider.AgentPool;
 import io.github.aililuola.mathproofmesh.provider.AgentRuntime;
 import io.github.aililuola.mathproofmesh.provider.InMemoryProviderCallRepository;
@@ -77,6 +81,8 @@ import io.github.aililuola.mathproofmesh.provider.LLMResponse;
 import io.github.aililuola.mathproofmesh.provider.MockResponder;
 import io.github.aililuola.mathproofmesh.provider.ProviderClientRegistry;
 import io.github.aililuola.mathproofmesh.provider.ProviderRequest;
+import io.github.aililuola.mathproofmesh.research.ResearchCheckpointLedger;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioRegistry;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -175,6 +181,11 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
     invoke("ensureInitialRoutes");
   }
 
+  void freezeAndCreateRouteForClaim(String strategyId, String claimId, String statement)
+      throws Exception {
+    freezeAndCreateRoute(boundClaimStrategy(strategyId, claimId, statement));
+  }
+
   void addCounterexampleTargets() {
     for (int round = 0; round < 20; round += 4) {
       String id = counterTarget(round);
@@ -252,6 +263,31 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
     invoke("integrateCommittedRoutes");
   }
 
+  void distributeBrokerArtifacts() throws Exception {
+    invoke("distributeVerifiedClaims");
+  }
+
+  void addRelatedRouteForClaim(String claimId, String statement) throws Exception {
+    invoke(
+        "addRoute",
+        new Class<?>[] {StrategyCard.class, int.class},
+        new Object[] {boundClaimStrategy("claim-salvage-target", claimId, statement), 0});
+  }
+
+  MathematicalArtifactBroker mathematicalArtifactBroker() {
+    return uncheckedField(
+        coordinator, "mathematicalArtifactBroker", MathematicalArtifactBroker.class);
+  }
+
+  MessageStoreSnapshot legacyMessageStore() {
+    Object repository = rawFieldUnchecked(coordinator, "messageRepository");
+    try {
+      return (MessageStoreSnapshot) repository.getClass().getMethod("snapshot").invoke(repository);
+    } catch (ReflectiveOperationException exception) {
+      throw new IllegalStateException(exception);
+    }
+  }
+
   List<String> exploreSubsequentRouteAndCaptureVerifiedFacts() throws Exception {
     invoke(
         "addRoute",
@@ -262,6 +298,14 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
         new Class<?>[] {boolean.class},
         new Object[] {false});
     return responder.lastExplorationVerifiedFacts();
+  }
+
+  List<String> exploreUnstartedRoutesAndCaptureBrokerArtifactIds() throws Exception {
+    invoke(
+        "exploreUnstartedRoutes",
+        new Class<?>[] {boolean.class},
+        new Object[] {false});
+    return responder.lastExplorationBrokerArtifactIds();
   }
 
   private void installFailedAttempt(int round, List<ClaimCard> claims)
@@ -495,6 +539,26 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
     return uncheckedField(coordinator, "rootGoal", RootGoalContract.class);
   }
 
+  ProtectedHashes protectedHashes() {
+    ProofControlFacade facade =
+        uncheckedField(coordinator, "proofControl", ProofControlFacade.class);
+    return new ProtectedHashes(
+        rootGoal().sourceStatementHash(),
+        typedMemory().negativeKnowledgeRegistry().registryHash(),
+        attemptArtifacts().ledgerHash(),
+        CanonicalJson.stableHash(facade.claims().snapshot()),
+        uncheckedField(coordinator, "researchCheckpoints", ResearchCheckpointLedger.class)
+            .ledgerHash(),
+        proofGraph().canonicalizationHash(),
+        uncheckedField(
+                coordinator, "proofGraphConvergence", ProofGraphConvergenceMonitor.class)
+            .stableHash(),
+        facade.semanticPivots().ledger().stableHash(),
+        uncheckedField(coordinator, "strategyPortfolios", StrategyPortfolioRegistry.class)
+            .registryHash(),
+        claimCourt().stableHash());
+  }
+
   String exactStatement() {
     return uncheckedField(
             coordinator,
@@ -706,6 +770,30 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
             List.of(contextBinding)));
   }
 
+  private static StrategyCard boundClaimStrategy(
+      String strategyId, String claimId, String statement) {
+    CriticalClaim claim =
+        new CriticalClaim(
+            claimId,
+            List.of(),
+            "Check the exact reusable local claim.",
+            "required",
+            null,
+            statement,
+            "needs_check");
+    CriticalClaimContextBinding binding =
+        new CriticalClaimContextBinding(
+            claimId,
+            "@claim",
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of("global"),
+            "positive");
+    return strategyWithCriticalClaim(strategyId, claim, binding);
+  }
+
   private static RunExecutionBackend.ProgressSink noOpProgress() {
     return (type, stage, agentId, status, summary, reference) -> {};
   }
@@ -755,10 +843,23 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
       int factCount,
       int routeClaimCount) {}
 
+  record ProtectedHashes(
+      String root,
+      String negative,
+      String attempts,
+      String claims,
+      String research,
+      String canonicalization,
+      String convergence,
+      String pivots,
+      String portfolio,
+      String court) {}
+
   private static final class ClaimReviewResponder implements MockResponder {
     private final List<ProviderRequest> requests = new ArrayList<>();
     private final Map<String, Integer> reviewCalls = new LinkedHashMap<>();
     private final List<List<String>> explorationVerifiedFacts = new ArrayList<>();
+    private final List<List<String>> explorationBrokerArtifactIds = new ArrayList<>();
 
     @Override
     public LLMResponse respond(ProviderRequest request) {
@@ -767,6 +868,14 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
         List<String> facts = new ArrayList<>();
         context.path("verified_facts").forEach(fact -> facts.add(fact.path("statement").asText()));
         explorationVerifiedFacts.add(List.copyOf(facts));
+        List<String> brokerArtifactIds = new ArrayList<>();
+        context
+            .path("broker_artifacts")
+            .forEach(
+                artifact ->
+                    brokerArtifactIds.add(
+                        text(artifact, "artifactId", "artifact_id")));
+        explorationBrokerArtifactIds.add(List.copyOf(brokerArtifactIds));
         InitialExplorationTurn turn =
             new InitialExplorationTurn(
                 InitialExplorationAction.ABANDON,
@@ -1095,6 +1204,12 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
       return explorationVerifiedFacts.isEmpty()
           ? List.of()
           : explorationVerifiedFacts.getLast();
+    }
+
+    List<String> lastExplorationBrokerArtifactIds() {
+      return explorationBrokerArtifactIds.isEmpty()
+          ? List.of()
+          : explorationBrokerArtifactIds.getLast();
     }
 
     private static JsonNode sanitizedContext(ProviderRequest request) {

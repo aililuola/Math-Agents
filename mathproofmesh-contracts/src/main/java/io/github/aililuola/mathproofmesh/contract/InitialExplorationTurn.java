@@ -13,7 +13,8 @@ public record InitialExplorationTurn(
     @JsonProperty(value = "attempt") ProofAttempt attempt,
     @JsonProperty(value = "experiment_impact") FailureLevel experimentImpact,
     @JsonProperty(value = "experiment_spec") ExperimentSpec experimentSpec,
-    @JsonProperty(value = "reason") @ContractNonNull String reason
+    @JsonProperty(value = "reason") @ContractNonNull String reason,
+    @JsonProperty(value = "broker_artifact_use_manifest") BrokerArtifactUseManifest brokerArtifactUseManifest
 ) implements StrictContract {
 
   public InitialExplorationTurn {
@@ -22,5 +23,14 @@ public record InitialExplorationTurn(
       reason = "";
     }
     reason = ContractStrings.trim(reason);
+  }
+
+  public InitialExplorationTurn(
+      InitialExplorationAction action,
+      ProofAttempt attempt,
+      FailureLevel experimentImpact,
+      ExperimentSpec experimentSpec,
+      String reason) {
+    this(action, attempt, experimentImpact, experimentSpec, reason, null);
   }
 }

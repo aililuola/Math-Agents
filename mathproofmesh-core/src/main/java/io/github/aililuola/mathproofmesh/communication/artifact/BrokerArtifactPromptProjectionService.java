@@ -78,7 +78,8 @@ public final class BrokerArtifactPromptProjectionService {
 
   public String instruction() {
     return "Merely receiving an artifact does not mean it was used. "
-        + "Any mathematical use must cite the artifact ID and declare a typed use. "
+        + "Any mathematical use must cite artifact_id in broker_artifact_use_manifest and "
+        + "declare a typed use; an artifact omitted from that manifest is recorded as NOT_USED. "
         + "A REVIEWED_OPEN obstruction cannot be used as a proved premise. "
         + "A BOUNDED observation cannot establish an unrestricted Claim.";
   }

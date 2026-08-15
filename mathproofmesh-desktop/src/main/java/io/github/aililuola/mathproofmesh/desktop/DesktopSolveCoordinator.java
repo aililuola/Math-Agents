@@ -29,6 +29,14 @@ import io.github.aililuola.mathproofmesh.communication.MessageDeliveryState;
 import io.github.aililuola.mathproofmesh.communication.PromptDeliveryBatch;
 import io.github.aililuola.mathproofmesh.communication.RouteRegistry;
 import io.github.aililuola.mathproofmesh.communication.VerifiedDownstreamEffect;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactCompilationRequest;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactCompiler;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactEffectObservation;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactPromptBatch;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactPublishResult;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactSourceKind;
+import io.github.aililuola.mathproofmesh.communication.artifact.MathematicalArtifactBroker;
+import io.github.aililuola.mathproofmesh.communication.artifact.RouteMathematicalNeedProfile;
 import io.github.aililuola.mathproofmesh.computation.ComputationBroker;
 import io.github.aililuola.mathproofmesh.computation.ComputationBroker.ComputationAudit;
 import io.github.aililuola.mathproofmesh.computation.ComputationContext;
@@ -43,6 +51,15 @@ import io.github.aililuola.mathproofmesh.contract.AttemptStatus;
 import io.github.aililuola.mathproofmesh.contract.BlindReviewPacket;
 import io.github.aililuola.mathproofmesh.contract.BlindVerificationReport;
 import io.github.aililuola.mathproofmesh.contract.BrokerDecision;
+import io.github.aililuola.mathproofmesh.contract.BrokerArtifactEnvelope;
+import io.github.aililuola.mathproofmesh.contract.BrokerArtifactReceiptStatus;
+import io.github.aililuola.mathproofmesh.contract.BrokerArtifactType;
+import io.github.aililuola.mathproofmesh.contract.BrokerBlockedInference;
+import io.github.aililuola.mathproofmesh.contract.BrokerClaimSemanticContext;
+import io.github.aililuola.mathproofmesh.contract.BrokerReusableConsequence;
+import io.github.aililuola.mathproofmesh.contract.ReviewedObstructionPayload;
+import io.github.aililuola.mathproofmesh.contract.VerifiedClaimPayload;
+import io.github.aililuola.mathproofmesh.contract.VerifiedCounterexamplePayload;
 import io.github.aililuola.mathproofmesh.contract.BudgetAction;
 import io.github.aililuola.mathproofmesh.contract.BudgetDecision;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
@@ -160,6 +177,7 @@ import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeAdmissionGate;
 import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeBlockedException;
 import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeCandidate;
 import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeDecision;
+import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeKind;
 import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeRegistry;
 import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeRecord;
 import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeSurface;
@@ -194,6 +212,7 @@ import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactRecord;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactSnapshot;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactStatus;
+import io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleController;
 import io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleSnapshot;
 import io.github.aililuola.mathproofmesh.proofcontrol.ExactGoalContractChecker;
 import io.github.aililuola.mathproofmesh.proofcontrol.FailureControlService;
@@ -530,6 +549,9 @@ final class DesktopSolveCoordinator {
   private RouteRegistry routeRegistry;
   private InMemoryMessageRepository messageRepository = new InMemoryMessageRepository();
   private MessageBroker messageBroker;
+  private final MathematicalArtifactBroker mathematicalArtifactBroker =
+      new MathematicalArtifactBroker();
+  private final BrokerArtifactCompiler brokerArtifactCompiler = new BrokerArtifactCompiler();
   private final AdaptiveBudgetManager adaptiveBudget;
   private final InspirationPolicy inspirationPolicy;
   private final InspirationMechanismRegistry inspirationRegistry;
@@ -2209,7 +2231,13 @@ final class DesktopSolveCoordinator {
             priorComputation == null || priorComputation.result() == null
                 ? "not_executed"
                 : priorComputation.result());
-        segmentContext.put("broker_messages", consumeBrokerContext(route));
+        BrokerArtifactPromptBatch brokerBatch = consumeBrokerContext(route);
+        if (!brokerBatch.deliveries().isEmpty()) {
+          persistUnchecked("broker_prompt_consumption", false);
+        }
+        segmentContext.put("broker_artifacts", brokerBatch.artifacts());
+        segmentContext.put("broker_artifact_provider_request_id", brokerBatch.providerRequestId());
+        segmentContext.put("broker_artifact_usage_contract", brokerBatch.usageInstruction());
         segmentContext.put("verified_facts", typedMemory.factsForRoute(route.routeId));
         segmentContext.put("negative_memory", typedMemory.negativesForRoute(route.routeId));
         segmentContext.put(
@@ -2234,6 +2262,15 @@ final class DesktopSolveCoordinator {
                 "depth",
                 "Exploring " + route.routeId + " segment " + (segment + 1));
         InitialExplorationTurn turn = call.value();
+        if (turn.brokerArtifactUseManifest() != null) {
+          if (!brokerBatch.providerRequestId()
+              .equals(turn.brokerArtifactUseManifest().providerRequestId())) {
+            throw new IllegalArgumentException(
+                "ARTIFACT_USE_MANIFEST_PROVIDER_REQUEST_MISMATCH");
+          }
+          mathematicalArtifactBroker.stageUseManifest(turn.brokerArtifactUseManifest());
+          persistUnchecked("broker_provider_result", false);
+        }
         previous = turn;
         route.segmentCount++;
         if (turn.action() == InitialExplorationAction.SUBMIT_ATTEMPT
@@ -2762,29 +2799,45 @@ final class DesktopSolveCoordinator {
     }
   }
 
-  private List<MessageEnvelope> consumeBrokerContext(RouteState route) {
-    PromptDeliveryBatch batch =
-        messageBroker.consumeForPrompt(
+  private BrokerArtifactPromptBatch consumeBrokerContext(RouteState route) {
+    String providerRequestId =
+        "artifact-prompt-" + route.routeId + "-" + roundIndex.get() + "-" + route.segmentCount;
+    Set<String> openTargets =
+        proofGraph.obligations().stream()
+            .filter(obligation -> obligation.routeIds().contains(route.routeId))
+            .filter(obligation -> "open".equals(obligation.status()))
+            .map(ProofObligation::obligationId)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    Set<String> verifiedClaims =
+        typedMemory.facts().stream()
+            .map(MessageEnvelope::messageId)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    Set<String> refutedClaims =
+        typedMemory.negatives().stream()
+            .map(MessageEnvelope::messageId)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    BrokerArtifactPromptBatch batch =
+        mathematicalArtifactBroker.consumeForPrompt(
             route.routeId,
-            "prompt-" + route.routeId + "-" + roundIndex.get() + "-" + route.segmentCount,
+            providerRequestId,
             roundIndex.get(),
-            config.topology().crossRoute().maxMessagesPerRoutePerRound());
-    for (MessageDelivery delivery : batch.deliveries()) {
-      if (route.pendingDeliveries.stream()
-          .noneMatch(existing -> existing.deliveryKey().equals(delivery.deliveryKey()))) {
-        route.pendingDeliveries.add(delivery);
-      }
-    }
-    if (!batch.messages().isEmpty()) {
+            config.topology().crossRoute().maxMessagesPerRoutePerRound(),
+            Math.max(0.0d, proofGraph.canonicalProofDebt(route.routeId)),
+            openTargets,
+            verifiedClaims,
+            refutedClaims,
+            route.activeStrategyEpochId,
+            route.focusedCanonicalTargetId);
+    if (!batch.artifacts().isEmpty()) {
       event(
-          "broker_messages_consumed",
+          "broker_artifacts_consumed",
           "cross_route_broker",
           route.author.id(),
           "completed",
-          "Consumed " + batch.messages().size() + " independently verified cross-route messages",
+          "Consumed " + batch.artifacts().size() + " relevant typed mathematical artifacts",
           batch.providerRequestId());
     }
-    return batch.messages();
+    return batch;
   }
 
   private ComputationTrace runComputation(
@@ -3683,6 +3736,7 @@ final class DesktopSolveCoordinator {
       } else {
         recordRouteFailure(route);
       }
+      verifyConsumedArtifactEffects(route);
       route.integrated = true;
       recordInspirationOutcome(route);
       persistUnchecked("claim_memory_graph", false);
@@ -4141,13 +4195,24 @@ final class DesktopSolveCoordinator {
   }
 
   private void acknowledgeConsumedMessages(RouteState route) {
-    if (route.pendingDeliveries.isEmpty() || route.attempt == null) {
+    if (route.attempt == null) {
       return;
     }
     Set<String> verifiedSteps =
         route.attempt.proofSteps().stream()
             .map(ProofStep::stepId)
             .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    List<String> pendingArtifactRequests =
+        mathematicalArtifactBroker.pendingProviderRequestsForRoute(route.routeId);
+    for (String providerRequestId : pendingArtifactRequests) {
+      mathematicalArtifactBroker.acknowledge(providerRequestId, verifiedSteps);
+    }
+    if (!pendingArtifactRequests.isEmpty()) {
+      persistUnchecked("broker_use_receipt", false);
+    }
+    if (route.pendingDeliveries.isEmpty()) {
+      return;
+    }
     MessageStoreSnapshot snapshot = messageRepository.snapshot();
     for (MessageDelivery delivery : List.copyOf(route.pendingDeliveries)) {
       MessageEnvelope message = snapshot.messages().get(delivery.messageId());
@@ -4203,6 +4268,54 @@ final class DesktopSolveCoordinator {
           acknowledged.receiptId());
     }
     route.pendingDeliveries.clear();
+  }
+
+  private void verifyConsumedArtifactEffects(RouteState route) {
+    if (route.attempt == null) {
+      return;
+    }
+    Set<String> committedSteps =
+        route.attempt.proofSteps().stream()
+            .map(ProofStep::stepId)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    Set<String> verifiedClaims =
+        typedMemory.facts().stream()
+            .map(MessageEnvelope::messageId)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    Set<String> refutedClaims = new LinkedHashSet<>(route.rejectedClaimIds);
+    Set<String> closedObligations =
+        proofGraph.obligations().stream()
+            .filter(obligation -> "closed".equals(obligation.status()))
+            .map(ProofObligation::obligationId)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    String computationPlanId =
+        computationTracesForRoute(route.routeId).stream()
+            .map(trace -> trace.spec().experimentId())
+            .findFirst()
+            .orElse(null);
+    BrokerArtifactEffectObservation observation =
+        new BrokerArtifactEffectObservation(
+            committedSteps,
+            verifiedClaims,
+            refutedClaims,
+            closedObligations,
+            route.retiredActiveClaimIds,
+            route.focusedCanonicalTargetId,
+            null,
+            route.activeSemanticPivotId,
+            computationPlanId,
+            false,
+            Math.max(0.0d, proofGraph.canonicalProofDebt(route.routeId)));
+    int utilitiesBefore = mathematicalArtifactBroker.utilities().size();
+    mathematicalArtifactBroker.receipts().stream()
+        .filter(receipt -> receipt.routeId().equals(route.routeId))
+        .filter(receipt -> receipt.status() == BrokerArtifactReceiptStatus.USED_PENDING_EFFECT)
+        .forEach(
+            receipt ->
+                mathematicalArtifactBroker.verifyEffect(receipt.deliveryId(), observation));
+    if (mathematicalArtifactBroker.utilities().size() != utilitiesBefore) {
+      persistUnchecked("broker_verified_utility", false);
+    }
   }
 
   private List<AttemptArtifactRecord> harvestAttemptArtifacts(RouteState route) {
@@ -6203,7 +6316,13 @@ final class DesktopSolveCoordinator {
     if (config.topology().crossRoute().shareFailureRecords()
         && route.plan.referee() != null
         && route.plan.referee().assigned()) {
-      messageBroker.publish(negative, route.plan.referee().agentId(), roundIndex.get());
+      event(
+          "broker_control_broadcast_rejected",
+          "cross_route_broker",
+          route.plan.referee().agentId(),
+          "rejected",
+          "GENERIC_FAILURE_RECORD: retained in local failure audit only",
+          negative.messageId());
     }
     event(
         "failure_classified",
@@ -6282,69 +6401,354 @@ final class DesktopSolveCoordinator {
   private void distributeVerifiedClaims() {
     stage(
         RoutePipelineFunctions.RunStage.CROSS_ROUTE_BROKER,
-        "Publishing only independently reviewed claims through the typed broker");
-    Set<String> knownObligations =
-        proofGraph.obligations().stream()
-            .map(ProofObligation::obligationId)
-            .collect(java.util.stream.Collectors.toSet());
-    for (RouteState route : verifiedRoutes()) {
-      if (route.deltaId == null || route.claimIds.isEmpty()) {
+        "Compiling authoritative mathematical state into typed cross-route artifacts");
+    if (rootGoal == null) {
+      complete(RoutePipelineFunctions.RunStage.CROSS_ROUTE_BROKER);
+      return;
+    }
+    List<RouteMathematicalNeedProfile> profiles = routeMathematicalNeedProfiles();
+    for (ClaimCourtRecord record : claimCourt.records()) {
+      BrokerArtifactCompilationRequest request = brokerCompilationRequest(record);
+      if (request == null) {
         continue;
       }
-      List<BrokerPhaseService.ReviewedClaim> reviewed = new ArrayList<>();
-      for (String claimId : route.claimIds) {
-        typedMemory
-            .find(claimId)
-            .ifPresent(
-                message ->
-                    reviewed.add(
-                        new BrokerPhaseService.ReviewedClaim(
-                            message.messageId(),
-                            message.statement(),
-                            message.dependencies(),
-                            message.artifactRefs(),
-                            route.deltaId,
-                            route.author.id(),
-                            "",
-                            true,
-                            true,
-                            route.teamResult != null && route.teamResult.globalShareAllowed())));
-      }
-      List<BrokerPhaseService.BrokerPacket> packets = crossRoute.share(reviewed, route.deltaId);
-      for (BrokerPhaseService.BrokerPacket packet : packets) {
-        MessageEnvelope message = typedMemory.find(packet.claimId()).orElseThrow();
-        proofControl
-            .messageUtility()
-            .registerContract(
-                message.messageId(),
-                route.routeId,
-                List.of(MAIN_GOAL_ID),
-                ProofControlModels.MessageExpectedEffect.CLOSE,
-                message.assumptions(),
-                Math.max(0.01d, proofGraph.canonicalProofDebt(route.routeId)),
-                roundIndex.get() + message.ttlRounds(),
-                knownObligations);
-        var utilityDecision =
-            proofControl
-                .messageUtility()
-                .decideBroadcast(message.messageId(), false, true, true, roundIndex.get());
-        if (utilityDecision.decision() != ProofControlModels.BroadcastDecision.BROADCAST) {
-          continue;
-        }
-        BrokerDecision decision =
-            messageBroker.publish(message, route.plan.referee().agentId(), roundIndex.get());
+      var compilation = brokerArtifactCompiler.compile(request);
+      if (!compilation.accepted()) {
         event(
-            decision.accepted() ? "broker_message_admitted" : "broker_message_rejected",
+            "broker_artifact_rejected",
             "cross_route_broker",
-            route.plan.referee().agentId(),
-            decision.accepted() ? "completed" : "rejected",
-            decision.accepted()
-                ? "Published sanitized verified claim to sparse route neighbors"
-                : decision.rejectionReason(),
-            message.messageId());
+            null,
+            "rejected",
+            String.join(", ", compilation.rejectionCodes()),
+            record.courtCaseId());
+        continue;
       }
+      BrokerArtifactPublishResult published =
+          mathematicalArtifactBroker.publish(
+              compilation.artifact(),
+              profiles,
+              roundIndex.get(),
+              config.topology().crossRoute().maxMessagesPerRoutePerRound());
+      event(
+          "broker_artifact_admitted",
+          "cross_route_broker",
+          null,
+          "completed",
+          "Published authoritative "
+              + published.artifact().artifactType()
+              + " to "
+              + published.deliveries().size()
+              + " relevant routes",
+          published.artifact().artifactId());
     }
     complete(RoutePipelineFunctions.RunStage.CROSS_ROUTE_BROKER);
+  }
+
+  private BrokerArtifactCompilationRequest brokerCompilationRequest(ClaimCourtRecord record) {
+    FrozenClaimSnapshot frozen = record.frozenClaim();
+    ClaimProofRevisionRecord revision;
+    try {
+      revision = claimProofRevisions.get(record.currentProofRevisionId());
+    } catch (IllegalArgumentException ignored) {
+      return null;
+    }
+    BrokerClaimSemanticContext context = brokerClaimContext(frozen);
+    List<String> evidenceRefs =
+        revision.evidenceRefs().stream().map(EvidenceRef::artifactRef).distinct().toList();
+    List<String> sourceSteps = revision.proofSteps().stream().map(ProofStep::stepId).toList();
+    int ttl = config.topology().crossRoute().messageTtlRounds();
+    if (record.outcome() == ClaimCourtOutcome.VERIFIED) {
+      boolean projectedFact =
+          typedMemory
+              .find(frozen.claimId())
+              .filter(message -> message.memoryTier() == MemoryTier.FACT)
+              .filter(
+                  message ->
+                      Objects.equals(message.claimSemanticHash(), frozen.claimSemanticHash()))
+              .isPresent();
+      boolean authorityValid =
+          revision.status() == ClaimProofRevisionStatus.BLIND_VERIFIED
+              && record.currentProofRevisionId().equals(revision.revisionId())
+              && revision.claimSemanticHash().equals(frozen.claimSemanticHash())
+              && claimLifecycleFactAuthority(frozen.claimId());
+      return new BrokerArtifactCompilationRequest(
+          problemHash,
+          rootGoal.sourceStatementHash(),
+          BrokerArtifactType.VERIFIED_CLAIM,
+          new VerifiedClaimPayload(context),
+          BrokerArtifactSourceKind.CLAIM_COURT_VERIFIED,
+          frozen.sourceRouteId(),
+          frozen.sourceAttemptId(),
+          frozen.claimId(),
+          revision.revisionId(),
+          sourceObligations(frozen.sourceRouteId()),
+          sourceSteps,
+          evidenceRefs,
+          List.of(
+              new BrokerReusableConsequence(
+                  frozen.statement(),
+                  sourceCanonicalTargets(frozen.sourceRouteId()),
+                  List.of(frozen.claimSemanticHash()),
+                  new ArrayList<>(
+                      ProofIdentity.domainObjects(
+                          java.util.stream.Stream.concat(
+                                  java.util.stream.Stream.of(frozen.statement()),
+                                  frozen.assumptions().stream())
+                              .toList())))),
+          List.of(),
+          List.of(frozen.claimId()),
+          null,
+          roundIndex.get(),
+          ttl,
+          authorityValid,
+          projectedFact);
+    }
+    if (record.outcome() == ClaimCourtOutcome.REFUTED
+        && !record.refutationEvidenceIds().isEmpty()) {
+      List<String> affected = exactCounterexampleObligations(frozen.claimId());
+      boolean appliedCounterexample =
+          attemptArtifacts.records().stream()
+              .filter(artifact -> artifact.claimId().equals(frozen.claimId()))
+              .filter(artifact -> artifact.status() == AttemptArtifactStatus.APPLIED_COUNTEREXAMPLE)
+              .anyMatch(
+                  artifact ->
+                      artifact.evidenceRefs().stream()
+                          .anyMatch(record.refutationEvidenceIds()::contains));
+      boolean trustedCounterexampleAuthority = hasVerifiedCounterexampleAuthority(frozen);
+      String witness =
+          "Verified exact counterexample evidence: "
+              + String.join(", ", record.refutationEvidenceIds());
+      return new BrokerArtifactCompilationRequest(
+          problemHash,
+          rootGoal.sourceStatementHash(),
+          BrokerArtifactType.VERIFIED_COUNTEREXAMPLE,
+          new VerifiedCounterexamplePayload(
+              context,
+              frozen.claimId(),
+              frozen.claimSemanticHash(),
+              witness,
+              record.refutationEvidenceIds(),
+              affected),
+          BrokerArtifactSourceKind.VERIFIED_COUNTEREXAMPLE,
+          frozen.sourceRouteId(),
+          frozen.sourceAttemptId(),
+          frozen.claimId(),
+          revision.revisionId(),
+          affected,
+          sourceSteps,
+          record.refutationEvidenceIds(),
+          List.of(),
+          List.of(
+              new BrokerBlockedInference(
+                  frozen.statement(), List.of(frozen.claimSemanticHash()), affected)),
+          List.of(),
+          affected.isEmpty() ? null : affected.getFirst(),
+          roundIndex.get(),
+          ttl,
+          appliedCounterexample && trustedCounterexampleAuthority,
+          true);
+    }
+    if (record.outcome() == ClaimCourtOutcome.PROOF_INVALID_BUT_CLAIM_OPEN) {
+      ClaimProofAuditDecision audit;
+      try {
+        audit = proofAuditFor(record);
+      } catch (IllegalStateException ignored) {
+        return null;
+      }
+      if (audit.issues().isEmpty()) {
+        return null;
+      }
+      ProofAuditIssue issue = audit.issues().getFirst();
+      List<String> sourceObligations = sourceObligations(frozen.sourceRouteId());
+      String nextObligation =
+          sourceObligations.isEmpty()
+              ? "claim-proof-repair:" + frozen.claimId()
+              : sourceObligations.getFirst();
+      ReviewedObstructionPayload payload =
+          new ReviewedObstructionPayload(
+              issue.stepId(),
+              issue.premiseSummary() + " -> " + issue.conclusionSummary(),
+              frozen.dependencyClaimIds(),
+              issue.issueKind().name(),
+              issue.repairability().name(),
+              issue.description(),
+              nextObligation,
+              List.of(record.proofAuditId()));
+      return new BrokerArtifactCompilationRequest(
+          problemHash,
+          rootGoal.sourceStatementHash(),
+          BrokerArtifactType.REVIEWED_OBSTRUCTION,
+          payload,
+          BrokerArtifactSourceKind.REVIEWED_PROOF_OBSTRUCTION,
+          frozen.sourceRouteId(),
+          frozen.sourceAttemptId(),
+          frozen.claimId(),
+          revision.revisionId(),
+          sourceObligations,
+          List.of(issue.stepId()),
+          List.of(record.proofAuditId()),
+          List.of(),
+          List.of(
+              new BrokerBlockedInference(
+                  issue.description(),
+                  List.of(frozen.claimSemanticHash()),
+                  sourceCanonicalTargets(frozen.sourceRouteId()))),
+          frozen.dependencyClaimIds(),
+          nextObligation,
+          roundIndex.get(),
+          ttl,
+          true,
+          true);
+    }
+    return null;
+  }
+
+  private static BrokerClaimSemanticContext brokerClaimContext(FrozenClaimSnapshot frozen) {
+    return new BrokerClaimSemanticContext(
+        frozen.statement(),
+        frozen.conclusion(),
+        frozen.assumptions(),
+        frozen.quantifiers(),
+        frozen.variableBindings(),
+        frozen.scopeLimitations(),
+        frozen.polarity(),
+        frozen.claimStatementHash(),
+        frozen.claimSemanticHash(),
+        frozen.dependencyClaimIds());
+  }
+
+  private boolean claimLifecycleFactAuthority(String claimId) {
+    try {
+      ClaimLifecycleController.State state = proofControl.claims().get(claimId).state();
+      return state == ClaimLifecycleController.State.FACT_CANDIDATE
+          || state == ClaimLifecycleController.State.EXTERNALLY_ADMITTED_FACT;
+    } catch (IllegalArgumentException ignored) {
+      return false;
+    }
+  }
+
+  private List<String> sourceObligations(String routeId) {
+    return proofGraph.obligations().stream()
+        .filter(obligation -> obligation.routeIds().contains(routeId))
+        .map(ProofObligation::obligationId)
+        .sorted()
+        .toList();
+  }
+
+  private List<String> sourceCanonicalTargets(String routeId) {
+    return proofGraph.obligations().stream()
+        .filter(obligation -> obligation.routeIds().contains(routeId))
+        .map(ProofObligation::obligationId)
+        .map(proofGraph::canonicalTargetForObligation)
+        .flatMap(Optional::stream)
+        .map(record -> record.canonicalTargetId())
+        .distinct()
+        .sorted()
+        .toList();
+  }
+
+  private List<String> exactCounterexampleObligations(String claimId) {
+    return attemptArtifacts.records().stream()
+        .filter(artifact -> artifact.claimId().equals(claimId))
+        .filter(artifact -> artifact.status() == AttemptArtifactStatus.APPLIED_COUNTEREXAMPLE)
+        .map(AttemptArtifactRecord::targetObligationId)
+        .filter(Objects::nonNull)
+        .distinct()
+        .toList();
+  }
+
+  private boolean hasVerifiedCounterexampleAuthority(FrozenClaimSnapshot frozen) {
+    NegativeKnowledgeCandidate candidate =
+        new NegativeKnowledgeCandidate(
+            problemHash,
+            NegativeKnowledgeTargetType.CLAIM,
+            frozen.statement(),
+            frozen.statement(),
+            frozen.assumptions(),
+            frozen.quantifiers(),
+            frozen.variableBindings(),
+            frozen.scopeLimitations(),
+            NegativeKnowledgeSurface.RESTORE_REVALIDATION,
+            NegativeCandidateIntent.AUDIT_ONLY);
+    String semanticKey = candidate.semanticKey();
+    return negativeKnowledgeRegistry.records().stream()
+        .filter(record -> record.activeAt(roundIndex.get()))
+        .filter(record -> record.problemHash().equals(problemHash))
+        .filter(record -> record.targetType() == NegativeKnowledgeTargetType.CLAIM)
+        .filter(record -> record.kinds().contains(NegativeKnowledgeKind.VERIFIED_COUNTEREXAMPLE))
+        .anyMatch(
+            record ->
+                record.primarySemanticKey().equals(semanticKey)
+                    || record.trustedAliasKeys().contains(semanticKey));
+  }
+
+  private List<RouteMathematicalNeedProfile> routeMathematicalNeedProfiles() {
+    return routes.stream().map(this::routeMathematicalNeedProfile).toList();
+  }
+
+  private RouteMathematicalNeedProfile routeMathematicalNeedProfile(RouteState route) {
+    LinkedHashSet<String> activeTargets = new LinkedHashSet<>();
+    LinkedHashSet<String> dependencies = new LinkedHashSet<>();
+    proofGraph.obligations().stream()
+        .filter(obligation -> obligation.routeIds().contains(route.routeId))
+        .filter(obligation -> "open".equals(obligation.status()))
+        .forEach(
+            obligation -> {
+              activeTargets.add(obligation.obligationId());
+              dependencies.addAll(obligation.dependencyIds());
+              proofGraph
+                  .canonicalTargetForObligation(obligation.obligationId())
+                  .map(record -> record.canonicalTargetId())
+                  .ifPresent(activeTargets::add);
+            });
+    if (route.focusedCanonicalTargetId != null && !route.focusedCanonicalTargetId.isBlank()) {
+      activeTargets.add(route.focusedCanonicalTargetId);
+    }
+    LinkedHashSet<String> required =
+        route.strategy.criticalClaims().stream()
+            .filter(claim -> "required".equals(claim.necessity()))
+            .filter(claim -> !"verified".equals(claim.status()))
+            .map(CriticalClaim::claimId)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    dependencies.addAll(required);
+    route.strategy.criticalClaims().stream()
+        .map(CriticalClaim::claimId)
+        .forEach(dependencies::add);
+    LinkedHashSet<String> families = new LinkedHashSet<>();
+    if (route.focusedBottleneckFamilyId != null
+        && !route.focusedBottleneckFamilyId.isBlank()) {
+      families.add(route.focusedBottleneckFamilyId);
+    }
+    LinkedHashSet<String> issueKinds = new LinkedHashSet<>();
+    for (String claimId : route.proofInvalidOpenClaimIds) {
+      claimCourt.records().stream()
+          .filter(record -> record.frozenClaim().claimId().equals(claimId))
+          .filter(record -> record.outcome() == ClaimCourtOutcome.PROOF_INVALID_BUT_CLAIM_OPEN)
+          .findFirst()
+          .ifPresent(
+              record -> {
+                try {
+                  proofAuditFor(record).issues().stream()
+                      .map(issue -> issue.issueKind().name())
+                      .forEach(issueKinds::add);
+                } catch (IllegalStateException ignored) {
+                  // A missing durable audit cannot establish a mathematical relevance edge.
+                }
+              });
+    }
+    String epoch =
+        route.activeStrategyEpochId == null || route.activeStrategyEpochId.isBlank()
+            ? route.strategy.strategyId()
+            : route.activeStrategyEpochId;
+    return new RouteMathematicalNeedProfile(
+        route.routeId,
+        activeTargets,
+        required,
+        dependencies,
+        families,
+        route.activeMathematicalObjectIds,
+        issueKinds,
+        epoch);
   }
 
   private SchedulerExit runScheduler() {
@@ -10451,6 +10855,14 @@ final class DesktopSolveCoordinator {
       messageRepository = new InMemoryMessageRepository(checkpoint.messageStore());
       messageBroker = createMessageBroker(messageRepository);
     }
+    mathematicalArtifactBroker.restore(
+        checkpoint.brokerArtifactRegistry(),
+        checkpoint.brokerArtifactPublications(),
+        checkpoint.brokerArtifactDeliveries(),
+        checkpoint.brokerArtifactReceipts(),
+        checkpoint.brokerArtifactUses(),
+        checkpoint.brokerArtifactUtilities(),
+        checkpoint.brokerArtifactInvalidations());
     inspirationLedger.loadHistorical(checkpoint.inspirationOutcomes());
 
     routes.clear();
@@ -10607,6 +11019,14 @@ final class DesktopSolveCoordinator {
                 strategyArchive.rejectChild(
                     strategyId, "negative-knowledge://restore-revalidation"));
     rebuildRouteRegistry();
+    if (checkpoint.schemaVersion() < 17) {
+      mathematicalArtifactBroker.migrateLegacy(
+          checkpoint.messageStore(),
+          problemHash,
+          rootGoal == null ? problemHash : rootGoal.sourceStatementHash(),
+          routeMathematicalNeedProfiles(),
+          roundIndex.get());
+    }
     reconsiderDeferredExpansions();
     MessageStoreSnapshot store = messageRepository.snapshot();
     for (RouteState route : routes) {
@@ -11046,6 +11466,13 @@ final class DesktopSolveCoordinator {
             claimCourtExecutions.snapshot(),
             researchCheckpoints.snapshot(),
             messageRepository.snapshot(),
+            mathematicalArtifactBroker.registrySnapshot(),
+            mathematicalArtifactBroker.publicationSnapshot(),
+            mathematicalArtifactBroker.deliverySnapshot(),
+            mathematicalArtifactBroker.receiptSnapshot(),
+            mathematicalArtifactBroker.useSnapshot(),
+            mathematicalArtifactBroker.utilitySnapshot(),
+            mathematicalArtifactBroker.invalidationSnapshot(),
             proofDebtHistory,
             strategyArchive.snapshot(),
             strategyBlueprints,
@@ -11096,6 +11523,23 @@ final class DesktopSolveCoordinator {
         structured.resolve("deferred-proof-expansions.json"),
         checkpoint.deferredExpansions());
     writeJsonAtomically(structured.resolve("message-store.json"), checkpoint.messageStore());
+    writeJsonAtomically(
+        structured.resolve("broker-artifact-registry.json"), checkpoint.brokerArtifactRegistry());
+    writeJsonAtomically(
+        structured.resolve("broker-artifact-publications.json"),
+        checkpoint.brokerArtifactPublications());
+    writeJsonAtomically(
+        structured.resolve("broker-artifact-deliveries.json"),
+        checkpoint.brokerArtifactDeliveries());
+    writeJsonAtomically(
+        structured.resolve("broker-artifact-receipts.json"), checkpoint.brokerArtifactReceipts());
+    writeJsonAtomically(
+        structured.resolve("broker-artifact-uses.json"), checkpoint.brokerArtifactUses());
+    writeJsonAtomically(
+        structured.resolve("broker-artifact-utilities.json"), checkpoint.brokerArtifactUtilities());
+    writeJsonAtomically(
+        structured.resolve("broker-artifact-invalidations.json"),
+        checkpoint.brokerArtifactInvalidations());
     writeJsonAtomically(structured.resolve("strategy-archive.json"), checkpoint.strategyArchive());
     writeJsonAtomically(
         structured.resolve("inspiration-progress.json"), checkpoint.inspirationProgress());

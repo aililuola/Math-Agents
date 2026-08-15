@@ -8,14 +8,25 @@ public final class BrokerArtifactPublicationService {
   private final BrokerArtifactRegistry registry;
   private final BrokerArtifactPublicationLedger publications;
   private final BrokerArtifactTargetingService targeting;
+  private final Runnable afterRegistryAdmission;
 
   public BrokerArtifactPublicationService(
       BrokerArtifactRegistry registry,
       BrokerArtifactPublicationLedger publications,
       BrokerArtifactTargetingService targeting) {
+    this(registry, publications, targeting, () -> {});
+  }
+
+  BrokerArtifactPublicationService(
+      BrokerArtifactRegistry registry,
+      BrokerArtifactPublicationLedger publications,
+      BrokerArtifactTargetingService targeting,
+      Runnable afterRegistryAdmission) {
     this.registry = java.util.Objects.requireNonNull(registry, "registry");
     this.publications = java.util.Objects.requireNonNull(publications, "publications");
     this.targeting = java.util.Objects.requireNonNull(targeting, "targeting");
+    this.afterRegistryAdmission =
+        java.util.Objects.requireNonNull(afterRegistryAdmission, "afterRegistryAdmission");
   }
 
   public Publication publish(
@@ -24,6 +35,7 @@ public final class BrokerArtifactPublicationService {
       int currentRound,
       int targetLimit) {
     BrokerArtifactEnvelope artifact = registry.admit(proposed);
+    afterRegistryAdmission.run();
     List<BrokerArtifactRelevanceDecision> decisions = profiles.stream()
         .map(profile -> targeting.decide(artifact, profile))
         .sorted(Comparator.comparingInt(BrokerArtifactRelevanceDecision::priority).reversed()

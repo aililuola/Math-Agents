@@ -28,7 +28,11 @@ public final class MathematicalArtifactBroker {
   private final BrokerArtifactPublicationLedger publications = new BrokerArtifactPublicationLedger();
   private final BrokerArtifactTargetingService targeting = new BrokerArtifactTargetingService();
   private final BrokerArtifactPublicationService publicationService =
-      new BrokerArtifactPublicationService(registry, publications, targeting);
+      new BrokerArtifactPublicationService(
+          registry,
+          publications,
+          targeting,
+          () -> maybeFail(BrokerArtifactFailurePoint.AFTER_ARTIFACT_REGISTRY));
   private final BrokerArtifactPromptProjectionService projection =
       new BrokerArtifactPromptProjectionService();
   private final BrokerArtifactUseLedger uses = new BrokerArtifactUseLedger();
@@ -41,6 +45,8 @@ public final class MathematicalArtifactBroker {
   private final Map<String, BrokerDeliveryBaseline> baselines = new LinkedHashMap<>();
   private final Map<String, List<String>> providerRequests = new LinkedHashMap<>();
   private long deliveryVersion;
+  private BrokerArtifactFailurePoint failurePoint = BrokerArtifactFailurePoint.NONE;
+  private BrokerArtifactFailurePoint hardCrashPoint = BrokerArtifactFailurePoint.NONE;
 
   public synchronized BrokerArtifactPublishResult publish(
       BrokerArtifactEnvelope artifact,
@@ -54,6 +60,7 @@ public final class MathematicalArtifactBroker {
     try {
       BrokerArtifactPublicationService.Publication result = publicationService.publish(
           artifact, profiles, currentRound, targetLimit);
+      maybeFail(BrokerArtifactFailurePoint.AFTER_PUBLICATION);
       List<BrokerArtifactDelivery> created = new ArrayList<>();
       for (String routeId : result.publication().targetRouteIds()) {
         String deliveryId = "broker-delivery-" +
@@ -66,6 +73,7 @@ public final class MathematicalArtifactBroker {
         created.add(existing == null ? delivery : existing);
         if (existing == null) deliveryVersion++;
       }
+      maybeFail(BrokerArtifactFailurePoint.AFTER_DELIVERY);
       return new BrokerArtifactPublishResult(result.artifact(), result.publication(), created,
           result.relevanceDecisions());
     } catch (RuntimeException exception) {
@@ -88,38 +96,62 @@ public final class MathematicalArtifactBroker {
       String strategyEpochId,
       String focusCanonicalTargetId) {
     if (providerRequests.containsKey(providerRequestId)) {
-      return new BrokerArtifactPromptBatch(providerRequestId, routeId, List.of(), List.of(), true,
+      List<BrokerArtifactDelivery> replayedDeliveries =
+          providerRequests.get(providerRequestId).stream()
+              .map(deliveries::get)
+              .filter(java.util.Objects::nonNull)
+              .filter(delivery -> delivery.targetRouteId().equals(routeId))
+              .toList();
+      List<BrokerArtifactEnvelope> replayedArtifacts =
+          replayedDeliveries.stream()
+              .map(BrokerArtifactDelivery::artifactId)
+              .map(registry::find)
+              .flatMap(Optional::stream)
+              .toList();
+      return new BrokerArtifactPromptBatch(
+          providerRequestId,
+          routeId,
+          projection.project(replayedArtifacts),
+          replayedDeliveries,
+          true,
           projection.instruction());
     }
-    List<BrokerArtifactDelivery> selected = deliveries.values().stream()
-        .filter(delivery -> delivery.targetRouteId().equals(routeId))
-        .filter(delivery -> delivery.state() == BrokerArtifactDeliveryState.QUEUED)
-        .filter(delivery -> registry.active(delivery.artifactId()))
-        .filter(delivery -> registry.find(delivery.artifactId())
-            .map(artifact -> currentRound - delivery.deliveredRound() <= artifact.ttlRounds())
-            .orElse(false))
-        .sorted(Comparator.comparing(BrokerArtifactDelivery::deliveryId))
-        .limit(Math.min(BrokerArtifactPromptProjectionService.MAX_ARTIFACTS, Math.max(0, limit)))
-        .toList();
-    List<BrokerArtifactDelivery> consumed = new ArrayList<>();
-    List<BrokerArtifactEnvelope> artifacts = new ArrayList<>();
-    for (BrokerArtifactDelivery delivery : selected) {
-      BrokerArtifactDelivery updated = delivery.consume(providerRequestId);
-      deliveries.put(delivery.deliveryId(), updated);
-      baselines.putIfAbsent(delivery.deliveryId(), new BrokerDeliveryBaseline(
-          delivery.deliveryId(), routeId, providerRequestId, currentRound, proofDebtBefore,
-          openCanonicalTargets, verifiedClaimIds, refutedClaimIds, strategyEpochId,
-          focusCanonicalTargetId));
-      consumed.add(updated);
-      artifacts.add(registry.find(delivery.artifactId()).orElseThrow());
+    BrokerArtifactDeliverySnapshot before = deliverySnapshot();
+    try {
+      List<BrokerArtifactDelivery> selected = deliveries.values().stream()
+          .filter(delivery -> delivery.targetRouteId().equals(routeId))
+          .filter(delivery -> delivery.state() == BrokerArtifactDeliveryState.QUEUED)
+          .filter(delivery -> registry.active(delivery.artifactId()))
+          .filter(delivery -> registry.find(delivery.artifactId())
+              .map(artifact -> currentRound - delivery.deliveredRound() <= artifact.ttlRounds())
+              .orElse(false))
+          .sorted(Comparator.comparing(BrokerArtifactDelivery::deliveryId))
+          .limit(Math.min(BrokerArtifactPromptProjectionService.MAX_ARTIFACTS, Math.max(0, limit)))
+          .toList();
+      List<BrokerArtifactDelivery> consumed = new ArrayList<>();
+      List<BrokerArtifactEnvelope> artifacts = new ArrayList<>();
+      for (BrokerArtifactDelivery delivery : selected) {
+        BrokerArtifactDelivery updated = delivery.consume(providerRequestId);
+        deliveries.put(delivery.deliveryId(), updated);
+        baselines.putIfAbsent(delivery.deliveryId(), new BrokerDeliveryBaseline(
+            delivery.deliveryId(), routeId, providerRequestId, currentRound, proofDebtBefore,
+            openCanonicalTargets, verifiedClaimIds, refutedClaimIds, strategyEpochId,
+            focusCanonicalTargetId));
+        consumed.add(updated);
+        artifacts.add(registry.find(delivery.artifactId()).orElseThrow());
+        deliveryVersion++;
+      }
+      providerRequests.put(providerRequestId,
+          consumed.stream().map(BrokerArtifactDelivery::deliveryId).toList());
       deliveryVersion++;
+      maybeFail(BrokerArtifactFailurePoint.AFTER_PROMPT_CONSUMPTION);
+      List<BrokerPromptArtifact> prompt = projection.project(artifacts);
+      return new BrokerArtifactPromptBatch(providerRequestId, routeId, prompt, consumed, false,
+          projection.instruction());
+    } catch (RuntimeException exception) {
+      restoreDeliveries(before);
+      throw exception;
     }
-    providerRequests.put(providerRequestId,
-        consumed.stream().map(BrokerArtifactDelivery::deliveryId).toList());
-    deliveryVersion++;
-    List<BrokerPromptArtifact> prompt = projection.project(artifacts);
-    return new BrokerArtifactPromptBatch(providerRequestId, routeId, prompt, consumed, false,
-        projection.instruction());
   }
 
   public synchronized List<BrokerArtifactReceipt> acknowledge(
@@ -134,8 +166,16 @@ public final class MathematicalArtifactBroker {
         .getOrDefault(providerRequestId, List.of()).stream().map(deliveries::get).toList();
     Map<String, BrokerArtifactEnvelope> artifacts = registry.snapshot().artifacts();
     try {
-      List<BrokerArtifactReceipt> recorded = receipts.record(providerRequestId, requestDeliveries,
-          artifacts, manifest, actualProofStepIds, uses);
+      List<BrokerArtifactReceipt> recorded =
+          receipts.record(
+              providerRequestId,
+              requestDeliveries,
+              artifacts,
+              manifest,
+              actualProofStepIds,
+              uses,
+              () -> maybeFail(BrokerArtifactFailurePoint.AFTER_USE_RECEIPT),
+              () -> maybeFail(BrokerArtifactFailurePoint.AFTER_LINEAGE));
       recorded.forEach(receipt -> deliveries.computeIfPresent(receipt.deliveryId(),
           (key, delivery) -> delivery.transition(BrokerArtifactDeliveryState.RECEIPTED)));
       deliveryVersion += recorded.size();
@@ -179,29 +219,58 @@ public final class MathematicalArtifactBroker {
     BrokerArtifactEffectVerifier.Verification verified =
         effectVerifier.verify(lineage, baseline, observation);
     if (!verified.verified()) return Optional.empty();
-    uses.markVerified(lineage.lineageId());
-    receipts.transition(deliveryId, BrokerArtifactReceiptStatus.USED_EFFECT_VERIFIED,
-        "DOWNSTREAM_EFFECT_VERIFIED");
-    return Optional.of(utilities.record(lineage, baseline, observation, verified));
+    BrokerArtifactUseSnapshot useBefore = uses.snapshot();
+    BrokerArtifactReceiptSnapshot receiptBefore = receipts.snapshot();
+    BrokerArtifactUtilitySnapshot utilityBefore = utilities.snapshot();
+    try {
+      uses.markVerified(lineage.lineageId());
+      receipts.transition(deliveryId, BrokerArtifactReceiptStatus.USED_EFFECT_VERIFIED,
+          "DOWNSTREAM_EFFECT_VERIFIED");
+      BrokerArtifactUtilityRecord utility = utilities.record(lineage, baseline, observation, verified);
+      maybeFail(BrokerArtifactFailurePoint.AFTER_UTILITY);
+      return Optional.of(utility);
+    } catch (RuntimeException exception) {
+      uses.restore(useBefore);
+      receipts.restore(receiptBefore);
+      utilities.restore(utilityBefore);
+      throw exception;
+    }
   }
 
   public synchronized BrokerArtifactInvalidationRecord invalidate(
       String artifactId, String sourceAuthorityId, String reason, int round) {
-    registry.invalidate(artifactId);
-    List<String> affectedDeliveries = deliveries.values().stream()
-        .filter(delivery -> delivery.artifactId().equals(artifactId))
-        .map(BrokerArtifactDelivery::deliveryId).toList();
-    List<String> lineageIds = uses.records().stream()
-        .filter(lineage -> lineage.artifactId().equals(artifactId))
-        .map(BrokerArtifactLineageRecord::lineageId).toList();
-    affectedDeliveries.forEach(id -> {
-      deliveries.computeIfPresent(id, (key, delivery) ->
-          delivery.transition(BrokerArtifactDeliveryState.INVALIDATED));
-      receipts.transition(id, BrokerArtifactReceiptStatus.INVALIDATED, "SOURCE_AUTHORITY_INVALIDATED");
-    });
-    utilities.invalidateArtifact(artifactId);
-    return invalidations.invalidate(artifactId, sourceAuthorityId, reason, round,
-        affectedDeliveries, lineageIds);
+    BrokerArtifactRegistrySnapshot registryBefore = registry.snapshot();
+    BrokerArtifactDeliverySnapshot deliveryBefore = deliverySnapshot();
+    BrokerArtifactReceiptSnapshot receiptBefore = receipts.snapshot();
+    BrokerArtifactUtilitySnapshot utilityBefore = utilities.snapshot();
+    BrokerArtifactInvalidationSnapshot invalidationBefore = invalidations.snapshot();
+    try {
+      registry.invalidate(artifactId);
+      List<String> affectedDeliveries = deliveries.values().stream()
+          .filter(delivery -> delivery.artifactId().equals(artifactId))
+          .map(BrokerArtifactDelivery::deliveryId).toList();
+      List<String> lineageIds = uses.records().stream()
+          .filter(lineage -> lineage.artifactId().equals(artifactId))
+          .map(BrokerArtifactLineageRecord::lineageId).toList();
+      affectedDeliveries.forEach(id -> {
+        deliveries.computeIfPresent(id, (key, delivery) ->
+            delivery.transition(BrokerArtifactDeliveryState.INVALIDATED));
+        receipts.transition(
+            id,
+            BrokerArtifactReceiptStatus.INVALIDATED,
+            "SOURCE_AUTHORITY_INVALIDATED");
+      });
+      utilities.invalidateArtifact(artifactId);
+      return invalidations.invalidate(artifactId, sourceAuthorityId, reason, round,
+          affectedDeliveries, lineageIds);
+    } catch (RuntimeException exception) {
+      registry.restore(registryBefore);
+      restoreDeliveries(deliveryBefore);
+      receipts.restore(receiptBefore);
+      utilities.restore(utilityBefore);
+      invalidations.restore(invalidationBefore);
+      throw exception;
+    }
   }
 
   public synchronized int expire(int currentRound) {
@@ -324,4 +393,33 @@ public final class MathematicalArtifactBroker {
   public synchronized List<BrokerArtifactLineageRecord> lineage() { return uses.records(); }
   public synchronized List<BrokerArtifactUtilityRecord> utilities() { return utilities.records(); }
   public synchronized List<BrokerArtifactInvalidationRecord> invalidations() { return invalidations.records(); }
+
+  public synchronized void setFailurePointForTest(BrokerArtifactFailurePoint point) {
+    failurePoint = java.util.Objects.requireNonNull(point, "point");
+  }
+
+  public synchronized void setHardCrashPointForTest(BrokerArtifactFailurePoint point) {
+    hardCrashPoint = java.util.Objects.requireNonNull(point, "point");
+  }
+
+  private void maybeFail(BrokerArtifactFailurePoint point) {
+    if (hardCrashPoint == point) {
+      hardCrashPoint = BrokerArtifactFailurePoint.NONE;
+      throw new AssertionError("simulated process termination at " + point);
+    }
+    if (failurePoint == point) {
+      failurePoint = BrokerArtifactFailurePoint.NONE;
+      throw new IllegalStateException("injected broker failure at " + point);
+    }
+  }
+
+  private void restoreDeliveries(BrokerArtifactDeliverySnapshot snapshot) {
+    deliveries.clear();
+    deliveries.putAll(snapshot.deliveries());
+    baselines.clear();
+    baselines.putAll(snapshot.baselines());
+    providerRequests.clear();
+    providerRequests.putAll(snapshot.providerRequests());
+    deliveryVersion = snapshot.version();
+  }
 }

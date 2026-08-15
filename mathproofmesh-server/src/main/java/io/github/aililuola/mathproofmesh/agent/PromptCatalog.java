@@ -63,7 +63,13 @@ public final class PromptCatalog {
         "Map each supplied critical claim only to an already registered computation contract and typed input references. "
             + "Do not submit code, commands, dependencies, containers, unknown tools, verified status, server scores, or mathematical authority. "
             + "Leave a claim untestable when no registered contract preserves its exact assumptions, quantifiers, polarity, and scope.");
-    stages.put("independent_exploration", "Develop only the assigned isolated route and report honest partial progress or a complete proof. Prefer registered typed computation methods. sandboxed_python is a last resort: arguments must contain exactly one input field whose value is the complete bounded JSON object supplied to run(data), domains must be empty, and typed_tool_gap must state why no typed method applies.");
+    stages.put(
+        "independent_exploration",
+        "Develop only the assigned isolated route and report honest partial progress or a complete proof. "
+            + "Broker artifacts are server-compiled mathematical sidecars: merely receiving one does not mean it was used. "
+            + "Any mathematical use must cite its artifact_id in broker_artifact_use_manifest with a typed use and real downstream IDs. "
+            + "A REVIEWED_OPEN obstruction is not a proved premise, and BOUNDED evidence cannot prove an unrestricted claim. "
+            + "Prefer registered typed computation methods. sandboxed_python is a last resort: arguments must contain exactly one input field whose value is the complete bounded JSON object supplied to run(data), domains must be empty, and typed_tool_gap must state why no typed method applies.");
     stages.put("proof_continuation", "Continue only from the verified checkpoint with a bounded auditable proof delta.");
     stages.put("route_prove", "Continue the assigned route from verified state; Insights are hints and never premises.");
     stages.put("checkpoint_verification", "Independently verify identity, dependencies, each inference, and checkpoint state before commit.");

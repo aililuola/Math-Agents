@@ -22,6 +22,13 @@ import io.github.aililuola.mathproofmesh.contract.TriageResult;
 import io.github.aililuola.mathproofmesh.contract.ToolAuditReport;
 import io.github.aililuola.mathproofmesh.contract.VerificationReport;
 import io.github.aililuola.mathproofmesh.communication.MessageStoreSnapshot;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactDeliverySnapshot;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactInvalidationSnapshot;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactPublicationSnapshot;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactReceiptSnapshot;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactRegistrySnapshot;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactUseSnapshot;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactUtilitySnapshot;
 import io.github.aililuola.mathproofmesh.computation.ComputationBroker;
 import io.github.aililuola.mathproofmesh.computation.ComputationEvidenceGate;
 import io.github.aililuola.mathproofmesh.memory.LemmaMemorySnapshot;
@@ -86,6 +93,13 @@ record DesktopSolveCheckpoint(
     ClaimCourtStageExecutionSnapshot claimCourtExecutions,
     ResearchCheckpointSnapshot researchCheckpoints,
     MessageStoreSnapshot messageStore,
+    BrokerArtifactRegistrySnapshot brokerArtifactRegistry,
+    BrokerArtifactPublicationSnapshot brokerArtifactPublications,
+    BrokerArtifactDeliverySnapshot brokerArtifactDeliveries,
+    BrokerArtifactReceiptSnapshot brokerArtifactReceipts,
+    BrokerArtifactUseSnapshot brokerArtifactUses,
+    BrokerArtifactUtilitySnapshot brokerArtifactUtilities,
+    BrokerArtifactInvalidationSnapshot brokerArtifactInvalidations,
     List<Double> proofDebtHistory,
     StrategyArchive.Snapshot strategyArchive,
     Map<String, StrategyBlueprintCompiler.Compilation> strategyBlueprints,
@@ -114,7 +128,7 @@ record DesktopSolveCheckpoint(
     DeferredExpansionSnapshot deferredExpansions,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 16;
+  static final int CURRENT_SCHEMA_VERSION = 17;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {
@@ -142,6 +156,32 @@ record DesktopSolveCheckpoint(
             : claimCourtExecutions;
     researchCheckpoints =
         researchCheckpoints == null ? ResearchCheckpointSnapshot.empty() : researchCheckpoints;
+    brokerArtifactRegistry =
+        brokerArtifactRegistry == null
+            ? BrokerArtifactRegistrySnapshot.empty()
+            : brokerArtifactRegistry;
+    brokerArtifactPublications =
+        brokerArtifactPublications == null
+            ? BrokerArtifactPublicationSnapshot.empty()
+            : brokerArtifactPublications;
+    brokerArtifactDeliveries =
+        brokerArtifactDeliveries == null
+            ? BrokerArtifactDeliverySnapshot.empty()
+            : brokerArtifactDeliveries;
+    brokerArtifactReceipts =
+        brokerArtifactReceipts == null
+            ? BrokerArtifactReceiptSnapshot.empty()
+            : brokerArtifactReceipts;
+    brokerArtifactUses =
+        brokerArtifactUses == null ? BrokerArtifactUseSnapshot.empty() : brokerArtifactUses;
+    brokerArtifactUtilities =
+        brokerArtifactUtilities == null
+            ? BrokerArtifactUtilitySnapshot.empty()
+            : brokerArtifactUtilities;
+    brokerArtifactInvalidations =
+        brokerArtifactInvalidations == null
+            ? BrokerArtifactInvalidationSnapshot.empty()
+            : brokerArtifactInvalidations;
     proofDebtHistory = proofDebtHistory == null ? List.of() : List.copyOf(proofDebtHistory);
     strategyBlueprints = strategyBlueprints == null ? Map.of() : Map.copyOf(strategyBlueprints);
     goalLinks = goalLinks == null ? Map.of() : Map.copyOf(goalLinks);

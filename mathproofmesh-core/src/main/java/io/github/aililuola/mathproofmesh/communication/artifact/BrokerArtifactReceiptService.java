@@ -22,11 +22,33 @@ public final class BrokerArtifactReceiptService {
       BrokerArtifactUseManifest manifest,
       Set<String> actualProofStepIds,
       BrokerArtifactUseLedger useLedger) {
+    return record(
+        providerRequestId,
+        deliveries,
+        artifacts,
+        manifest,
+        actualProofStepIds,
+        useLedger,
+        () -> {},
+        () -> {});
+  }
+
+  synchronized List<BrokerArtifactReceipt> record(
+      String providerRequestId,
+      List<BrokerArtifactDelivery> deliveries,
+      Map<String, BrokerArtifactEnvelope> artifacts,
+      BrokerArtifactUseManifest manifest,
+      Set<String> actualProofStepIds,
+      BrokerArtifactUseLedger useLedger,
+      Runnable afterReceiptWrite,
+      Runnable afterLineageWrite) {
     java.util.Objects.requireNonNull(providerRequestId, "providerRequestId");
     java.util.Objects.requireNonNull(deliveries, "deliveries");
     java.util.Objects.requireNonNull(artifacts, "artifacts");
     java.util.Objects.requireNonNull(actualProofStepIds, "actualProofStepIds");
     java.util.Objects.requireNonNull(useLedger, "useLedger");
+    java.util.Objects.requireNonNull(afterReceiptWrite, "afterReceiptWrite");
+    java.util.Objects.requireNonNull(afterLineageWrite, "afterLineageWrite");
     Map<String, BrokerArtifactUseClaim> uses = new LinkedHashMap<>();
     if (manifest != null) {
       if (!providerRequestId.equals(manifest.providerRequestId())) {
@@ -59,11 +81,17 @@ public final class BrokerArtifactReceiptService {
         } else {
           receipt = create(delivery, use, BrokerArtifactReceiptStatus.USED_PENDING_EFFECT,
               "EXPLICIT_USE_VALIDATED");
+          receipts.put(delivery.deliveryId(), receipt);
+          version++;
+          afterReceiptWrite.run();
           useLedger.recordLineage(delivery.deliveryId(), use, providerRequestId);
+          afterLineageWrite.run();
         }
       }
-      receipts.put(delivery.deliveryId(), receipt);
-      version++;
+      if (!receipts.containsKey(delivery.deliveryId())) {
+        receipts.put(delivery.deliveryId(), receipt);
+        version++;
+      }
       result.add(receipt);
     }
     return List.copyOf(result);
