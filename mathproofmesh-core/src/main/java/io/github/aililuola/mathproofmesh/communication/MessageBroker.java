@@ -333,6 +333,13 @@ public final class MessageBroker {
     payload.put("message_type", message.messageType().value());
     payload.put("normalized_statement", message.normalizedStatement());
     payload.put("assumptions", message.assumptions().stream().sorted().toList());
+    payload.put("conclusion", message.conclusion());
+    payload.put("quantifiers", message.quantifiers());
+    payload.put("variable_bindings", message.variableBindings());
+    payload.put("scope_limitations", message.scopeLimitations().stream().sorted().toList());
+    payload.put("polarity", message.polarity());
+    payload.put("claim_statement_hash", message.claimStatementHash());
+    payload.put("claim_semantic_hash", message.claimSemanticHash());
     payload.put("dependencies", message.dependencies().stream().sorted().toList());
     payload.put("evidence_type", message.evidenceType().value());
     payload.put("memory_tier", message.memoryTier().value());

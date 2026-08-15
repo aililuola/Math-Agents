@@ -1,0 +1,12 @@
+package io.github.aililuola.mathproofmesh.contract;
+
+public enum BrokerArtifactType {
+  VERIFIED_CLAIM,
+  VERIFIED_COUNTEREXAMPLE,
+  VERIFIED_NO_GO,
+  REVIEWED_OBSTRUCTION,
+  REUSABLE_CONSTRUCTION,
+  EXACT_EXAMPLE,
+  FORMAL_CERTIFICATE,
+  BOUNDED_OBSERVATION
+}
