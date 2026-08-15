@@ -97,13 +97,31 @@ class StrategyPreflightRegistryExecutionTest {
     assertThat(registry.execution(completed.executionId()))
         .contains(completed);
 
+    StrategyPreflightExecutionRecord newerButWeaker =
+        new StrategyPreflightExecutionRecord(
+            started.executionId(),
+            PROBLEM,
+            STRATEGY,
+            CLAIM,
+            PLAN_HASH,
+            started.actionKey(),
+            started.typedInputHash(),
+            "",
+            "",
+            StrategyPreflightExecutionStatus.RUNNING,
+            null,
+            0,
+            null,
+            null,
+            1,
+            99L);
     registry.mergeDurable(
         new StrategyPreflightSnapshot(
             StrategyPreflightSnapshot.CURRENT_SCHEMA_VERSION,
             Map.of(),
             Map.of(),
-            Map.of(started.executionId(), started),
-            1L));
+            Map.of(newerButWeaker.executionId(), newerButWeaker),
+            99L));
     assertThat(registry.execution(completed.executionId()))
         .contains(completed);
 
@@ -152,6 +170,249 @@ class StrategyPreflightRegistryExecutionTest {
         .isInstanceOf(IllegalArgumentException.class);
   }
 
+  @Test
+  void typedFrontierTransitionsAreIdempotentBoundAndMonotonic() {
+    StrategyPreflightRegistry registry = new StrategyPreflightRegistry();
+    StrategyPreflightExecutionRecord reserved =
+        registry.reserveExecution(
+            PROBLEM, STRATEGY, CLAIM, PLAN_HASH, "bounded-search", "input-hash", 2);
+    assertThat(reserved.status()).isEqualTo(StrategyPreflightExecutionStatus.RESERVED);
+    assertThat(reserved.executionCount()).isZero();
+    assertThat(
+            registry.reserveExecution(
+                PROBLEM, STRATEGY, CLAIM, PLAN_HASH, "bounded-search", "input-hash", 9))
+        .isSameAs(reserved);
+    assertThatThrownBy(
+            () ->
+                registry.reserveExecution(
+                    PROBLEM, STRATEGY, CLAIM, PLAN_HASH, "other-action", "input-hash", 2))
+        .isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(
+            () ->
+                registry.reserveExecution(
+                    PROBLEM, STRATEGY, CLAIM, PLAN_HASH, "bounded-search", "other-input", 2))
+        .isInstanceOf(IllegalStateException.class);
+
+    CriticalClaimPreflightEvidence evidence = evidence("durable");
+    String replayHash = StrategySemanticNormalizer.hash(evidence);
+    assertThatThrownBy(
+            () ->
+                registry.recordDurableResult(
+                    reserved.executionId(), evidence, "artifact://durable", replayHash, 2))
+        .isInstanceOf(IllegalStateException.class);
+    StrategyPreflightExecutionRecord running = registry.startExecution(reserved.executionId());
+    assertThat(registry.startExecution(reserved.executionId())).isSameAs(running);
+    StrategyPreflightExecutionRecord durable =
+        registry.recordDurableResult(
+            reserved.executionId(), evidence, "artifact://durable", replayHash, 3);
+    assertThat(
+            registry.recordDurableResult(
+                reserved.executionId(), evidence, "artifact://durable", replayHash, 4))
+        .isSameAs(durable);
+    assertThatThrownBy(
+            () ->
+                registry.recordDurableResult(
+                    reserved.executionId(), evidence, "artifact://changed", replayHash, 4))
+        .isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(
+            () ->
+                registry.recordDurableResult(
+                    reserved.executionId(), evidence, "artifact://durable", "changed-replay", 4))
+        .isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(() -> registry.abortExecution(reserved.executionId()))
+        .isInstanceOf(IllegalStateException.class);
+
+    StrategyPreflightExecutionRecord completed =
+        registry.completeExecution(reserved.executionId(), evidence, 4);
+    assertThat(registry.completeExecution(reserved.executionId(), evidence, 8))
+        .isSameAs(completed);
+    assertThatThrownBy(() -> registry.startExecution(reserved.executionId()))
+        .isInstanceOf(IllegalStateException.class);
+
+    StrategyPreflightRegistry abortedRegistry = new StrategyPreflightRegistry();
+    StrategyPreflightExecutionRecord abortable =
+        abortedRegistry.reserveExecution(
+            PROBLEM, "aborted-strategy", CLAIM, PLAN_HASH, "action", "input", 0);
+    StrategyPreflightExecutionRecord aborted =
+        abortedRegistry.abortExecution(abortable.executionId());
+    assertThat(aborted.status()).isEqualTo(StrategyPreflightExecutionStatus.ABORTED);
+    assertThat(aborted.executionCount()).isZero();
+    assertThat(abortedRegistry.abortExecution(abortable.executionId())).isSameAs(aborted);
+    assertThatThrownBy(() -> abortedRegistry.startExecution(abortable.executionId()))
+        .isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(
+            () -> abortedRegistry.completeExecution(abortable.executionId(), evidence, 1))
+        .isInstanceOf(IllegalStateException.class);
+
+    StrategyPreflightRegistry runningAbortRegistry = new StrategyPreflightRegistry();
+    StrategyPreflightExecutionRecord runningAbort =
+        runningAbortRegistry.startExecution(
+            runningAbortRegistry
+                .reserveExecution(
+                    PROBLEM, "running-abort", CLAIM, PLAN_HASH, "action", "input", 0)
+                .executionId());
+    assertThat(runningAbortRegistry.abortExecution(runningAbort.executionId()).executionCount())
+        .isEqualTo(1);
+  }
+
+  @Test
+  void typedExecutionRecordValidatesEveryDurableFrontierShape() {
+    StrategyPreflightExecutionRecord reserved =
+        fullExecution(
+            StrategyPreflightExecutionStatus.RESERVED,
+            null,
+            null,
+            null,
+            null,
+            null,
+            0,
+            1L);
+    assertThat(reserved.actionKey()).startsWith("legacy-preflight-action:");
+    assertThat(reserved.typedInputHash()).isEqualTo(PLAN_HASH);
+    assertThat(reserved.resultArtifactRef()).isEmpty();
+    assertThat(reserved.replayHash()).isEmpty();
+
+    CriticalClaimPreflightEvidence emptyRefs =
+        new CriticalClaimPreflightEvidence(
+            CriticalClaimPreflightStatus.NOT_REFUTED_IN_BOUNDED_SCOPE,
+            "registered-computation",
+            List.of(),
+            "empty refs remain replayable");
+    StrategyPreflightExecutionRecord completed =
+        fullExecution(
+            StrategyPreflightExecutionStatus.COMPLETED,
+            emptyRefs,
+            "",
+            "",
+            2,
+            3,
+            1,
+            1L);
+    assertThat(completed.resultArtifactRef()).isEqualTo("legacy:execution-id");
+    assertThat(completed.replayHash()).isNotBlank();
+    assertThat(
+            fullExecution(
+                    StrategyPreflightExecutionStatus.RESULT_DURABLE,
+                    evidence("result"),
+                    "artifact://result",
+                    "replay",
+                    2,
+                    null,
+                    1,
+                    1L)
+                .resultDurable())
+        .isTrue();
+    assertThat(
+            fullExecution(
+                    StrategyPreflightExecutionStatus.ABORTED,
+                    null,
+                    "",
+                    "",
+                    null,
+                    null,
+                    0,
+                    1L)
+                .resultDurable())
+        .isFalse();
+
+    assertThatThrownBy(
+            () ->
+                fullExecution(
+                    StrategyPreflightExecutionStatus.RUNNING,
+                    null,
+                    "",
+                    "",
+                    -1,
+                    null,
+                    1,
+                    1L))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(
+            () ->
+                fullExecution(
+                    StrategyPreflightExecutionStatus.COMPLETED,
+                    evidence("early-completion"),
+                    "artifact://early",
+                    "replay",
+                    2,
+                    1,
+                    1,
+                    1L))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(
+            () ->
+                fullExecution(
+                    StrategyPreflightExecutionStatus.RESULT_DURABLE,
+                    evidence("missing-artifact"),
+                    "",
+                    "replay",
+                    2,
+                    null,
+                    1,
+                    1L))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(
+            () ->
+                fullExecution(
+                    StrategyPreflightExecutionStatus.RESULT_DURABLE,
+                    evidence("missing-replay"),
+                    "artifact://result",
+                    "",
+                    2,
+                    null,
+                    1,
+                    1L))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(
+            () ->
+                fullExecution(
+                    StrategyPreflightExecutionStatus.RESERVED,
+                    null,
+                    "",
+                    "",
+                    null,
+                    null,
+                    1,
+                    1L))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(
+            () ->
+                fullExecution(
+                    StrategyPreflightExecutionStatus.RUNNING,
+                    null,
+                    "",
+                    "",
+                    null,
+                    null,
+                    0,
+                    1L))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(
+            () ->
+                fullExecution(
+                    StrategyPreflightExecutionStatus.RUNNING,
+                    null,
+                    "",
+                    "",
+                    null,
+                    2,
+                    1,
+                    1L))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(
+            () ->
+                fullExecution(
+                    StrategyPreflightExecutionStatus.RUNNING,
+                    evidence("non-durable"),
+                    "",
+                    "",
+                    null,
+                    null,
+                    1,
+                    1L))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
   private static StrategyPreflightExecutionRecord execution(
       String state,
       CriticalClaimPreflightEvidence evidence,
@@ -168,6 +429,34 @@ class StrategyPreflightRegistryExecutionTest {
         state,
         evidence,
         startedRound,
+        completedRound,
+        executionCount,
+        version);
+  }
+
+  private static StrategyPreflightExecutionRecord fullExecution(
+      StrategyPreflightExecutionStatus status,
+      CriticalClaimPreflightEvidence evidence,
+      String artifact,
+      String replay,
+      Integer resultRound,
+      Integer completedRound,
+      int executionCount,
+      long version) {
+    return new StrategyPreflightExecutionRecord(
+        "execution-id",
+        PROBLEM,
+        STRATEGY,
+        CLAIM,
+        PLAN_HASH,
+        null,
+        null,
+        artifact,
+        replay,
+        status,
+        evidence,
+        0,
+        resultRound,
         completedRound,
         executionCount,
         version);

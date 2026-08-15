@@ -147,6 +147,9 @@ public final class StrategyCriticalClaimPreflight {
     if (statuses.contains(CriticalClaimPreflightStatus.VERIFIED_REFUTED)) {
       return CriticalClaimPreflightStatus.VERIFIED_REFUTED;
     }
+    if (statuses.contains(CriticalClaimPreflightStatus.EXECUTION_QUARANTINED)) {
+      return CriticalClaimPreflightStatus.EXECUTION_QUARANTINED;
+    }
     if (support) {
       return CriticalClaimPreflightStatus.VERIFIED_SUPPORTED;
     }

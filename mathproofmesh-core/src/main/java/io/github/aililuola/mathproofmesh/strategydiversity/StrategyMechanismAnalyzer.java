@@ -102,6 +102,10 @@ public final class StrategyMechanismAnalyzer {
     structural.put("representation", structure.representation().name());
     structural.put("dependency_dag", structure.topologyHash());
     structural.put("operations", structure.operationHash());
+    structural.put("operation_graph_known", structure.operationGraphKnown());
+    if (!structure.operationGraphKnown()) {
+      structural.put("unknown_operation_identity", strategy.strategyId());
+    }
     structural.put("falsification", structure.falsificationHash());
     return new StrategyMechanismSignature(
         problemHash,
@@ -113,7 +117,8 @@ public final class StrategyMechanismAnalyzer {
         structure.topologyHash(),
         structure.operationHash(),
         structure.falsificationHash(),
-        StrategySemanticNormalizer.hash(structural));
+        StrategySemanticNormalizer.hash(structural),
+        structure.operationGraphKnown());
   }
 
   public StrategyMechanismProfile profile(
@@ -162,7 +167,9 @@ public final class StrategyMechanismAnalyzer {
         || !left.rootGoalHash().equals(right.rootGoalHash())) {
       return StrategyMechanismRelation.UNKNOWN;
     }
-    if (left.structuralSignatureHash().equals(right.structuralSignatureHash())) {
+    if (left.operationGraphKnown()
+        && right.operationGraphKnown()
+        && left.structuralSignatureHash().equals(right.structuralSignatureHash())) {
       return StrategyMechanismRelation.SAME_STRUCTURAL_MECHANISM;
     }
     Set<String> common = new LinkedHashSet<>(left.requiredClaimSemanticKeys());

@@ -23,6 +23,8 @@ import io.github.aililuola.mathproofmesh.contract.CriticalClaim;
 import io.github.aililuola.mathproofmesh.contract.Difficulty;
 import io.github.aililuola.mathproofmesh.contract.EvidenceType;
 import io.github.aililuola.mathproofmesh.contract.MemoryTier;
+import io.github.aililuola.mathproofmesh.contract.MechanismOperationDeclaration;
+import io.github.aililuola.mathproofmesh.contract.MechanismOperationKind;
 import io.github.aililuola.mathproofmesh.contract.MessageEnvelope;
 import io.github.aililuola.mathproofmesh.contract.MessageType;
 import io.github.aililuola.mathproofmesh.contract.ProblemKind;
@@ -45,6 +47,7 @@ import io.github.aililuola.mathproofmesh.proofcontrol.RootGoalContract;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlModels;
 import io.github.aililuola.mathproofmesh.proofcontrol.ScopeGuard;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyArchive;
+import io.github.aililuola.mathproofmesh.proofcontrol.StrategyBlueprintCompiler;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphConvergenceMonitor;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
 import io.github.aililuola.mathproofmesh.provider.AgentPool;
@@ -61,6 +64,7 @@ import io.github.aililuola.mathproofmesh.strategydiversity.StrategyDiversityConf
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyMechanismRegistry;
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioRegistry;
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPreflightRegistry;
+import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPreflightExecutionRecord;
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPreflightPlanCompiler;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -199,11 +203,22 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
   }
 
   void prepareAgain(String episodeId, StrategyCard strategy) throws Exception {
-    invoke(
+    prepareAgainSelection(episodeId, strategy);
+  }
+
+  List<String> prepareAgainSelection(String episodeId, StrategyCard strategy) throws Exception {
+    Object preparation =
+        invoke(
         "prepareStrategyPortfolio",
         new Class<?>[] {String.class, StrategySet.class},
         episodeId,
         new StrategySet("Replay captured candidate.", List.of(), List.of(strategy)));
+    Method decisionAccessor = preparation.getClass().getDeclaredMethod("decision");
+    decisionAccessor.setAccessible(true);
+    io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioDecision decision =
+        (io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioDecision)
+            decisionAccessor.invoke(preparation);
+    return decision.selectedStrategyIds();
   }
 
   boolean widen() throws Exception {
@@ -253,6 +268,10 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
 
   void setHardCrashPoint(StrategyPortfolioFailurePoint point) {
     coordinator.setStrategyPortfolioHardCrashPointForTest(point);
+  }
+
+  void setPreflightHardCrashPoint(StrategyPreflightFailurePoint point) {
+    coordinator.setStrategyPreflightHardCrashPointForTest(point);
   }
 
   void registerVerifiedCounterexample(StrategyCard strategy, String id) {
@@ -534,8 +553,53 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
     return field("strategyPreflights", StrategyPreflightRegistry.class);
   }
 
+  Map<String, CriticalClaimContext> productionClaimContexts(StrategyCard strategy)
+      throws Exception {
+    ProofControlFacade facade = field("proofControl", ProofControlFacade.class);
+    StrategyBlueprintCompiler.Compilation blueprint = productionBlueprint(strategy);
+    ProofControlModels.ScopeSignature scope =
+        facade
+            .scopeGuard()
+            .extract("claim-context-production-test", rootGoal().sourceStatement(), List.of(), 1.0d);
+    @SuppressWarnings("unchecked")
+    Map<String, CriticalClaimContext> contexts =
+        (Map<String, CriticalClaimContext>)
+            invoke(
+                "criticalClaimContexts",
+                new Class<?>[] {
+                  StrategyCard.class,
+                  StrategyBlueprintCompiler.Compilation.class,
+                  ProofControlModels.ScopeSignature.class
+                },
+                strategy,
+                blueprint,
+                scope);
+    return Map.copyOf(contexts);
+  }
+
+  StrategyBlueprintCompiler.Compilation productionBlueprint(StrategyCard strategy)
+      throws Exception {
+    String boundProblemHash = (String) rawField("problemHash");
+    ProofControlModels.Strategy control =
+        (ProofControlModels.Strategy)
+            invoke(
+                "controlStrategy",
+                new Class<?>[] {StrategyCard.class, String.class},
+                strategy,
+                "claim-context-production-test");
+    ProofControlModels.Obligation goal =
+        (ProofControlModels.Obligation) invoke("controlGoal");
+    ProofControlFacade facade = field("proofControl", ProofControlFacade.class);
+    return facade.blueprintCompiler().compile(boundProblemHash, control, goal);
+  }
+
   int preflightExecutionCount() throws ReflectiveOperationException {
     return preflights().executionCount();
+  }
+
+  StrategyPreflightExecutionRecord onlyPreflightExecution()
+      throws ReflectiveOperationException {
+    return preflights().snapshot().executions().values().stream().findFirst().orElseThrow();
   }
 
   int preflightPlanCount() throws ReflectiveOperationException {
@@ -618,7 +682,66 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
         List.of("The tree is finite and has at least two vertices."),
         id,
         List.of("presentation-" + id),
-        title);
+        title,
+        List.of(
+            new MechanismOperationDeclaration(
+                "declared-mechanism",
+                operationKind(mechanism),
+                List.of("@roots"),
+                List.of("@direct_targets"))),
+        List.of());
+  }
+
+  static StrategyCard withOperation(
+      StrategyCard source, MechanismOperationKind kind) {
+    return new StrategyCard(
+        source.assignedAgentId(),
+        source.bottleneck(),
+        source.calculationChecks(),
+        source.calculationEvidenceRefs(),
+        source.computationHints(),
+        source.coreIdea(),
+        source.criticalClaims(),
+        source.estimatedCost(),
+        source.estimatedSuccess(),
+        source.expectedLemmas(),
+        source.falsificationTest(),
+        source.independenceBasis(),
+        source.inspirationProposalId(),
+        source.keyOriginalStep(),
+        source.parentStrategyIds(),
+        source.prerequisites(),
+        source.strategyId(),
+        source.tags(),
+        source.title(),
+        List.of(
+            new MechanismOperationDeclaration(
+                "declared-mechanism", kind, List.of("@roots"), List.of("@direct_targets"))),
+        source.criticalClaimContextBindings());
+  }
+
+  private static MechanismOperationKind operationKind(String mechanism) {
+    String normalized = mechanism.toLowerCase(java.util.Locale.ROOT);
+    if (normalized.contains("longest")
+        || normalized.contains("geodesic")
+        || normalized.contains("extremal")) {
+      return MechanismOperationKind.EXTREMAL_SELECTION;
+    }
+    if (normalized.contains("count") || normalized.contains("degree sum")) {
+      return MechanismOperationKind.COUNTING;
+    }
+    if (normalized.contains("smallest counterexample")
+        || normalized.contains("minimal counterexample")) {
+      return MechanismOperationKind.MINIMAL_COUNTEREXAMPLE;
+    }
+    if (normalized.contains("induct")
+        || normalized.contains("recursive")
+        || normalized.contains("leaf")
+        || normalized.contains("pendant")
+        || normalized.contains("endpoint")) {
+      return MechanismOperationKind.REDUCTION;
+    }
+    return MechanismOperationKind.DIRECT;
   }
 
   static List<StrategyCard> fourIndependent(String prefix) {

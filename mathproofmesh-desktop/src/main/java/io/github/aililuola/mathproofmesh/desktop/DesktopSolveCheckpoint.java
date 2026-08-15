@@ -108,7 +108,7 @@ record DesktopSolveCheckpoint(
     DeferredExpansionSnapshot deferredExpansions,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 14;
+  static final int CURRENT_SCHEMA_VERSION = 15;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {

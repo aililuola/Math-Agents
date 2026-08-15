@@ -12,7 +12,8 @@ public record StrategyMechanismSignature(
     String dependencyDagShapeHash,
     String proofTransformationHash,
     String falsificationContractSignature,
-    String structuralSignatureHash) {
+    String structuralSignatureHash,
+    boolean operationGraphKnown) {
   public StrategyMechanismSignature {
     problemHash = StrategySemanticNormalizer.require(problemHash, "problemHash");
     rootGoalHash = StrategySemanticNormalizer.require(rootGoalHash, "rootGoalHash");
@@ -32,6 +33,31 @@ public record StrategyMechanismSignature(
             falsificationContractSignature, "falsificationContractSignature");
     structuralSignatureHash =
         StrategySemanticNormalizer.require(structuralSignatureHash, "structuralSignatureHash");
+  }
+
+  public StrategyMechanismSignature(
+      String problemHash,
+      String rootGoalHash,
+      Set<String> targetCanonicalIds,
+      Set<String> requiredClaimSemanticKeys,
+      String domainObjectRoleSignature,
+      String representationSignature,
+      String dependencyDagShapeHash,
+      String proofTransformationHash,
+      String falsificationContractSignature,
+      String structuralSignatureHash) {
+    this(
+        problemHash,
+        rootGoalHash,
+        targetCanonicalIds,
+        requiredClaimSemanticKeys,
+        domainObjectRoleSignature,
+        representationSignature,
+        dependencyDagShapeHash,
+        proofTransformationHash,
+        falsificationContractSignature,
+        structuralSignatureHash,
+        true);
   }
 
   @Override

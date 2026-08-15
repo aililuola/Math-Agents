@@ -13,7 +13,13 @@ public final class GenericStrategyGenerationPolicy {
         "critical_claim_contract",
         List.of(
             "Label each critical claim as REQUIRED or SUPPORTING.",
-            "Separate already verified facts from unresolved assumptions."),
+            "Separate already verified facts from unresolved assumptions.",
+            "Declare claim-local assumptions, quantifiers, bindings, scope, and polarity in critical_claim_context_bindings."),
+        "typed_mechanism_contract",
+        List.of(
+            "Declare mechanism_operations using only the bounded operation kind enum.",
+            "Bind each operation to server-validated blueprint selectors such as @roots, @direct_targets, @all_intermediates, or @main_goal.",
+            "Use unknown when no bounded operation kind is justified; prose never determines the hard mechanism identity."),
         "falsification_contract",
         List.of(
             "Give a bounded falsification plan for each load-bearing claim.",

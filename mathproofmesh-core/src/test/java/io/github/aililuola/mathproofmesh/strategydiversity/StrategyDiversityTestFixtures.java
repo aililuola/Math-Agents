@@ -1,6 +1,8 @@
 package io.github.aililuola.mathproofmesh.strategydiversity;
 
 import io.github.aililuola.mathproofmesh.contract.CriticalClaim;
+import io.github.aililuola.mathproofmesh.contract.MechanismOperationDeclaration;
+import io.github.aililuola.mathproofmesh.contract.MechanismOperationKind;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlModels;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyBlueprintCompiler;
@@ -35,7 +37,38 @@ final class StrategyDiversityTestFixtures {
         List.of("The structure is finite."),
         id,
         List.of("presentation-" + id),
-        title);
+        title,
+        List.of(
+            new MechanismOperationDeclaration(
+                "declared-mechanism",
+                operationKind(mechanism),
+                List.of("@roots"),
+                List.of("@direct_targets"))),
+        List.of());
+  }
+
+  private static MechanismOperationKind operationKind(String mechanism) {
+    String normalized = mechanism.toLowerCase(java.util.Locale.ROOT);
+    if (normalized.contains("longest")
+        || normalized.contains("geodesic")
+        || normalized.contains("extremal")) {
+      return MechanismOperationKind.EXTREMAL_SELECTION;
+    }
+    if (normalized.contains("count") || normalized.contains("degree sum")) {
+      return MechanismOperationKind.COUNTING;
+    }
+    if (normalized.contains("smallest counterexample")
+        || normalized.contains("minimal counterexample")) {
+      return MechanismOperationKind.MINIMAL_COUNTEREXAMPLE;
+    }
+    if (normalized.contains("induct")
+        || normalized.contains("recursive")
+        || normalized.contains("leaf")
+        || normalized.contains("pendant")
+        || normalized.contains("endpoint")) {
+      return MechanismOperationKind.REDUCTION;
+    }
+    return MechanismOperationKind.DIRECT;
   }
 
   static CriticalClaim claim(String id, String statement, String necessity) {

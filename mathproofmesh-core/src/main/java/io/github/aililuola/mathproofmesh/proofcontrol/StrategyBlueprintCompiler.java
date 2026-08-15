@@ -145,18 +145,39 @@ public final class StrategyBlueprintCompiler {
                         + strategy.mechanism()
                         + ".");
     List<Node> intermediates = new ArrayList<>();
+    String intermediateSource =
+        strategy.expectedLemmas().isEmpty() ? "critical_claim" : "expected_lemma";
+    int intermediateIndex = 0;
     for (String statement : intermediate) {
       Node node =
           node(
               strategy.id(),
-              "lemma",
+              "lemma:" + intermediateIndex++,
               statement,
               ProofControlModels.BlueprintNodeKind.LEMMA,
-              "expected_lemma",
+              intermediateSource,
               "test the first load-bearing implication");
       nodes.add(node);
       intermediates.add(node);
       gaps.add(node.id());
+    }
+    List<Node> claimNodes = new ArrayList<>();
+    if ("critical_claim".equals(intermediateSource)) {
+      claimNodes.addAll(intermediates);
+    } else {
+      int claimIndex = 0;
+      for (String statement : strategy.criticalClaims()) {
+        Node node =
+            node(
+                strategy.id(),
+                "claim:" + claimIndex++,
+                statement,
+                ProofControlModels.BlueprintNodeKind.LEMMA,
+                "critical_claim",
+                "run the registered critical-claim preflight");
+        nodes.add(node);
+        claimNodes.add(node);
+      }
     }
     Node target =
         node(
@@ -181,6 +202,22 @@ public final class StrategyBlueprintCompiler {
               intermediates.get(index).id(),
               intermediates.get(index + 1).id(),
               "implies"));
+    }
+    for (Node claimNode : claimNodes) {
+      if (!intermediates.contains(claimNode)) {
+        edges.add(
+            edge(
+                strategy.id(),
+                intermediates.getLast().id(),
+                claimNode.id(),
+                "supports_claim"));
+        edges.add(
+            edge(
+                strategy.id(),
+                claimNode.id(),
+                target.id(),
+                "implies"));
+      }
     }
     edges.add(
         edge(

@@ -1,11 +1,12 @@
 package io.github.aililuola.mathproofmesh.strategydiversity;
 
+import io.github.aililuola.mathproofmesh.contract.MechanismOperationDeclaration;
+import io.github.aililuola.mathproofmesh.contract.MechanismOperationKind;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
 import io.github.aililuola.mathproofmesh.contract.ToolRequest;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlModels;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyBlueprintCompiler;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,8 +22,10 @@ final class StrategyMechanismStructureCompiler {
       StrategyBlueprintCompiler.Blueprint blueprint) {
     StructuredRepresentationKind representation =
         representation(blueprint);
-    List<MechanismOperationNode> operations = operations(strategy, blueprint);
-    String topologyHash = topologyHash(blueprint);
+    Map<String, String> topologyLabels = topologyLabels(blueprint);
+    CompiledOperations compiledOperations = operations(strategy, blueprint, topologyLabels);
+    List<MechanismOperationNode> operations = compiledOperations.nodes();
+    String topologyHash = topologyHash(blueprint, topologyLabels);
     String roleHash =
         StrategySemanticNormalizer.hash(
             Map.of(
@@ -64,7 +67,8 @@ final class StrategyMechanismStructureCompiler {
         roleHash,
         topologyHash,
         operationHash,
-        falsificationHash);
+        falsificationHash,
+        compiledOperations.known());
   }
 
   private static StructuredRepresentationKind representation(
@@ -102,150 +106,141 @@ final class StrategyMechanismStructureCompiler {
     return StructuredRepresentationKind.ABSTRACT;
   }
 
-  private static List<MechanismOperationNode> operations(
-      StrategyCard strategy, StrategyBlueprintCompiler.Blueprint blueprint) {
+  private static CompiledOperations operations(
+      StrategyCard strategy,
+      StrategyBlueprintCompiler.Blueprint blueprint,
+      Map<String, String> topologyLabels) {
     Map<String, StrategyBlueprintCompiler.Node> nodes = new LinkedHashMap<>();
     blueprint.nodes().forEach(node -> nodes.put(node.id(), node));
-    Map<String, Long> incomingCounts =
-        blueprint.edges().stream()
-            .collect(
-                java.util.stream.Collectors.groupingBy(
-                    StrategyBlueprintCompiler.Edge::targetId,
-                    LinkedHashMap::new,
-                    java.util.stream.Collectors.counting()));
+    if (strategy.mechanismOperations().isEmpty()) {
+      return new CompiledOperations(List.of(), false);
+    }
+    Map<String, List<String>> outgoing = outgoing(blueprint);
+    Map<String, ProofOperationKind> declaredPairs = new LinkedHashMap<>();
+    Set<String> operationIds = new java.util.LinkedHashSet<>();
     List<MechanismOperationNode> operations = new ArrayList<>();
-    int index = 0;
-    for (StrategyBlueprintCompiler.Edge edge : blueprint.edges()) {
-      StrategyBlueprintCompiler.Node source = nodes.get(edge.sourceId());
-      StrategyBlueprintCompiler.Node target = nodes.get(edge.targetId());
-      ProofOperationKind kind =
-          operationKind(edge, source, target, incomingCounts.getOrDefault(edge.targetId(), 0L));
+    boolean known = true;
+    for (MechanismOperationDeclaration declaration : strategy.mechanismOperations()) {
+      if (!operationIds.add(declaration.operationId())) {
+        throw new IllegalArgumentException(
+            "duplicate mechanism operation declaration: " + declaration.operationId());
+      }
+      ProofOperationKind kind = operationKind(declaration.kind());
+      known &= kind != ProofOperationKind.UNKNOWN;
+      Set<String> inputs =
+          resolveNodeIds(declaration.inputBlueprintNodeIds(), blueprint, nodes);
+      Set<String> outputs =
+          resolveNodeIds(declaration.outputBlueprintNodeIds(), blueprint, nodes);
+      validateReachability(declaration.operationId(), inputs, outputs, outgoing);
+      for (String input : inputs) {
+        for (String output : outputs) {
+          if (!pathExists(input, output, outgoing)) {
+            continue;
+          }
+          String pair = input + ">" + output;
+          ProofOperationKind previous = declaredPairs.putIfAbsent(pair, kind);
+          if (previous != null && previous != kind) {
+            throw new IllegalArgumentException(
+                "mechanism operation declarations assign conflicting kinds to " + pair);
+          }
+        }
+      }
       operations.add(
           new MechanismOperationNode(
-              "operation:" + index++,
+              declaration.operationId(),
               kind,
-              Set.of(source == null ? "UNKNOWN" : boundedRole(source)),
-              Set.of(target == null ? "UNKNOWN" : boundedRole(target))));
+              inputs.stream().map(topologyLabels::get).collect(java.util.stream.Collectors.toSet()),
+              outputs.stream()
+                  .map(topologyLabels::get)
+                  .collect(java.util.stream.Collectors.toSet())));
     }
-    Set<String> rootRoles = Set.copyOf(boundedRoles(blueprint, blueprint.rootEntryNodeIds()));
-    Set<String> targetRoles =
-        Set.copyOf(boundedRoles(blueprint, blueprint.directTargetNodeIds()));
-    for (ProofOperationKind kind : classifyOperations(strategy.coreIdea())) {
-      operations.add(
-          new MechanismOperationNode(
-              "classified-operation:" + kind.name(), kind, rootRoles, targetRoles));
-    }
-    return List.copyOf(operations);
+    return new CompiledOperations(operations, known);
   }
 
-  private static Set<ProofOperationKind> classifyOperations(String mechanism) {
-    String text = mechanism == null ? "" : mechanism.toLowerCase(Locale.ROOT);
-    EnumSet<ProofOperationKind> kinds = EnumSet.noneOf(ProofOperationKind.class);
-    add(
-        text,
-        kinds,
-        ProofOperationKind.INDUCTION,
-        "induction",
-        "induct",
-        "inductive hypothesis",
-        "recursively",
-        "recursive step",
-        "lift the result");
-    add(text, kinds, ProofOperationKind.CONTRADICTION, "contradiction", "assume the negation");
-    add(
-        text,
-        kinds,
-        ProofOperationKind.MINIMAL_COUNTEREXAMPLE,
-        "minimal counterexample",
-        "smallest counterexample");
-    add(
-        text,
-        kinds,
-        ProofOperationKind.EXTREMAL_SELECTION,
-        "longest",
-        "shortest",
-        "maximal",
-        "extremal");
-    add(
-        text,
-        kinds,
-        ProofOperationKind.DECOMPOSITION,
-        "decompose",
-        "decomposition",
-        "partition",
-        "split into");
-    add(text, kinds, ProofOperationKind.CONSTRUCTION, "construct", "explicit witness");
-    add(
-        text,
-        kinds,
-        ProofOperationKind.DUALIZATION,
-        "duality",
-        "dual representation",
-        "pass to the dual");
-    add(
-        text,
-        kinds,
-        ProofOperationKind.REDUCTION,
-        "reduce",
-        "reduction",
-        "delete a leaf",
-        "remove a leaf",
-        "remove a pendant",
-        "prune a leaf",
-        "prune a pendant",
-        "strip one terminal",
-        "take away an endpoint",
-        "one-vertex-shorter",
-        "smaller-order");
-    add(
-        text,
-        kinds,
-        ProofOperationKind.ALGEBRAIC_TRANSFORMATION,
-        "algebraic",
-        "factor",
-        "linear transformation",
-        "extend a basis");
-    add(
-        text,
-        kinds,
-        ProofOperationKind.COUNTING,
-        "counting",
-        "count vertices",
-        "degree sum",
-        "pigeonhole",
-        "cardinality");
-    add(text, kinds, ProofOperationKind.SPECTRAL_ARGUMENT, "spectral", "eigenvalue");
-    add(
-        text,
-        kinds,
-        ProofOperationKind.PROBABILISTIC_ARGUMENT,
-        "probabilistic",
-        "expectation",
-        "random");
-    if (kinds.isEmpty()) {
-      kinds.add(ProofOperationKind.DIRECT);
-    }
-    return Set.copyOf(kinds);
+  private static ProofOperationKind operationKind(MechanismOperationKind kind) {
+    return ProofOperationKind.valueOf(kind.name());
   }
 
-  private static ProofOperationKind operationKind(
-      StrategyBlueprintCompiler.Edge edge,
-      StrategyBlueprintCompiler.Node source,
-      StrategyBlueprintCompiler.Node target,
-      long targetInDegree) {
-    if ((source != null && source.kind() == ProofControlModels.BlueprintNodeKind.CONSTRUCTION)
-        || (target != null && target.kind() == ProofControlModels.BlueprintNodeKind.CONSTRUCTION)) {
-      return ProofOperationKind.CONSTRUCTION;
+  private static Set<String> resolveNodeIds(
+      List<String> references,
+      StrategyBlueprintCompiler.Blueprint blueprint,
+      Map<String, StrategyBlueprintCompiler.Node> nodes) {
+    Set<String> resolved = new java.util.LinkedHashSet<>();
+    for (String raw : references) {
+      String reference = raw == null ? "" : raw.strip();
+      switch (reference) {
+        case "@roots" -> resolved.addAll(blueprint.rootEntryNodeIds());
+        case "@direct_targets" -> resolved.addAll(blueprint.directTargetNodeIds());
+        case "@main_goal" -> resolved.add(blueprint.mainGoalNodeId());
+        case "@all_intermediates" ->
+            blueprint.nodes().stream()
+                .filter(node -> node.kind() == ProofControlModels.BlueprintNodeKind.LEMMA)
+                .map(StrategyBlueprintCompiler.Node::id)
+                .forEach(resolved::add);
+        default -> {
+          if (!nodes.containsKey(reference)) {
+            throw new IllegalArgumentException(
+                "mechanism operation declaration references an unknown blueprint node: "
+                    + reference);
+          }
+          resolved.add(reference);
+        }
+      }
     }
-    if (targetInDegree > 1L) {
-      return ProofOperationKind.DECOMPOSITION;
+    if (resolved.isEmpty()) {
+      throw new IllegalArgumentException("mechanism operation declaration resolves to no nodes");
     }
-    return "DEPENDS_ON".equals(normalizedRelation(edge.relation()))
-        ? ProofOperationKind.REDUCTION
-        : ProofOperationKind.DIRECT;
+    return Set.copyOf(resolved);
   }
 
-  private static String topologyHash(StrategyBlueprintCompiler.Blueprint blueprint) {
+  private static void validateReachability(
+      String operationId,
+      Set<String> inputs,
+      Set<String> outputs,
+      Map<String, List<String>> outgoing) {
+    for (String input : inputs) {
+      if (outputs.stream().noneMatch(output -> pathExists(input, output, outgoing))) {
+        throw new IllegalArgumentException(
+            "mechanism operation input cannot reach an output: " + operationId);
+      }
+    }
+    for (String output : outputs) {
+      if (inputs.stream().noneMatch(input -> pathExists(input, output, outgoing))) {
+        throw new IllegalArgumentException(
+            "mechanism operation output is not reachable from an input: " + operationId);
+      }
+    }
+  }
+
+  private static boolean pathExists(
+      String source, String target, Map<String, List<String>> outgoing) {
+    java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>(List.of(source));
+    Set<String> visited = new java.util.HashSet<>();
+    while (!queue.isEmpty()) {
+      String current = queue.removeFirst();
+      if (!visited.add(current)) {
+        continue;
+      }
+      if (current.equals(target)) {
+        return true;
+      }
+      queue.addAll(outgoing.getOrDefault(current, List.of()));
+    }
+    return false;
+  }
+
+  private static Map<String, List<String>> outgoing(
+      StrategyBlueprintCompiler.Blueprint blueprint) {
+    Map<String, List<String>> outgoing = new LinkedHashMap<>();
+    blueprint.edges().forEach(
+        edge ->
+            outgoing.computeIfAbsent(edge.sourceId(), ignored -> new ArrayList<>())
+                .add(edge.targetId()));
+    return outgoing;
+  }
+
+  private static Map<String, String> topologyLabels(
+      StrategyBlueprintCompiler.Blueprint blueprint) {
     Map<String, StrategyBlueprintCompiler.Node> nodes = new LinkedHashMap<>();
     blueprint.nodes().forEach(node -> nodes.put(node.id(), node));
     Map<String, List<StrategyBlueprintCompiler.Edge>> incoming = new HashMap<>();
@@ -300,7 +295,11 @@ final class StrategyMechanismStructureCompiler {
       }
       labels = refined;
     }
-    Map<String, String> finalLabels = labels;
+    return Map.copyOf(labels);
+  }
+
+  private static String topologyHash(
+      StrategyBlueprintCompiler.Blueprint blueprint, Map<String, String> finalLabels) {
     List<String> edges =
         blueprint.edges().stream()
             .map(
@@ -368,16 +367,6 @@ final class StrategyMechanismStructureCompiler {
     };
   }
 
-  private static void add(
-      String text, Set<ProofOperationKind> destination, ProofOperationKind kind, String... markers) {
-    for (String marker : markers) {
-      if (text.contains(marker)) {
-        destination.add(kind);
-        return;
-      }
-    }
-  }
-
   private static boolean has(String text, String... markers) {
     for (String marker : markers) {
       if (text.contains(marker)) {
@@ -394,7 +383,8 @@ final class StrategyMechanismStructureCompiler {
       String domainRoleHash,
       String topologyHash,
       String operationHash,
-      String falsificationHash) {
+      String falsificationHash,
+      boolean operationGraphKnown) {
     Structure {
       canonicalTargetIds = Set.copyOf(canonicalTargetIds);
       representation = java.util.Objects.requireNonNull(representation, "representation");
@@ -409,6 +399,12 @@ final class StrategyMechanismStructureCompiler {
     @Override
     public List<MechanismOperationNode> operations() {
       return List.copyOf(operations);
+    }
+  }
+
+  private record CompiledOperations(List<MechanismOperationNode> nodes, boolean known) {
+    private CompiledOperations {
+      nodes = List.copyOf(nodes);
     }
   }
 }

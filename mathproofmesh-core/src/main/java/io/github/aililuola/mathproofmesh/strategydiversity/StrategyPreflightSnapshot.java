@@ -9,7 +9,7 @@ public record StrategyPreflightSnapshot(
     Map<String, StrategyPreflightPlan> plans,
     Map<String, StrategyPreflightExecutionRecord> executions,
     long version) {
-  public static final int CURRENT_SCHEMA_VERSION = 2;
+  public static final int CURRENT_SCHEMA_VERSION = 3;
 
   public StrategyPreflightSnapshot {
     reports = reports == null ? Map.of() : Map.copyOf(reports);
