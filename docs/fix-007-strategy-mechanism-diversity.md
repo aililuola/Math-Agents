@@ -2,14 +2,15 @@
 
 ## 1. Status and Git provenance
 
-- Status: `CLOSED` after all gates recorded below passed.
+- Status: `CLOSED` after the initial implementation and the structured-mechanism follow-up passed all gates below.
 - Branch: `fix/007-strategy-mechanism-diversity`
 - Baseline branch: `java`
 - Baseline commit: `d42c896ef353259707f017d7e2a90dbd706e28b7`
 - Issue 006 prerequisite commit: `c73803297396057c52d4b6ef193ed00240fee9d7`
-- Implementation commit: `c1b64e77d1534446eeaa7b67063b15313d3fc297`
+- Initial implementation commit: `c1b64e77d1534446eeaa7b67063b15313d3fc297`
+- Follow-up hardening commit: `80c60634ab98d715a68119fabc621db36abfab38`
 - Baseline checkpoint schema: `12`
-- Resulting checkpoint schema: `13`
+- Resulting checkpoint schema: `14`
 
 The work stayed on the Issue 007 branch. It did not modify `main`, commit directly to
 `java`, or start Issue 008.
@@ -76,9 +77,13 @@ ACTUAL_FIRST_SELECTED=A
 ### 4.1 Hard signature and soft profile
 
 `StrategyMechanismAnalyzer` builds a deterministic hard signature from the bound problem and
-root hashes, canonical targets, required-claim semantic keys, object roles, representation,
-dependency DAG shape, proof transformation, and falsification contract. It excludes title,
-strategy ID, route ID, agent ID, estimated success/cost, and free-form tag order.
+root hashes, Issue 005 canonical target IDs, required-claim semantic keys, bounded object roles,
+bounded representation kind, the complete directed Blueprint topology, server-classified proof
+operations, and registered falsification-contract kinds. Raw `coreIdea`, `bottleneck`, expected
+lemma prose, falsification prose, and prerequisite prose are not serialized into the hard hash.
+The server classifier emits only `ProofOperationKind` and `MechanismOperationNode` values.
+It excludes title, strategy ID, route ID, agent ID, estimated success/cost, and free-form tag
+order.
 
 `StrategyMechanismProfile` records broad mechanism primitives only as non-authoritative
 coverage information. It cannot establish equivalence, Claim truth, Negative Knowledge, or
@@ -88,7 +93,11 @@ proof closure. `SAME_STRUCTURAL_MECHANISM` is produced only by the hard signatur
 
 `CriticalClaimKeyCompiler` binds each Claim to the problem hash, normalized statement,
 assumptions, ordered quantifiers, variable bindings, scope, polarity, and required/supporting
-necessity. `TrustedStrategyPreflightEvidenceSource` reads only existing authoritative sources:
+necessity. Production constructs `CriticalClaimContext` from the immutable Root Goal, strategy
+prerequisites, Blueprint completeness, and the Root Goal's quantifier/scope projection. Exact
+alpha-renaming is supported, but conditional, differently quantified, or differently scoped
+facts do not support the Claim. `TrustedStrategyPreflightEvidenceSource` reads only existing
+authoritative sources:
 
 - Permanent Negative Knowledge and verified counterexamples from Issue 002.
 - Verified Claim and Fact projections from Issue 003.
@@ -102,7 +111,18 @@ Required Claims that are verified-refuted, permanently blocked, or in preflight 
 rejected. A refuted supporting Claim marks the candidate for regeneration, without entering the
 Issue 008 Claim-repair lifecycle.
 
-### 4.3 Calibration, common mode, and global selection
+### 4.3 Registered computation preflight
+
+Candidates with a registered typed calculation contract now traverse the real
+`strategy_preflight_plan` provider stage. The returned plan must equal the server-compiled
+claim-to-contract binding and pass `StrategyPreflightPlanValidator`. The existing Java
+`ComputationBroker` executes the bounded read-only falsification request, audits independent
+replay, and records a durable `StrategyPreflightExecutionRecord` before admission. Unknown
+contracts are `UNTESTABLE`; invalid inputs are `ERROR`; bounded non-refutation is never upgraded
+to verified support. A persisted reservation or completed execution is never run twice after
+restore, and arbitrary code, shell commands, dependencies, and Docker images remain forbidden.
+
+### 4.4 Calibration, common mode, and global selection
 
 The server score combines root alignment, blueprint completeness, verified Claim coverage,
 mechanism novelty, complementarity, common-mode penalty, and cost. An all-unresolved required
@@ -115,10 +135,12 @@ similar text does not consume the common-mode cap.
 
 `StrategyPortfolioOptimizer` performs a deterministic bounded global search. It enforces one
 candidate per hard structural signature and one candidate per unresolved required Claim group,
-while considering the entire active portfolio. It no longer performs greedy title-distance
-selection.
+while considering the entire active portfolio. It first removes candidates below the configured
+feasibility, Blueprint-completeness, or required-evidence floors. The former fixed `+10` reward
+per candidate is gone, so an undersized qualified portfolio is preserved instead of being padded
+with low-quality routes. It no longer performs greedy title-distance selection.
 
-### 4.4 One-shot replenishment and atomicity
+### 4.5 One-shot replenishment and atomicity
 
 If the qualified first portfolio is undersized, `PortfolioReplenishmentLedger` permits exactly
 one `portfolio_gap_replenishment` provider call for that episode. The prompt contains only the
@@ -131,9 +153,9 @@ are snapshotted before active commit. A caught failure restores all projections.
 hard process termination before the one authoritative apply checkpoint leaves the durable state
 at the complete pre-apply frontier, so restore and retry produce one receipt and one route set.
 
-### 4.5 Restore and migration
+### 4.6 Restore and migration
 
-Checkpoint schema `12 -> 13` adds:
+Checkpoint schema `12 -> 13` added:
 
 - `StrategyCandidateSnapshot`
 - `StrategyMechanismSnapshot`
@@ -144,6 +166,10 @@ Checkpoint schema `12 -> 13` adds:
 V12 active strategies are retained as `LEGACY_ACTIVE`. Their hard signatures are rebuilt
 deterministically, their soft profiles become `UNKNOWN`, and they are not retroactively
 preflighted, rejected, regenerated, or routed again. New candidates use the full gate.
+
+Checkpoint schema `13 -> 14` extends `StrategyPreflightSnapshot` with immutable provider plans
+and exactly-once execution records. Missing V13 fields restore as empty; existing Issue 007
+candidate, mechanism, portfolio, and route projections remain unchanged.
 
 ## 5. Domain neutrality
 
@@ -171,11 +197,15 @@ The new `strategydiversity` package contains:
   `StrategyMechanismProfile`, `StrategyMechanismPrimitive`, `StrategyMechanismRelation`,
   `StrategyMechanismRegistry`, `StrategyMechanismSnapshot`.
 - Critical Claim preflight: `CriticalClaimSemanticKey`, `CriticalClaimKeyCompiler`,
+  `CriticalClaimContext`,
   `CriticalClaimPreflightSpec`, `CriticalClaimPreflightEvidence`,
   `CriticalClaimPreflightResult`, `CriticalClaimPreflightStatus`,
   `StrategyPreflightEvidenceSource`, `TrustedStrategyPreflightEvidenceSource`,
-  `StrategyCriticalClaimPreflight`, `StrategyPreflightReport`, `StrategyPreflightRegistry`,
+  `StrategyCriticalClaimPreflight`, `StrategyPreflightPlanCompiler`,
+  `StrategyPreflightExecutionRecord`, `StrategyPreflightReport`, `StrategyPreflightRegistry`,
   `StrategyPreflightSnapshot`.
+- Structured hard identity: `StructuredRepresentationKind`, `ProofOperationKind`,
+  `MechanismOperationNode`, and `StrategyMechanismStructureCompiler`.
 - Candidate and common-mode state: `StrategyCandidateStatus`, `StrategyCandidateRecord`,
   `StrategyCandidateLedger`, `StrategyCandidateSnapshot`, `CommonModeRiskRecord`,
   `CommonModeRiskRegistry`.
@@ -196,7 +226,7 @@ The new `strategydiversity` package contains:
   cross-problem plans, and model authority fields.
 - `DesktopSolveCoordinator.java`: production pipeline, one-shot replenishment, atomic commit,
   restore, and whole-portfolio widening gate.
-- `DesktopSolveCheckpoint.java`: schema 13 and five Issue 007 snapshots.
+- `DesktopSolveCheckpoint.java`: schema 14 and durable Issue 007 plan/execution state.
 - `StrategyPortfolioFailurePoint.java`: deterministic exception and hard-crash injection points.
 - `GreedyGcdDomainStrategySeedProvider.java`: isolated optional legacy domain extension.
 
@@ -215,9 +245,9 @@ The new `strategydiversity` package contains:
 
 | Suite | Tests | Failures | Errors | Skipped | Result |
 |---|---:|---:|---:|---:|---|
-| Core | 28 | 0 | 0 | 0 | PASS |
+| Core | 47 | 0 | 0 | 0 | PASS |
 | Server | 5 | 0 | 0 | 0 | PASS |
-| Desktop | 15 | 0 | 0 | 0 | PASS |
+| Desktop | 22 | 0 | 0 | 0 | PASS |
 
 The fixed black-box outputs are:
 
@@ -327,16 +357,16 @@ All explicit Issue 001-006 suites passed before the final full gate:
 Final `verify-all.ps1 -Offline` result:
 
 - `FULL VERIFICATION: PASS`.
-- Maven module total: 2322 tests, 0 failures, 0 errors; 4 pre-existing conditional skips.
+- Maven module total: 2348 tests, 0 failures, 0 errors; 4 pre-existing conditional skips.
 - All nine critical scenario groups passed with zero critical skips.
 - PostgreSQL Testcontainers passed:
   `JdbcMessageRepositoryIT`, `MemoryProofGraphPostgresIT`, `PersistencePostgresIT`,
   `Phase17CheckpointOutboxPerformanceIT`, and `ProviderCallPostgresIT`.
-- Core branch coverage: `7380 / 9802 = 75.290757%`, above the unchanged 75% gate.
+- Core branch coverage: `7534 / 10020 = 75.189621%`, above the unchanged 75% gate.
 - SpotBugs and FindSecBugs: 0 findings in all five Java modules.
 - OWASP dependency gate: 115 dependencies scanned, 0 visible findings, 0 findings at CVSS 7+.
 - License gate: 111 components, 0 missing and 0 unreviewed licenses.
-- Secret scan: 1454 files, 0 findings.
+- Secret scan: 1483 files, 0 findings.
 - Frozen original source: 401 files, manifest
   `9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770`, PASS.
 
@@ -363,3 +393,74 @@ ISSUE_007_STATUS=CLOSED
 ```
 
 Issue 008 has not been started.
+
+## 11. Structured-mechanism follow-up verification
+
+The follow-up started from documentation commit `49973ac` and closed four concrete gaps in the
+initial Issue 007 implementation:
+
+1. Hard mechanism identity now uses canonical target IDs, bounded representations and roles,
+   complete directed topology, bounded operation nodes, and context-bound required Claim keys.
+   Natural-language paraphrases are not hashed directly.
+2. Claim keys and trusted evidence now bind assumptions, ordered quantifiers, variable bindings,
+   scope limitations, polarity, and necessity. Only exact or trusted alpha-equivalent evidence
+   can become `VERIFIED_SUPPORTED`.
+3. `strategy_preflight_plan` now executes in the real Desktop production chain through existing
+   registered Java computation contracts, with durable exactly-once plan/execution state.
+4. Portfolio quality floors run before global optimization; low-feasibility candidates cannot
+   suppress one-shot gap replenishment or pad a requested portfolio.
+
+The pre-fix follow-up tests first exposed these behaviors: directed chain and fork Blueprints had
+the same topology hash; ordinary mathematical paraphrases produced different hard hashes; a
+conditional Fact supported an unconditional Claim; a registered falsification contract was not
+executed; and feasibility scores `0.01`/`0.02` were selected to fill the requested count.
+
+Final focused diagnostics were:
+
+```text
+STRUCTURED MECHANISM AND PREFLIGHT FOLLOW-UP
+PARAPHRASED_SAME_MECHANISM_CANDIDATES=6
+PARAPHRASED_SAME_MECHANISM_ADMISSIONS=1
+PARAPHRASE_BYPASS_LEAKS=0
+
+CONDITIONAL_FACT_FALSE_SUPPORTS=0
+QUANTIFIER_SCOPE_FALSE_SUPPORTS=0
+CROSS_SCOPE_COMMON_MODE_COLLISIONS=0
+PARAPHRASED_REQUIRED_CLAIM_BYPASSES=0
+
+PREFLIGHT_PLANS_GENERATED=1
+PREFLIGHT_PLAN_PROVIDER_CALLS=1
+REGISTERED_CONTRACT_EXECUTIONS=1
+VERIFIED_COUNTEREXAMPLES_FOUND=1
+REFUTED_STRATEGY_ADMISSIONS=0
+POST_RESTORE_PREFLIGHT_EXECUTIONS=0
+ARBITRARY_CODE_EXECUTIONS=0
+
+BOUNDED_NON_REFUTATIONS=1
+BOUNDED_NON_REFUTATION_VERIFIED_SUPPORTS=0
+INDEPENDENTLY_REPLAYED_COUNTEREXAMPLES=1
+UNREPLAYED_COUNTEREXAMPLE_AUTHORITIES=0
+
+SELECTED=2
+LOW_FEASIBILITY_ADMISSIONS=0
+PORTFOLIO_SHORTFALL=2
+REPLENISHMENT_REQUESTS=1
+SECOND_REPLENISHMENT_CALLS=0
+FINAL_SELECTED=2
+RESULT=PASS
+```
+
+The final 20-round restore hashes were:
+
+```text
+CANDIDATE_HASH_BEFORE_RESTORE=88770460b7ffe1d1db3ab6032c99cafe80d56495f342b3860fe1f56e363e4208
+CANDIDATE_HASH_AFTER_RESTORE=88770460b7ffe1d1db3ab6032c99cafe80d56495f342b3860fe1f56e363e4208
+MECHANISM_HASH_BEFORE_RESTORE=f260bf78ac0b19e0360795cad2ee01a019d3a2535e3aaedc2473492bfb593a2f
+MECHANISM_HASH_AFTER_RESTORE=f260bf78ac0b19e0360795cad2ee01a019d3a2535e3aaedc2473492bfb593a2f
+PORTFOLIO_HASH_BEFORE_RESTORE=0eb903f2d647ce80b8488eb1f5ffd2c839b38fe4d08797ff8ff274bb6d82acc6
+PORTFOLIO_HASH_AFTER_RESTORE=0eb903f2d647ce80b8488eb1f5ffd2c839b38fe4d08797ff8ff274bb6d82acc6
+```
+
+The final `verify-all.ps1 -Offline` run completed with exit code 0, including all five PostgreSQL
+Testcontainers suites, unchanged coverage/security/license/SpotBugs gates, and the frozen 401-file
+source manifest. The three generated Phase 17 report files were intentionally not committed.
