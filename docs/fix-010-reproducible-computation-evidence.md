@@ -444,3 +444,126 @@ ISSUE_010_STATUS=CLOSED
 ```
 
 Issue 011 尚未开始。
+
+## 12. Exact claim-context authority projection closure
+
+The final independent audit found one remaining Issue 010 projection defect: a computation was
+bound to a complete `ClaimEvidenceSemanticBinding`, but the downstream counterexample or
+certificate was created with the legacy `MessageEnvelope` constructor. That discarded the
+quantifiers, variable bindings, exact scope, polarity, dependencies, and claim hashes at the
+Negative Knowledge / Fact boundary.
+
+This patch remains on `fix/010-reproducible-computation-evidence` and changes only the Desktop
+computation authority projection plus Issue 010 tests. Issues 001-009 were not weakened or
+rewritten, and Issue 011 was not started.
+
+### 12.1 Production behavior
+
+- Claim-bound authority projection now fails closed unless request binding, result binding, and
+  the server-owned `ComputationTargetBinding` agree exactly.
+- A verified counterexample is projected with the original statement, conclusion, assumptions,
+  ordered quantifiers, variable bindings, scope, dependencies, statement hash, semantic hash,
+  and polarity. `VerifiedCounterexampleAuthority.targetStatement` uses the same exact statement.
+- A formal certificate is projected as the original Claim identity, so the resulting verified
+  Fact passes the existing `exactVerifiedFactForFrozenClaim(...)` authority check.
+- A complete finite certificate receives a new bounded statement hash and bounded semantic hash.
+  Its identity includes the declared domains, complete finite input, result coverage scope, and
+  an explicit prohibition against treating it as proof of the unrestricted Claim.
+- Isolated computation questions retain their existing graph-only authority boundary.
+
+### 12.2 Pre-patch behavioral evidence
+
+The new black-box tests were run before changing production projection code. The old path exposed
+the concrete context loss:
+
+```text
+DesktopComputationCounterexampleSemanticContextRoundTripTest
+expected quantifiers: [forall x in declared domain D]
+actual quantifiers:   []
+
+DesktopFormalCertificateFactContextRoundTripTest
+expected FORMAL_FACT_STATEMENT_HASH_LOSSES=0
+actual   FORMAL_FACT_STATEMENT_HASH_LOSSES=1
+```
+
+This is behavioral evidence from the real coordinator / TypedMemory path, not a missing-new-API
+compile failure.
+
+### 12.3 Exact-context diagnostics
+
+All values below are calculated from real `MessageEnvelope`, `NegativeKnowledgeRegistry`,
+`TypedMemory`, `ProofGraphStore`, checkpoint JSON, and restored coordinator state.
+
+```text
+COMPUTATION EXACT CONTEXT PROJECTION DIAGNOSTIC
+COUNTEREXAMPLE_QUANTIFIER_LOSSES=0
+COUNTEREXAMPLE_BINDING_LOSSES=0
+COUNTEREXAMPLE_SCOPE_LOSSES=0
+COUNTEREXAMPLE_POLARITY_LOSSES=0
+COUNTEREXAMPLE_SEMANTIC_HASH_LOSSES=0
+EXACT_NEGATIVE_REENTRY_BLOCKS=1
+CROSS_QUANTIFIER_FALSE_BLOCKS=0
+CROSS_SCOPE_FALSE_BLOCKS=0
+CROSS_POLARITY_FALSE_BLOCKS=0
+
+FORMAL_FACT_STATEMENT_HASH_LOSSES=0
+FORMAL_FACT_SEMANTIC_HASH_LOSSES=0
+FORMAL_FACT_QUANTIFIER_LOSSES=0
+FORMAL_FACT_BINDING_LOSSES=0
+FORMAL_FACT_SCOPE_LOSSES=0
+FORMAL_FACT_POLARITY_LOSSES=0
+FORMAL_FACT_EVIDENCE_ROUND_TRIP_FAILURES=0
+
+FINITE_CERTIFICATE_UNRESTRICTED_CLAIM_HASH_REUSES=0
+FINITE_CERTIFICATE_SCOPE_LOSSES=0
+FINITE_CERTIFICATE_GENERAL_FACT_PROMOTIONS=0
+
+RESTORE_ROUND=5
+POST_RESTORE_COUNTEREXAMPLE_CONTEXT_LOSSES=0
+POST_RESTORE_FORMAL_FACT_CONTEXT_LOSSES=0
+POST_RESTORE_DUPLICATE_NEGATIVE_RECORDS=0
+POST_RESTORE_DUPLICATE_FACTS=0
+RESULT=PASS
+```
+
+The focused suite ran `5 tests, 0 failures, 0 errors, 0 skipped` without a model API, network,
+Python sidecar, database, or Docker dependency.
+
+### 12.4 Regression and full verification
+
+The Core/Desktop module regression, including every prior Issue 001-009 test, passed:
+
+```text
+Contracts=65, failures=0, errors=0, skipped=0
+Core=1321, failures=0, errors=0, skipped=0
+Server unit=871, failures=0, errors=0, skipped=3
+Desktop=260, failures=0, errors=0, skipped=1
+MODULE_TOTAL=2517, failures=0, errors=0, skipped=4
+```
+
+The final `./scripts/verify-all.ps1 -Offline` run also passed, including Docker-backed PostgreSQL
+integration tests and every release gate:
+
+```text
+FULL VERIFICATION: PASS
+Contracts=65, failures=0, errors=0, skipped=0
+Core=1321, failures=0, errors=0, skipped=0
+Server unit=871, failures=0, errors=0, skipped=3
+Server PostgreSQL IT=26, failures=0, errors=0, skipped=0
+Desktop=260, failures=0, errors=0, skipped=1
+Compatibility=149, failures=0, errors=0, skipped=0
+TOTAL=2692, failures=0, errors=0, skipped=4
+
+CORE_LINE_COVERAGE=90.264414%
+CORE_BRANCH_COVERAGE=75.115173%
+DESKTOP_LINE_COVERAGE=79.696995%
+SPOTBUGS_FINDBUGS_FINDINGS=0
+POSTGRESQL_ITS=PASS
+OWASP=PASS
+SECRET_SCAN=PASS
+LICENSE_GATE=PASS
+SOURCE_IMMUTABILITY=PASS
+PYTHON_SIDECAR_PERFORMANCE=PASS
+
+ISSUE_010_STATUS=CLOSED
+```

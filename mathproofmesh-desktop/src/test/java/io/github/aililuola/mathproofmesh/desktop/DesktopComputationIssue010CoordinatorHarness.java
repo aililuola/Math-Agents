@@ -26,12 +26,16 @@ import io.github.aililuola.mathproofmesh.contract.ComputationMethod;
 import io.github.aililuola.mathproofmesh.contract.EvidenceStrength;
 import io.github.aililuola.mathproofmesh.contract.ExperimentOutcome;
 import io.github.aililuola.mathproofmesh.contract.MemoryTier;
+import io.github.aililuola.mathproofmesh.contract.MessageEnvelope;
 import io.github.aililuola.mathproofmesh.contract.ObligationKind;
 import io.github.aililuola.mathproofmesh.contract.ProofObligation;
+import io.github.aililuola.mathproofmesh.contract.QuantifierSpec;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
 import io.github.aililuola.mathproofmesh.contract.StrategySet;
+import io.github.aililuola.mathproofmesh.contract.VariableBinding;
 import io.github.aililuola.mathproofmesh.proofgraph.CanonicalObligationRecord;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.FrozenClaimSnapshot;
 import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
 import io.github.aililuola.mathproofmesh.provider.AgentPool;
 import io.github.aililuola.mathproofmesh.provider.InMemoryProviderCallRepository;
@@ -212,10 +216,23 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
   }
 
   void addObligation(String obligationId, String statement) throws Exception {
+    addObligation(
+        obligationId,
+        statement,
+        List.of("All values use the declared exact finite input."),
+        List.of());
+  }
+
+  void addObligation(
+      String obligationId,
+      String statement,
+      List<String> assumptions,
+      List<QuantifierSpec> quantifiers)
+      throws Exception {
     proofGraph()
         .addObligation(
             new ProofObligation(
-                List.of("All values use the declared exact finite input."),
+                assumptions,
                 0.7d,
                 "",
                 List.of(),
@@ -227,7 +244,7 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
                 obligationId,
                 0.8d,
                 DesktopNegativeKnowledgeTestHarness.PROBLEM_HASH,
-                List.of(),
+                quantifiers,
                 List.of(routeId()),
                 statement,
                 "open"));
@@ -241,6 +258,15 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
   }
 
   ExperimentSpec exactBound(ExperimentSpec source, String obligationId) throws Exception {
+    return exactBound(source, obligationId, List.of(), List.of());
+  }
+
+  ExperimentSpec exactBound(
+      ExperimentSpec source,
+      String obligationId,
+      List<VariableBinding> variableBindings,
+      List<String> dependencyClaimIds)
+      throws Exception {
     ProofObligation obligation = obligation(obligationId);
     CanonicalObligationRecord canonical =
         proofGraph().canonicalTargetForObligation(obligationId).orElseThrow();
@@ -254,14 +280,14 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
             obligation.statement(),
             obligation.assumptions(),
             obligation.quantifiers(),
-            List.of(),
+            variableBindings,
             canonical.signature().scopeMarkers(),
             canonical.signature().polarity(),
-            List.of(),
+            dependencyClaimIds,
             source.domains());
     return new ExperimentSpec(
         source.arguments(),
-        source.assumptions(),
+        obligation.assumptions(),
         source.broadSearch(),
         source.decisionIfConfirmed(),
         source.decisionIfRefuted(),
@@ -285,6 +311,41 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
         source.whyComputationIsNeeded(),
         obligationId,
         binding);
+  }
+
+  void setRound(int round) throws ReflectiveOperationException {
+    ((java.util.concurrent.atomic.AtomicInteger) field("roundIndex")).set(round);
+  }
+
+  boolean exactVerifiedFact(
+      MessageEnvelope fact, ClaimEvidenceSemanticBinding binding) throws Exception {
+    DesktopSolveCheckpoint checkpoint = checkpointRoundTrip();
+    FrozenClaimSnapshot frozen =
+        new FrozenClaimSnapshot(
+            "court-case-computation-context",
+            binding.problemHash(),
+            checkpoint.problem().goalHash(),
+            binding.claimId(),
+            binding.claimStatementHash(),
+            binding.claimSemanticHash(),
+            binding.statement(),
+            binding.conclusion(),
+            binding.assumptions(),
+            binding.quantifiers(),
+            binding.variableBindings(),
+            binding.scopeLimitations(),
+            binding.polarity(),
+            binding.dependencyClaimIds(),
+            CanonicalJson.stableHash(binding.dependencyClaimIds()),
+            "proof-revision-computation-context",
+            "attempt-computation-context",
+            routeId(),
+            "author-computation-context");
+    Method method =
+        DesktopSolveCoordinator.class.getDeclaredMethod(
+            "exactVerifiedFactForFrozenClaim", MessageEnvelope.class, FrozenClaimSnapshot.class);
+    method.setAccessible(true);
+    return (boolean) invokeMethod(method, fact, frozen);
   }
 
   DesktopSolveCheckpoint.ComputationCheckpoint runComputation(ExperimentSpec spec)

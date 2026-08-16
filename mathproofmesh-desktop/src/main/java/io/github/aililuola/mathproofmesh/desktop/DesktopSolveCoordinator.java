@@ -3351,9 +3351,14 @@ final class DesktopSolveCoordinator {
       RouteState route,
       ComputationTrace trace,
       ComputationExecutionOutcome executionOutcome) {
-    MessageEnvelope counterexample = computationCounterexampleMessage(route, trace);
+    ClaimEvidenceSemanticBinding claimBinding =
+        trace.targetBinding().isolatedComputationQuestion()
+            ? null
+            : claimBindingForAuthorityProjection(trace);
+    MessageEnvelope counterexample =
+        computationCounterexampleMessage(route, trace, claimBinding);
     String counterexampleId = "";
-    if (!trace.targetBinding().isolatedComputationQuestion()) {
+    if (claimBinding != null) {
       typedMemory.applyVerifiedCounterexample(
           counterexample,
           VerifiedCounterexampleAuthority.independentReplay(
@@ -3361,7 +3366,7 @@ final class DesktopSolveCoordinator {
               trace.replayValid(),
               trace.authority(),
               "experiment://" + trace.result().experimentId(),
-              trace.result().targetClaim(),
+              claimBinding.statement(),
               trace.result().resultHash(),
               List.of()));
       counterexampleId = counterexample.messageId();
@@ -3396,8 +3401,44 @@ final class DesktopSolveCoordinator {
   }
 
   private MessageEnvelope computationCounterexampleMessage(
-      RouteState route, ComputationTrace trace) {
+      RouteState route,
+      ComputationTrace trace,
+      ClaimEvidenceSemanticBinding claimBinding) {
     ExperimentResult result = trace.result();
+    if (claimBinding != null) {
+      return new MessageEnvelope(
+          List.of("experiment://" + result.experimentId()),
+          claimBinding.assumptions(),
+          claimBinding.conclusion(),
+          "",
+          null,
+          claimBinding.dependencyClaimIds(),
+          List.of(),
+          EvidenceType.COUNTEREXAMPLE,
+          MemoryTier.NEGATIVE,
+          "counterexample-" + result.experimentId() + "-" + result.resultHash().substring(0, 12),
+          MessageType.COUNTEREXAMPLE,
+          1.0d,
+          topology.mathNormalize(claimBinding.statement()),
+          claimBinding.problemHash(),
+          claimBinding.quantifiers(),
+          result.resultHash(),
+          roundIndex.get(),
+          "1",
+          claimBinding.scopeLimitations(),
+          "independent-computation-replay",
+          RouteRole.TOOL_SPECIALIST,
+          route.routeId,
+          claimBinding.statement(),
+          List.of(route.routeId),
+          config.topology().crossRoute().messageTtlRounds(),
+          claimBinding.variableBindings(),
+          1.0d,
+          ClaimStatus.REJECTED,
+          claimBinding.claimStatementHash(),
+          claimBinding.claimSemanticHash(),
+          claimBinding.polarity());
+    }
     return new MessageEnvelope(
         List.of("experiment://" + result.experimentId()),
         trace.spec().assumptions(),
@@ -3490,41 +3531,9 @@ final class DesktopSolveCoordinator {
               executionOutcome.executionId());
       return new AuthorityMutationIds("", "", obligationId, "", "");
     }
-    String statement =
-        (formal ? "Formally certified: " : "Verified only on the complete finite scope: ")
-            + result.targetClaim();
+    ClaimEvidenceSemanticBinding claimBinding = claimBindingForAuthorityProjection(trace);
     MessageEnvelope certificate =
-        new MessageEnvelope(
-            List.of("experiment://" + result.experimentId()),
-            trace.spec().assumptions(),
-            statement,
-            "",
-            null,
-            List.of(),
-            List.of(),
-            formal
-                ? EvidenceType.FORMAL_KERNEL_CERTIFICATE
-                : EvidenceType.COMPLETE_FINITE_ENUMERATION,
-            MemoryTier.FACT,
-            "computation-fact-" + result.experimentId() + "-" + result.resultHash().substring(0, 12),
-            formal ? MessageType.FORMAL_CERTIFICATE : MessageType.COMPUTATION_CERTIFICATE,
-            1.0d,
-            topology.mathNormalize(statement),
-            problemHash,
-            List.of(),
-            result.resultHash(),
-            roundIndex.get(),
-            "1",
-            formal ? List.of() : List.of("Finite scope: " + result.scope()),
-            route.author.id(),
-            RouteRole.TOOL_SPECIALIST,
-            route.routeId,
-            statement,
-            List.of(route.routeId),
-            config.topology().crossRoute().messageTtlRounds(),
-            List.of(),
-            1.0d,
-            ClaimStatus.VERIFIED);
+        computationCertificateMessage(route, trace, claimBinding, formal);
     try {
       MessageEnvelope admitted =
           typedMemory.addFact(
@@ -3560,6 +3569,120 @@ final class DesktopSolveCoordinator {
           result.experimentId());
       return AuthorityMutationIds.none();
     }
+  }
+
+  private MessageEnvelope computationCertificateMessage(
+      RouteState route,
+      ComputationTrace trace,
+      ClaimEvidenceSemanticBinding claimBinding,
+      boolean formal) {
+    ExperimentResult result = trace.result();
+    String statement = claimBinding.statement();
+    String conclusion = claimBinding.conclusion();
+    List<String> scopeLimitations = claimBinding.scopeLimitations();
+    String claimStatementHash = claimBinding.claimStatementHash();
+    String claimSemanticHash = claimBinding.claimSemanticHash();
+    if (!formal) {
+      String canonicalDomains = CanonicalJson.canonicalize(trace.spec().domains());
+      String canonicalInput = CanonicalJson.canonicalize(trace.spec().arguments());
+      String canonicalResultScope = CanonicalJson.canonicalize(result.scope());
+      statement =
+          "Finite-domain certificate for: "
+              + claimBinding.statement()
+              + "; certified input="
+              + canonicalInput
+              + "; declared domains="
+              + canonicalDomains
+              + "; result scope="
+              + canonicalResultScope;
+      conclusion = statement;
+      scopeLimitations =
+          java.util.stream.Stream.concat(
+                  claimBinding.scopeLimitations().stream(),
+                  java.util.stream.Stream.of(
+                      "Finite computation domains: " + canonicalDomains,
+                      "Certified finite input: " + canonicalInput,
+                      "Certified result scope: " + canonicalResultScope,
+                      "This certificate does not establish the unrestricted claim."))
+              .distinct()
+              .toList();
+      claimStatementHash = CanonicalJson.stableHash(statement);
+      claimSemanticHash =
+          CanonicalJson.stableHash(
+              Map.ofEntries(
+                  Map.entry("identity_kind", "complete_finite_enumeration"),
+                  Map.entry("problem_hash", claimBinding.problemHash()),
+                  Map.entry("source_claim_statement_hash", claimBinding.claimStatementHash()),
+                  Map.entry("source_claim_semantic_hash", claimBinding.claimSemanticHash()),
+                  Map.entry("statement", statement),
+                  Map.entry("conclusion", conclusion),
+                  Map.entry("assumptions", claimBinding.assumptions()),
+                  Map.entry("quantifiers", claimBinding.quantifiers()),
+                  Map.entry("variable_bindings", claimBinding.variableBindings()),
+                  Map.entry("scope_limitations", scopeLimitations),
+                  Map.entry("polarity", claimBinding.polarity()),
+                  Map.entry("dependency_claim_ids", claimBinding.dependencyClaimIds()),
+                  Map.entry("computation_method", trace.spec().method().value()),
+                  Map.entry("computation_domains", trace.spec().domains()),
+                  Map.entry("computation_input", trace.spec().arguments()),
+                  Map.entry("result_scope", result.scope())));
+    }
+    return new MessageEnvelope(
+        List.of("experiment://" + result.experimentId()),
+        claimBinding.assumptions(),
+        conclusion,
+        "",
+        null,
+        claimBinding.dependencyClaimIds(),
+        List.of(),
+        formal
+            ? EvidenceType.FORMAL_KERNEL_CERTIFICATE
+            : EvidenceType.COMPLETE_FINITE_ENUMERATION,
+        MemoryTier.FACT,
+        "computation-fact-" + result.experimentId() + "-" + result.resultHash().substring(0, 12),
+        formal ? MessageType.FORMAL_CERTIFICATE : MessageType.COMPUTATION_CERTIFICATE,
+        1.0d,
+        topology.mathNormalize(statement),
+        claimBinding.problemHash(),
+        claimBinding.quantifiers(),
+        result.resultHash(),
+        roundIndex.get(),
+        "1",
+        scopeLimitations,
+        route.author.id(),
+        RouteRole.TOOL_SPECIALIST,
+        route.routeId,
+        statement,
+        List.of(route.routeId),
+        config.topology().crossRoute().messageTtlRounds(),
+        claimBinding.variableBindings(),
+        1.0d,
+        ClaimStatus.VERIFIED,
+        claimStatementHash,
+        claimSemanticHash,
+        claimBinding.polarity());
+  }
+
+  private ClaimEvidenceSemanticBinding claimBindingForAuthorityProjection(
+      ComputationTrace trace) {
+    ComputationTargetBinding target = trace.targetBinding();
+    ClaimEvidenceSemanticBinding request = trace.spec().claimEvidenceSemanticBinding();
+    ClaimEvidenceSemanticBinding result =
+        trace.result() == null ? null : trace.result().claimEvidenceSemanticBinding();
+    if (target == null
+        || target.isolatedComputationQuestion()
+        || request == null
+        || !request.equals(result)
+        || !sameHash(request.problemHash(), target.problemHash())
+        || !request.claimId().equals(target.claimId())
+        || !sameHash(request.claimStatementHash(), target.claimStatementHash())
+        || !sameHash(request.claimSemanticHash(), target.claimSemanticHash())
+        || !request.polarity().equals(target.polarity())
+        || !request.claimId().equals(trace.result().targetClaimId())) {
+      throw new IllegalStateException(
+          "claim-bound authority projection requires exact semantic binding");
+    }
+    return request;
   }
 
   private MessageEnvelope isolatedComputationCertificateMessage(
