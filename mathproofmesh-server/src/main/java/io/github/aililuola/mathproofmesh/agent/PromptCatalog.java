@@ -68,6 +68,8 @@ public final class PromptCatalog {
         "Develop only the assigned isolated route and report honest partial progress or a complete proof. "
             + "Broker artifacts are server-compiled mathematical sidecars: merely receiving one does not mean it was used. "
             + "Any mathematical use must cite its artifact_id in broker_artifact_use_manifest with a typed use and real downstream IDs. "
+            + "For counterexample and no-go artifacts, echo target_semantic_hash and bind only "
+            + "the projected exact target Claim and obligation IDs. "
             + "A REVIEWED_OPEN obstruction is not a proved premise, and BOUNDED evidence cannot prove an unrestricted claim. "
             + "Only VERIFIED_CLAIM and FORMAL_CERTIFICATE artifacts may use CITED_IN_FINAL_PROOF. "
             + "REVIEWED_OBSTRUCTION artifacts cannot use PREMISE_IN_PROOF_STEP or CITED_IN_FINAL_PROOF; "

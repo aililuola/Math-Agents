@@ -447,6 +447,20 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
     invoke("restore", DesktopSolveCheckpoint.class, checkpoint);
   }
 
+  void acknowledgeLegacyConsumedMessages() throws Exception {
+    Object route = route();
+    invoke(
+        "acknowledgeConsumedMessages",
+        new Class<?>[] {route.getClass()},
+        new Object[] {route});
+  }
+
+  @SuppressWarnings("unchecked")
+  double schedulerBrokerUtility(String routeId) throws Exception {
+    Map<String, Double> utility = (Map<String, Double>) invoke("brokerUtility");
+    return utility.getOrDefault(routeId, 0.0d);
+  }
+
   DesktopSolveCheckpoint readPersistedCheckpoint() throws Exception {
     Path state = runDirectory.resolve("structured").resolve("desktop-solve-state.json");
     return ContractObjectMapper.read(Files.readString(state), DesktopSolveCheckpoint.class);

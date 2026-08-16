@@ -14,30 +14,41 @@ public final class BrokerArtifactEffectVerifier {
       BrokerArtifactEffectObservation observation) {
     Set<BrokerVerifiedEffectType> effects = new LinkedHashSet<>();
     Set<String> affected = new LinkedHashSet<>();
-    if (intersects(lineage.downstreamProofStepIds(), observation.committedStepIds())) {
+    Set<String> newlyCommitted =
+        difference(observation.committedStepIds(), baseline.committedStepIdsBefore());
+    Set<String> newlyVerified =
+        difference(observation.verifiedClaimIds(), baseline.verifiedClaimIdsBefore());
+    Set<String> newlyRefuted =
+        difference(observation.refutedClaimIds(), baseline.refutedClaimIdsBefore());
+    Set<String> newlyClosed = new LinkedHashSet<>(observation.closedObligationIds());
+    newlyClosed.retainAll(baseline.openCanonicalTargetIdsBefore());
+    Set<String> newlyRetired =
+        difference(observation.retiredDependencyIds(), baseline.retiredDependencyIdsBefore());
+    if (intersects(lineage.downstreamProofStepIds(), newlyCommitted)) {
       effects.add(BrokerVerifiedEffectType.COMMITTED_STEP_REUSE);
-      lineage.downstreamProofStepIds().stream().filter(observation.committedStepIds()::contains)
+      lineage.downstreamProofStepIds().stream().filter(newlyCommitted::contains)
           .forEach(affected::add);
     }
-    if (intersects(lineage.downstreamClaimIds(), observation.verifiedClaimIds())) {
+    if (intersects(lineage.downstreamClaimIds(), newlyVerified)) {
       effects.add(BrokerVerifiedEffectType.VERIFIED_CLAIM_DERIVED);
-      lineage.downstreamClaimIds().stream().filter(observation.verifiedClaimIds()::contains)
+      lineage.downstreamClaimIds().stream().filter(newlyVerified::contains)
           .forEach(affected::add);
     }
     if (lineage.useKind() == BrokerArtifactUseKind.REFUTES_CLAIM
-        && intersects(lineage.downstreamClaimIds(), observation.refutedClaimIds())) {
+        && intersects(lineage.downstreamClaimIds(), newlyRefuted)) {
       effects.add(BrokerVerifiedEffectType.EXACT_CLAIM_REFUTED);
-      lineage.downstreamClaimIds().stream().filter(observation.refutedClaimIds()::contains)
+      lineage.downstreamClaimIds().stream().filter(newlyRefuted::contains)
           .forEach(affected::add);
     }
-    if (intersects(lineage.downstreamObligationIds(), observation.closedObligationIds())) {
+    if (intersects(lineage.downstreamObligationIds(), newlyClosed)) {
       effects.add(BrokerVerifiedEffectType.OBLIGATION_CLOSED);
-      lineage.downstreamObligationIds().stream().filter(observation.closedObligationIds()::contains)
+      lineage.downstreamObligationIds().stream().filter(newlyClosed::contains)
           .forEach(affected::add);
     }
     if (lineage.useKind() == BrokerArtifactUseKind.RETIRES_DEPENDENCY
-        && intersects(lineage.downstreamClaimIds(), observation.retiredDependencyIds())) {
+        && intersects(lineage.downstreamClaimIds(), newlyRetired)) {
       effects.add(BrokerVerifiedEffectType.DEPENDENCY_RETIRED);
+      lineage.downstreamClaimIds().stream().filter(newlyRetired::contains).forEach(affected::add);
     }
     if (lineage.useKind() == BrokerArtifactUseKind.SELECTS_FOCUS_OBLIGATION
         && observation.focusCanonicalTargetIdAfter() != null
@@ -46,17 +57,23 @@ public final class BrokerArtifactEffectVerifier {
       affected.add(observation.focusCanonicalTargetIdAfter());
     }
     if (lineage.useKind() == BrokerArtifactUseKind.TRIGGERS_LOCAL_REPAIR
-        && observation.localRepairId() != null) {
+        && lineage.repairId() != null
+        && lineage.repairId().equals(observation.localRepairId())
+        && !baseline.localRepairIdsBefore().contains(lineage.repairId())) {
       effects.add(BrokerVerifiedEffectType.LOCAL_REPAIR_BOUND);
       affected.add(observation.localRepairId());
     }
     if (lineage.useKind() == BrokerArtifactUseKind.TRIGGERS_SEMANTIC_PIVOT
-        && observation.semanticPivotId() != null) {
+        && lineage.pivotId() != null
+        && lineage.pivotId().equals(observation.semanticPivotId())
+        && !baseline.semanticPivotIdsBefore().contains(lineage.pivotId())) {
       effects.add(BrokerVerifiedEffectType.SEMANTIC_PIVOT_BOUND);
       affected.add(observation.semanticPivotId());
     }
     if (lineage.useKind() == BrokerArtifactUseKind.SUPPORTS_COMPUTATION_PLAN
-        && observation.computationPlanId() != null) {
+        && lineage.computationPlanId() != null
+        && lineage.computationPlanId().equals(observation.computationPlanId())
+        && !baseline.computationPlanIdsBefore().contains(lineage.computationPlanId())) {
       effects.add(BrokerVerifiedEffectType.COMPUTATION_PLAN_BOUND);
       affected.add(observation.computationPlanId());
     }
@@ -70,6 +87,12 @@ public final class BrokerArtifactEffectVerifier {
 
   private static boolean intersects(List<String> declared, Set<String> actual) {
     return declared.stream().anyMatch(actual::contains);
+  }
+
+  private static Set<String> difference(Set<String> after, Set<String> before) {
+    Set<String> result = new LinkedHashSet<>(after);
+    result.removeAll(before);
+    return Set.copyOf(result);
   }
 
   @SuppressFBWarnings(

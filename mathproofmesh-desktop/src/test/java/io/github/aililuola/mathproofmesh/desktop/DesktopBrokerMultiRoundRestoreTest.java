@@ -181,6 +181,14 @@ class DesktopBrokerMultiRoundRestoreTest {
                                 receipt.status()
                                     == BrokerArtifactReceiptStatus.USED_PENDING_EFFECT)
                         .count();
+            if (scenario.useKind() == BrokerArtifactUseKind.TRIGGERS_LOCAL_REPAIR) {
+              fixture.broker.bindEffectTarget(
+                  scenario.related().routeId(),
+                  BrokerArtifactUseKind.TRIGGERS_LOCAL_REPAIR,
+                  "repair-" + round,
+                  Set.of(),
+                  Set.of(scenario.artifact().nextExactObligationId()));
+            }
             BrokerArtifactEffectObservation observation = effect(scenario, round);
             var utility =
                 fixture.broker
@@ -425,7 +433,7 @@ class DesktopBrokerMultiRoundRestoreTest {
             : Set.of();
     Set<String> refuted =
         scenario.useKind() == BrokerArtifactUseKind.REFUTES_CLAIM
-            ? Set.of("claim-derived")
+            ? Set.of("claim-counterexample-r" + round)
             : Set.of();
     String repair =
         scenario.useKind() == BrokerArtifactUseKind.TRIGGERS_LOCAL_REPAIR

@@ -5,6 +5,9 @@ import io.github.aililuola.mathproofmesh.contract.BrokerArtifactReceiptStatus;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactUseClaim;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactUseManifest;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
+import io.github.aililuola.mathproofmesh.contract.ReviewedObstructionPayload;
+import io.github.aililuola.mathproofmesh.contract.VerifiedCounterexamplePayload;
+import io.github.aililuola.mathproofmesh.contract.VerifiedNoGoPayload;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -142,6 +145,48 @@ public final class BrokerArtifactReceiptService {
         default -> "INCOMPATIBLE_ARTIFACT_USE";
       };
     }
+    if (artifact.payload() instanceof VerifiedCounterexamplePayload counterexample) {
+      if (!Set.copyOf(use.affectedClaimIds()).equals(Set.of(counterexample.exactTargetClaimId()))) {
+        return "COUNTEREXAMPLE_WRONG_EXACT_CLAIM_TARGET";
+      }
+      if (!counterexample.targetSemanticHash().equals(use.targetSemanticHash())) {
+        return "COUNTEREXAMPLE_SEMANTIC_HASH_MISMATCH";
+      }
+      if (!Set.copyOf(counterexample.affectedExactObligationIds())
+          .containsAll(use.affectedObligationIds())) {
+        return "COUNTEREXAMPLE_WRONG_EXACT_OBLIGATION_TARGET";
+      }
+    }
+    if (artifact.payload() instanceof VerifiedNoGoPayload noGo) {
+      if (!Set.copyOf(use.affectedClaimIds()).equals(Set.of(noGo.exactTargetClaimId()))) {
+        return "NO_GO_WRONG_EXACT_CLAIM_TARGET";
+      }
+      if (!noGo.targetClaim().claimSemanticHash().equals(use.targetSemanticHash())) {
+        return "NO_GO_SEMANTIC_HASH_MISMATCH";
+      }
+      if (!allowedObligationTargets(artifact).containsAll(use.affectedObligationIds())) {
+        return "NO_GO_WRONG_EXACT_OBLIGATION_TARGET";
+      }
+    }
+    if (artifact.payload() instanceof ReviewedObstructionPayload obstruction) {
+      boolean failedStepBound =
+          use.referencedProofStepIds().contains(obstruction.exactFailedProofStepId());
+      boolean obligationBound =
+          use.affectedObligationIds().size() == 1
+              && use.affectedObligationIds().contains(obstruction.nextExactObligationId());
+      if (!failedStepBound && !obligationBound) {
+        return "OBSTRUCTION_WRONG_EXACT_REPAIR_TARGET";
+      }
+    }
     return null;
+  }
+
+  private static Set<String> allowedObligationTargets(BrokerArtifactEnvelope artifact) {
+    Set<String> targets = new java.util.LinkedHashSet<>(artifact.sourceObligationIds());
+    if (artifact.nextExactObligationId() != null) {
+      targets.add(artifact.nextExactObligationId());
+    }
+    artifact.blockedInferences().forEach(blocked -> targets.addAll(blocked.canonicalTargetIds()));
+    return Set.copyOf(targets);
   }
 }

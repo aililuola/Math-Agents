@@ -17,7 +17,58 @@ public record BrokerPromptArtifact(
     @JsonProperty("reusable_consequences") @ContractNonNull List<BrokerReusableConsequence> reusableConsequences,
     @JsonProperty("blocked_inferences") @ContractNonNull List<BrokerBlockedInference> blockedInferences,
     @JsonProperty("next_exact_obligation_id") String nextExactObligationId,
+    @JsonProperty("exact_target_claim_id") String exactTargetClaimId,
+    @JsonProperty("target_semantic_hash") String targetSemanticHash,
+    @JsonProperty("counterexample_witness") String counterexampleWitness,
+    @JsonProperty("affected_exact_obligation_ids") @ContractNonNull
+        List<String> affectedExactObligationIds,
+    @JsonProperty("exact_failed_proof_step_id") String exactFailedProofStepId,
+    @JsonProperty("issue_kind") String issueKind,
+    @JsonProperty("repairability") String repairability,
+    @JsonProperty("first_missing_justification") String firstMissingJustification,
+    @JsonProperty("exact_blocked_inference") String exactBlockedInference,
     @JsonProperty("allowed_use_kinds") @ContractNonNull List<BrokerArtifactUseKind> allowedUseKinds) {
+  public BrokerPromptArtifact(
+      String artifactId,
+      BrokerArtifactType artifactType,
+      BrokerArtifactAuthority authority,
+      String exactStatement,
+      List<String> assumptions,
+      List<QuantifierSpec> quantifiers,
+      List<String> scope,
+      String polarity,
+      String sourceClaimRevisionId,
+      List<String> evidenceRefs,
+      List<BrokerReusableConsequence> reusableConsequences,
+      List<BrokerBlockedInference> blockedInferences,
+      String nextExactObligationId,
+      List<BrokerArtifactUseKind> allowedUseKinds) {
+    this(
+        artifactId,
+        artifactType,
+        authority,
+        exactStatement,
+        assumptions,
+        quantifiers,
+        scope,
+        polarity,
+        sourceClaimRevisionId,
+        evidenceRefs,
+        reusableConsequences,
+        blockedInferences,
+        nextExactObligationId,
+        null,
+        null,
+        null,
+        List.of(),
+        null,
+        null,
+        null,
+        null,
+        null,
+        allowedUseKinds);
+  }
+
   public BrokerPromptArtifact {
     artifactId = ContractStrings.required("artifact_id", ContractStrings.trim(artifactId));
     artifactType = ContractValues.required("artifact_type", artifactType);
@@ -32,6 +83,15 @@ public record BrokerPromptArtifact(
     reusableConsequences = ImmutableCollections.listOrEmpty(reusableConsequences);
     blockedInferences = ImmutableCollections.listOrEmpty(blockedInferences);
     nextExactObligationId = ContractStrings.trim(nextExactObligationId);
+    exactTargetClaimId = ContractStrings.trim(exactTargetClaimId);
+    targetSemanticHash = ContractStrings.trim(targetSemanticHash);
+    counterexampleWitness = ContractStrings.trim(counterexampleWitness);
+    affectedExactObligationIds = ImmutableCollections.listOrEmpty(affectedExactObligationIds);
+    exactFailedProofStepId = ContractStrings.trim(exactFailedProofStepId);
+    issueKind = ContractStrings.trim(issueKind);
+    repairability = ContractStrings.trim(repairability);
+    firstMissingJustification = ContractStrings.trim(firstMissingJustification);
+    exactBlockedInference = ContractStrings.trim(exactBlockedInference);
     allowedUseKinds = ImmutableCollections.listOrEmpty(allowedUseKinds);
   }
   @Override public List<String> assumptions() { return List.copyOf(assumptions); }
@@ -40,5 +100,8 @@ public record BrokerPromptArtifact(
   @Override public List<String> evidenceRefs() { return List.copyOf(evidenceRefs); }
   @Override public List<BrokerReusableConsequence> reusableConsequences() { return List.copyOf(reusableConsequences); }
   @Override public List<BrokerBlockedInference> blockedInferences() { return List.copyOf(blockedInferences); }
+  @Override public List<String> affectedExactObligationIds() {
+    return List.copyOf(affectedExactObligationIds);
+  }
   @Override public List<BrokerArtifactUseKind> allowedUseKinds() { return List.copyOf(allowedUseKinds); }
 }

@@ -6,6 +6,8 @@ import io.github.aililuola.mathproofmesh.contract.BrokerArtifactUseKind;
 import io.github.aililuola.mathproofmesh.contract.BrokerClaimSemanticContext;
 import io.github.aililuola.mathproofmesh.contract.BrokerPromptArtifact;
 import io.github.aililuola.mathproofmesh.contract.ReviewedObstructionPayload;
+import io.github.aililuola.mathproofmesh.contract.VerifiedCounterexamplePayload;
+import io.github.aililuola.mathproofmesh.contract.VerifiedNoGoPayload;
 import java.util.List;
 
 public final class BrokerArtifactPromptProjectionService {
@@ -24,12 +26,31 @@ public final class BrokerArtifactPromptProjectionService {
     List<io.github.aililuola.mathproofmesh.contract.QuantifierSpec> quantifiers;
     List<String> scope;
     String polarity;
+    String exactTargetClaimId = null;
+    String targetSemanticHash = null;
+    String counterexampleWitness = null;
+    List<String> affectedExactObligationIds = List.of();
+    String exactFailedProofStepId = null;
+    String issueKind = null;
+    String repairability = null;
+    String firstMissingJustification = null;
+    String exactBlockedInference = null;
     if (context != null) {
       statement = context.statement();
       assumptions = context.assumptions();
       quantifiers = context.quantifiers();
       scope = context.scopeLimitations();
       polarity = context.polarity();
+      if (artifact.payload() instanceof VerifiedCounterexamplePayload counterexample) {
+        exactTargetClaimId = counterexample.exactTargetClaimId();
+        targetSemanticHash = counterexample.targetSemanticHash();
+        counterexampleWitness = counterexample.witness();
+        affectedExactObligationIds = counterexample.affectedExactObligationIds();
+      } else if (artifact.payload() instanceof VerifiedNoGoPayload noGo) {
+        exactTargetClaimId = noGo.exactTargetClaimId();
+        targetSemanticHash = noGo.targetClaim().claimSemanticHash();
+        exactBlockedInference = noGo.blockedInference();
+      }
     } else {
       ReviewedObstructionPayload obstruction = (ReviewedObstructionPayload) artifact.payload();
       statement = obstruction.failedInferenceStatement();
@@ -37,13 +58,20 @@ public final class BrokerArtifactPromptProjectionService {
       quantifiers = List.of();
       scope = List.of("exact failed proof step " + obstruction.exactFailedProofStepId());
       polarity = "negative";
+      exactFailedProofStepId = obstruction.exactFailedProofStepId();
+      issueKind = obstruction.issueKind();
+      repairability = obstruction.repairability();
+      firstMissingJustification = obstruction.firstMissingJustification();
     }
     return new BrokerPromptArtifact(
         artifact.artifactId(), artifact.artifactType(), artifact.authority(), statement,
         assumptions, quantifiers, scope, polarity, artifact.sourceClaimRevisionId(),
         artifact.evidenceRefs(), artifact.reusableConsequences().stream().limit(MAX_CONSEQUENCES).toList(),
         artifact.blockedInferences().stream().limit(MAX_BLOCKED_INFERENCES).toList(),
-        artifact.nextExactObligationId(), allowedUses(artifact.artifactType()));
+        artifact.nextExactObligationId(), exactTargetClaimId, targetSemanticHash,
+        counterexampleWitness, affectedExactObligationIds, exactFailedProofStepId, issueKind,
+        repairability, firstMissingJustification, exactBlockedInference,
+        allowedUses(artifact.artifactType()));
   }
 
   public static List<BrokerArtifactUseKind> allowedUses(BrokerArtifactType type) {
@@ -76,6 +104,8 @@ public final class BrokerArtifactPromptProjectionService {
     return "Merely receiving an artifact does not mean it was used. "
         + "Any mathematical use must cite artifact_id in broker_artifact_use_manifest and "
         + "declare a typed use; an artifact omitted from that manifest is recorded as NOT_USED. "
+        + "Counterexample and no-go uses must echo target_semantic_hash and bind only the exact "
+        + "claim and obligation identifiers projected with that artifact. "
         + "A REVIEWED_OPEN obstruction cannot be used as a proved premise. "
         + "A BOUNDED observation cannot establish an unrestricted Claim.";
   }

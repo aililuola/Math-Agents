@@ -18,17 +18,10 @@ import io.github.aililuola.mathproofmesh.agent.StructuredOutputError;
 import io.github.aililuola.mathproofmesh.api.RunApiModels.RouteView;
 import io.github.aililuola.mathproofmesh.api.RunExecutionBackend;
 import io.github.aililuola.mathproofmesh.api.SolveRequest;
-import io.github.aililuola.mathproofmesh.communication.ArtifactCatalog;
-import io.github.aililuola.mathproofmesh.communication.DependencyCatalog;
 import io.github.aililuola.mathproofmesh.communication.InMemoryMessageRepository;
-import io.github.aililuola.mathproofmesh.communication.MessageStoreSnapshot;
-import io.github.aililuola.mathproofmesh.communication.MessageBroker;
-import io.github.aililuola.mathproofmesh.communication.MessageBrokerPolicy;
 import io.github.aililuola.mathproofmesh.communication.MessageDelivery;
-import io.github.aililuola.mathproofmesh.communication.MessageDeliveryState;
 import io.github.aililuola.mathproofmesh.communication.PromptDeliveryBatch;
 import io.github.aililuola.mathproofmesh.communication.RouteRegistry;
-import io.github.aililuola.mathproofmesh.communication.VerifiedDownstreamEffect;
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactCompilationRequest;
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactCompiler;
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactEffectObservation;
@@ -54,6 +47,7 @@ import io.github.aililuola.mathproofmesh.contract.BrokerDecision;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactEnvelope;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactReceiptStatus;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactType;
+import io.github.aililuola.mathproofmesh.contract.BrokerArtifactUseKind;
 import io.github.aililuola.mathproofmesh.contract.BrokerBlockedInference;
 import io.github.aililuola.mathproofmesh.contract.BrokerClaimSemanticContext;
 import io.github.aililuola.mathproofmesh.contract.BrokerReusableConsequence;
@@ -119,7 +113,6 @@ import io.github.aililuola.mathproofmesh.contract.InspirationTrigger;
 import io.github.aililuola.mathproofmesh.contract.InspirationTriggerType;
 import io.github.aililuola.mathproofmesh.contract.MemoryTier;
 import io.github.aililuola.mathproofmesh.contract.MessageEnvelope;
-import io.github.aililuola.mathproofmesh.contract.MessageReceipt;
 import io.github.aililuola.mathproofmesh.contract.MessageType;
 import io.github.aililuola.mathproofmesh.contract.MetaDirectiveAction;
 import io.github.aililuola.mathproofmesh.contract.MetaReview;
@@ -134,7 +127,6 @@ import io.github.aililuola.mathproofmesh.contract.ProofObligation;
 import io.github.aililuola.mathproofmesh.contract.ProofStep;
 import io.github.aililuola.mathproofmesh.contract.ProofRepairability;
 import io.github.aililuola.mathproofmesh.contract.QuantifierSpec;
-import io.github.aililuola.mathproofmesh.contract.ReceiptStatus;
 import io.github.aililuola.mathproofmesh.contract.ResearchFindingDispositionAction;
 import io.github.aililuola.mathproofmesh.contract.ResearchFindingKind;
 import io.github.aililuola.mathproofmesh.contract.ResearchFindingUpdateBatch;
@@ -544,7 +536,6 @@ final class DesktopSolveCoordinator {
   private final RouteTeamFactory teamFactory;
   private RouteRegistry routeRegistry;
   private InMemoryMessageRepository messageRepository = new InMemoryMessageRepository();
-  private MessageBroker messageBroker;
   private final MathematicalArtifactBroker mathematicalArtifactBroker =
       new MathematicalArtifactBroker();
   private final BrokerArtifactCompiler brokerArtifactCompiler = new BrokerArtifactCompiler();
@@ -601,7 +592,6 @@ final class DesktopSolveCoordinator {
             config.topology().crossRoute().maxNeighborsPerRoute(),
             8,
             config.topology().strategySimilarityThreshold());
-    this.messageBroker = createMessageBroker(messageRepository);
     this.routeTeam = new RouteTeam(config.topology().routeTeams().skepticRiskThreshold());
     this.roleRunner = new RoleRunner(roleCandidates(pool.agents()));
     this.teamFactory = new RouteTeamFactory(roleRunner);
@@ -2107,7 +2097,6 @@ final class DesktopSolveCoordinator {
             config.topology().crossRoute().maxNeighborsPerRoute(),
             8,
             config.topology().strategySimilarityThreshold());
-    messageBroker = createMessageBroker(messageRepository);
     rebuildRouteRegistry();
   }
 
@@ -2812,6 +2801,16 @@ final class DesktopSolveCoordinator {
         typedMemory.negatives().stream()
             .map(MessageEnvelope::messageId)
             .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    Set<String> committedSteps =
+        route.attempt == null
+            ? Set.of()
+            : route.attempt.proofSteps().stream()
+                .map(ProofStep::stepId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    Set<String> computationPlanIds =
+        computationTracesForRoute(route.routeId).stream()
+            .map(trace -> trace.spec().experimentId())
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
     BrokerArtifactPromptBatch batch =
         mathematicalArtifactBroker.consumeForPrompt(
             route.routeId,
@@ -2822,6 +2821,12 @@ final class DesktopSolveCoordinator {
             openTargets,
             verifiedClaims,
             refutedClaims,
+            committedSteps,
+            route.retiredActiveClaimIds,
+            mathematicalArtifactBroker.boundEffectIdsForRoute(
+                route.routeId, BrokerArtifactUseKind.TRIGGERS_LOCAL_REPAIR),
+            route.semanticPivotIds,
+            computationPlanIds,
             route.activeStrategyEpochId,
             route.focusedCanonicalTargetId);
     if (!batch.artifacts().isEmpty()) {
@@ -2887,6 +2892,12 @@ final class DesktopSolveCoordinator {
             authority,
             replayValid);
     computationTraces.add(trace);
+    mathematicalArtifactBroker.bindEffectTarget(
+        route.routeId,
+        BrokerArtifactUseKind.SUPPORTS_COMPUTATION_PLAN,
+        trace.spec().experimentId(),
+        Set.of(),
+        Set.of(targetObligationId));
     applyComputationAuthority(route, trace);
     event(
         "computation",
@@ -4209,60 +4220,14 @@ final class DesktopSolveCoordinator {
     if (route.pendingDeliveries.isEmpty()) {
       return;
     }
-    MessageStoreSnapshot snapshot = messageRepository.snapshot();
-    for (MessageDelivery delivery : List.copyOf(route.pendingDeliveries)) {
-      MessageEnvelope message = snapshot.messages().get(delivery.messageId());
-      if (message == null) {
-        continue;
-      }
-      MessageReceipt receipt =
-          messageBroker
-              .receiptService()
-              .buildReceipt(
-                  message,
-                  delivery,
-                  ReceiptStatus.ACCEPTED,
-                  message.assumptions(),
-                  message.conclusion(),
-                  message.quantifiers(),
-                  message.variableBindings(),
-                  new ArrayList<>(verifiedSteps),
-                  List.of(),
-                  "Message was parsed and used only through the committed route context");
-      MessageReceipt acknowledged = messageBroker.acknowledge(receipt);
-      if (acknowledged.status() != ReceiptStatus.ACCEPTED) {
-        continue;
-      }
-      double before = proofGraph.canonicalProofDebt(route.routeId);
-      VerifiedDownstreamEffect effect =
-          new VerifiedDownstreamEffect(
-              verifiedSteps,
-              Set.of(),
-              Set.of(),
-              Set.of(),
-              Set.of(),
-              false,
-              before,
-              proofGraph.canonicalProofDebt(route.routeId));
-      messageBroker.verifyUtility(message.messageId(), route.routeId, effect);
-      proofControl
-          .messageUtility()
-          .recordUsage(
-              message.messageId(),
-              route.routeId,
-              new ArrayList<>(verifiedSteps),
-              verifiedSteps,
-              List.of(),
-              List.of(),
-              false);
-      event(
-          "broker_receipt_recorded",
-          "cross_route_broker",
-          route.author.id(),
-          "completed",
-          "Recorded semantic receipt and verified downstream utility",
-          acknowledged.receiptId());
-    }
+    event(
+        "legacy_broker_delivery_unattributed",
+        "cross_route_broker",
+        route.author.id(),
+        "audit_only",
+        "Legacy PROMPT_CONSUMED deliveries remain historical audit data and cannot receive "
+            + "automatic proof-step attribution or scheduler utility",
+        route.routeId);
     route.pendingDeliveries.clear();
   }
 
@@ -4284,31 +4249,32 @@ final class DesktopSolveCoordinator {
             .filter(obligation -> "closed".equals(obligation.status()))
             .map(ProofObligation::obligationId)
             .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-    String computationPlanId =
-        computationTracesForRoute(route.routeId).stream()
-            .map(trace -> trace.spec().experimentId())
-            .findFirst()
-            .orElse(null);
-    BrokerArtifactEffectObservation observation =
-        new BrokerArtifactEffectObservation(
-            committedSteps,
-            verifiedClaims,
-            refutedClaims,
-            closedObligations,
-            route.retiredActiveClaimIds,
-            route.focusedCanonicalTargetId,
-            null,
-            route.activeSemanticPivotId,
-            computationPlanId,
-            false,
-            Math.max(0.0d, proofGraph.canonicalProofDebt(route.routeId)));
     int utilitiesBefore = mathematicalArtifactBroker.utilities().size();
     mathematicalArtifactBroker.receipts().stream()
         .filter(receipt -> receipt.routeId().equals(route.routeId))
         .filter(receipt -> receipt.status() == BrokerArtifactReceiptStatus.USED_PENDING_EFFECT)
         .forEach(
-            receipt ->
-                mathematicalArtifactBroker.verifyEffect(receipt.deliveryId(), observation));
+            receipt -> {
+              var lineage =
+                  mathematicalArtifactBroker.lineage().stream()
+                      .filter(value -> value.deliveryId().equals(receipt.deliveryId()))
+                      .findFirst()
+                      .orElse(null);
+              BrokerArtifactEffectObservation observation =
+                  new BrokerArtifactEffectObservation(
+                      committedSteps,
+                      verifiedClaims,
+                      refutedClaims,
+                      closedObligations,
+                      route.retiredActiveClaimIds,
+                      route.focusedCanonicalTargetId,
+                      lineage == null ? null : lineage.repairId(),
+                      lineage == null ? null : lineage.pivotId(),
+                      lineage == null ? null : lineage.computationPlanId(),
+                      false,
+                      Math.max(0.0d, proofGraph.canonicalProofDebt(route.routeId)));
+              mathematicalArtifactBroker.verifyEffect(receipt.deliveryId(), observation);
+            });
     if (mathematicalArtifactBroker.utilities().size() != utilitiesBefore) {
       persistUnchecked("broker_verified_utility", false);
     }
@@ -7986,6 +7952,12 @@ final class DesktopSolveCoordinator {
             + nextRevision,
         target.checkpoint.checkpointId());
     LocalRepairApplyReceipt receipt = localRepairReceipt(repairPlan, revision);
+    mathematicalArtifactBroker.bindEffectTarget(
+        target.routeId,
+        BrokerArtifactUseKind.TRIGGERS_LOCAL_REPAIR,
+        receipt.repairId(),
+        Set.of(),
+        Set.of(receipt.exactFocusedObligationId()));
     event(
         "local_repair_applied",
         "scheduler_decision",
@@ -8220,6 +8192,24 @@ final class DesktopSolveCoordinator {
         "completed",
         "Applied a reviewed non-empty mathematical strategy-state delta",
         applied.applyReceipt().receiptId());
+    Set<String> pivotClaimIds =
+        delta.claimUseChanges().stream()
+            .map(change -> change.claimId())
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    Set<String> pivotObligationIds = new LinkedHashSet<>();
+    delta.obligationChanges().stream()
+        .map(change -> change.obligationId())
+        .forEach(pivotObligationIds::add);
+    delta.obstructionRefs().stream()
+        .map(ref -> ref.boundCanonicalTargetId())
+        .filter(java.util.Objects::nonNull)
+        .forEach(pivotObligationIds::add);
+    mathematicalArtifactBroker.bindEffectTarget(
+        route.routeId,
+        BrokerArtifactUseKind.TRIGGERS_SEMANTIC_PIVOT,
+        delta.pivotId(),
+        pivotClaimIds,
+        pivotObligationIds);
     return applied;
   }
 
@@ -10253,7 +10243,8 @@ final class DesktopSolveCoordinator {
               item.put("proof_debt", proofGraph.canonicalProofDebt(route.routeId));
               item.put("claim_ids", List.copyOf(route.claimIds));
               item.put("failure", route.failure == null ? "none" : route.failure.failureClass());
-              item.put("message_utility", messageBroker.utilityForRoute(route.routeId));
+              item.put(
+                  "message_utility", mathematicalArtifactBroker.utilityForRoute(route.routeId));
               return Map.copyOf(item);
             })
         .toList();
@@ -10261,7 +10252,10 @@ final class DesktopSolveCoordinator {
 
   private Map<String, Double> brokerUtility() {
     Map<String, Double> result = new LinkedHashMap<>();
-    routes.forEach(route -> result.put(route.routeId, messageBroker.utilityForRoute(route.routeId)));
+    routes.forEach(
+        route ->
+            result.put(
+                route.routeId, mathematicalArtifactBroker.utilityForRoute(route.routeId)));
     return Map.copyOf(result);
   }
 
@@ -10849,7 +10843,6 @@ final class DesktopSolveCoordinator {
     nextStrategyIndex.set(Math.min(nextStrategyIndex.get(), admittedStrategies.size()));
     if (checkpoint.messageStore() != null) {
       messageRepository = new InMemoryMessageRepository(checkpoint.messageStore());
-      messageBroker = createMessageBroker(messageRepository);
     }
     mathematicalArtifactBroker.restore(
         checkpoint.brokerArtifactRegistry(),
@@ -11024,13 +11017,6 @@ final class DesktopSolveCoordinator {
           roundIndex.get());
     }
     reconsiderDeferredExpansions();
-    MessageStoreSnapshot store = messageRepository.snapshot();
-    for (RouteState route : routes) {
-      store.deliveries().values().stream()
-          .filter(delivery -> delivery.targetRouteId().equals(route.routeId))
-          .filter(delivery -> delivery.state() == MessageDeliveryState.PROMPT_CONSUMED)
-          .forEach(route.pendingDeliveries::add);
-    }
     var resumeDecision =
         proofControl
             .resume()
@@ -12139,62 +12125,6 @@ final class DesktopSolveCoordinator {
             List.of("run"),
             authoritativeGoal,
             "open"));
-  }
-
-  private MessageBroker createMessageBroker(InMemoryMessageRepository repository) {
-    var communication = config.topology().typedCommunication();
-    var cross = config.topology().crossRoute();
-    MessageBrokerPolicy policy =
-        new MessageBrokerPolicy(
-            communication.schemaVersion(),
-            communication.maxMessageChars(),
-            communication.maxAssumptions(),
-            communication.maxDependencies(),
-            Math.max(1, cross.maxMessagesPerRoutePerRound()),
-            cross.maxGlobalMessagesPerRound(),
-            cross.maxNeighborsPerRoute(),
-            cross.initialIsolationRounds(),
-            config.topology().typedMemory().factPassThreshold(),
-            cross.enabled(),
-            cross.shareVerifiedFacts(),
-            cross.shareCounterexamples(),
-            cross.shareOpenObligations(),
-            cross.shareFailureRecords(),
-            cross.shareUnverifiedInsights());
-    DependencyCatalog dependencies =
-        new DependencyCatalog() {
-          @Override
-          public boolean exists(String dependencyId) {
-            if (dependencyId == null || dependencyId.isBlank()) {
-              return false;
-            }
-            return lemmaMemory.claims().stream()
-                    .anyMatch(claim -> dependencyId.equals(claim.claimId()))
-                || typedMemory.find(dependencyId).isPresent()
-                || proofGraph.obligations().stream()
-                    .anyMatch(obligation -> dependencyId.equals(obligation.obligationId()))
-                || routes.stream()
-                    .filter(route -> route.attempt != null)
-                    .flatMap(route -> route.attempt.proofSteps().stream())
-                    .anyMatch(step -> dependencyId.equals(step.stepId()));
-          }
-
-          @Override
-          public boolean invalidated(String dependencyId) {
-            return false;
-          }
-
-          @Override
-          public boolean wouldCreateCycle(String messageId, List<String> dependencyIds) {
-            return dependencyIds != null && dependencyIds.contains(messageId);
-          }
-        };
-    return new MessageBroker(
-        policy,
-        routeRegistry,
-        ArtifactCatalog.allowRunScopedReferences(),
-        dependencies,
-        repository);
   }
 
   private static Map<RouteRole, List<String>> roleCandidates(List<AgentRuntime> agents) {

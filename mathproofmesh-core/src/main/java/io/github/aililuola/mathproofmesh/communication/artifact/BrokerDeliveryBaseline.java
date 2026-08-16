@@ -15,8 +15,42 @@ public record BrokerDeliveryBaseline(
     Set<String> openCanonicalTargetIdsBefore,
     Set<String> verifiedClaimIdsBefore,
     Set<String> refutedClaimIdsBefore,
+    Set<String> committedStepIdsBefore,
+    Set<String> retiredDependencyIdsBefore,
+    Set<String> localRepairIdsBefore,
+    Set<String> semanticPivotIdsBefore,
+    Set<String> computationPlanIdsBefore,
     String strategyEpochIdBefore,
     String focusCanonicalTargetIdBefore) {
+  public BrokerDeliveryBaseline(
+      String deliveryId,
+      String routeId,
+      String providerRequestId,
+      int consumedRound,
+      double canonicalProofDebtBefore,
+      Set<String> openCanonicalTargetIdsBefore,
+      Set<String> verifiedClaimIdsBefore,
+      Set<String> refutedClaimIdsBefore,
+      String strategyEpochIdBefore,
+      String focusCanonicalTargetIdBefore) {
+    this(
+        deliveryId,
+        routeId,
+        providerRequestId,
+        consumedRound,
+        canonicalProofDebtBefore,
+        openCanonicalTargetIdsBefore,
+        verifiedClaimIdsBefore,
+        refutedClaimIdsBefore,
+        Set.of(),
+        Set.of(),
+        Set.of(),
+        Set.of(),
+        Set.of(),
+        strategyEpochIdBefore,
+        focusCanonicalTargetIdBefore);
+  }
+
   public BrokerDeliveryBaseline {
     deliveryId = BrokerArtifactValues.required(deliveryId, "deliveryId");
     routeId = BrokerArtifactValues.required(routeId, "routeId");
@@ -27,6 +61,11 @@ public record BrokerDeliveryBaseline(
     openCanonicalTargetIdsBefore = BrokerArtifactValues.set(openCanonicalTargetIdsBefore);
     verifiedClaimIdsBefore = BrokerArtifactValues.set(verifiedClaimIdsBefore);
     refutedClaimIdsBefore = BrokerArtifactValues.set(refutedClaimIdsBefore);
+    committedStepIdsBefore = BrokerArtifactValues.set(committedStepIdsBefore);
+    retiredDependencyIdsBefore = BrokerArtifactValues.set(retiredDependencyIdsBefore);
+    localRepairIdsBefore = BrokerArtifactValues.set(localRepairIdsBefore);
+    semanticPivotIdsBefore = BrokerArtifactValues.set(semanticPivotIdsBefore);
+    computationPlanIdsBefore = BrokerArtifactValues.set(computationPlanIdsBefore);
     strategyEpochIdBefore = BrokerArtifactValues.required(strategyEpochIdBefore, "strategyEpochIdBefore");
     focusCanonicalTargetIdBefore = BrokerArtifactValues.nullable(focusCanonicalTargetIdBefore);
   }

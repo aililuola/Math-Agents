@@ -39,7 +39,8 @@ public final class BrokerArtifactUseLedger {
     if (existing != null) return existing;
     BrokerArtifactLineageRecord record = new BrokerArtifactLineageRecord(
         id, use.artifactId(), deliveryId, use.useKind(), use.referencedProofStepIds(),
-        use.affectedClaimIds(), use.affectedObligationIds(), null, null, providerRequestId, false);
+        use.affectedClaimIds(), use.affectedObligationIds(), null, null, null, providerRequestId,
+        false);
     lineage.put(id, record);
     version++;
     return record;
@@ -47,6 +48,20 @@ public final class BrokerArtifactUseLedger {
 
   public synchronized Optional<BrokerArtifactLineageRecord> forDelivery(String deliveryId) {
     return lineage.values().stream().filter(value -> value.deliveryId().equals(deliveryId)).findFirst();
+  }
+
+  public synchronized BrokerArtifactLineageRecord bindEffectTarget(
+      String lineageId, String effectId) {
+    BrokerArtifactLineageRecord record = lineage.get(lineageId);
+    if (record == null) {
+      throw new IllegalArgumentException("UNKNOWN_BROKER_LINEAGE");
+    }
+    BrokerArtifactLineageRecord updated = record.bindEffectTarget(effectId);
+    if (!updated.equals(record)) {
+      lineage.put(lineageId, updated);
+      version++;
+    }
+    return updated;
   }
 
   public synchronized void markVerified(String lineageId) {

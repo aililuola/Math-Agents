@@ -6,11 +6,14 @@ import io.github.aililuola.mathproofmesh.contract.BrokerArtifactType;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactUseClaim;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactUseKind;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactUseManifest;
+import io.github.aililuola.mathproofmesh.contract.BrokerBlockedInference;
 import io.github.aililuola.mathproofmesh.contract.BrokerClaimSemanticContext;
 import io.github.aililuola.mathproofmesh.contract.BrokerReusableConsequence;
 import io.github.aililuola.mathproofmesh.contract.QuantifierSpec;
+import io.github.aililuola.mathproofmesh.contract.ReviewedObstructionPayload;
 import io.github.aililuola.mathproofmesh.contract.VariableBinding;
 import io.github.aililuola.mathproofmesh.contract.VerifiedClaimPayload;
+import io.github.aililuola.mathproofmesh.contract.VerifiedCounterexamplePayload;
 import java.util.List;
 import java.util.Set;
 
@@ -87,6 +90,65 @@ final class BrokerArtifactTestFixtures {
                 "revision-tree",
                 true))
         .artifact();
+  }
+
+  static BrokerArtifactEnvelope counterexample() {
+    BrokerClaimSemanticContext context = context("forall", "global", "positive");
+    return new BrokerArtifactCompiler()
+        .compile(
+            request(
+                BrokerArtifactType.VERIFIED_COUNTEREXAMPLE,
+                new VerifiedCounterexamplePayload(
+                    context,
+                    "claim-tree",
+                    context.claimSemanticHash(),
+                    "The path on four vertices is an exact counterexample.",
+                    List.of("artifact://counterexample/tree"),
+                    List.of("target-tree")),
+                BrokerArtifactSourceKind.VERIFIED_COUNTEREXAMPLE,
+                "route-a",
+                "claim-tree",
+                "revision-tree",
+                true))
+        .artifact();
+  }
+
+  static BrokerArtifactEnvelope obstruction() {
+    BrokerArtifactCompilationRequest request =
+        new BrokerArtifactCompilationRequest(
+            PROBLEM_HASH,
+            ROOT_HASH,
+            BrokerArtifactType.REVIEWED_OBSTRUCTION,
+            new ReviewedObstructionPayload(
+                "failed-step-tree",
+                "Surjectivity was used as injectivity without a finite-cardinality bridge.",
+                List.of("claim-retained"),
+                "MISSING_JUSTIFICATION",
+                "LOCAL_PATCH",
+                "Prove the finite-cardinality bridge.",
+                "target-tree",
+                List.of("artifact://proof-audit/tree")),
+            BrokerArtifactSourceKind.REVIEWED_PROOF_OBSTRUCTION,
+            "route-a",
+            "attempt-1",
+            "claim-tree",
+            "revision-tree",
+            List.of("target-tree"),
+            List.of("failed-step-tree"),
+            List.of("artifact://proof-audit/tree"),
+            List.of(),
+            List.of(
+                new BrokerBlockedInference(
+                    "Surjective therefore injective without finite cardinality.",
+                    List.of("semantic-forall-global-positive"),
+                    List.of("target-tree"))),
+            List.of("claim-retained"),
+            "target-tree",
+            0,
+            20,
+            true,
+            true);
+    return new BrokerArtifactCompiler().compile(request).artifact();
   }
 
   static RouteMathematicalNeedProfile related(String routeId) {

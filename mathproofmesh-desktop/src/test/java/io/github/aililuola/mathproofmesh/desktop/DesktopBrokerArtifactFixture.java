@@ -188,6 +188,14 @@ final class DesktopBrokerArtifactFixture {
 
   BrokerArtifactUseManifest use(
       String requestId, BrokerArtifactEnvelope artifact, BrokerArtifactUseKind kind) {
+    List<String> affectedClaims = List.of("claim-derived");
+    String targetSemanticHash = null;
+    if (artifact.payload() instanceof VerifiedCounterexamplePayload counterexample) {
+      affectedClaims = List.of(counterexample.exactTargetClaimId());
+      targetSemanticHash = counterexample.targetSemanticHash();
+    } else if (artifact.payload() instanceof ReviewedObstructionPayload) {
+      affectedClaims = List.of();
+    }
     return new BrokerArtifactUseManifest(
         requestId,
         List.of(
@@ -195,8 +203,9 @@ final class DesktopBrokerArtifactFixture {
                 artifact.artifactId(),
                 kind,
                 List.of("step-use"),
-                List.of("claim-derived"),
+                affectedClaims,
                 List.of(artifact.nextExactObligationId()),
+                targetSemanticHash,
                 "The exact artifact supplies step-use.")));
   }
 

@@ -539,7 +539,7 @@ class BrokerArtifactBranchCoverageTest {
   }
 
   private static BrokerArtifactLineageRecord lineage(BrokerArtifactUseKind useKind) {
-    return new BrokerArtifactLineageRecord(
+    BrokerArtifactLineageRecord lineage = new BrokerArtifactLineageRecord(
         "lineage-" + useKind.name(),
         "artifact-1",
         "delivery-1",
@@ -551,6 +551,12 @@ class BrokerArtifactBranchCoverageTest {
         null,
         "provider-request-1",
         false);
+    return switch (useKind) {
+      case TRIGGERS_LOCAL_REPAIR -> lineage.bindEffectTarget("repair-1");
+      case TRIGGERS_SEMANTIC_PIVOT -> lineage.bindEffectTarget("pivot-1");
+      case SUPPORTS_COMPUTATION_PLAN -> lineage.bindEffectTarget("plan-1");
+      default -> lineage;
+    };
   }
 
   private static BrokerArtifactEffectObservation observation(

@@ -4,6 +4,7 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.communication.MessageStoreSnapshot;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactEnvelope;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactReceiptStatus;
+import io.github.aililuola.mathproofmesh.contract.BrokerArtifactUseKind;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactUseManifest;
 import io.github.aililuola.mathproofmesh.contract.BrokerClaimSemanticContext;
 import io.github.aililuola.mathproofmesh.contract.BrokerPromptArtifact;
@@ -69,16 +70,42 @@ public final class MathematicalArtifactBroker {
           artifact, profiles, currentRound, targetLimit);
       maybeFail(BrokerArtifactFailurePoint.AFTER_PUBLICATION);
       List<BrokerArtifactDelivery> created = new ArrayList<>();
+      Map<String, Integer> priorities = result.relevanceDecisions().stream()
+          .collect(java.util.stream.Collectors.toMap(
+              BrokerArtifactRelevanceDecision::routeId,
+              BrokerArtifactRelevanceDecision::priority,
+              Math::max));
+      int utilityPriority =
+          (int)
+              Math.round(
+                  utilities.records().stream()
+                          .filter(value -> value.artifactId().equals(result.artifact().artifactId()))
+                          .filter(value -> !value.invalidated())
+                          .mapToDouble(BrokerArtifactUtilityRecord::utilityScore)
+                          .max()
+                          .orElse(0.0d)
+                      * 50.0d);
       for (String routeId : result.publication().targetRouteIds()) {
         String deliveryId = "broker-delivery-" +
             io.github.aililuola.mathproofmesh.contract.CanonicalJson.stableHash(
                 List.of(result.publication().publicationId(), routeId)).substring(0, 24);
         BrokerArtifactDelivery delivery = new BrokerArtifactDelivery(
             deliveryId, result.artifact().artifactId(), result.publication().publicationId(),
-            routeId, currentRound, BrokerArtifactDeliveryState.QUEUED, null);
-        BrokerArtifactDelivery existing = deliveries.putIfAbsent(deliveryId, delivery);
-        created.add(existing == null ? delivery : existing);
-        if (existing == null) deliveryVersion++;
+            routeId, currentRound, BrokerArtifactDeliveryState.QUEUED, null,
+            priorities.getOrDefault(routeId, 0) + utilityPriority);
+        BrokerArtifactDelivery existing = deliveries.get(deliveryId);
+        if (existing == null) {
+          deliveries.put(deliveryId, delivery);
+          created.add(delivery);
+          deliveryVersion++;
+        } else {
+          BrokerArtifactDelivery prioritized = existing.prioritize(delivery.relevancePriority());
+          deliveries.put(deliveryId, prioritized);
+          created.add(prioritized);
+          if (!prioritized.equals(existing)) {
+            deliveryVersion++;
+          }
+        }
       }
       maybeFail(BrokerArtifactFailurePoint.AFTER_DELIVERY);
       return new BrokerArtifactPublishResult(result.artifact(), result.publication(), created,
@@ -100,6 +127,40 @@ public final class MathematicalArtifactBroker {
       Set<String> openCanonicalTargets,
       Set<String> verifiedClaimIds,
       Set<String> refutedClaimIds,
+      String strategyEpochId,
+      String focusCanonicalTargetId) {
+    return consumeForPrompt(
+        routeId,
+        providerRequestId,
+        currentRound,
+        limit,
+        proofDebtBefore,
+        openCanonicalTargets,
+        verifiedClaimIds,
+        refutedClaimIds,
+        Set.of(),
+        Set.of(),
+        Set.of(),
+        Set.of(),
+        Set.of(),
+        strategyEpochId,
+        focusCanonicalTargetId);
+  }
+
+  public synchronized BrokerArtifactPromptBatch consumeForPrompt(
+      String routeId,
+      String providerRequestId,
+      int currentRound,
+      int limit,
+      double proofDebtBefore,
+      Set<String> openCanonicalTargets,
+      Set<String> verifiedClaimIds,
+      Set<String> refutedClaimIds,
+      Set<String> committedStepIds,
+      Set<String> retiredDependencyIds,
+      Set<String> localRepairIds,
+      Set<String> semanticPivotIds,
+      Set<String> computationPlanIds,
       String strategyEpochId,
       String focusCanonicalTargetId) {
     if (providerRequests.containsKey(providerRequestId)) {
@@ -132,7 +193,10 @@ public final class MathematicalArtifactBroker {
           .filter(delivery -> registry.find(delivery.artifactId())
               .map(artifact -> currentRound - delivery.deliveredRound() <= artifact.ttlRounds())
               .orElse(false))
-          .sorted(Comparator.comparing(BrokerArtifactDelivery::deliveryId))
+          .sorted(
+              Comparator.comparingInt(BrokerArtifactDelivery::relevancePriority)
+                  .reversed()
+                  .thenComparing(BrokerArtifactDelivery::deliveryId))
           .limit(Math.min(BrokerArtifactPromptProjectionService.MAX_ARTIFACTS, Math.max(0, limit)))
           .toList();
       List<BrokerArtifactDelivery> consumed = new ArrayList<>();
@@ -142,8 +206,9 @@ public final class MathematicalArtifactBroker {
         deliveries.put(delivery.deliveryId(), updated);
         baselines.putIfAbsent(delivery.deliveryId(), new BrokerDeliveryBaseline(
             delivery.deliveryId(), routeId, providerRequestId, currentRound, proofDebtBefore,
-            openCanonicalTargets, verifiedClaimIds, refutedClaimIds, strategyEpochId,
-            focusCanonicalTargetId));
+            openCanonicalTargets, verifiedClaimIds, refutedClaimIds, committedStepIds,
+            retiredDependencyIds, localRepairIds, semanticPivotIds, computationPlanIds,
+            strategyEpochId, focusCanonicalTargetId));
         consumed.add(updated);
         artifacts.add(registry.find(delivery.artifactId()).orElseThrow());
         deliveryVersion++;
@@ -242,6 +307,62 @@ public final class MathematicalArtifactBroker {
       utilities.restore(utilityBefore);
       throw exception;
     }
+  }
+
+  public synchronized Optional<BrokerArtifactLineageRecord> bindEffectTarget(
+      String routeId,
+      BrokerArtifactUseKind useKind,
+      String effectId,
+      Set<String> affectedClaimIds,
+      Set<String> affectedObligationIds) {
+    String normalizedRoute = BrokerArtifactValues.required(routeId, "routeId");
+    String normalizedEffect = BrokerArtifactValues.required(effectId, "effectId");
+    Set<String> claims = BrokerArtifactValues.set(affectedClaimIds);
+    Set<String> obligations = BrokerArtifactValues.set(affectedObligationIds);
+    List<BrokerArtifactLineageRecord> candidates =
+        uses.records().stream()
+            .filter(lineage -> lineage.useKind() == useKind)
+            .filter(lineage -> !lineage.effectVerified())
+            .filter(
+                lineage -> {
+                  BrokerArtifactDelivery delivery = deliveries.get(lineage.deliveryId());
+                  return delivery != null && delivery.targetRouteId().equals(normalizedRoute);
+                })
+            .filter(lineage -> targetIsUnbound(lineage, useKind))
+            .filter(lineage -> targetContextMatches(lineage, claims, obligations))
+            .toList();
+    if (candidates.size() != 1) {
+      return Optional.empty();
+    }
+    return Optional.of(uses.bindEffectTarget(candidates.getFirst().lineageId(), normalizedEffect));
+  }
+
+  public synchronized double utilityForRoute(String routeId) {
+    String normalizedRoute = BrokerArtifactValues.required(routeId, "routeId");
+    return utilities.records().stream()
+        .filter(utility -> !utility.invalidated())
+        .filter(
+            utility -> {
+              BrokerArtifactDelivery delivery = deliveries.get(utility.deliveryId());
+              return delivery != null && delivery.targetRouteId().equals(normalizedRoute);
+            })
+        .mapToDouble(BrokerArtifactUtilityRecord::utilityScore)
+        .sum();
+  }
+
+  public synchronized Set<String> boundEffectIdsForRoute(
+      String routeId, BrokerArtifactUseKind useKind) {
+    String normalizedRoute = BrokerArtifactValues.required(routeId, "routeId");
+    return uses.records().stream()
+        .filter(lineage -> lineage.useKind() == useKind)
+        .filter(
+            lineage -> {
+              BrokerArtifactDelivery delivery = deliveries.get(lineage.deliveryId());
+              return delivery != null && delivery.targetRouteId().equals(normalizedRoute);
+            })
+        .map(lineage -> effectId(lineage, useKind))
+        .filter(java.util.Objects::nonNull)
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
   }
 
   public synchronized BrokerArtifactInvalidationRecord invalidate(
@@ -405,6 +526,39 @@ public final class MathematicalArtifactBroker {
   public synchronized List<BrokerArtifactLineageRecord> lineage() { return uses.records(); }
   public synchronized List<BrokerArtifactUtilityRecord> utilities() { return utilities.records(); }
   public synchronized List<BrokerArtifactInvalidationRecord> invalidations() { return invalidations.records(); }
+
+  private static boolean targetIsUnbound(
+      BrokerArtifactLineageRecord lineage, BrokerArtifactUseKind useKind) {
+    return switch (useKind) {
+      case TRIGGERS_LOCAL_REPAIR -> lineage.repairId() == null;
+      case TRIGGERS_SEMANTIC_PIVOT -> lineage.pivotId() == null;
+      case SUPPORTS_COMPUTATION_PLAN -> lineage.computationPlanId() == null;
+      default -> false;
+    };
+  }
+
+  private static String effectId(
+      BrokerArtifactLineageRecord lineage, BrokerArtifactUseKind useKind) {
+    return switch (useKind) {
+      case TRIGGERS_LOCAL_REPAIR -> lineage.repairId();
+      case TRIGGERS_SEMANTIC_PIVOT -> lineage.pivotId();
+      case SUPPORTS_COMPUTATION_PLAN -> lineage.computationPlanId();
+      default -> null;
+    };
+  }
+
+  private static boolean targetContextMatches(
+      BrokerArtifactLineageRecord lineage,
+      Set<String> affectedClaimIds,
+      Set<String> affectedObligationIds) {
+    boolean declaresContext =
+        !lineage.downstreamClaimIds().isEmpty() || !lineage.downstreamObligationIds().isEmpty();
+    boolean claimMatch =
+        lineage.downstreamClaimIds().stream().anyMatch(affectedClaimIds::contains);
+    boolean obligationMatch =
+        lineage.downstreamObligationIds().stream().anyMatch(affectedObligationIds::contains);
+    return declaresContext && (claimMatch || obligationMatch);
+  }
 
   public synchronized void setFailurePointForTest(BrokerArtifactFailurePoint point) {
     failurePoint = java.util.Objects.requireNonNull(point, "point");
