@@ -30,7 +30,12 @@ import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactRe
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactUseSnapshot;
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactUtilitySnapshot;
 import io.github.aililuola.mathproofmesh.computation.ComputationBroker;
+import io.github.aililuola.mathproofmesh.computation.ComputationArtifactSnapshot;
+import io.github.aililuola.mathproofmesh.computation.ComputationCapabilitySnapshot;
 import io.github.aililuola.mathproofmesh.computation.ComputationEvidenceGate;
+import io.github.aililuola.mathproofmesh.computation.ComputationExecutionSnapshot;
+import io.github.aililuola.mathproofmesh.computation.ComputationOutcomeReceiptSnapshot;
+import io.github.aililuola.mathproofmesh.computation.ComputationVerificationSnapshot;
 import io.github.aililuola.mathproofmesh.memory.LemmaMemorySnapshot;
 import io.github.aililuola.mathproofmesh.memory.TypedMemorySnapshot;
 import io.github.aililuola.mathproofmesh.orchestration.ContinuationFunctions.Checkpoint;
@@ -123,12 +128,17 @@ record DesktopSolveCheckpoint(
     ValidationExecution finalValidationExecution,
     FormalizationCoverageReport formalizationCoverage,
     List<ComputationBroker.ComputationAudit> computationAudits,
+    ComputationCapabilitySnapshot computationCapabilities,
+    ComputationExecutionSnapshot computationExecutions,
+    ComputationArtifactSnapshot computationArtifacts,
+    ComputationVerificationSnapshot computationVerifications,
+    ComputationOutcomeReceiptSnapshot computationOutcomeReceipts,
     List<String> completedStages,
     ProofGraphConvergenceSnapshot proofGraphConvergence,
     DeferredExpansionSnapshot deferredExpansions,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 17;
+  static final int CURRENT_SCHEMA_VERSION = 18;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {
@@ -205,6 +215,24 @@ record DesktopSolveCheckpoint(
     finalReviewReports = finalReviewReports == null ? List.of() : List.copyOf(finalReviewReports);
     finalValidationPassed = Boolean.TRUE.equals(finalValidationPassed);
     computationAudits = computationAudits == null ? List.of() : List.copyOf(computationAudits);
+    computationCapabilities =
+        computationCapabilities == null
+            ? ComputationCapabilitySnapshot.empty()
+            : computationCapabilities;
+    computationExecutions =
+        computationExecutions == null
+            ? ComputationExecutionSnapshot.empty()
+            : computationExecutions;
+    computationArtifacts =
+        computationArtifacts == null ? ComputationArtifactSnapshot.empty() : computationArtifacts;
+    computationVerifications =
+        computationVerifications == null
+            ? ComputationVerificationSnapshot.empty()
+            : computationVerifications;
+    computationOutcomeReceipts =
+        computationOutcomeReceipts == null
+            ? ComputationOutcomeReceiptSnapshot.empty()
+            : computationOutcomeReceipts;
     completedStages = completedStages == null ? List.of() : List.copyOf(completedStages);
     proofGraphConvergence =
         proofGraphConvergence == null

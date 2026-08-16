@@ -780,8 +780,15 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
     }
     ComputationHandlerRegistry registry =
         new ComputationHandlerRegistry(new CompositeExternalComputationHandler(external));
+    ArtifactStore computationArtifacts =
+        new ArtifactStore(runDirectory.resolve("runtime-artifacts"), runId);
     ComputationBroker broker =
-        new ComputationBroker(runId, limits, registry, new InMemoryComputationCache());
+        new ComputationBroker(
+            runId,
+            limits,
+            registry,
+            new InMemoryComputationCache(),
+            new ArtifactStoreComputationArtifactStore(computationArtifacts));
     return new ComputationRuntime(broker, sandboxEnabled, remainingCalls);
   }
 

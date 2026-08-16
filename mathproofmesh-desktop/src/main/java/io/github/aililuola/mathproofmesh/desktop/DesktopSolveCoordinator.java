@@ -34,6 +34,9 @@ import io.github.aililuola.mathproofmesh.computation.ComputationBroker;
 import io.github.aililuola.mathproofmesh.computation.ComputationBroker.ComputationAudit;
 import io.github.aililuola.mathproofmesh.computation.ComputationContext;
 import io.github.aililuola.mathproofmesh.computation.ComputationEvidenceGate;
+import io.github.aililuola.mathproofmesh.computation.ComputationExecutionState;
+import io.github.aililuola.mathproofmesh.computation.ComputationExecutionContext;
+import io.github.aililuola.mathproofmesh.computation.ComputationExecutionOutcome;
 import io.github.aililuola.mathproofmesh.computation.ContractsFunctions;
 import io.github.aililuola.mathproofmesh.computation.ToolBroker;
 import io.github.aililuola.mathproofmesh.config.BudgetConfig;
@@ -647,6 +650,8 @@ final class DesktopSolveCoordinator {
         return resultFromCurrentState();
       }
     }
+    computation.setStatePersister(
+        (reason, state) -> persistUnchecked(reason, false));
     while (true) {
       switch (workflowCursor) {
         case CURSOR_FREEZE -> freezeProblem();
@@ -1619,7 +1624,11 @@ final class DesktopSolveCoordinator {
       ComputationAudit audit =
           computation.auditExperiment(prepared.spec(), prepared.decision(), null, result);
       ComputationEvidenceGate.EvidenceAuthority authority =
-          ComputationEvidenceGate.authority(result);
+          computation
+              .executionService()
+              .lastOutcome(prepared.spec().experimentId())
+              .map(ComputationExecutionOutcome::authority)
+              .orElse(ComputationEvidenceGate.EvidenceAuthority.INCONCLUSIVE);
       computationTraces.add(
           new ComputationTrace(
               "strategy-preflight:" + strategy.strategyId(),
@@ -2873,10 +2882,19 @@ final class DesktopSolveCoordinator {
         audit = retryAudit;
       }
     }
-    boolean replayValid = audit != null && audit.valid();
+    ComputationExecutionOutcome executionOutcome =
+        computation
+            .executionService()
+            .lastOutcome(trace.spec().experimentId())
+            .orElse(null);
+    boolean replayValid =
+        audit != null
+            && audit.valid()
+            && executionOutcome != null
+            && executionOutcome.verificationReceipt().valid();
     ComputationEvidenceGate.EvidenceAuthority authority =
-        replayValid && trace.result() != null
-            ? ComputationEvidenceGate.authority(trace.result())
+        replayValid
+            ? executionOutcome.authority()
             : ComputationEvidenceGate.EvidenceAuthority.INCONCLUSIVE;
     trace =
         new ComputationTrace(
@@ -3011,7 +3029,27 @@ final class DesktopSolveCoordinator {
                 "Generating a bounded sandbox computation");
         program = sandboxProgram(prepared.spec(), draft.value());
       }
-      result = computation.runExperiment(prepared.spec(), decision, program);
+      String claimId = prepared.spec().targetClaimId();
+      String claimSemanticHash =
+          prepared.spec().claimEvidenceSemanticBinding() == null
+              ? claimId == null || claimId.isBlank()
+                  ? ""
+                  : CanonicalJson.stableHash(prepared.spec().targetClaim())
+              : prepared.spec().claimEvidenceSemanticBinding().claimSemanticHash();
+      ComputationExecutionContext executionContext =
+          new ComputationExecutionContext(
+              problemHash,
+              rootGoal().sourceStatementHash(),
+              route.routeId,
+              claimId,
+              claimSemanticHash,
+              targetObligationId,
+              route.focusedCanonicalTargetId,
+              roundIndex.get(),
+              null);
+      result =
+          computation.runExperiment(
+              prepared.spec(), decision, program, executionContext);
     }
     return new ComputationTrace(
         route.routeId,
@@ -10772,6 +10810,13 @@ final class DesktopSolveCoordinator {
     inspirationProgress = checkpoint.inspirationProgress();
     computationAudits.clear();
     computationAudits.addAll(checkpoint.computationAudits());
+    computation.restore(
+        new ComputationExecutionState(
+            checkpoint.computationCapabilities(),
+            checkpoint.computationExecutions(),
+            checkpoint.computationArtifacts(),
+            checkpoint.computationVerifications(),
+            checkpoint.computationOutcomeReceipts()));
     inspirationProposals.clear();
     inspirationProposals.addAll(checkpoint.inspirationProposals());
     inspirationOutcomes.clear();
@@ -10791,6 +10836,32 @@ final class DesktopSolveCoordinator {
                     value.targetObligationId(),
                     value.authority(),
                     value.replayValid())));
+    if (checkpoint.schemaVersion() < 18
+        && checkpoint.computationExecutions().records().isEmpty()) {
+      checkpoint.computations().forEach(
+          value -> {
+            if (value.result() != null) {
+              computation
+                  .executionService()
+                  .importLegacy(
+                      value.routeId(),
+                      value.spec(),
+                      value.program(),
+                      value.result(),
+                      value.authority(),
+                      value.replayValid(),
+                      checkpoint.roundIndex());
+            } else {
+              computation
+                  .executionService()
+                  .importLegacyAudit(
+                      value.routeId(),
+                      value.spec(),
+                      value.program(),
+                      checkpoint.roundIndex());
+            }
+          });
+    }
 
     if (checkpoint.typedMemory() != null) {
       typedMemory = TypedMemory.restore(checkpoint.typedMemory(), memoryPolicy());
@@ -11422,6 +11493,7 @@ final class DesktopSolveCoordinator {
                         trace.authority(),
                         trace.replayValid()))
             .toList();
+    ComputationExecutionState computationState = computation.snapshot();
     DesktopSolveCheckpoint checkpoint =
         new DesktopSolveCheckpoint(
             STATE_SCHEMA_VERSION,
@@ -11479,6 +11551,11 @@ final class DesktopSolveCoordinator {
             finalValidationExecution,
             formalizationCoverage,
             computationAudits,
+            computationState.capabilities(),
+            computationState.executions(),
+            computationState.artifacts(),
+            computationState.verifications(),
+            computationState.outcomeReceipts(),
             new ArrayList<>(completedStages),
             proofGraphConvergence.snapshot(),
             deferredExpansions.snapshot(),
