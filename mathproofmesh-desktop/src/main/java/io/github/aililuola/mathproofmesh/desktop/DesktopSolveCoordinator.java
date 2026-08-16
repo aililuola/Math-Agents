@@ -2797,10 +2797,7 @@ final class DesktopSolveCoordinator {
         typedMemory.facts().stream()
             .map(MessageEnvelope::messageId)
             .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-    Set<String> refutedClaims =
-        typedMemory.negatives().stream()
-            .map(MessageEnvelope::messageId)
-            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    Set<String> refutedClaims = refutedClaimIdsForRoute(route);
     Set<String> committedSteps =
         route.attempt == null
             ? Set.of()
@@ -4231,6 +4228,10 @@ final class DesktopSolveCoordinator {
     route.pendingDeliveries.clear();
   }
 
+  private Set<String> refutedClaimIdsForRoute(RouteState route) {
+    return Set.copyOf(route.rejectedClaimIds);
+  }
+
   private void verifyConsumedArtifactEffects(RouteState route) {
     if (route.attempt == null) {
       return;
@@ -4243,7 +4244,7 @@ final class DesktopSolveCoordinator {
         typedMemory.facts().stream()
             .map(MessageEnvelope::messageId)
             .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-    Set<String> refutedClaims = new LinkedHashSet<>(route.rejectedClaimIds);
+    Set<String> refutedClaims = refutedClaimIdsForRoute(route);
     Set<String> closedObligations =
         proofGraph.obligations().stream()
             .filter(obligation -> "closed".equals(obligation.status()))

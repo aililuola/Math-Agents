@@ -61,7 +61,9 @@ import io.github.aililuola.mathproofmesh.contract.VerificationVerdict;
 import io.github.aililuola.mathproofmesh.memory.LemmaMemory;
 import io.github.aililuola.mathproofmesh.memory.TypedMemory;
 import io.github.aililuola.mathproofmesh.communication.MessageStoreSnapshot;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactPromptBatch;
 import io.github.aililuola.mathproofmesh.communication.artifact.MathematicalArtifactBroker;
+import io.github.aililuola.mathproofmesh.contract.BrokerArtifactUseManifest;
 import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleController;
@@ -455,6 +457,79 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
         new Object[] {route});
   }
 
+  void addRejectedClaimToRoute(String claimId) {
+    Object route = routeUnchecked();
+    addDistinct(mutableStringListField(route, "claimIds"), claimId);
+    addDistinct(mutableStringListField(route, "rejectedClaimIds"), claimId);
+  }
+
+  Set<String> rejectedClaimIds() {
+    return Set.copyOf(mutableStringListField(routeUnchecked(), "rejectedClaimIds"));
+  }
+
+  void setRoundForBrokerTest(int round) throws ReflectiveOperationException {
+    setRound(round);
+  }
+
+  BrokerArtifactPromptBatch consumeBrokerContext() throws Exception {
+    Object route = route();
+    return (BrokerArtifactPromptBatch)
+        invoke(
+            "consumeBrokerContext",
+            new Class<?>[] {route.getClass()},
+            new Object[] {route});
+  }
+
+  void installBrokerUseAttempt(int round) throws ReflectiveOperationException {
+    setRound(round);
+    Object route = route();
+    AgentRuntime author = field(route, "author", AgentRuntime.class);
+    StrategyCard strategy = field(route, "strategy", StrategyCard.class);
+    ProofAttempt attempt =
+        new ProofAttempt(
+            author.id(),
+            "broker-use-attempt-" + round,
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of("checked exact counterexample target"),
+            null,
+            null,
+            null,
+            PROBLEM_HASH,
+            "The delivered counterexample is cited only for its exact Claim target.",
+            List.of(proofStep("use", "The exact target Claim was already refuted.")),
+            List.of(),
+            "artifact://broker-use/" + round,
+            null,
+            round,
+            1,
+            0.5d,
+            AttemptStatus.FAILED,
+            strategy.strategyId(),
+            List.of("the main route remains open"),
+            new UsageRecord());
+    setField(route, "attempt", attempt);
+  }
+
+  void stageAndAcknowledgeBrokerUse(BrokerArtifactUseManifest manifest) throws Exception {
+    mathematicalArtifactBroker().stageUseManifest(manifest);
+    Object route = route();
+    invoke(
+        "acknowledgeConsumedMessages",
+        new Class<?>[] {route.getClass()},
+        new Object[] {route});
+  }
+
+  void verifyConsumedArtifactEffects() throws Exception {
+    Object route = route();
+    invoke(
+        "verifyConsumedArtifactEffects",
+        new Class<?>[] {route.getClass()},
+        new Object[] {route});
+  }
+
   @SuppressWarnings("unchecked")
   double schedulerBrokerUtility(String routeId) throws Exception {
     Map<String, Double> utility = (Map<String, Double>) invoke("brokerUtility");
@@ -725,6 +800,17 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
     Field field = target.getClass().getDeclaredField(name);
     field.setAccessible(true);
     field.set(target, value);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static List<String> mutableStringListField(Object target, String name) {
+    return (List<String>) rawFieldUnchecked(target, name);
+  }
+
+  private static void addDistinct(List<String> values, String value) {
+    if (!values.contains(value)) {
+      values.add(value);
+    }
   }
 
   private static StrategyCard validStrategy() {

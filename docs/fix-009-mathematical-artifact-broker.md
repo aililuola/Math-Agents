@@ -595,3 +595,82 @@ log, checkpoint, database, cache, or temporary file was committed.
 
 Run-generated `target`, log, checkpoint, database, and refreshed report files are not included in
 the commits.
+
+## 20. Post-audit refuted Claim identity closure
+
+An independent follow-up audit found one remaining Desktop identity-domain mismatch. Prompt
+consumption recorded `BrokerDeliveryBaseline.refutedClaimIdsBefore` from Typed Memory negative
+message IDs, while downstream effect verification observed Route rejected Claim IDs. The Core
+difference calculation was correct, but its two inputs did not describe the same identity space.
+
+The regression was written before the production change and failed through the real Desktop
+chain after a round-5 checkpoint restore:
+
+```text
+PREEXISTING_ROUTE_REFUTED_CLAIMS=1
+REFUTED_BASELINE_CLAIM_IDS=0
+REFUTED_BASELINE_NEGATIVE_MESSAGE_IDS=0
+NEW_REFUTED_CLAIMS_AFTER_DELIVERY=1
+EXACT_CLAIM_REFUTED_EFFECTS=1
+PREEXISTING_REFUTED_CLAIM_UTILITIES=1
+REFUTED_BASELINE_ID_DOMAIN_MISMATCHES=1
+Tests run: 2, Failures: 2, Errors: 0, Skipped: 0
+```
+
+`DesktopSolveCoordinator` now owns one `refutedClaimIdsForRoute(...)` projection. Both
+`consumeBrokerContext(...)` and `verifyConsumedArtifactEffects(...)` call it, so the before and
+after sets are immutable copies of the same Route Claim-ID state. Typed Memory negatives remain
+available for negative-knowledge prompts and audit history, but are not accepted as Claim IDs for
+Broker effect attribution. No Broker contract, effect verifier, Claim Court, or checkpoint schema
+changed.
+
+`DesktopPreExistingRefutedClaimNoUtilityTest` exercises:
+
+```text
+Route rejectedClaimIds
+-> Artifact publish
+-> consumeBrokerContext
+-> BrokerDeliveryBaseline
+-> checkpoint JSON round trip and restore at round 5
+-> explicit REFUTES_CLAIM use
+-> verifyConsumedArtifactEffects
+```
+
+The final production-chain diagnostic is:
+
+```text
+PREEXISTING REFUTED CLAIM BROKER DIAGNOSTIC
+RESTORE_ROUND=5
+PREEXISTING_ROUTE_REFUTED_CLAIMS=1
+REFUTED_BASELINE_CLAIM_IDS=1
+REFUTED_BASELINE_NEGATIVE_MESSAGE_IDS=0
+NEW_REFUTED_CLAIMS_AFTER_DELIVERY=0
+EXACT_CLAIM_REFUTED_EFFECTS=0
+PREEXISTING_REFUTED_CLAIM_UTILITIES=0
+REFUTED_BASELINE_ID_DOMAIN_MISMATCHES=0
+RESULT=PASS
+```
+
+`DesktopBrokerRefutedIdentityDomainArchitectureTest` additionally locks both production sites to
+the shared projection and rejects any return to `typedMemory.negatives()` in the delivery
+baseline.
+
+The Broker-focused regression ran 67 tests across Contracts, Core, Server, and Desktop with zero
+failure, error, or skip. The full Core/Desktop dependency reactor then passed 2,367 tests with
+zero failures or errors and four existing skips. The final offline release gate passed with:
+
+```text
+contracts:       61 tests, 0 failures, 0 errors, 0 skipped
+core:          1215 tests, 0 failures, 0 errors, 0 skipped
+server:         864 tests, 0 failures, 0 errors, 3 skipped
+desktop:        227 tests, 0 failures, 0 errors, 1 skipped
+compatibility:  149 tests, 0 failures, 0 errors, 0 skipped
+TOTAL UNIT:    2516 tests, 0 failures, 0 errors, 4 skipped
+FAILSAFE:        26 tests, 0 failures, 0 errors, 0 skipped
+FULL VERIFICATION: PASS
+```
+
+Docker-backed PostgreSQL integration tests, coverage, SpotBugs/FindSecBugs, OWASP dependency
+checking, secret scanning, license review, performance thresholds, and original-source
+immutability all passed. Refreshed generated reports were restored and are not part of this
+patch. Issues 001-008 and Issue 010 remain outside this follow-up's production change.
