@@ -1,6 +1,9 @@
 package io.github.aililuola.mathproofmesh.computation;
 
 import io.github.aililuola.mathproofmesh.contract.ComputationMethod;
+import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
+import io.github.aililuola.mathproofmesh.contract.ComputationVerificationReceipt;
+import io.github.aililuola.mathproofmesh.contract.ComputationVerifiedAuthority;
 import io.github.aililuola.mathproofmesh.contract.EvidenceStrength;
 import io.github.aililuola.mathproofmesh.contract.ExperimentOutcome;
 import io.github.aililuola.mathproofmesh.contract.ExperimentResult;
@@ -11,50 +14,55 @@ public final class ComputationEvidenceGate {
 
   public static EvidenceAuthority authority(ExperimentResult result) {
     java.util.Objects.requireNonNull(result, "result");
-    if (result.outcome() == ExperimentOutcome.COUNTEREXAMPLE_FOUND
-        && result.evidenceStrength() == EvidenceStrength.COUNTEREXAMPLE
-        && result.independentlyVerified()) {
-      return EvidenceAuthority.REFUTED;
-    }
     if (result.outcome() == ExperimentOutcome.NOT_REFUTED) {
       return EvidenceAuthority.NOT_REFUTED;
-    }
-    if (result.outcome() == ExperimentOutcome.CERTIFIED
-        && result.evidenceStrength() == EvidenceStrength.EXHAUSTIVE_CERTIFICATE
-        && result.scope().path("complete_domain").asBoolean(false)) {
-      return EvidenceAuthority.VERIFIED_BOUNDED;
-    }
-    if (result.outcome() == ExperimentOutcome.CERTIFIED
-        && result.evidenceStrength() == EvidenceStrength.FORMAL_CERTIFICATE
-        && result.method() == ComputationMethod.LEAN_CHECK) {
-      return EvidenceAuthority.VERIFIED;
     }
     return EvidenceAuthority.INCONCLUSIVE;
   }
 
+  public static EvidenceAuthority authority(
+      ExperimentResult result,
+      ComputationVerificationReceipt receipt,
+      ComputationCapabilityDescriptor descriptor) {
+    java.util.Objects.requireNonNull(result, "result");
+    java.util.Objects.requireNonNull(receipt, "receipt");
+    java.util.Objects.requireNonNull(descriptor, "descriptor");
+    if (!receipt.valid()
+        || result.method() != descriptor.method()
+        || !receipt.verifierId().equals(descriptor.verifierId())
+        || !receipt.verifierVersion().equals(descriptor.verifierVersion())
+        || !receipt.verifiedScopeHash().equals(CanonicalJson.stableHash(result.scope()))
+        || !descriptor.authorityCeiling().permits(receipt.authority())) {
+      return result.outcome() == ExperimentOutcome.NOT_REFUTED
+          ? EvidenceAuthority.NOT_REFUTED
+          : EvidenceAuthority.INCONCLUSIVE;
+    }
+    return switch (receipt.authority()) {
+      case EXACT_COUNTEREXAMPLE -> EvidenceAuthority.REFUTED;
+      case FINITE_DOMAIN_CERTIFICATE -> EvidenceAuthority.VERIFIED_BOUNDED;
+      case FORMAL_CERTIFICATE -> EvidenceAuthority.VERIFIED;
+      case BOUNDED_OBSERVATION -> EvidenceAuthority.NOT_REFUTED;
+      case AUDIT_ONLY -> EvidenceAuthority.INCONCLUSIVE;
+    };
+  }
+
   public static FactDecision evaluate(ExperimentResult result) {
-    if (result.outcome() == ExperimentOutcome.COUNTEREXAMPLE_FOUND
-        && result.evidenceStrength() == EvidenceStrength.COUNTEREXAMPLE
-        && result.independentlyVerified()) {
-      return new FactDecision(false, true, "independently replayed counterexample");
-    }
-    if (result.evidenceStrength() == EvidenceStrength.BOUNDED_EVIDENCE
-        || result.outcome() == ExperimentOutcome.NOT_REFUTED) {
-      return new FactDecision(
-          false, false, "bounded computation cannot satisfy the Fact gate");
-    }
-    if (result.evidenceStrength() == EvidenceStrength.FORMAL_CERTIFICATE
-        && result.outcome() == ExperimentOutcome.CERTIFIED
-        && result.method() == ComputationMethod.LEAN_CHECK) {
-      return new FactDecision(true, false, "formal kernel certificate");
-    }
-    if (result.evidenceStrength() == EvidenceStrength.EXHAUSTIVE_CERTIFICATE
-        && result.outcome() == ExperimentOutcome.CERTIFIED
-        && result.scope().path("complete_domain").asBoolean(false)) {
-      return new FactDecision(true, false, "complete finite-domain certificate");
-    }
     return new FactDecision(
-        false, false, "evidence does not meet a fact-admission rule");
+        false, false, "a durable independent verification receipt is required");
+  }
+
+  public static FactDecision evaluate(
+      ExperimentResult result,
+      ComputationVerificationReceipt receipt,
+      ComputationCapabilityDescriptor descriptor) {
+    return switch (authority(result, receipt, descriptor)) {
+      case REFUTED -> new FactDecision(false, true, "verified exact counterexample receipt");
+      case VERIFIED -> new FactDecision(true, false, "formal kernel verification receipt");
+      case VERIFIED_BOUNDED ->
+          new FactDecision(true, false, "complete finite-domain verification receipt");
+      case NOT_REFUTED, INCONCLUSIVE ->
+          new FactDecision(false, false, "bounded or inconclusive computation is not a Fact");
+    };
   }
 
   public record FactDecision(

@@ -17,6 +17,9 @@ public enum ComputationMethod {
   NUMERIC_COUNTEREXAMPLE("numeric_counterexample"),
   REAL_INEQUALITY("real_inequality"),
   NUMBER_THEORY_CHECK("number_theory_check"),
+  EXACT_LINEAR_ALGEBRA("exact_linear_algebra"),
+  FINITE_SET_MAP_CHECK("finite_set_map_check"),
+  HYPERGRAPH_TRANSVERSAL("hypergraph_transversal"),
   SANDBOXED_PYTHON("sandboxed_python"),
   LEAN_CHECK("lean_check");
 

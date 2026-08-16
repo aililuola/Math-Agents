@@ -6,8 +6,20 @@ import java.util.concurrent.ConcurrentMap;
 /** Run-local quota ledger; no state is shared between broker instances or tenants. */
 public final class ComputationLedger {
   private final ConcurrentMap<String, Usage> usageByPath = new ConcurrentHashMap<>();
+  private final ComputationExecutionLedger durable;
+
+  public ComputationLedger() {
+    this(null);
+  }
+
+  ComputationLedger(ComputationExecutionLedger durable) {
+    this.durable = durable;
+  }
 
   public Usage usage(String pathId) {
+    if (durable != null) {
+      return durable.usage(pathId);
+    }
     return usageByPath.getOrDefault(pathId, new Usage(0, 0.0));
   }
 

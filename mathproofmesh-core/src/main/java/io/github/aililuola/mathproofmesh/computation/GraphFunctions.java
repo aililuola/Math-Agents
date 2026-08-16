@@ -59,6 +59,7 @@ public final class GraphFunctions {
 
     ObjectNode scope =
         ComputationJson.object()
+            .put("complete_domain", true)
             .put("node_count", nodes.size())
             .put("edge_count", edges.size())
             .put("directed", directed);
@@ -102,7 +103,7 @@ public final class GraphFunctions {
     accepted.setAll(verification.details);
     return new HandlerEvidence(
         ExperimentOutcome.CERTIFIED,
-        EvidenceStrength.FORMAL_CERTIFICATE,
+        EvidenceStrength.EXHAUSTIVE_CERTIFICATE,
         scope,
         null,
         accepted,

@@ -29,8 +29,10 @@ class Phase17ContractValidationBranchTest {
 
   @Test
   void catalogFilteringAndGreedyDiscoveryNormalizationCoverControlBranches() {
-    assertThat(ContractsFunctions.experimentToolCatalog(null)).hasSize(15);
-    assertThat(ContractsFunctions.experimentToolCatalog(Set.of())).hasSize(15);
+    assertThat(ContractsFunctions.experimentToolCatalog(null))
+        .hasSize(io.github.aililuola.mathproofmesh.contract.ComputationMethod.values().length);
+    assertThat(ContractsFunctions.experimentToolCatalog(Set.of()))
+        .hasSize(io.github.aililuola.mathproofmesh.contract.ComputationMethod.values().length);
     assertThat(ContractsFunctions.experimentToolCatalog(Set.of("bounded_greedy_sequence")))
         .singleElement()
         .satisfies(

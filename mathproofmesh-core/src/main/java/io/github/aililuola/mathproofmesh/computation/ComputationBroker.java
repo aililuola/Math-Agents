@@ -1,16 +1,12 @@
 package io.github.aililuola.mathproofmesh.computation;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.contract.ComputationDecision;
 import io.github.aililuola.mathproofmesh.contract.ComputationDecisionStatus;
-import io.github.aililuola.mathproofmesh.contract.EvidenceRef;
-import io.github.aililuola.mathproofmesh.contract.EvidenceStrength;
-import io.github.aililuola.mathproofmesh.contract.ExperimentOutcome;
 import io.github.aililuola.mathproofmesh.contract.ExperimentProgram;
 import io.github.aililuola.mathproofmesh.contract.ExperimentResult;
 import io.github.aililuola.mathproofmesh.contract.ExperimentSpec;
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -24,7 +20,10 @@ public final class ComputationBroker {
   private final ComputationCache cache;
   private final ComputationLedger ledger;
   private final ComputationPolicy policy;
+  private final ComputationExecutionService executionService;
   private final ConcurrentMap<String, ExperimentSpec> preparedByExperiment =
+      new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, ComputationExecutionContext> contextByExperiment =
       new ConcurrentHashMap<>();
 
   public ComputationBroker(
@@ -32,6 +31,36 @@ public final class ComputationBroker {
       ComputationLimits limits,
       ComputationHandlerRegistry registry,
       ComputationCache cache) {
+    this(runId, limits, registry, cache, new InMemoryComputationArtifactStore());
+  }
+
+  public ComputationBroker(
+      String runId,
+      ComputationLimits limits,
+      ComputationHandlerRegistry registry,
+      ComputationCache cache,
+      ComputationArtifactStore artifactStore) {
+    this(
+        runId,
+        limits,
+        registry,
+        cache,
+        new ComputationExecutionService(
+            runId,
+            registry.capabilityRegistry(),
+            cache,
+            artifactStore,
+            new ComputationExecutionLedger(),
+            new ComputationVerificationLedger(),
+            new ComputationOutcomeReceiptLedger()));
+  }
+
+  public ComputationBroker(
+      String runId,
+      ComputationLimits limits,
+      ComputationHandlerRegistry registry,
+      ComputationCache cache,
+      ComputationExecutionService executionService) {
     if (runId == null || runId.isBlank()) {
       throw new IllegalArgumentException("runId is required");
     }
@@ -39,13 +68,17 @@ public final class ComputationBroker {
     this.limits = java.util.Objects.requireNonNull(limits, "limits");
     this.registry = java.util.Objects.requireNonNull(registry, "registry");
     this.cache = java.util.Objects.requireNonNull(cache, "cache");
-    this.ledger = new ComputationLedger();
+    this.executionService =
+        java.util.Objects.requireNonNull(executionService, "executionService");
+    this.ledger = new ComputationLedger(executionService.executions());
     this.policy = new ComputationPolicy(limits);
   }
 
   public PreparedDecision decide(ExperimentSpec requested, ComputationContext context) {
     ExperimentSpec spec = prepare(requested);
     preparedByExperiment.put(spec.experimentId(), spec);
+    contextByExperiment.put(
+        spec.experimentId(), ComputationExecutionContext.legacy(context.pathId()));
     String identity = registry.toolIdentity(spec.method());
     Optional<ExperimentResult> cached =
         limits.cacheResults()
@@ -71,6 +104,17 @@ public final class ComputationBroker {
       ExperimentSpec requested,
       ComputationDecision decision,
       ExperimentProgram program) {
+    ComputationExecutionContext context =
+        contextByExperiment.getOrDefault(
+            requested.experimentId(), ComputationExecutionContext.legacy(pathId(requested)));
+    return runExperiment(requested, decision, program, context);
+  }
+
+  public ExperimentResult runExperiment(
+      ExperimentSpec requested,
+      ComputationDecision decision,
+      ExperimentProgram program,
+      ComputationExecutionContext context) {
     ExperimentSpec spec =
         preparedByExperiment.getOrDefault(requested.experimentId(), prepare(requested));
     if (decision.decision() != ComputationDecisionStatus.ALLOW) {
@@ -81,50 +125,13 @@ public final class ComputationBroker {
       throw new IllegalArgumentException(
           "computation decision does not match the prepared request");
     }
-    String identity = registry.toolIdentity(spec.method());
-    if (limits.cacheResults()) {
-      Optional<ExperimentResult> cached =
-          cache.find(runId, spec.executionHash(), identity);
-      if (cached.isPresent()) {
-        return cachedForRequest(cached.get(), spec);
-      }
-    }
-
-    long started = System.nanoTime();
-    HandlerEvidence evidence;
-    String error = null;
-    try {
-      evidence = registry.execute(spec, program);
-      if (evidenceSize(evidence) > limits.maxOutputChars()) {
-        throw new IllegalArgumentException(
-            "handler output exceeds max_output_chars=" + limits.maxOutputChars());
-      }
-    } catch (RuntimeException exception) {
-      error = boundedMessage(exception);
-      evidence =
-          new HandlerEvidence(
-              ExperimentOutcome.INCONCLUSIVE,
-              EvidenceStrength.HEURISTIC,
-              ComputationJson.object().put("method", spec.method().value()),
-              null,
-              null,
-              false,
-              0,
-              false,
-              List.of(error),
-              null);
-    }
-    double runtimeSeconds = (System.nanoTime() - started) / 1_000_000_000.0;
-    ExperimentResult result =
-        toResult(spec, program, identity, evidence, runtimeSeconds, error, false);
-    ledger.record(pathId(spec), runtimeSeconds);
-    if (limits.cacheResults()) {
-      cache.put(runId, spec.executionHash(), identity, result);
-    }
-    return result;
+    ComputationExecutionContext bound =
+        context == null ? ComputationExecutionContext.legacy(pathId(spec)) : context;
+    contextByExperiment.put(spec.experimentId(), bound);
+    return executionService.execute(spec, decision, program, bound).result();
   }
 
-  /** Replays a recorded computation through the pinned handler and compares canonical evidence. */
+  /** Audits the independently verified durable receipt without rerunning the producer. */
   public ComputationAudit auditExperiment(
       ExperimentSpec requested,
       ComputationDecision decision,
@@ -134,7 +141,9 @@ public final class ComputationBroker {
     Objects.requireNonNull(decision, "decision");
     Objects.requireNonNull(recorded, "recorded");
     ExperimentSpec spec = prepare(requested);
-    String identity = registry.toolIdentity(spec.method());
+    ComputationCapabilityDescriptor descriptor =
+        registry.capabilityRegistry().capability(spec.method()).descriptor();
+    String identity = descriptor.verifierId() + "/" + descriptor.verifierVersion();
     if (decision.decision() != ComputationDecisionStatus.ALLOW) {
       return ComputationAudit.failed(
           spec.experimentId(), spec.requestHash(), recorded.resultHash(), identity,
@@ -147,7 +156,6 @@ public final class ComputationBroker {
           "request hash changed before replay");
     }
     if (recorded.method() != spec.method()
-        || !recorded.toolVersion().equals(identity)
         || !recorded.experimentId().equals(spec.experimentId())) {
       return ComputationAudit.failed(
           spec.experimentId(), spec.requestHash(), recorded.resultHash(), identity,
@@ -160,34 +168,26 @@ public final class ComputationBroker {
           "recorded program hash changed before replay");
     }
 
-    long started = System.nanoTime();
     try {
-      HandlerEvidence evidence = registry.execute(spec, program);
-      if (evidenceSize(evidence) > limits.maxOutputChars()) {
-        return ComputationAudit.failed(
-            spec.experimentId(), spec.requestHash(), recorded.resultHash(), identity,
-            "replayed handler output exceeded the configured bound");
-      }
-      ExperimentResult replayed =
-          toResult(
-              spec,
-              program,
-              identity,
-              evidence,
-              (System.nanoTime() - started) / 1_000_000_000.0d,
-              null,
-              false);
+      ComputationExecutionContext context =
+          contextByExperiment.getOrDefault(
+              spec.experimentId(), ComputationExecutionContext.legacy(pathId(spec)));
+      ComputationExecutionOutcome verified =
+          executionService.execute(spec, decision, program, context);
       boolean valid =
-          recorded.error() == null && recorded.resultHash().equals(replayed.resultHash());
+          verified.verificationReceipt().valid()
+              && recorded.resultHash().equals(verified.result().resultHash());
       return new ComputationAudit(
           spec.experimentId(),
           spec.requestHash(),
           recorded.resultHash(),
-          replayed.resultHash(),
+          verified.result().resultHash(),
           identity,
           true,
           valid,
-          valid ? "canonical evidence matched an independent replay" : "replayed evidence changed");
+          valid
+              ? "certificate accepted by an independent verifier"
+              : "independent certificate verification failed");
     } catch (RuntimeException exception) {
       return new ComputationAudit(
           spec.experimentId(),
@@ -209,6 +209,29 @@ public final class ComputationBroker {
     return runId;
   }
 
+  @SuppressFBWarnings(
+      value = "EI_EXPOSE_REP",
+      justification = "The broker intentionally exposes its single state-owning execution facade.")
+  public ComputationExecutionService executionService() {
+    return executionService;
+  }
+
+  public ComputationExecutionState snapshot() {
+    return executionService.snapshot();
+  }
+
+  public void restore(ComputationExecutionState state) {
+    executionService.restore(state);
+  }
+
+  public void setExecutionHook(ComputationExecutionHook hook) {
+    executionService.setHook(hook);
+  }
+
+  public void setStatePersister(ComputationStatePersister persister) {
+    executionService.setPersister(persister);
+  }
+
   public ExperimentSpec prepare(ExperimentSpec requested) {
     ContractsFunctions.Normalization normalization =
         ContractsFunctions.normalizeExploratoryContract(requested);
@@ -218,98 +241,6 @@ public final class ComputationBroker {
     fingerprint.put("tool_version", registry.toolIdentity(normalized.method()));
     fingerprint.put("runtime", "java-25");
     return normalized.bindRuntimeFingerprint(fingerprint);
-  }
-
-  private static ExperimentResult toResult(
-      ExperimentSpec spec,
-      ExperimentProgram program,
-      String identity,
-      HandlerEvidence evidence,
-      double runtimeSeconds,
-      String error,
-      boolean cached) {
-    return new ExperimentResult(
-        List.<EvidenceRef>of(),
-        cached,
-        evidence.casesChecked(),
-        evidence.certificate(),
-        evidence.counterexample(),
-        null,
-        error,
-        evidence.evidenceStrength(),
-        evidence.exactArithmetic(),
-        spec.experimentId(),
-        evidence.independentlyVerified(),
-        spec.method(),
-        evidence.outcome(),
-        spec.parentCheckpointId(),
-        spec.pathId(),
-        program == null ? null : program.codeHash(),
-        spec.requestHash(),
-        null,
-        runtimeSeconds,
-        evidence.scope(),
-        spec.targetClaim(),
-        spec.targetClaimId(),
-        spec.method().value(),
-        identity,
-        evidence.verificationNotes(),
-        spec.claimEvidenceSemanticBinding());
-  }
-
-  private static ExperimentResult cachedForRequest(
-      ExperimentResult canonical, ExperimentSpec requested) {
-    boolean claimBound = requested.claimEvidenceSemanticBinding() != null;
-    return new ExperimentResult(
-        canonical.artifactRefs(),
-        true,
-        canonical.casesChecked(),
-        canonical.certificate(),
-        canonical.counterexample(),
-        canonical.createdAt(),
-        canonical.error(),
-        canonical.evidenceStrength(),
-        canonical.exactArithmetic(),
-        requested.experimentId(),
-        canonical.independentlyVerified(),
-        canonical.method(),
-        canonical.outcome(),
-        requested.parentCheckpointId(),
-        requested.pathId(),
-        canonical.programHash(),
-        claimBound ? requested.requestHash() : canonical.requestHash(),
-        claimBound ? null : canonical.resultHash(),
-        canonical.runtimeSeconds(),
-        canonical.scope(),
-        canonical.targetClaim(),
-        claimBound ? requested.targetClaimId() : canonical.targetClaimId(),
-        canonical.toolName(),
-        canonical.toolVersion(),
-        canonical.verificationNotes(),
-        claimBound ? requested.claimEvidenceSemanticBinding() : null);
-  }
-
-  private static int evidenceSize(HandlerEvidence evidence) {
-    int size = evidence.scope().toString().length();
-    if (evidence.counterexample() != null) {
-      size += evidence.counterexample().toString().length();
-    }
-    if (evidence.certificate() != null) {
-      size += evidence.certificate().toString().length();
-    }
-    if (evidence.rawOutput() != null) {
-      size += evidence.rawOutput().toString().length();
-    }
-    size += evidence.verificationNotes().stream().mapToInt(String::length).sum();
-    return size;
-  }
-
-  private static String boundedMessage(RuntimeException exception) {
-    String message =
-        exception.getMessage() == null
-            ? exception.getClass().getSimpleName()
-            : exception.getMessage();
-    return message.length() <= 1_000 ? message : message.substring(0, 1_000);
   }
 
   private static String pathId(ExperimentSpec spec) {

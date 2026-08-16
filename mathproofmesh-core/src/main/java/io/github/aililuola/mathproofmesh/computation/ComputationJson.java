@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -92,5 +94,12 @@ final class ComputationJson {
 
   static void putBigInteger(ObjectNode node, String field, BigInteger value) {
     node.put(field, value);
+  }
+
+  static boolean hashesEqual(String left, String right) {
+    return left != null
+        && right != null
+        && MessageDigest.isEqual(
+            left.getBytes(StandardCharsets.UTF_8), right.getBytes(StandardCharsets.UTF_8));
   }
 }

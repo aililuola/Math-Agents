@@ -285,7 +285,10 @@ public final class ComputationPolicy {
           BOUNDED_GREEDY_SEQUENCE,
           CANDIDATE_PERIOD_CHECK,
           EXACT_GEOMETRY,
-          NUMBER_THEORY_CHECK -> true;
+          NUMBER_THEORY_CHECK,
+          EXACT_LINEAR_ALGEBRA,
+          FINITE_SET_MAP_CHECK,
+          HYPERGRAPH_TRANSVERSAL -> true;
       default -> false;
     };
   }

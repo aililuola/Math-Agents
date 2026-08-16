@@ -9,6 +9,21 @@ import java.util.concurrent.ConcurrentMap;
 /** Thread-safe cache used by local runs and deterministic tests. */
 public final class InMemoryComputationCache implements ComputationCache {
   private final ConcurrentMap<Key, ExperimentResult> values = new ConcurrentHashMap<>();
+  private final ConcurrentMap<ComputationCacheKey, CanonicalComputationCacheEntry> canonical =
+      new ConcurrentHashMap<>();
+
+  @Override
+  public Optional<CanonicalComputationCacheEntry> find(ComputationCacheKey key) {
+    return Optional.ofNullable(canonical.get(key));
+  }
+
+  @Override
+  public void put(ComputationCacheKey key, CanonicalComputationCacheEntry entry) {
+    if (entry.result().outcome() != ExperimentOutcome.ERROR
+        && entry.result().outcome() != ExperimentOutcome.INCONCLUSIVE) {
+      canonical.putIfAbsent(key, entry);
+    }
+  }
 
   @Override
   public Optional<ExperimentResult> find(
@@ -29,7 +44,7 @@ public final class InMemoryComputationCache implements ComputationCache {
   }
 
   public int size() {
-    return values.size();
+    return Math.max(values.size(), canonical.size());
   }
 
   private record Key(String runId, String executionHash, String toolIdentity) {

@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.aililuola.mathproofmesh.contract.ContractNonNull;
 import io.github.aililuola.mathproofmesh.contract.ContractAllowedValues;
+import io.github.aililuola.mathproofmesh.contract.ContractEnumValues;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
@@ -111,6 +112,15 @@ public final class PromptJsonSchema {
         ArrayNode values = componentSchema.putArray("enum");
         for (String value : allowedValues.value()) {
           values.add(value);
+        }
+      }
+      ContractEnumValues enumValues =
+          annotation(target, component, ContractEnumValues.class);
+      if (enumValues != null) {
+        ArrayNode values = componentSchema.putArray("enum");
+        for (Object constant : enumValues.value().getEnumConstants()) {
+          JsonNode serialized = ContractObjectMapper.toTree(constant);
+          values.add(serialized.isTextual() ? serialized.textValue() : constant.toString());
         }
       }
       properties.set(name, componentSchema);

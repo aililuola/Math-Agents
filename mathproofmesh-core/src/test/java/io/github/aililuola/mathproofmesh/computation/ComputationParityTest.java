@@ -458,8 +458,15 @@ class ComputationParityTest {
             ComputationFixtures.spec(
                 ComputationMethod.CANDIDATE_PERIOD_CHECK,
                 "{\"values\":[1,2,1,3],\"candidate_period\":2}"));
+    ComputationExecutionOutcome outcome =
+        broker.executionService().lastOutcome(result.experimentId()).orElseThrow();
+    ComputationCapabilityDescriptor descriptor =
+        ComputationHandlerRegistry.javaOnly()
+            .capabilityRegistry()
+            .capability(result.method())
+            .descriptor();
     ComputationEvidenceGate.FactDecision gate =
-        ComputationEvidenceGate.evaluate(result);
+        ComputationEvidenceGate.evaluate(result, outcome.verificationReceipt(), descriptor);
 
     assertThat(result.independentlyVerified()).isTrue();
     assertThat(gate.factAdmissible()).isFalse();

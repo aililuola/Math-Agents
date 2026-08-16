@@ -5,6 +5,10 @@ import java.util.Optional;
 
 /** Run-scoped canonical computation-result cache. */
 public interface ComputationCache {
+  Optional<CanonicalComputationCacheEntry> find(ComputationCacheKey key);
+
+  void put(ComputationCacheKey key, CanonicalComputationCacheEntry entry);
+
   Optional<ExperimentResult> find(
       String runId, String executionHash, String toolIdentity);
 

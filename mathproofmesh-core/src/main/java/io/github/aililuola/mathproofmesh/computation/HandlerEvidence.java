@@ -33,10 +33,9 @@ public record HandlerEvidence(
     rawOutput = rawOutput == null ? null : rawOutput.deepCopy();
     if (outcome == ExperimentOutcome.COUNTEREXAMPLE_FOUND
         && (counterexample == null
-            || evidenceStrength != EvidenceStrength.COUNTEREXAMPLE
-            || !independentlyVerified)) {
+            || evidenceStrength != EvidenceStrength.COUNTEREXAMPLE)) {
       throw new IllegalArgumentException(
-          "counterexamples require a payload, counterexample strength, and independent replay");
+          "counterexamples require a payload and counterexample strength");
     }
     if (outcome == ExperimentOutcome.CERTIFIED
         && (certificate == null

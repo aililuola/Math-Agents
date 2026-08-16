@@ -1526,6 +1526,18 @@
         "value": "number_theory_check"
       },
       {
+        "name": "EXACT_LINEAR_ALGEBRA",
+        "value": "exact_linear_algebra"
+      },
+      {
+        "name": "FINITE_SET_MAP_CHECK",
+        "value": "finite_set_map_check"
+      },
+      {
+        "name": "HYPERGRAPH_TRANSVERSAL",
+        "value": "hypergraph_transversal"
+      },
+      {
         "name": "SANDBOXED_PYTHON",
         "value": "sandboxed_python"
       },

@@ -8,7 +8,6 @@ import io.github.aililuola.mathproofmesh.contract.ComputationPurpose;
 import io.github.aililuola.mathproofmesh.contract.ExperimentSpec;
 import java.math.BigInteger;
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -41,22 +40,6 @@ public final class ContractsFunctions {
           "positive",
           "nonnegative",
           "nonzero");
-  private static final Map<ComputationMethod, Set<String>> ARGUMENTS = argumentContracts();
-  private static final Set<ComputationMethod> NO_DOMAIN_METHODS =
-      Set.of(
-          ComputationMethod.SYMPY_SIMPLIFY,
-          ComputationMethod.SYMPY_EQUIVALENT,
-          ComputationMethod.POLYNOMIAL_FACTOR,
-          ComputationMethod.NUMERIC_COUNTEREXAMPLE,
-          ComputationMethod.GRAPH_CERTIFICATE,
-          ComputationMethod.RECURRENCE_CHECK,
-          ComputationMethod.BOUNDED_GREEDY_SEQUENCE,
-          ComputationMethod.CANDIDATE_PERIOD_CHECK,
-          ComputationMethod.EXACT_GEOMETRY,
-          ComputationMethod.NUMBER_THEORY_CHECK,
-          ComputationMethod.SANDBOXED_PYTHON,
-          ComputationMethod.LEAN_CHECK);
-
   private ContractsFunctions() {}
 
   public static ContractMode computationContractMode(ExperimentSpec spec) {
@@ -105,10 +88,9 @@ public final class ContractsFunctions {
 
   public static List<String> validateExperimentContract(ExperimentSpec spec) {
     List<String> issues = new ArrayList<>();
-    Set<String> allowed = ARGUMENTS.get(spec.method());
-    if (allowed == null) {
-      return List.of("no registered contract exists for method " + spec.method().value());
-    }
+    RegisteredComputationCapability capability =
+        ComputationCapabilityRegistry.javaOnly().capability(spec.method());
+    Set<String> allowed = capability.allowedArguments();
     Set<String> unknown = new TreeSet<>();
     spec.arguments().properties().forEach(entry -> {
       if (!allowed.contains(entry.getKey())) {
@@ -118,7 +100,7 @@ public final class ContractsFunctions {
     if (!unknown.isEmpty()) {
       issues.add("unsupported arguments: " + String.join(", ", unknown));
     }
-    if (NO_DOMAIN_METHODS.contains(spec.method()) && !spec.domains().isEmpty()) {
+    if (!capability.acceptsDomains() && !spec.domains().isEmpty()) {
       issues.add(spec.method().value() + " does not accept domains");
     }
 
@@ -140,6 +122,9 @@ public final class ContractsFunctions {
       case EXACT_GEOMETRY -> validateGeometry(arguments, issues);
       case REAL_INEQUALITY -> validateRealInequality(spec, issues);
       case NUMBER_THEORY_CHECK -> validateNumberTheory(arguments, issues);
+      case EXACT_LINEAR_ALGEBRA -> validateExactLinearAlgebra(arguments, issues);
+      case FINITE_SET_MAP_CHECK -> validateFiniteSetMap(arguments, issues);
+      case HYPERGRAPH_TRANSVERSAL -> validateHypergraph(arguments, issues);
       case SANDBOXED_PYTHON -> {
         if (!arguments.path("input").isObject()) {
           issues.add("input must be a JSON object");
@@ -151,38 +136,85 @@ public final class ContractsFunctions {
   }
 
   public static List<ObjectNode> experimentToolCatalog(Set<String> allowedTools) {
-    List<ObjectNode> catalog = new ArrayList<>();
-    for (Map.Entry<ComputationMethod, Set<String>> entry : ARGUMENTS.entrySet()) {
-      if (allowedTools != null
-          && !allowedTools.isEmpty()
-          && !allowedTools.contains(entry.getKey().value())) {
-        continue;
-      }
-      ObjectNode item = ComputationJson.object().put("method", entry.getKey().value());
-      ArrayNode arguments = item.putArray("allowed_arguments");
-      new TreeSet<>(entry.getValue()).forEach(arguments::add);
-      item.put("domains", NO_DOMAIN_METHODS.contains(entry.getKey()) ? "unused" : "typed");
-      if (entry.getKey() == ComputationMethod.SANDBOXED_PYTHON) {
-        item.putArray("required_arguments").add("input");
+    List<ObjectNode> catalog =
+        new ArrayList<>(ComputationCapabilityRegistry.javaOnly().promptCatalog(allowedTools));
+    for (ObjectNode item : catalog) {
+      ComputationMethod method = ComputationMethod.fromValue(item.path("method").asText());
+      if (method == ComputationMethod.SANDBOXED_PYTHON) {
         item.putArray("optional_arguments");
-        item
-            .putArray("constraints")
-            .add("Last resort only; typed_tool_gap must explain why no typed contract applies.")
-            .add("arguments.input must be the complete JSON object supplied to run(data).")
-            .add("Do not place sandbox inputs beside input; such fields are rejected.");
-        item.put(
-            "domains", "Must be empty; put all bounded input under arguments.input.");
+        item.put("domains", "Must be empty; put all bounded input under arguments.input.");
       }
-      if (entry.getKey() == ComputationMethod.BOUNDED_GREEDY_SEQUENCE) {
+      if (method == ComputationMethod.BOUNDED_GREEDY_SEQUENCE) {
         ArrayNode rules = item.putArray("allowed_rules");
         new TreeSet<>(GREEDY_RULES).forEach(rules::add);
         item.put(
             "unknown_alias_policy",
             "Aliases such as a1, max_n, and max_terms are rejected.");
       }
-      catalog.add(item);
     }
     return List.copyOf(catalog);
+  }
+
+  private static void validateExactLinearAlgebra(
+      ObjectNode arguments, List<String> issues) {
+    requireText(arguments, "operation", issues, "");
+    String operation = arguments.path("operation").asText();
+    if (!Set.of("determinant", "rank", "solve", "nullspace", "span_membership")
+        .contains(operation)) {
+      issues.add("unsupported exact linear algebra operation");
+    }
+    JsonNode matrix = arguments.get("matrix");
+    if (matrix == null || !matrix.isArray() || matrix.isEmpty()) {
+      issues.add("matrix must be a non-empty finite rational matrix");
+    }
+    if (operation.equals("solve")
+        && (arguments.get("rhs") == null || !arguments.get("rhs").isArray())) {
+      issues.add("solve requires an rhs vector");
+    }
+    if (operation.equals("span_membership")
+        && (arguments.get("vector") == null || !arguments.get("vector").isArray())) {
+      issues.add("span_membership requires a vector");
+    }
+  }
+
+  private static void validateFiniteSetMap(
+      ObjectNode arguments, List<String> issues) {
+    requireText(arguments, "operation", issues, "");
+    if (!Set.of(
+            "injective",
+            "surjective",
+            "bijective",
+            "image",
+            "preimage",
+            "cardinality_equality")
+        .contains(arguments.path("operation").asText())) {
+      issues.add("unsupported finite set-map operation");
+    }
+    if (!arguments.path("domain").isArray() || !arguments.path("codomain").isArray()) {
+      issues.add("domain and codomain must be finite lists");
+    }
+    if (!arguments.path("mapping").isObject()) {
+      issues.add("mapping must be a total finite object");
+    }
+    if (arguments.path("operation").asText().equals("preimage")) {
+      requireText(arguments, "target", issues, "");
+    }
+  }
+
+  private static void validateHypergraph(ObjectNode arguments, List<String> issues) {
+    requireText(arguments, "operation", issues, "");
+    if (!Set.of(
+            "is_hitting_set", "is_minimal_hitting_set", "enumerate_minimal_transversals")
+        .contains(arguments.path("operation").asText())) {
+      issues.add("unsupported hypergraph transversal operation");
+    }
+    if (!arguments.path("vertices").isArray() || !arguments.path("edges").isArray()) {
+      issues.add("vertices and edges must be finite lists");
+    }
+    if (!arguments.path("operation").asText().equals("enumerate_minimal_transversals")
+        && !arguments.path("candidate").isArray()) {
+      issues.add("hitting-set checks require a finite candidate");
+    }
   }
 
   private static void validateGreedy(ExperimentSpec spec, List<String> issues) {
@@ -653,70 +685,6 @@ public final class ContractsFunctions {
 
   private static BigInteger integer(JsonNode value) {
     return ExactRational.parse(value, "value").toBigIntegerExact("value");
-  }
-
-  private static Map<ComputationMethod, Set<String>> argumentContracts() {
-    Map<ComputationMethod, Set<String>> result = new EnumMap<>(ComputationMethod.class);
-    result.put(ComputationMethod.SYMPY_SIMPLIFY, Set.of("expression"));
-    result.put(ComputationMethod.SYMPY_EQUIVALENT, Set.of("lhs", "rhs"));
-    result.put(ComputationMethod.POLYNOMIAL_FACTOR, Set.of("expression"));
-    result.put(
-        ComputationMethod.NUMERIC_COUNTEREXAMPLE,
-        Set.of("lhs", "rhs", "relation", "variables", "ranges", "samples", "tolerance"));
-    result.put(
-        ComputationMethod.MODULAR_EXHAUSTIVE,
-        Set.of(
-            "lhs",
-            "rhs",
-            "modulus",
-            "relation",
-            "variables",
-            "finite_reduction",
-            "reduction_justification"));
-    result.put(ComputationMethod.BOUNDED_INTEGER_SEARCH, Set.of("target", "constraints"));
-    result.put(ComputationMethod.GRAPH_CERTIFICATE, Set.of("graph", "property", "certificate"));
-    result.put(
-        ComputationMethod.RECURRENCE_CHECK,
-        Set.of(
-            "initial_values",
-            "coefficients",
-            "start_n",
-            "end_n",
-            "inhomogeneous",
-            "claimed_expression"));
-    result.put(
-        ComputationMethod.BOUNDED_GREEDY_SEQUENCE,
-        Set.of(
-            "initial_values",
-            "length",
-            "candidate_min",
-            "candidate_max",
-            "strictly_increasing",
-            "rule",
-            "forbidden_differences",
-            "claimed_values"));
-    result.put(
-        ComputationMethod.CANDIDATE_PERIOD_CHECK,
-        Set.of("values", "candidate_period", "start_index"));
-    result.put(ComputationMethod.EXACT_GEOMETRY, Set.of("points", "assertion"));
-    result.put(
-        ComputationMethod.REAL_INEQUALITY,
-        Set.of("lhs", "rhs", "relation", "variables", "max_runtime_ms"));
-    result.put(
-        ComputationMethod.NUMBER_THEORY_CHECK,
-        Set.of(
-            "operation",
-            "a",
-            "n",
-            "p",
-            "residues",
-            "moduli",
-            "expression",
-            "assignment",
-            "claimed"));
-    result.put(ComputationMethod.SANDBOXED_PYTHON, Set.of("input"));
-    result.put(ComputationMethod.LEAN_CHECK, Set.of("source"));
-    return Map.copyOf(result);
   }
 
   public enum ContractMode {

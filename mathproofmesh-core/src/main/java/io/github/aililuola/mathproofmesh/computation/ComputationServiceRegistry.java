@@ -8,28 +8,27 @@ public final class ComputationServiceRegistry {
   private ComputationServiceRegistry() {}
 
   public static Set<ComputationMethod> javaNativeMethods() {
-    return Set.of(
-        ComputationMethod.MODULAR_EXHAUSTIVE,
-        ComputationMethod.BOUNDED_INTEGER_SEARCH,
-        ComputationMethod.GRAPH_CERTIFICATE,
-        ComputationMethod.RECURRENCE_CHECK,
-        ComputationMethod.BOUNDED_GREEDY_SEQUENCE,
-        ComputationMethod.CANDIDATE_PERIOD_CHECK,
-        ComputationMethod.EXACT_GEOMETRY,
-        ComputationMethod.NUMBER_THEORY_CHECK);
+    return methods(ComputationBackendKind.NATIVE_JAVA);
   }
 
   public static Set<ComputationMethod> sidecarMethods() {
-    return Set.of(
-        ComputationMethod.SYMPY_SIMPLIFY,
-        ComputationMethod.SYMPY_EQUIVALENT,
-        ComputationMethod.POLYNOMIAL_FACTOR,
-        ComputationMethod.NUMERIC_COUNTEREXAMPLE,
-        ComputationMethod.REAL_INEQUALITY);
+    return methods(ComputationBackendKind.EXTERNAL_TYPED);
   }
 
   public static Set<ComputationMethod> arbitraryExecutionMethods() {
-    return Set.of(
-        ComputationMethod.SANDBOXED_PYTHON, ComputationMethod.LEAN_CHECK);
+    return ComputationCapabilityRegistry.javaOnly().snapshot().descriptors().stream()
+        .filter(
+            value ->
+                value.backendKind() == ComputationBackendKind.SANDBOXED_PYTHON
+                    || value.backendKind() == ComputationBackendKind.FORMAL_KERNEL)
+        .map(ComputationCapabilityDescriptor::method)
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+  }
+
+  private static Set<ComputationMethod> methods(ComputationBackendKind backend) {
+    return ComputationCapabilityRegistry.javaOnly().snapshot().descriptors().stream()
+        .filter(value -> value.backendKind() == backend)
+        .map(ComputationCapabilityDescriptor::method)
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
   }
 }

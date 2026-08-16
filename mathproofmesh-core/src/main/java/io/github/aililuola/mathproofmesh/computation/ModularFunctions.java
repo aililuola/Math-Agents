@@ -92,7 +92,8 @@ public final class ModularFunctions {
           EvidenceStrength.EXHAUSTIVE_CERTIFICATE,
           ComputationJson.object()
               .put("finite_reduction_claimed", true)
-              .put("full_residue_coverage", true),
+              .put("full_residue_coverage", true)
+              .put("complete_domain", true),
           null,
           certificate,
           true,

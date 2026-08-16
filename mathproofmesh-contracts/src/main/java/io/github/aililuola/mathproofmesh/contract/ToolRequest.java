@@ -13,20 +13,7 @@ public record ToolRequest(
     @JsonProperty(value = "domains") @ContractNonNull ObjectNode domains,
     @JsonProperty(value = "kind", required = true)
         @ContractNonNull
-        @ContractAllowedValues({
-          "sympy_simplify",
-          "sympy_equivalent",
-          "numeric_counterexample",
-          "polynomial_factor",
-          "modular_exhaustive",
-          "bounded_integer_search",
-          "graph_certificate",
-          "recurrence_check",
-          "bounded_greedy_sequence",
-          "candidate_period_check",
-          "exact_geometry",
-          "lean_check"
-        })
+        @ContractEnumValues(ComputationMethod.class)
         String kind,
     @JsonProperty(value = "max_cases") @ContractNonNull Integer maxCases,
     @JsonProperty(value = "purpose", required = true) @ContractNonNull String purpose,
@@ -44,7 +31,7 @@ public record ToolRequest(
     domains = ContractValues.objectOrEmpty(domains);
     kind = ContractStrings.trim(kind);
     kind = ContractStrings.required("kind", kind);
-    ContractValues.oneOf("kind", kind, "sympy_simplify", "sympy_equivalent", "numeric_counterexample", "polynomial_factor", "modular_exhaustive", "bounded_integer_search", "graph_certificate", "recurrence_check", "bounded_greedy_sequence", "candidate_period_check", "exact_geometry", "lean_check");
+    ComputationMethod.fromValue(kind);
     if (maxCases == null) {
       maxCases = 100000;
     }
