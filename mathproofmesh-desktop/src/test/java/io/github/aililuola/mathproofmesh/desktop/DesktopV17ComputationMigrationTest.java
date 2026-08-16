@@ -107,7 +107,13 @@ class DesktopV17ComputationMigrationTest {
           .anyMatch(receipt -> receipt.diagnostics().contains("LEGACY_VERIFICATION_ACCEPTED"));
       assertThat(version18.computationVerifications().receipts())
           .anyMatch(receipt -> receipt.diagnostics().contains("LEGACY_AUDIT_ONLY"));
-      assertThat(version18.computationArtifacts().records()).hasSize(10);
+      assertThat(version18.computationArtifacts().records()).hasSize(12);
+      assertThat(version18.computationArtifacts().records())
+          .filteredOn(
+              record ->
+                  record.kind()
+                      == io.github.aililuola.mathproofmesh.computation.ComputationArtifactKind.AUTHORITY_MUTATION_RECEIPT)
+          .hasSize(2);
     }
 
     try (DesktopComputationIssue010CoordinatorHarness restoredAgain =

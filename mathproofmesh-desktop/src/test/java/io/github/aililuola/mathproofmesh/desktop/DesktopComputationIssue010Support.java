@@ -33,16 +33,7 @@ final class DesktopComputationIssue010Support {
         prepared.spec(),
         prepared.decision(),
         null,
-        new ComputationExecutionContext(
-            "p".repeat(64),
-            "g".repeat(64),
-            routeId,
-            "",
-            "",
-            "obligation-" + routeId,
-            "canonical-" + routeId,
-            round,
-            null));
+        ComputationExecutionContext.legacy(routeId));
     return broker.executionService().lastOutcome(spec.experimentId()).orElseThrow();
   }
 
@@ -101,6 +92,13 @@ final class DesktopComputationIssue010Support {
             + variant
             + ','
             + (variant + 1)
-            + "],\"candidate_period\":2}");
+        + "],\"candidate_period\":2}");
+  }
+
+  static ExperimentSpec formalCertificate(String id) {
+    return ComputationIssue010BlackBoxFixtures.spec(
+        id,
+        ComputationMethod.LEAN_CHECK,
+        "{\"source\":\"theorem exact_finite_claim : True := by trivial\"}");
   }
 }

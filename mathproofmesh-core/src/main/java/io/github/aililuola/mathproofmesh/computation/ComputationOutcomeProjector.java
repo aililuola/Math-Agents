@@ -85,9 +85,9 @@ public final class ComputationOutcomeProjector {
         plan.planHash(),
         verification.receiptHash(),
         applied,
-        true,
+        false,
         authoritative
-            ? "Typed action is ready for the existing authority gate."
+            ? "Typed action is projection-ready for the existing authority gate."
             : "No mathematical authority mutation is permitted.",
         null);
   }

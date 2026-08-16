@@ -111,6 +111,21 @@ final class IndependentComputationCertificateVerifier
     ComputationMethod method = request.spec().method();
     boolean valid =
         switch (method) {
+          case MODULAR_EXHAUSTIVE ->
+              IndependentNativeComputationVerifier.verifyModular(request.spec(), result);
+          case BOUNDED_INTEGER_SEARCH ->
+              IndependentNativeComputationVerifier.verifyBoundedIntegerSearch(
+                  request.spec(), result);
+          case RECURRENCE_CHECK ->
+              IndependentNativeComputationVerifier.verifyRecurrence(request.spec(), result);
+          case BOUNDED_GREEDY_SEQUENCE ->
+              IndependentNativeComputationVerifier.verifyGreedySequence(request.spec(), result);
+          case CANDIDATE_PERIOD_CHECK ->
+              IndependentNativeComputationVerifier.verifyCandidatePeriod(request.spec(), result);
+          case EXACT_GEOMETRY ->
+              IndependentGeometryCertificateVerifier.verify(request.spec(), result);
+          case NUMBER_THEORY_CHECK ->
+              IndependentNumberTheoryCertificateVerifier.verify(request.spec(), result);
           case EXACT_LINEAR_ALGEBRA -> verifyLinearAlgebra(request.spec().arguments(), result.certificate());
           case FINITE_SET_MAP_CHECK -> verifyFiniteMap(request.spec().arguments(), result.certificate());
           case HYPERGRAPH_TRANSVERSAL -> verifyHypergraph(request.spec().arguments(), result.certificate(), request.spec().maxCases());
@@ -124,15 +139,28 @@ final class IndependentComputationCertificateVerifier
           case SYMPY_SIMPLIFY,
               SYMPY_EQUIVALENT,
               POLYNOMIAL_FACTOR -> false;
-          default ->
-              result.exactArithmetic()
-                  && (result.outcome() != ExperimentOutcome.CERTIFIED
-                      || result.scope().path("complete_domain").asBoolean(false));
         };
     if (!valid) {
       diagnostics.add("INDEPENDENT_CERTIFICATE_CHECK_FAILED");
     }
     return valid;
+  }
+
+  static boolean hasExplicitNativeVerifier(ComputationMethod method) {
+    return switch (method) {
+      case MODULAR_EXHAUSTIVE,
+          BOUNDED_INTEGER_SEARCH,
+          GRAPH_CERTIFICATE,
+          RECURRENCE_CHECK,
+          BOUNDED_GREEDY_SEQUENCE,
+          CANDIDATE_PERIOD_CHECK,
+          EXACT_GEOMETRY,
+          NUMBER_THEORY_CHECK,
+          EXACT_LINEAR_ALGEBRA,
+          FINITE_SET_MAP_CHECK,
+          HYPERGRAPH_TRANSVERSAL -> true;
+      default -> false;
+    };
   }
 
   private static ComputationVerifiedAuthority authority(
@@ -298,7 +326,7 @@ final class IndependentComputationCertificateVerifier
       case "determinant" ->
           matrix.length == matrix[0].length
               && ExactRational.parse(certificate.get("determinant"), "determinant")
-                  .equals(determinantByExpansion(matrix));
+                  .equals(determinantByElimination(matrix));
       case "rank" -> certificate.path("rank").asInt(-1) == independentRank(matrix);
       case "solve" -> verifySolution(matrix, arguments.get("rhs"), certificate);
       case "nullspace" -> verifyNullspace(matrix, certificate);
@@ -307,32 +335,41 @@ final class IndependentComputationCertificateVerifier
     };
   }
 
-  private static ExactRational determinantByExpansion(ExactRational[][] matrix) {
+  private static ExactRational determinantByElimination(ExactRational[][] matrix) {
     if (matrix.length != matrix[0].length) {
       return ExactRational.ZERO;
     }
-    if (matrix.length == 1) {
-      return matrix[0][0];
-    }
-    ExactRational value = ExactRational.ZERO;
-    for (int column = 0; column < matrix.length; column++) {
-      ExactRational term = matrix[0][column].multiply(determinantByExpansion(minor(matrix, column)));
-      value = column % 2 == 0 ? value.add(term) : value.subtract(term);
-    }
-    return value;
-  }
-
-  private static ExactRational[][] minor(ExactRational[][] matrix, int removedColumn) {
-    ExactRational[][] result = new ExactRational[matrix.length - 1][matrix.length - 1];
-    for (int row = 1; row < matrix.length; row++) {
-      int target = 0;
-      for (int column = 0; column < matrix.length; column++) {
-        if (column != removedColumn) {
-          result[row - 1][target++] = matrix[row][column];
+    ExactRational[][] values = copy(matrix);
+    ExactRational determinant = ExactRational.ONE;
+    int sign = 1;
+    for (int column = 0; column < values.length; column++) {
+      int pivot = column;
+      while (pivot < values.length && values[pivot][column].signum() == 0) {
+        pivot++;
+      }
+      if (pivot == values.length) {
+        return ExactRational.ZERO;
+      }
+      if (pivot != column) {
+        ExactRational[] swap = values[column];
+        values[column] = values[pivot];
+        values[pivot] = swap;
+        sign = -sign;
+      }
+      ExactRational pivotValue = values[column][column];
+      determinant = determinant.multiply(pivotValue);
+      for (int row = column + 1; row < values.length; row++) {
+        if (values[row][column].signum() == 0) {
+          continue;
+        }
+        ExactRational factor = values[row][column].divide(pivotValue);
+        for (int index = column + 1; index < values.length; index++) {
+          values[row][index] =
+              values[row][index].subtract(factor.multiply(values[column][index]));
         }
       }
     }
-    return result;
+    return sign < 0 ? ExactRational.ZERO.subtract(determinant) : determinant;
   }
 
   private static int independentRank(ExactRational[][] matrix) {

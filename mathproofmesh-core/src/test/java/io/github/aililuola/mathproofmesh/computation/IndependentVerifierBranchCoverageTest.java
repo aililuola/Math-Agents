@@ -303,7 +303,7 @@ class IndependentVerifierBranchCoverageTest {
                         true,
                         ""))
                 .valid())
-        .isTrue();
+        .isFalse();
     assertThat(
             verify(
                     defaultSpec,
@@ -365,7 +365,7 @@ class IndependentVerifierBranchCoverageTest {
                         true,
                         ""))
                 .valid())
-        .isTrue();
+        .isFalse();
 
     ExperimentSpec numeric =
         spec(
@@ -412,7 +412,7 @@ class IndependentVerifierBranchCoverageTest {
                         true,
                         ""))
                 .valid())
-        .isTrue();
+        .isFalse();
 
     ExperimentSpec lean = spec(ComputationMethod.LEAN_CHECK, "{}");
     assertThat(

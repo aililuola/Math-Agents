@@ -37,6 +37,10 @@ import io.github.aililuola.mathproofmesh.computation.ComputationEvidenceGate;
 import io.github.aililuola.mathproofmesh.computation.ComputationExecutionState;
 import io.github.aililuola.mathproofmesh.computation.ComputationExecutionContext;
 import io.github.aililuola.mathproofmesh.computation.ComputationExecutionOutcome;
+import io.github.aililuola.mathproofmesh.computation.ComputationExecutionFailurePoint;
+import io.github.aililuola.mathproofmesh.computation.ComputationExecutionRecord;
+import io.github.aililuola.mathproofmesh.computation.ComputationExecutionStatus;
+import io.github.aililuola.mathproofmesh.computation.ComputationTargetBinding;
 import io.github.aililuola.mathproofmesh.computation.ContractsFunctions;
 import io.github.aililuola.mathproofmesh.computation.ToolBroker;
 import io.github.aililuola.mathproofmesh.config.BudgetConfig;
@@ -89,6 +93,8 @@ import io.github.aililuola.mathproofmesh.contract.ComputationDecisionStatus;
 import io.github.aililuola.mathproofmesh.contract.ComputationContractRepair;
 import io.github.aililuola.mathproofmesh.contract.ComputationContractRepairAction;
 import io.github.aililuola.mathproofmesh.contract.ComputationContractRepairStatus;
+import io.github.aililuola.mathproofmesh.contract.ComputationAuthorityMutationReceipt;
+import io.github.aililuola.mathproofmesh.contract.ComputationDecisionAction;
 import io.github.aililuola.mathproofmesh.contract.ComputationMethod;
 import io.github.aililuola.mathproofmesh.contract.CriticalClaim;
 import io.github.aililuola.mathproofmesh.contract.CriticalClaimPreflightPlan;
@@ -358,6 +364,7 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -1636,7 +1643,7 @@ final class DesktopSolveCoordinator {
               prepared.decision(),
               null,
               result,
-              claim.claimId(),
+              null,
               authority,
               audit.valid()));
       computationAudits.add(audit);
@@ -2857,9 +2864,9 @@ final class DesktopSolveCoordinator {
     if (repairableComputationDecision(prepared.decision())) {
       prepared = repairComputationContract(route, prepared, segment);
     }
-    String targetObligationId = bindComputationTargetObligation(route, spec);
+    ComputationTargetBinding targetBinding = bindComputationTarget(route, spec);
     ComputationTrace trace =
-        executePreparedComputation(route, prepared, segment, targetObligationId, 0);
+        executePreparedComputation(route, prepared, segment, targetBinding, 0);
     ComputationAudit audit = auditComputation(trace);
     if (audit != null && !audit.valid()) {
       event(
@@ -2876,7 +2883,7 @@ final class DesktopSolveCoordinator {
               segment);
       if (repaired.decision().decision() == ComputationDecisionStatus.ALLOW) {
         ComputationTrace retry =
-            executePreparedComputation(route, repaired, segment, targetObligationId, 1);
+            executePreparedComputation(route, repaired, segment, targetBinding, 1);
         ComputationAudit retryAudit = auditComputation(retry);
         trace = retry;
         audit = retryAudit;
@@ -2903,17 +2910,19 @@ final class DesktopSolveCoordinator {
             trace.decision(),
             trace.program(),
             trace.result(),
-            targetObligationId,
+            targetBinding,
             authority,
             replayValid);
-    computationTraces.add(trace);
+    upsertComputationTrace(trace);
     mathematicalArtifactBroker.bindEffectTarget(
         route.routeId,
         BrokerArtifactUseKind.SUPPORTS_COMPUTATION_PLAN,
         trace.spec().experimentId(),
         Set.of(),
-        Set.of(targetObligationId));
-    applyComputationAuthority(route, trace);
+        Set.of(targetBinding.obligationId()));
+    if (executionOutcome != null) {
+      applyComputationAuthorityAtomically(route, trace, executionOutcome);
+    }
     event(
         "computation",
         "working_delta",
@@ -2924,24 +2933,11 @@ final class DesktopSolveCoordinator {
     return trace;
   }
 
-  private String bindComputationTargetObligation(RouteState route, ExperimentSpec spec) {
-    Optional<ProofObligation> focused = findObligation(route.focusObligationId);
-    if (focused.isPresent()) {
-      return focused.get().obligationId();
-    }
-    Optional<ProofObligation> matching =
-        proofGraph.obligations().stream()
-            .filter(obligation -> obligation.routeIds().contains(route.routeId))
-            .filter(obligation -> "open".equals(obligation.status()))
-            .filter(
-                obligation ->
-                    topology.mathSimilarity(obligation.statement(), spec.targetClaim()) >= 0.82d)
-            .max(
-                java.util.Comparator.comparingDouble(
-                    obligation ->
-                        topology.mathSimilarity(obligation.statement(), spec.targetClaim())));
-    if (matching.isPresent()) {
-      return matching.get().obligationId();
+  private ComputationTargetBinding bindComputationTarget(
+      RouteState route, ExperimentSpec spec) {
+    Optional<ComputationTargetBinding> exact = exactComputationTarget(route, spec);
+    if (exact.isPresent()) {
+      return exact.orElseThrow();
     }
     String id = "computation-obligation-" + spec.requestHash().substring(0, 16);
     if (findObligation(id).isEmpty()) {
@@ -2977,14 +2973,162 @@ final class DesktopSolveCoordinator {
               spec.targetClaim()),
           FocusedRecoveryActionType.EXACT_FALSIFICATION);
     }
-    return id;
+    CanonicalObligationRecord canonical =
+        proofGraph
+            .canonicalTargetForObligation(id)
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "isolated computation question has no canonical target"));
+    return new ComputationTargetBinding(
+        problemHash,
+        "",
+        "",
+        "",
+        id,
+        canonical.signature().signatureHash(),
+        canonical.canonicalTargetId(),
+        computationScopeHash(spec),
+        canonical.signature().polarity(),
+        true,
+        null);
+  }
+
+  private Optional<ComputationTargetBinding> exactComputationTarget(
+      RouteState route, ExperimentSpec spec) {
+    ClaimEvidenceSemanticBinding requested = spec.claimEvidenceSemanticBinding();
+    if (requested == null
+        || spec.targetClaimId() == null
+        || spec.targetClaimId().isBlank()
+        || !sameHash(requested.problemHash(), problemHash)
+        || !requested.claimId().equals(spec.targetClaimId())) {
+      return Optional.empty();
+    }
+    FrozenClaimSnapshot frozen =
+        claimCourt.records().stream()
+            .map(ClaimCourtRecord::frozenClaim)
+            .filter(value -> exactClaimBinding(requested, value, spec))
+            .findFirst()
+            .orElse(null);
+    return proofGraph.obligations().stream()
+        .filter(obligation -> obligation.routeIds().contains(route.routeId))
+        .filter(obligation -> "open".equals(obligation.status()))
+        .filter(obligation -> exactComputationObligation(obligation, requested, frozen, spec))
+        .map(
+            obligation -> {
+              CanonicalObligationRecord canonical =
+                  proofGraph.canonicalTargetForObligation(obligation.obligationId()).orElse(null);
+              if (canonical == null) {
+                return null;
+              }
+              String statementHash =
+                  frozen == null
+                      ? CanonicalJson.stableHash(obligation.statement())
+                      : frozen.claimStatementHash();
+              String semanticHash =
+                  frozen == null
+                      ? canonical.signature().signatureHash()
+                      : frozen.claimSemanticHash();
+              if (!sameHash(requested.claimStatementHash(), statementHash)
+                  || !sameHash(requested.claimSemanticHash(), semanticHash)) {
+                return null;
+              }
+              return new ComputationTargetBinding(
+                  problemHash,
+                  requested.claimId(),
+                  statementHash,
+                  semanticHash,
+                  obligation.obligationId(),
+                  canonical.signature().signatureHash(),
+                  canonical.canonicalTargetId(),
+                  computationScopeHash(spec),
+                  canonical.signature().polarity(),
+                  false,
+                  null);
+            })
+        .filter(Objects::nonNull)
+        .findFirst();
+  }
+
+  private boolean exactComputationObligation(
+      ProofObligation obligation,
+      ClaimEvidenceSemanticBinding requested,
+      FrozenClaimSnapshot frozen,
+      ExperimentSpec spec) {
+    CanonicalObligationRecord canonical =
+        proofGraph.canonicalTargetForObligation(obligation.obligationId()).orElse(null);
+    if (canonical == null || !sameHash(obligation.problemHash(), problemHash)) {
+      return false;
+    }
+    boolean idBound =
+        requested.claimId().equals(obligation.obligationId()) || frozen != null;
+    String normalizedTarget = topology.mathNormalize(spec.targetClaim());
+    boolean exactStatement =
+        normalizedTarget.equals(topology.mathNormalize(obligation.statement()))
+            || (frozen != null
+                && (normalizedTarget.equals(topology.mathNormalize(frozen.statement()))
+                    || normalizedTarget.equals(topology.mathNormalize(frozen.conclusion()))));
+    return idBound
+        && exactStatement
+        && requested.assumptions().equals(obligation.assumptions())
+        && requested.quantifiers().equals(obligation.quantifiers())
+        && requested.polarity().equals(canonical.signature().polarity())
+        && exactScopeMarkers(requested.scopeLimitations(), canonical.signature().scopeMarkers());
+  }
+
+  private static boolean exactClaimBinding(
+      ClaimEvidenceSemanticBinding requested,
+      FrozenClaimSnapshot frozen,
+      ExperimentSpec spec) {
+    return sameHash(requested.problemHash(), frozen.problemHash())
+        && requested.claimId().equals(frozen.claimId())
+        && sameHash(requested.claimStatementHash(), frozen.claimStatementHash())
+        && sameHash(requested.claimSemanticHash(), frozen.claimSemanticHash())
+        && requested.statement().equals(frozen.statement())
+        && requested.conclusion().equals(frozen.conclusion())
+        && requested.assumptions().equals(frozen.assumptions())
+        && requested.quantifiers().equals(frozen.quantifiers())
+        && requested.variableBindings().equals(frozen.variableBindings())
+        && requested.scopeLimitations().equals(frozen.scopeLimitations())
+        && requested.polarity().equals(frozen.polarity())
+        && requested.dependencyClaimIds().equals(frozen.dependencyClaimIds())
+        && requested.computationDomains().equals(spec.domains());
+  }
+
+  private static boolean exactScopeMarkers(
+      List<String> requested, List<String> canonical) {
+    List<String> normalizedRequested =
+        requested.stream().map(DesktopSolveCoordinator::normalizedIdentityText).sorted().toList();
+    List<String> normalizedCanonical =
+        canonical.stream().map(DesktopSolveCoordinator::normalizedIdentityText).sorted().toList();
+    return normalizedRequested.equals(normalizedCanonical)
+        || (normalizedRequested.isEmpty() && normalizedCanonical.equals(List.of("unspecified")));
+  }
+
+  private static String computationScopeHash(ExperimentSpec spec) {
+    ClaimEvidenceSemanticBinding binding = spec.claimEvidenceSemanticBinding();
+    return CanonicalJson.stableHash(
+        Map.of(
+            "assumptions", spec.assumptions(),
+            "domains", spec.domains(),
+            "quantifiers", binding == null ? List.of() : binding.quantifiers(),
+            "variable_bindings", binding == null ? List.of() : binding.variableBindings(),
+            "scope_limitations", binding == null ? List.of() : binding.scopeLimitations(),
+            "polarity", binding == null ? "positive" : binding.polarity()));
+  }
+
+  private static boolean sameHash(String expected, String actual) {
+    return expected != null
+        && actual != null
+        && MessageDigest.isEqual(
+            expected.getBytes(StandardCharsets.UTF_8), actual.getBytes(StandardCharsets.UTF_8));
   }
 
   private ComputationTrace executePreparedComputation(
       RouteState route,
       ComputationBroker.PreparedDecision prepared,
       int segment,
-      String targetObligationId,
+      ComputationTargetBinding targetBinding,
       int executionAttempt) {
     ComputationDecision decision = prepared.decision();
     ExperimentProgram program = null;
@@ -3043,10 +3187,20 @@ final class DesktopSolveCoordinator {
               route.routeId,
               claimId,
               claimSemanticHash,
-              targetObligationId,
-              route.focusedCanonicalTargetId,
+              targetBinding.obligationId(),
+              targetBinding.canonicalTargetId(),
               roundIndex.get(),
               null);
+      upsertComputationTrace(
+          new ComputationTrace(
+              route.routeId,
+              prepared.spec(),
+              decision,
+              program,
+              null,
+              targetBinding,
+              ComputationEvidenceGate.EvidenceAuthority.INCONCLUSIVE,
+              false));
       result =
           computation.runExperiment(
               prepared.spec(), decision, program, executionContext);
@@ -3057,9 +3211,19 @@ final class DesktopSolveCoordinator {
         decision,
         program,
         result,
-        targetObligationId,
+        targetBinding,
         ComputationEvidenceGate.EvidenceAuthority.INCONCLUSIVE,
         false);
+  }
+
+  private void upsertComputationTrace(ComputationTrace trace) {
+    synchronized (computationTraces) {
+      computationTraces.removeIf(
+          current ->
+              current.routeId().equals(trace.routeId())
+                  && current.spec().experimentId().equals(trace.spec().experimentId()));
+      computationTraces.add(trace);
+    }
   }
 
   private ComputationBroker.PreparedDecision replayFailurePrepared(
@@ -3094,98 +3258,141 @@ final class DesktopSolveCoordinator {
     return audit;
   }
 
-  private void applyComputationAuthority(RouteState route, ComputationTrace trace) {
-    if (trace.result() == null || !trace.replayValid()) {
+  @SuppressFBWarnings(
+      value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
+      justification = "The real mathematical projection is rolled back before failure propagation.")
+  private void applyComputationAuthorityAtomically(
+      RouteState route,
+      ComputationTrace trace,
+      ComputationExecutionOutcome executionOutcome) {
+    TypedMemorySnapshot memoryBefore = typedMemory.snapshot();
+    ProofGraphSnapshot graphBefore = proofGraph.snapshot();
+    ComputationExecutionState computationBefore = computation.snapshot();
+    try {
+      AuthorityMutationIds ids = applyComputationAuthority(route, trace, executionOutcome);
+      ComputationAuthorityMutationReceipt mutation =
+          new ComputationAuthorityMutationReceipt(
+              "computation-mutation-"
+                  + CanonicalJson.stableHash(
+                          Map.of(
+                              "execution_id", executionOutcome.executionId(),
+                              "target_binding_hash", trace.targetBinding().bindingHash(),
+                              "action", executionOutcome.applicationReceipt().action().value()))
+                      .substring(0, 24),
+              executionOutcome.executionId(),
+              trace.targetBinding().bindingHash(),
+              executionOutcome.applicationReceipt().action(),
+              ids.factMessageId(),
+              ids.counterexampleMessageId(),
+              ids.closedObligationId(),
+              ids.refutedObligationId(),
+              ids.claimCourtEvidenceId(),
+              null);
+      computation
+          .executionService()
+          .recordAuthorityMutation(mutation, roundIndex.get());
+      computation
+          .executionService()
+          .completeAuthorityApplication(executionOutcome.executionId(), roundIndex.get());
+    } catch (RuntimeException exception) {
+      typedMemory = TypedMemory.restore(memoryBefore, memoryPolicy());
+      proofGraph = ProofGraphStore.restore(graphBefore, ProofGraphPolicy.defaults());
+      computation.restore(computationBefore);
+      installNegativeKnowledgeRuntime();
+      try {
+        persistUnchecked("computation_authority_projection_rollback", false);
+      } catch (RuntimeException rollbackFailure) {
+        exception.addSuppressed(rollbackFailure);
+      }
+      throw exception;
+    }
+  }
+
+  private AuthorityMutationIds applyComputationAuthority(
+      RouteState route,
+      ComputationTrace trace,
+      ComputationExecutionOutcome executionOutcome) {
+    if (trace.result() == null
+        || !trace.replayValid()
+        || !targetBindingStillExact(trace)) {
       event(
           "computation_evidence_disabled",
           "working_delta",
           route.author.id(),
           "warning",
-          "The result has no proof authority because independent replay did not pass",
+          "The result has no proof authority because replay or exact target binding did not pass",
           trace.spec().experimentId());
-      return;
+      return AuthorityMutationIds.none();
     }
-    switch (trace.authority()) {
-      case REFUTED -> applyComputationCounterexample(route, trace);
-      case NOT_REFUTED -> typedMemory.addInsight(computationInsightMessage(route, trace));
-      case VERIFIED_BOUNDED -> promoteComputationCertificate(route, trace, false);
-      case VERIFIED -> promoteComputationCertificate(route, trace, true);
+    return switch (trace.authority()) {
+      case REFUTED -> applyComputationCounterexample(route, trace, executionOutcome);
+      case NOT_REFUTED -> {
+        typedMemory.addInsight(computationInsightMessage(route, trace));
+        yield AuthorityMutationIds.none();
+      }
+      case VERIFIED_BOUNDED ->
+          promoteComputationCertificate(route, trace, executionOutcome, false);
+      case VERIFIED -> promoteComputationCertificate(route, trace, executionOutcome, true);
       case INCONCLUSIVE ->
-          event(
-              "computation_inconclusive",
-              "working_delta",
-              route.author.id(),
-              "warning",
-              "The computation is retained for audit but cannot support a proof claim",
-              trace.result().experimentId());
-    }
+          {
+            event(
+                "computation_inconclusive",
+                "working_delta",
+                route.author.id(),
+                "warning",
+                "The computation is retained for audit but cannot support a proof claim",
+                trace.result().experimentId());
+            yield AuthorityMutationIds.none();
+          }
+    };
   }
 
-  private void applyComputationCounterexample(RouteState route, ComputationTrace trace) {
+  private AuthorityMutationIds applyComputationCounterexample(
+      RouteState route,
+      ComputationTrace trace,
+      ComputationExecutionOutcome executionOutcome) {
     MessageEnvelope counterexample = computationCounterexampleMessage(route, trace);
-    typedMemory.applyVerifiedCounterexample(
-        counterexample,
-        VerifiedCounterexampleAuthority.independentReplay(
-            trace.result() != null,
-            trace.replayValid(),
-            trace.authority(),
-            "experiment://" + trace.result().experimentId(),
-            trace.result().targetClaim(),
-            trace.result().resultHash(),
-            List.of()));
-    Set<String> affected = new LinkedHashSet<>(proofGraph.applyCounterexample(counterexample));
-    findObligation(trace.targetObligationId())
+    String counterexampleId = "";
+    if (!trace.targetBinding().isolatedComputationQuestion()) {
+      typedMemory.applyVerifiedCounterexample(
+          counterexample,
+          VerifiedCounterexampleAuthority.independentReplay(
+              trace.result() != null,
+              trace.replayValid(),
+              trace.authority(),
+              "experiment://" + trace.result().experimentId(),
+              trace.result().targetClaim(),
+              trace.result().resultHash(),
+              List.of()));
+      counterexampleId = counterexample.messageId();
+    }
+    String refutedObligationId = trace.targetBinding().obligationId();
+    String evidenceId =
+        counterexampleId.isEmpty()
+            ? "experiment://" + trace.result().experimentId()
+            : counterexampleId;
+    findObligation(refutedObligationId)
         .filter(obligation -> !"refuted".equals(obligation.status()))
         .ifPresent(
-            obligation -> {
-              proofGraph.refuteObligation(obligation.obligationId(), counterexample.messageId());
-              affected.add(obligation.obligationId());
-            });
-    Set<String> blockedRoutes = new LinkedHashSet<>();
-    for (String obligationId : affected) {
-      findObligation(obligationId)
-          .filter(item -> item.kind() != ObligationKind.COMPUTATION_QUESTION)
-          .ifPresent(
-              item -> {
-                blockedRoutes.addAll(item.routeIds());
-                proofGraph.findDependents(obligationId).stream()
-                    .flatMap(dependent -> dependent.routeIds().stream())
-                    .forEach(blockedRoutes::add);
-              });
-    }
-    routes.stream()
-        .filter(candidate -> strategyRequiresClaim(candidate.strategy, trace.result().targetClaim()))
-        .map(candidate -> candidate.routeId)
-        .forEach(blockedRoutes::add);
-    routes.stream()
-        .filter(candidate -> blockedRoutes.contains(candidate.routeId))
-        .filter(candidate -> !"verified".equals(candidate.status))
-        .forEach(
-            candidate -> {
-              candidate.status = "blocked";
-              candidate.metaAbandoned = true;
-              candidate.failureReason =
-                  "A required claim was refuted by independently replayed computation "
-                      + trace.result().experimentId();
-              candidate.metaControlReason = candidate.failureReason;
-            });
+            obligation ->
+                proofGraph.refuteObligation(
+                    obligation.obligationId(), evidenceId));
+    computation
+        .executionService()
+        .fireHook(
+            ComputationExecutionFailurePoint.AFTER_COUNTEREXAMPLE_MUTATION_BEFORE_LEDGER_COMMIT,
+            executionOutcome.executionId());
     event(
         "computation_counterexample_admitted",
         "working_delta",
         route.author.id(),
         "rejected",
-        "Counterexample entered Negative Memory and blocked "
-            + blockedRoutes.size()
-            + " dependent route(s)",
-        counterexample.messageId());
-  }
-
-  private boolean strategyRequiresClaim(StrategyCard strategy, String claim) {
-    String dependencies = topology.dependencyText(strategy);
-    return !dependencies.isBlank()
-        && claim != null
-        && !claim.isBlank()
-        && topology.mathSimilarity(dependencies, claim) >= 0.68d;
+        trace.targetBinding().isolatedComputationQuestion()
+            ? "Counterexample refuted only its isolated computation question"
+            : "Counterexample entered Negative Memory and refuted its exact bound obligation",
+        counterexampleId.isEmpty() ? refutedObligationId : counterexampleId);
+    return new AuthorityMutationIds(
+        "", counterexampleId, "", refutedObligationId, "");
   }
 
   private MessageEnvelope computationCounterexampleMessage(
@@ -3257,9 +3464,32 @@ final class DesktopSolveCoordinator {
         ClaimStatus.PROPOSED);
   }
 
-  private void promoteComputationCertificate(
-      RouteState route, ComputationTrace trace, boolean formal) {
+  private AuthorityMutationIds promoteComputationCertificate(
+      RouteState route,
+      ComputationTrace trace,
+      ComputationExecutionOutcome executionOutcome,
+      boolean formal) {
     ExperimentResult result = trace.result();
+    if (trace.targetBinding().isolatedComputationQuestion()) {
+      String obligationId = trace.targetBinding().obligationId();
+      MessageEnvelope isolatedEvidence =
+          isolatedComputationCertificateMessage(route, trace, formal);
+      proofGraph.addClaimNode(isolatedEvidence);
+      findObligation(obligationId)
+          .filter(obligation -> !"closed".equals(obligation.status()))
+          .ifPresent(
+              obligation ->
+                  proofGraph.closeObligation(
+                      obligation.obligationId(),
+                      isolatedEvidence.messageId(),
+                      1.0d));
+      computation
+          .executionService()
+          .fireHook(
+              ComputationExecutionFailurePoint.AFTER_FACT_MUTATION_BEFORE_LEDGER_COMMIT,
+              executionOutcome.executionId());
+      return new AuthorityMutationIds("", "", obligationId, "", "");
+    }
     String statement =
         (formal ? "Formally certified: " : "Verified only on the complete finite scope: ")
             + result.targetClaim();
@@ -3300,7 +3530,8 @@ final class DesktopSolveCoordinator {
           typedMemory.addFact(
               certificate, "independent-computation-replay", roundIndex.get());
       proofGraph.addClaimNode(admitted);
-      findObligation(trace.targetObligationId())
+      String obligationId = trace.targetBinding().obligationId();
+      findObligation(obligationId)
           .filter(
               obligation ->
                   formal
@@ -3310,6 +3541,15 @@ final class DesktopSolveCoordinator {
               obligation ->
                   proofGraph.closeObligation(
                       obligation.obligationId(), admitted.messageId(), 1.0d));
+      computation
+          .executionService()
+          .fireHook(
+              ComputationExecutionFailurePoint.AFTER_FACT_MUTATION_BEFORE_LEDGER_COMMIT,
+              executionOutcome.executionId());
+      boolean closed =
+          findObligation(obligationId).map(value -> "closed".equals(value.status())).orElse(false);
+      return new AuthorityMutationIds(
+          admitted.messageId(), "", closed ? obligationId : "", "", "");
     } catch (IllegalArgumentException rejected) {
       event(
           "computation_fact_rejected",
@@ -3318,7 +3558,101 @@ final class DesktopSolveCoordinator {
           "warning",
           rejected.getMessage(),
           result.experimentId());
+      return AuthorityMutationIds.none();
     }
+  }
+
+  private MessageEnvelope isolatedComputationCertificateMessage(
+      RouteState route, ComputationTrace trace, boolean formal) {
+    ExperimentResult result = trace.result();
+    String statement =
+        (formal
+                ? "Formally certified only for isolated computation question: "
+                : "Complete finite certificate only for isolated computation question: ")
+            + result.targetClaim();
+    return new MessageEnvelope(
+        List.of("experiment://" + result.experimentId()),
+        trace.spec().assumptions(),
+        statement,
+        "",
+        null,
+        List.of(),
+        List.of(),
+        formal
+            ? EvidenceType.FORMAL_KERNEL_CERTIFICATE
+            : EvidenceType.COMPLETE_FINITE_ENUMERATION,
+        MemoryTier.FACT,
+        "isolated-computation-fact-"
+            + result.experimentId()
+            + "-"
+            + result.resultHash().substring(0, 12),
+        formal ? MessageType.FORMAL_CERTIFICATE : MessageType.COMPUTATION_CERTIFICATE,
+        1.0d,
+        topology.mathNormalize(statement),
+        problemHash,
+        List.of(),
+        result.resultHash(),
+        roundIndex.get(),
+        "1",
+        List.of("Authority is restricted to " + trace.targetBinding().obligationId()),
+        route.author.id(),
+        RouteRole.TOOL_SPECIALIST,
+        route.routeId,
+        statement,
+        List.of(route.routeId),
+        config.topology().crossRoute().messageTtlRounds(),
+        List.of(),
+        1.0d,
+        ClaimStatus.VERIFIED);
+  }
+
+  private boolean targetBindingStillExact(ComputationTrace trace) {
+    ComputationTargetBinding binding = trace.targetBinding();
+    if (binding == null
+        || !sameHash(binding.problemHash(), problemHash)
+        || !sameHash(binding.scopeHash(), computationScopeHash(trace.spec()))) {
+      return false;
+    }
+    ProofObligation obligation = findObligation(binding.obligationId()).orElse(null);
+    CanonicalObligationRecord canonical =
+        proofGraph.canonicalTargetForObligation(binding.obligationId()).orElse(null);
+    if (obligation == null
+        || canonical == null
+        || !canonical.canonicalTargetId().equals(binding.canonicalTargetId())
+        || !sameHash(canonical.signature().signatureHash(), binding.obligationSemanticHash())
+        || !canonical.signature().polarity().equals(binding.polarity())) {
+      return false;
+    }
+    if (binding.isolatedComputationQuestion()) {
+      return obligation.kind() == ObligationKind.COMPUTATION_QUESTION
+          && topology
+              .mathNormalize(obligation.statement())
+              .equals(topology.mathNormalize(trace.spec().targetClaim()));
+    }
+    ClaimEvidenceSemanticBinding requested = trace.spec().claimEvidenceSemanticBinding();
+    if (requested == null
+        || trace.result().claimEvidenceSemanticBinding() == null
+        || !requested.equals(trace.result().claimEvidenceSemanticBinding())
+        || !binding.claimId().equals(trace.result().targetClaimId())) {
+      return false;
+    }
+    FrozenClaimSnapshot frozen =
+        claimCourt.records().stream()
+            .map(ClaimCourtRecord::frozenClaim)
+            .filter(value -> exactClaimBinding(requested, value, trace.spec()))
+            .findFirst()
+            .orElse(null);
+    return exactComputationObligation(obligation, requested, frozen, trace.spec())
+        && sameHash(
+            binding.claimStatementHash(),
+            frozen == null
+                ? CanonicalJson.stableHash(obligation.statement())
+                : frozen.claimStatementHash())
+        && sameHash(
+            binding.claimSemanticHash(),
+            frozen == null
+                ? canonical.signature().signatureHash()
+                : frozen.claimSemanticHash());
   }
 
   private ComputationBroker.PreparedDecision repairComputationContract(
@@ -10810,13 +11144,16 @@ final class DesktopSolveCoordinator {
     inspirationProgress = checkpoint.inspirationProgress();
     computationAudits.clear();
     computationAudits.addAll(checkpoint.computationAudits());
+    boolean legacyComputationSchema = checkpoint.schemaVersion() < 18;
     computation.restore(
-        new ComputationExecutionState(
-            checkpoint.computationCapabilities(),
-            checkpoint.computationExecutions(),
-            checkpoint.computationArtifacts(),
-            checkpoint.computationVerifications(),
-            checkpoint.computationOutcomeReceipts()));
+        legacyComputationSchema
+            ? ComputationExecutionState.empty()
+            : new ComputationExecutionState(
+                checkpoint.computationCapabilities(),
+                checkpoint.computationExecutions(),
+                checkpoint.computationArtifacts(),
+                checkpoint.computationVerifications(),
+                checkpoint.computationOutcomeReceipts()));
     inspirationProposals.clear();
     inspirationProposals.addAll(checkpoint.inspirationProposals());
     inspirationOutcomes.clear();
@@ -10833,11 +11170,10 @@ final class DesktopSolveCoordinator {
                     value.decision(),
                     value.program(),
                     value.result(),
-                    value.targetObligationId(),
+                    value.targetBinding(),
                     value.authority(),
                     value.replayValid())));
-    if (checkpoint.schemaVersion() < 18
-        && checkpoint.computationExecutions().records().isEmpty()) {
+    if (legacyComputationSchema) {
       checkpoint.computations().forEach(
           value -> {
             if (value.result() != null) {
@@ -11073,6 +11409,7 @@ final class DesktopSolveCoordinator {
                 || restoreBlockedObligations.contains(task.obligationId()));
     restoreStrategyArchive(checkpoint);
     reconcileSemanticPivotProjection();
+    reconcileComputationAuthorityProjection();
     restoreBlockedStrategyIds.stream()
         .filter(strategyArchive.lineage()::containsKey)
         .forEach(
@@ -11113,6 +11450,84 @@ final class DesktopSolveCoordinator {
         "completed",
         resumeDecision.decision().name() + ": " + resumeDecision.reason(),
         resumeDecision.id());
+  }
+
+  private void reconcileComputationAuthorityProjection() {
+    for (ComputationTrace saved : List.copyOf(computationTraces)) {
+      if (saved.targetBinding() == null) {
+        continue;
+      }
+      ComputationExecutionRecord record =
+          computation.executionService().executions().records().stream()
+              .filter(value -> value.routeId().equals(saved.routeId()))
+              .filter(value -> value.requestHash().equals(saved.spec().requestHash()))
+              .findFirst()
+              .orElse(null);
+      if (record == null
+          || (record.status() != ComputationExecutionStatus.PROJECTION_READY
+              && record.status()
+                  != ComputationExecutionStatus.AUTHORITY_MUTATION_DURABLE
+              && record.status() != ComputationExecutionStatus.AUTHORITY_APPLIED)) {
+        continue;
+      }
+      RouteState route =
+          routes.stream().filter(value -> value.routeId.equals(saved.routeId())).findFirst().orElse(null);
+      if (route == null) {
+        continue;
+      }
+      ComputationExecutionOutcome outcome =
+          computation
+              .executionService()
+              .recoverOutcome(saved.spec(), saved.program(), saved.routeId())
+              .orElse(null);
+      if (outcome == null) {
+        continue;
+      }
+      ComputationTrace restored =
+          saved.result() == null
+              ? new ComputationTrace(
+                  saved.routeId(),
+                  saved.spec(),
+                  saved.decision(),
+                  saved.program(),
+                  outcome.result(),
+                  saved.targetBinding(),
+                  outcome.authority(),
+                  outcome.verificationReceipt().valid())
+              : saved;
+      upsertComputationTrace(restored);
+      Optional<ComputationAuthorityMutationReceipt> mutation =
+          computation.executionService().authorityMutationReceipt(outcome.executionId());
+      if (mutation.isPresent() && authorityMutationPresent(mutation.orElseThrow())) {
+        computation
+            .executionService()
+            .completeAuthorityApplication(outcome.executionId(), roundIndex.get());
+        continue;
+      }
+      applyComputationAuthorityAtomically(route, restored, outcome);
+    }
+  }
+
+  private boolean authorityMutationPresent(ComputationAuthorityMutationReceipt receipt) {
+    boolean factPresent =
+        receipt.factMessageId().isEmpty()
+            || typedMemory.facts().stream()
+                .anyMatch(value -> value.messageId().equals(receipt.factMessageId()));
+    boolean counterexamplePresent =
+        receipt.counterexampleMessageId().isEmpty()
+            || typedMemory.negatives().stream()
+                .anyMatch(value -> value.messageId().equals(receipt.counterexampleMessageId()));
+    boolean closurePresent =
+        receipt.closedObligationId().isEmpty()
+            || findObligation(receipt.closedObligationId())
+                .map(value -> "closed".equals(value.status()))
+                .orElse(false);
+    boolean refutationPresent =
+        receipt.refutedObligationId().isEmpty()
+            || findObligation(receipt.refutedObligationId())
+                .map(value -> "refuted".equals(value.status()))
+                .orElse(false);
+    return factPresent && counterexamplePresent && closurePresent && refutationPresent;
   }
 
   private void restoreStrategyArchive(DesktopSolveCheckpoint checkpoint) {
@@ -11491,7 +11906,8 @@ final class DesktopSolveCoordinator {
                         trace.result(),
                         trace.targetObligationId(),
                         trace.authority(),
-                        trace.replayValid()))
+                        trace.replayValid(),
+                        trace.targetBinding()))
             .toList();
     ComputationExecutionState computationState = computation.snapshot();
     DesktopSolveCheckpoint checkpoint =
@@ -13382,13 +13798,18 @@ final class DesktopSolveCoordinator {
       ComputationDecision decision,
       ExperimentProgram program,
       ExperimentResult result,
-      String targetObligationId,
+      ComputationTargetBinding targetBinding,
       ComputationEvidenceGate.EvidenceAuthority authority,
       boolean replayValid) {
+    private String targetObligationId() {
+      return targetBinding == null ? "" : targetBinding.obligationId();
+    }
+
     private Map<String, Object> publicView() {
       Map<String, Object> view = new LinkedHashMap<>();
       view.put("route_id", routeId);
-      view.put("target_obligation_id", targetObligationId);
+      view.put("target_obligation_id", targetObligationId());
+      view.put("target_binding_hash", targetBinding == null ? "none" : targetBinding.bindingHash());
       view.put("experiment", spec);
       view.put("decision", decision);
       view.put("program_hash", program == null ? "none" : program.codeHash());
@@ -13397,6 +13818,33 @@ final class DesktopSolveCoordinator {
       view.put("replay_valid", replayValid);
       return Map.copyOf(view);
     }
+  }
+
+  private record AuthorityMutationIds(
+      String factMessageId,
+      String counterexampleMessageId,
+      String closedObligationId,
+      String refutedObligationId,
+      String claimCourtEvidenceId) {
+    private AuthorityMutationIds {
+      factMessageId = cleanIdentity(factMessageId);
+      counterexampleMessageId = cleanIdentity(counterexampleMessageId);
+      closedObligationId = cleanIdentity(closedObligationId);
+      refutedObligationId = cleanIdentity(refutedObligationId);
+      claimCourtEvidenceId = cleanIdentity(claimCourtEvidenceId);
+    }
+
+    private static AuthorityMutationIds none() {
+      return new AuthorityMutationIds("", "", "", "", "");
+    }
+  }
+
+  private static String normalizedIdentityText(String value) {
+    return value == null ? "" : value.strip().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+  }
+
+  private static String cleanIdentity(String value) {
+    return value == null ? "" : value.strip();
   }
 
   private record VerifiedCourtFactProjection(

@@ -2,7 +2,9 @@ package io.github.aililuola.mathproofmesh.computation;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
+import io.github.aililuola.mathproofmesh.contract.ComputationAuthorityMutationReceipt;
 import io.github.aililuola.mathproofmesh.contract.ComputationCertificateEnvelope;
+import io.github.aililuola.mathproofmesh.contract.ComputationDecisionAction;
 import io.github.aililuola.mathproofmesh.contract.ComputationDecision;
 import io.github.aililuola.mathproofmesh.contract.ComputationDecisionPlan;
 import io.github.aililuola.mathproofmesh.contract.ComputationDecisionStatus;
@@ -110,6 +112,17 @@ public final class ComputationExecutionService {
     Optional<ComputationExecutionOutcome> completed = completedOutcome(spec, request, record);
     if (completed.isPresent()) {
       ComputationExecutionOutcome outcome = completed.orElseThrow();
+      if (!context.authoritativeBinding()) {
+        ComputationExecutionRecord current =
+            executions.find(request.executionId()).orElseThrow();
+        if (current.status() == ComputationExecutionStatus.PROJECTION_READY) {
+          recordAuthorityMutation(syntheticMutation(outcome), context.round());
+          current = executions.find(request.executionId()).orElseThrow();
+        }
+        if (current.status() == ComputationExecutionStatus.AUTHORITY_MUTATION_DURABLE) {
+          completeAuthorityApplication(request.executionId(), context.round());
+        }
+      }
       outcomesByExperiment.put(spec.experimentId(), outcome);
       return outcome;
     }
@@ -145,6 +158,8 @@ public final class ComputationExecutionService {
       if (cached.isPresent()) {
         cacheHit = true;
         ComputationResultArtifact rebound = rebind(cached.orElseThrow().result(), request);
+        ComputationResourceGuard.validateResult(
+            rebound, request.capability().resourceEnvelope());
         ComputationCertificateEnvelope reboundCertificate =
             ComputationCertificateFactory.create(request, rebound);
         durable = persistProducerArtifacts(request, rebound, reboundCertificate);
@@ -163,7 +178,10 @@ public final class ComputationExecutionService {
         ProducedComputation produced;
         String error = "";
         try {
-          produced = capability.producer().execute(request);
+          produced =
+              ComputationResourceGuard.callWithin(
+                  () -> capability.producer().execute(request),
+                  request.capability().resourceEnvelope());
         } catch (RuntimeException exception) {
           error = boundedMessage(exception);
           produced =
@@ -175,6 +193,21 @@ public final class ComputationExecutionService {
         }
         double cpuSeconds = (System.nanoTime() - started) / 1_000_000_000.0d;
         ComputationResultArtifact raw = rawResult(request, produced, error, cpuSeconds);
+        try {
+          ComputationResourceGuard.validateResult(
+              raw, request.capability().resourceEnvelope());
+        } catch (RuntimeException exception) {
+          error = boundedMessage(exception);
+          produced =
+              new ProducedComputation(
+                  HandlerEvidence.inconclusive(
+                      error, ComputationJson.object().put("method", spec.method().value())),
+                  request.capability().producerId(),
+                  request.capability().producerVersion());
+          raw = rawResult(request, produced, error, cpuSeconds);
+          ComputationResourceGuard.validateResult(
+              raw, request.capability().resourceEnvelope());
+        }
         ComputationCertificateEnvelope certificate =
             ComputationCertificateFactory.create(request, raw);
         durable = persistProducerArtifacts(request, raw, certificate);
@@ -219,12 +252,10 @@ public final class ComputationExecutionService {
             ComputationArtifactKind.OUTCOME_APPLICATION_RECEIPT,
             application);
     outcomeReceipts.record(application);
-    executions.markAuthorityApplied(request.executionId(), applicationRecord.reference(), context.round());
-    hook.onPoint(
-        ComputationExecutionFailurePoint.AFTER_AUTHORITY_APPLIED_BEFORE_CHECKPOINT,
-        request.executionId());
-    persist("computation_authority_applied");
-    hook.onPoint(ComputationExecutionFailurePoint.AFTER_ATOMIC_CHECKPOINT_MOVE, request.executionId());
+    executions.markProjectionReady(
+        request.executionId(), applicationRecord.reference(), context.round());
+    persist("computation_projection_ready");
+    fireHook(ComputationExecutionFailurePoint.AFTER_PROJECTION_READY, request.executionId());
 
     List<ComputationArtifactRecord> allArtifacts = new ArrayList<>(evidenceArtifacts);
     allArtifacts.add(applicationRecord);
@@ -248,11 +279,26 @@ public final class ComputationExecutionService {
             authority,
             cacheHit);
     outcomesByExperiment.put(spec.experimentId(), outcome);
+    if (!context.authoritativeBinding()) {
+      recordAuthorityMutation(syntheticMutation(outcome), context.round());
+      completeAuthorityApplication(request.executionId(), context.round());
+    }
     return outcome;
   }
 
   public Optional<ComputationExecutionOutcome> lastOutcome(String experimentId) {
     return Optional.ofNullable(outcomesByExperiment.get(experimentId));
+  }
+
+  /** Rebuilds a public outcome from durable artifacts without running a producer or verifier. */
+  public Optional<ComputationExecutionOutcome> recoverOutcome(
+      ExperimentSpec spec, ExperimentProgram program, String routeId) {
+    Objects.requireNonNull(spec, "spec");
+    ValidatedComputationRequest request =
+        compiler.compile(spec, program, ComputationExecutionContext.legacy(routeId));
+    return executions
+        .find(request.executionId())
+        .flatMap(record -> completedOutcome(spec, request, record));
   }
 
   public ComputationExecutionState snapshot() {
@@ -271,6 +317,7 @@ public final class ComputationExecutionService {
     artifacts.restore(safe.artifacts());
     verifications.restore(safe.verifications());
     outcomeReceipts.restore(safe.outcomeReceipts());
+    migrateLegacyAppliedRecords();
     rebuildCanonicalCache();
     outcomesByExperiment.clear();
   }
@@ -398,7 +445,12 @@ public final class ComputationExecutionService {
             ComputationArtifactKind.OUTCOME_APPLICATION_RECEIPT,
             application);
     outcomeReceipts.record(application);
-    executions.markAuthorityApplied(request.executionId(), applicationRecord.reference(), round);
+    executions.markProjectionReady(request.executionId(), applicationRecord.reference(), round);
+    ComputationExecutionOutcome outcome =
+        completedOutcome(spec, request, executions.find(request.executionId()).orElseThrow())
+            .orElseThrow();
+    recordAuthorityMutation(syntheticMutation(outcome), round);
+    completeAuthorityApplication(request.executionId(), round);
   }
 
   /** Imports an incomplete v17 trace as audit-only evidence without invoking any backend. */
@@ -488,7 +540,12 @@ public final class ComputationExecutionService {
             ComputationArtifactKind.OUTCOME_APPLICATION_RECEIPT,
             application);
     outcomeReceipts.record(application);
-    executions.markAuthorityApplied(request.executionId(), applicationRecord.reference(), round);
+    executions.markProjectionReady(request.executionId(), applicationRecord.reference(), round);
+    ComputationExecutionOutcome outcome =
+        completedOutcome(spec, request, executions.find(request.executionId()).orElseThrow())
+            .orElseThrow();
+    recordAuthorityMutation(syntheticMutation(outcome), round);
+    completeAuthorityApplication(request.executionId(), round);
   }
 
   public ComputationExecutionLedger executions() {
@@ -510,6 +567,67 @@ public final class ComputationExecutionService {
     return outcomeReceipts;
   }
 
+  /** Commits the receipt produced only after the caller's real mathematical mutation succeeds. */
+  public ComputationExecutionRecord recordAuthorityMutation(
+      ComputationAuthorityMutationReceipt receipt, int round) {
+    Objects.requireNonNull(receipt, "receipt");
+    ComputationExecutionRecord current =
+        executions
+            .find(receipt.executionId())
+            .orElseThrow(
+                () ->
+                    new IllegalArgumentException(
+                        "unknown computation execution: " + receipt.executionId()));
+    ComputationOutcomeApplicationReceipt application =
+        artifacts
+            .read(
+                current.outcomeApplicationReceiptRef(),
+                ComputationOutcomeApplicationReceipt.class)
+            .orElseThrow(() -> new IllegalStateException("outcome application receipt is missing"));
+    if (application.action() != receipt.action()) {
+      throw new IllegalArgumentException("authority mutation action does not match projection plan");
+    }
+    ComputationArtifactRecord receiptRecord =
+        artifacts.write(
+            receipt.executionId(),
+            ComputationArtifactKind.AUTHORITY_MUTATION_RECEIPT,
+            receipt);
+    ComputationExecutionRecord updated =
+        executions.markAuthorityMutationDurable(
+            receipt.executionId(), receiptRecord.reference(), round);
+    fireHook(
+        ComputationExecutionFailurePoint.AFTER_LEDGER_COMMIT_BEFORE_CHECKPOINT,
+        receipt.executionId());
+    persist("computation_authority_mutation_durable");
+    fireHook(ComputationExecutionFailurePoint.AFTER_ATOMIC_CHECKPOINT_MOVE, receipt.executionId());
+    return updated;
+  }
+
+  /** Marks the transaction complete only after its mutation receipt is durable. */
+  public ComputationExecutionRecord completeAuthorityApplication(String executionId, int round) {
+    ComputationExecutionRecord updated = executions.markAuthorityApplied(executionId, round);
+    fireHook(
+        ComputationExecutionFailurePoint.AFTER_AUTHORITY_APPLIED_BEFORE_CHECKPOINT, executionId);
+    persist("computation_authority_applied");
+    return updated;
+  }
+
+  public Optional<ComputationAuthorityMutationReceipt> authorityMutationReceipt(
+      String executionId) {
+    return executions
+        .find(executionId)
+        .filter(record -> !record.authorityMutationReceiptRef().isEmpty())
+        .flatMap(
+            record ->
+                artifacts.read(
+                    record.authorityMutationReceiptRef(),
+                    ComputationAuthorityMutationReceipt.class));
+  }
+
+  public void fireHook(ComputationExecutionFailurePoint point, String executionId) {
+    hook.onPoint(Objects.requireNonNull(point, "point"), required(executionId, "executionId"));
+  }
+
   public void setHook(ComputationExecutionHook hook) {
     this.hook = hook == null ? ComputationExecutionHook.noOp() : hook;
   }
@@ -522,7 +640,9 @@ public final class ComputationExecutionService {
       ExperimentSpec spec,
       ValidatedComputationRequest request,
       ComputationExecutionRecord record) {
-    if (record.status() != ComputationExecutionStatus.AUTHORITY_APPLIED) {
+    if (record.status() != ComputationExecutionStatus.PROJECTION_READY
+        && record.status() != ComputationExecutionStatus.AUTHORITY_MUTATION_DURABLE
+        && record.status() != ComputationExecutionStatus.AUTHORITY_APPLIED) {
       return Optional.empty();
     }
     ResultAndCertificate durable = readDurable(record);
@@ -562,6 +682,61 @@ public final class ComputationExecutionService {
             bundle,
             ComputationEvidenceGate.authority(result, receipt, request.capability()),
             true));
+  }
+
+  private static ComputationAuthorityMutationReceipt syntheticMutation(
+      ComputationExecutionOutcome outcome) {
+    String targetBindingHash =
+        CanonicalJson.stableHash(Map.of("legacy_execution_id", outcome.executionId()));
+    return new ComputationAuthorityMutationReceipt(
+        "mutation-" + CanonicalJson.stableHash(Map.of("execution_id", outcome.executionId())),
+        outcome.executionId(),
+        targetBindingHash,
+        outcome.applicationReceipt().action(),
+        "",
+        "",
+        "",
+        "",
+        "",
+        null);
+  }
+
+  private void migrateLegacyAppliedRecords() {
+    for (ComputationExecutionRecord record : executions.records()) {
+      if (record.status() != ComputationExecutionStatus.AUTHORITY_APPLIED
+          || !record.authorityMutationReceiptRef().isEmpty()) {
+        continue;
+      }
+      ComputationOutcomeApplicationReceipt application =
+          artifacts
+              .read(
+                  record.outcomeApplicationReceiptRef(),
+                  ComputationOutcomeApplicationReceipt.class)
+              .orElse(null);
+      if (application == null) {
+        continue;
+      }
+      ComputationAuthorityMutationReceipt receipt =
+          new ComputationAuthorityMutationReceipt(
+              "legacy-mutation-"
+                  + CanonicalJson.stableHash(Map.of("execution_id", record.executionId())),
+              record.executionId(),
+              CanonicalJson.stableHash(Map.of("legacy_execution_id", record.executionId())),
+              application.action(),
+              "",
+              "",
+              "",
+              "",
+              "",
+              null);
+      ComputationArtifactRecord receiptRecord =
+          artifacts.write(
+              record.executionId(),
+              ComputationArtifactKind.AUTHORITY_MUTATION_RECEIPT,
+              receipt);
+      executions.migrateLegacyAppliedMutation(
+          record.executionId(), receiptRecord.reference(), record.lastUpdatedRound());
+    }
   }
 
   private Optional<ResultAndCertificate> recoverDurableProducerArtifacts(
@@ -616,7 +791,9 @@ public final class ComputationExecutionService {
     }
     RegisteredComputationCapability capability = capabilities.capability(request.spec().method());
     ComputationVerificationReceipt receipt =
-        capability.verifier().verify(request, durable.result(), durable.certificate());
+        ComputationResourceGuard.callWithin(
+            () -> capability.verifier().verify(request, durable.result(), durable.certificate()),
+            request.capability().resourceEnvelope());
     ComputationArtifactRecord receiptRecord =
         artifacts.write(
             request.executionId(), ComputationArtifactKind.VERIFICATION_RECEIPT, receipt);

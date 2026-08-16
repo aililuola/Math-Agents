@@ -333,4 +333,114 @@ ISSUE_010_STATUS=CLOSED
 ================================================================
 ```
 
+## 11. Independent source-audit closure patch
+
+The follow-up audit identified four remaining Issue 010 boundaries. They are now closed on
+the same branch without changing Issues 001-009 or beginning Issue 011.
+
+### 11.1 Explicit independent native verification
+
+- Removed every authority-producing default verifier path. Unsupported methods fail closed.
+- Added independent exact replay for modular exhaustion, bounded integer search, recurrence,
+  greedy sequences, candidate periods, exact geometry, and number theory.
+- Replaced recursive determinant expansion with independent elimination.
+- Added positive replay coverage for all supported native branches plus forged certificate and
+  counterexample mutation coverage.
+
+```text
+NATIVE_METHODS_WITHOUT_EXPLICIT_VERIFIER=0
+NATIVE_METHODS_WITH_POSITIVE_DEFAULT_VERIFIER=0
+FORGED_NATIVE_CERTIFICATES_ACCEPTED=0
+FORGED_NATIVE_COUNTEREXAMPLES_ACCEPTED=0
+```
+
+Before the patch, the seven named forged-native regression tests all failed because the old
+positive default accepted their forged evidence. After the patch, all seven pass.
+
+### 11.2 Exact computation target binding
+
+`ComputationTargetBinding` is server-owned and binds the claim context hash, obligation semantic
+hash, canonical target, scope, and polarity. Focus and text similarity cannot confer authority.
+An unbound request receives an isolated `COMPUTATION_QUESTION`; its result cannot mutate another
+mathematical obligation.
+
+```text
+WRONG_FOCUS_OBLIGATION_BINDINGS=0
+SIMILARITY_ONLY_AUTHORITY_BINDINGS=0
+WRONG_TARGET_REFUTATIONS=0
+WRONG_TARGET_FINITE_CERTIFICATE_CLOSURES=0
+WRONG_TARGET_FORMAL_CERTIFICATE_CLOSURES=0
+WRONG_TARGET_CERTIFICATE_CLOSURES=0
+```
+
+### 11.3 Crash-safe authority projection
+
+The durable state sequence is now:
+
+```text
+VERIFICATION_DURABLE
+-> PROJECTION_READY
+-> AUTHORITY_MUTATION_DURABLE
+-> AUTHORITY_APPLIED
+```
+
+`ComputationAuthorityMutationReceipt` records the real Fact, counterexample, closed/refuted
+obligation, and Claim Court evidence projections. Desktop mutation is checkpointed atomically;
+restore deterministically rolls forward a durable mutation or performs a no-op for an already
+applied receipt.
+
+```text
+COMPUTATION AUTHORITY PROJECTION HARD-CRASH DIAGNOSTIC
+HARD_CRASH_POINTS=5
+RESTORE_FAILURES=0
+AUTHORITY_LEDGER_WITHOUT_MUTATION=0
+MUTATION_WITHOUT_AUTHORITY_LEDGER=0
+DUPLICATE_FACT_PROJECTIONS=0
+DUPLICATE_COUNTEREXAMPLE_PROJECTIONS=0
+PARTIAL_AUTHORITY_PROJECTIONS=0
+ROOT_HASH_CHANGES=0
+SECOND_RESTORE_CHANGES=0
+RESULT=PASS
+
+COMPUTATION AUTHORITY RESTORE RECONCILIATION DIAGNOSTIC
+FRONTIERS_RECONCILED=3
+AUTHORITY_LEDGER_WITHOUT_MUTATION=0
+MUTATION_WITHOUT_AUTHORITY_LEDGER=0
+PARTIAL_AUTHORITY_PROJECTIONS=0
+SECOND_RESTORE_CHANGES=0
+RESULT=PASS
+```
+
+### 11.4 Enforced resource envelope
+
+The request compiler, native execution wrapper, and result validation now enforce CPU timeout,
+memory, serialized input/output, matrix dimensions, exact-number bit length, finite-set size,
+hypergraph size, certificate nodes, and result characters. All five required resource tests pass,
+with additional boundary coverage for each independent limit and execution failure mode.
+
+### 11.5 Final verification after the audit patch
+
+```text
+FULL VERIFICATION: PASS
+Contracts=65, failures=0, errors=0, skipped=0
+Core=1321, failures=0, errors=0, skipped=0
+Server unit=871, failures=0, errors=0, skipped=3
+Server PostgreSQL IT=26, failures=0, errors=0, skipped=0
+Desktop=255, failures=0, errors=0, skipped=1
+Compatibility=149, failures=0, errors=0, skipped=0
+TOTAL=2687, failures=0, errors=0, skipped=4
+
+CORE_LINE_COVERAGE=90.264414%
+CORE_BRANCH_COVERAGE=75.107743%
+SPOTBUGS_FINDBUGS_FINDINGS=0
+POSTGRESQL_ITS=PASS
+OWASP=PASS
+SECRET_SCAN=PASS
+LICENSE_GATE=PASS
+SOURCE_IMMUTABILITY=PASS
+PYTHON_SIDECAR_PERFORMANCE=PASS
+
+ISSUE_010_STATUS=CLOSED
+```
+
 Issue 011 尚未开始。

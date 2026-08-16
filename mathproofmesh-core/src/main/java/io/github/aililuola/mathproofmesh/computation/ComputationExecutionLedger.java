@@ -48,6 +48,7 @@ public final class ComputationExecutionLedger {
               "",
               "",
               "",
+              "",
               ComputationVerifiedAuthority.AUDIT_ONLY,
               0,
               0,
@@ -78,6 +79,7 @@ public final class ComputationExecutionLedger {
               current.certificateArtifactRef(),
               current.verificationReceiptRef(),
               current.outcomeApplicationReceiptRef(),
+              current.authorityMutationReceiptRef(),
               current.authority(),
               current.attemptCount() + 1,
               current.producerExecutions(),
@@ -104,6 +106,8 @@ public final class ComputationExecutionLedger {
         current -> {
           if (current.status() == ComputationExecutionStatus.RESULT_DURABLE
               || current.status() == ComputationExecutionStatus.VERIFICATION_DURABLE
+              || current.status() == ComputationExecutionStatus.PROJECTION_READY
+              || current.status() == ComputationExecutionStatus.AUTHORITY_MUTATION_DURABLE
               || current.status() == ComputationExecutionStatus.AUTHORITY_APPLIED) {
             return current;
           }
@@ -114,6 +118,7 @@ public final class ComputationExecutionLedger {
               certificateArtifactRef,
               current.verificationReceiptRef(),
               current.outcomeApplicationReceiptRef(),
+              current.authorityMutationReceiptRef(),
               current.authority(),
               current.attemptCount(),
               current.producerExecutions() + (producerExecuted ? 1 : 0),
@@ -136,6 +141,8 @@ public final class ComputationExecutionLedger {
         executionId,
         current -> {
           if (current.status() == ComputationExecutionStatus.VERIFICATION_DURABLE
+              || current.status() == ComputationExecutionStatus.PROJECTION_READY
+              || current.status() == ComputationExecutionStatus.AUTHORITY_MUTATION_DURABLE
               || current.status() == ComputationExecutionStatus.AUTHORITY_APPLIED) {
             return current;
           }
@@ -149,6 +156,7 @@ public final class ComputationExecutionLedger {
               current.certificateArtifactRef(),
               receiptRef,
               current.outcomeApplicationReceiptRef(),
+              current.authorityMutationReceiptRef(),
               authority,
               current.attemptCount(),
               current.producerExecutions(),
@@ -162,24 +170,60 @@ public final class ComputationExecutionLedger {
         });
   }
 
-  public ComputationExecutionRecord markAuthorityApplied(
+  public ComputationExecutionRecord markProjectionReady(
       String executionId, String outcomeReceiptRef, int round) {
     return transition(
         executionId,
         current -> {
-          if (current.status() == ComputationExecutionStatus.AUTHORITY_APPLIED) {
+          if (current.status() == ComputationExecutionStatus.PROJECTION_READY
+              || current.status() == ComputationExecutionStatus.AUTHORITY_MUTATION_DURABLE
+              || current.status() == ComputationExecutionStatus.AUTHORITY_APPLIED) {
             return current;
           }
           if (current.status() != ComputationExecutionStatus.VERIFICATION_DURABLE) {
-            throw new IllegalStateException("authority projection requires durable verification");
+            throw new IllegalStateException("projection readiness requires durable verification");
           }
           return copy(
               current,
-              ComputationExecutionStatus.AUTHORITY_APPLIED,
+              ComputationExecutionStatus.PROJECTION_READY,
               current.resultArtifactRef(),
               current.certificateArtifactRef(),
               current.verificationReceiptRef(),
               outcomeReceiptRef,
+              current.authorityMutationReceiptRef(),
+              current.authority(),
+              current.attemptCount(),
+              current.producerExecutions(),
+              current.verifierExecutions(),
+              current.authorityProjections(),
+              current.cacheHits(),
+              current.cpuSeconds(),
+              round,
+              "",
+              "PROJECTION_READY");
+        });
+  }
+
+  public ComputationExecutionRecord markAuthorityMutationDurable(
+      String executionId, String mutationReceiptRef, int round) {
+    return transition(
+        executionId,
+        current -> {
+          if (current.status() == ComputationExecutionStatus.AUTHORITY_MUTATION_DURABLE
+              || current.status() == ComputationExecutionStatus.AUTHORITY_APPLIED) {
+            return current;
+          }
+          if (current.status() != ComputationExecutionStatus.PROJECTION_READY) {
+            throw new IllegalStateException("authority mutation requires a projection-ready plan");
+          }
+          return copy(
+              current,
+              ComputationExecutionStatus.AUTHORITY_MUTATION_DURABLE,
+              current.resultArtifactRef(),
+              current.certificateArtifactRef(),
+              current.verificationReceiptRef(),
+              current.outcomeApplicationReceiptRef(),
+              mutationReceiptRef,
               current.authority(),
               current.attemptCount(),
               current.producerExecutions(),
@@ -189,7 +233,70 @@ public final class ComputationExecutionLedger {
               current.cpuSeconds(),
               round,
               "",
+              "AUTHORITY_MUTATION_DURABLE");
+        });
+  }
+
+  public ComputationExecutionRecord markAuthorityApplied(
+      String executionId, int round) {
+    return transition(
+        executionId,
+        current -> {
+          if (current.status() == ComputationExecutionStatus.AUTHORITY_APPLIED) {
+            return current;
+          }
+          if (current.status() != ComputationExecutionStatus.AUTHORITY_MUTATION_DURABLE) {
+            throw new IllegalStateException("authority apply requires a durable mutation receipt");
+          }
+          return copy(
+              current,
+              ComputationExecutionStatus.AUTHORITY_APPLIED,
+              current.resultArtifactRef(),
+              current.certificateArtifactRef(),
+              current.verificationReceiptRef(),
+              current.outcomeApplicationReceiptRef(),
+              current.authorityMutationReceiptRef(),
+              current.authority(),
+              current.attemptCount(),
+              current.producerExecutions(),
+              current.verifierExecutions(),
+              current.authorityProjections(),
+              current.cacheHits(),
+              current.cpuSeconds(),
+              round,
+              "",
               "AUTHORITY_APPLIED");
+        });
+  }
+
+  /** Adds the missing mutation receipt projection to a pre-transaction checkpoint. */
+  public ComputationExecutionRecord migrateLegacyAppliedMutation(
+      String executionId, String mutationReceiptRef, int round) {
+    return transition(
+        executionId,
+        current -> {
+          if (current.status() != ComputationExecutionStatus.AUTHORITY_APPLIED
+              || !current.authorityMutationReceiptRef().isEmpty()) {
+            return current;
+          }
+          return copy(
+              current,
+              current.status(),
+              current.resultArtifactRef(),
+              current.certificateArtifactRef(),
+              current.verificationReceiptRef(),
+              current.outcomeApplicationReceiptRef(),
+              mutationReceiptRef,
+              current.authority(),
+              current.attemptCount(),
+              current.producerExecutions(),
+              current.verifierExecutions(),
+              current.authorityProjections(),
+              current.cacheHits(),
+              current.cpuSeconds(),
+              round,
+              current.errorCode(),
+              "LEGACY_AUTHORITY_MUTATION_MIGRATED");
         });
   }
 
@@ -207,6 +314,7 @@ public final class ComputationExecutionLedger {
               current.certificateArtifactRef(),
               current.verificationReceiptRef(),
               current.outcomeApplicationReceiptRef(),
+              current.authorityMutationReceiptRef(),
               current.authority(),
               current.attemptCount(),
               current.producerExecutions(),
@@ -241,6 +349,7 @@ public final class ComputationExecutionLedger {
                 current.certificateArtifactRef(),
                 current.verificationReceiptRef(),
                 current.outcomeApplicationReceiptRef(),
+                current.authorityMutationReceiptRef(),
                 current.authority(),
                 current.attemptCount(),
                 current.producerExecutions(),
@@ -322,6 +431,7 @@ public final class ComputationExecutionLedger {
       String certificateArtifactRef,
       String verificationReceiptRef,
       String outcomeApplicationReceiptRef,
+      String authorityMutationReceiptRef,
       ComputationVerifiedAuthority authority,
       int attemptCount,
       int producerExecutions,
@@ -337,6 +447,7 @@ public final class ComputationExecutionLedger {
         && certificateArtifactRef.equals(current.certificateArtifactRef())
         && verificationReceiptRef.equals(current.verificationReceiptRef())
         && outcomeApplicationReceiptRef.equals(current.outcomeApplicationReceiptRef())
+        && authorityMutationReceiptRef.equals(current.authorityMutationReceiptRef())
         && authority == current.authority()
         && attemptCount == current.attemptCount()
         && producerExecutions == current.producerExecutions()
@@ -366,6 +477,7 @@ public final class ComputationExecutionLedger {
         certificateArtifactRef,
         verificationReceiptRef,
         outcomeApplicationReceiptRef,
+        authorityMutationReceiptRef,
         authority,
         attemptCount,
         producerExecutions,

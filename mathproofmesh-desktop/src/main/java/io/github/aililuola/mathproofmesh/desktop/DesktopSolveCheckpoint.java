@@ -33,6 +33,7 @@ import io.github.aililuola.mathproofmesh.computation.ComputationBroker;
 import io.github.aililuola.mathproofmesh.computation.ComputationArtifactSnapshot;
 import io.github.aililuola.mathproofmesh.computation.ComputationCapabilitySnapshot;
 import io.github.aililuola.mathproofmesh.computation.ComputationEvidenceGate;
+import io.github.aililuola.mathproofmesh.computation.ComputationTargetBinding;
 import io.github.aililuola.mathproofmesh.computation.ComputationExecutionSnapshot;
 import io.github.aililuola.mathproofmesh.computation.ComputationOutcomeReceiptSnapshot;
 import io.github.aililuola.mathproofmesh.computation.ComputationVerificationSnapshot;
@@ -742,13 +743,38 @@ record DesktopSolveCheckpoint(
       ExperimentResult result,
       String targetObligationId,
       ComputationEvidenceGate.EvidenceAuthority authority,
-      boolean replayValid) {
+      boolean replayValid,
+      ComputationTargetBinding targetBinding) {
     ComputationCheckpoint {
       targetObligationId = targetObligationId == null ? "" : targetObligationId.strip();
+      if (targetBinding != null) {
+        targetObligationId = targetBinding.obligationId();
+      }
       authority =
           authority == null
               ? ComputationEvidenceGate.EvidenceAuthority.INCONCLUSIVE
               : authority;
+    }
+
+    ComputationCheckpoint(
+        String routeId,
+        ExperimentSpec spec,
+        ComputationDecision decision,
+        ExperimentProgram program,
+        ExperimentResult result,
+        String targetObligationId,
+        ComputationEvidenceGate.EvidenceAuthority authority,
+        boolean replayValid) {
+      this(
+          routeId,
+          spec,
+          decision,
+          program,
+          result,
+          targetObligationId,
+          authority,
+          replayValid,
+          null);
     }
   }
 

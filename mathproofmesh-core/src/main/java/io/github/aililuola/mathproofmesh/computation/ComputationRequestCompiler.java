@@ -30,6 +30,8 @@ public final class ComputationRequestCompiler {
     if (spec.maxCases() > capability.descriptor().resourceEnvelope().maxCases()) {
       throw new IllegalArgumentException("request exceeds capability maxCases");
     }
+    ComputationResourceGuard.validateRequest(
+        spec, capability.descriptor().resourceEnvelope());
     if (spec.method() == ComputationMethod.SANDBOXED_PYTHON) {
       rejectNativeBypass(spec);
       if (program == null) {

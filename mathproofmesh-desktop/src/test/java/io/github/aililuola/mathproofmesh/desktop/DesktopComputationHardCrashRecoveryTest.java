@@ -113,9 +113,8 @@ class DesktopComputationHardCrashRecoveryTest {
     System.out.println("GHOST_RESULTS=" + ghostResults);
     System.out.println("GHOST_CERTIFICATES=" + ghostCertificates);
     System.out.println("GHOST_RECEIPTS=" + ghostReceipts);
-    System.out.println("PARTIAL_FACT_WRITES=0");
-    System.out.println("PARTIAL_COUNTEREXAMPLE_WRITES=0");
-    System.out.println("TASK_LEASE_LEAKS=0");
+    System.out.println("SCOPE=CORE_EXECUTION_ARTIFACTS_ONLY");
+    System.out.println("AUTHORITY_MUTATIONS=MEASURED_BY_COORDINATOR_PROJECTION_TESTS");
     System.out.println("RESULT=PASS");
   }
 

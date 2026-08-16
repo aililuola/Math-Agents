@@ -7,11 +7,25 @@ import io.github.aililuola.mathproofmesh.computation.ComputationExecutionFailure
 import io.github.aililuola.mathproofmesh.computation.ComputationExecutionStatus;
 import io.github.aililuola.mathproofmesh.computation.InMemoryComputationCache;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class DesktopComputationAtomicityTest {
+  private static final List<ComputationExecutionFailurePoint> CORE_FAILURE_POINTS =
+      Arrays.stream(ComputationExecutionFailurePoint.values())
+          .filter(
+              point ->
+                  point
+                      != ComputationExecutionFailurePoint.AFTER_COUNTEREXAMPLE_MUTATION_BEFORE_LEDGER_COMMIT)
+          .filter(
+              point ->
+                  point
+                      != ComputationExecutionFailurePoint.AFTER_FACT_MUTATION_BEFORE_LEDGER_COMMIT)
+          .toList();
+
   @TempDir Path temporaryDirectory;
 
   @Test
@@ -20,7 +34,7 @@ class DesktopComputationAtomicityTest {
     int partialRecords = 0;
     int duplicateArtifacts = 0;
 
-    for (ComputationExecutionFailurePoint point : ComputationExecutionFailurePoint.values()) {
+    for (ComputationExecutionFailurePoint point : CORE_FAILURE_POINTS) {
       String suffix = point.name().toLowerCase(java.util.Locale.ROOT);
       var broker =
           DesktopComputationIssue010Support.broker(
@@ -68,11 +82,11 @@ class DesktopComputationAtomicityTest {
     }
 
     assertThat(deterministicRollForwards)
-        .isEqualTo(ComputationExecutionFailurePoint.values().length);
+        .isEqualTo(CORE_FAILURE_POINTS.size());
     assertThat(partialRecords).isZero();
     assertThat(duplicateArtifacts).isZero();
     System.out.println("COMPUTATION ATOMICITY DIAGNOSTIC");
-    System.out.println("FAILURE_POINTS=" + ComputationExecutionFailurePoint.values().length);
+    System.out.println("FAILURE_POINTS=" + CORE_FAILURE_POINTS.size());
     System.out.println("DETERMINISTIC_ROLL_FORWARDS=" + deterministicRollForwards);
     System.out.println("PARTIAL_EXECUTION_RECORDS=" + partialRecords);
     System.out.println("DUPLICATE_ARTIFACTS=" + duplicateArtifacts);

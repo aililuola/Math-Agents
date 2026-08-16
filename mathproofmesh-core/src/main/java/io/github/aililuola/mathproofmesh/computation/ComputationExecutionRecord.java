@@ -19,6 +19,7 @@ public record ComputationExecutionRecord(
     String certificateArtifactRef,
     String verificationReceiptRef,
     String outcomeApplicationReceiptRef,
+    String authorityMutationReceiptRef,
     ComputationVerifiedAuthority authority,
     int attemptCount,
     int producerExecutions,
@@ -48,6 +49,7 @@ public record ComputationExecutionRecord(
     certificateArtifactRef = normalize(certificateArtifactRef);
     verificationReceiptRef = normalize(verificationReceiptRef);
     outcomeApplicationReceiptRef = normalize(outcomeApplicationReceiptRef);
+    authorityMutationReceiptRef = normalize(authorityMutationReceiptRef);
     if (attemptCount < 0
         || producerExecutions < 0
         || verifierExecutions < 0
@@ -70,10 +72,19 @@ public record ComputationExecutionRecord(
         && (resultArtifactRef.isEmpty() || certificateArtifactRef.isEmpty())) {
       throw new IllegalArgumentException("durable result state requires result and certificate artifacts");
     }
-    if ((status == ComputationExecutionStatus.VERIFICATION_DURABLE
-            || status == ComputationExecutionStatus.AUTHORITY_APPLIED)
+    if (status.ordinal() >= ComputationExecutionStatus.VERIFICATION_DURABLE.ordinal()
+        && status.ordinal() <= ComputationExecutionStatus.AUTHORITY_APPLIED.ordinal()
         && verificationReceiptRef.isEmpty()) {
       throw new IllegalArgumentException("verified state requires a verification receipt");
+    }
+    if (status.ordinal() >= ComputationExecutionStatus.PROJECTION_READY.ordinal()
+        && status.ordinal() <= ComputationExecutionStatus.AUTHORITY_APPLIED.ordinal()
+        && outcomeApplicationReceiptRef.isEmpty()) {
+      throw new IllegalArgumentException("projection state requires an outcome receipt");
+    }
+    if (status == ComputationExecutionStatus.AUTHORITY_MUTATION_DURABLE
+        && authorityMutationReceiptRef.isEmpty()) {
+      throw new IllegalArgumentException("applied authority state requires a mutation receipt");
     }
   }
 
