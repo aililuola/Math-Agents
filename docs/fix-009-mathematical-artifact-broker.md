@@ -2,8 +2,8 @@
 
 ## 1. Status and Git provenance
 
-- Status: CLOSED after the Issue 009 suites, the Issue 001-008 explicit regression, and the
-  complete release gate passed.
+- Status: CLOSED after the final exact-attribution audit patch, the Issue 009 suites, the
+  Issue 001-008 regression, and the complete release gate passed.
 - Branch: `fix/009-mathematical-artifact-broker`
 - Baseline branch: `java`
 - Baseline commit: `20c0c9fdb61cc44b508be71aa223ed64ccd01b2f`
@@ -12,6 +12,8 @@
 - Legacy compatibility commit: `867168c` (`fix(broker): preserve legacy message broker compatibility`)
 - Security-gate commit: `5d78b6b` (`fix(broker): satisfy artifact security gates`)
 - Coverage-policy test commit: `e6d3e8b` (`test(broker): cover artifact contracts and branch policies`)
+- Exact-attribution closure commit: `7f7061f`
+  (`fix(broker): bind utility to exact post-baseline effects`)
 - Baseline checkpoint schema: 16
 - Resulting checkpoint schema: 17
 
@@ -197,11 +199,16 @@ has been established. Irrelevant routes receive no delivery.
 `BrokerArtifactPromptProjectionService` emits a bounded `BrokerPromptArtifact` containing the
 minimum typed mathematical sidecar needed downstream: exact statement/context, authority,
 source revision, evidence, reusable consequences, blocked inferences, next obligation, and
-allowed use kinds.
+allowed use kinds. Counterexamples additionally project the exact target Claim ID, target
+semantic hash, witness, and exact affected obligations. Reviewed obstructions project the exact
+failed step, issue kind, repairability, and first missing justification. Verified no-go
+artifacts project the exact blocked inference.
 
 The prompt contract explicitly states that receipt does not imply use. `REVIEWED_OPEN` is not a
 proved premise, bounded evidence cannot prove an unrestricted Claim, and final-proof citation
-is restricted to compatible verified artifact types.
+is restricted to compatible verified artifact types. Prompt consumption orders queued artifacts
+by server-computed relevance priority, then stable delivery ID; previously verified active
+utility may only refine the priority after exact relevance has already been established.
 
 `InitialExplorationTurn` gained an optional, backward-compatible
 `BrokerArtifactUseManifest`. The five-argument constructor remains supported.
@@ -209,9 +216,13 @@ is restricted to compatible verified artifact types.
 ## 10. Explicit use, receipts, lineage, and utility
 
 Every claimed use must name an actually delivered artifact ID, a compatible
-`BrokerArtifactUseKind`, and real affected proof-step, Claim, or obligation IDs. The use ledger
-validates this manifest against the consumed provider request. A missing manifest produces
-`NOT_USED`; parsing or prompt inclusion does not produce an accepted use.
+`BrokerArtifactUseKind`, and real affected proof-step, Claim, or obligation IDs. Counterexample
+and verified-no-go uses must echo the server-projected target semantic hash and bind exactly the
+payload target Claim; their obligation targets must remain within the payload's exact target
+set. Reviewed-obstruction repair, focus, and Pivot uses must bind the exact failed step or next
+exact obligation. The use ledger validates this manifest against the consumed provider request.
+A missing manifest produces `NOT_USED`; parsing or prompt inclusion does not produce an accepted
+use.
 
 The receipt state machine distinguishes:
 
@@ -223,11 +234,16 @@ The receipt state machine distinguishes:
 - `EXPIRED`
 
 Lineage binds artifact, delivery, explicit use kind, provider request, downstream proof steps,
-Claims, obligations, Pivot, and repair IDs. `BrokerArtifactEffectVerifier` then compares the
-durable prompt-consumption baseline with later authoritative state and recognizes only actual
-effects: committed-step reuse, derived verified Claim, exact refutation, closed obligation,
-retired dependency, focus change, local repair, Semantic Pivot, computation plan, or final-proof
-citation.
+Claims, obligations, local repair, Pivot, and computation-plan IDs. The server writes the reverse
+binding when the concrete repair, Pivot, or computation is created. An unrelated pre-existing ID
+on the same Route cannot satisfy the lineage.
+
+`BrokerArtifactEffectVerifier` compares the durable prompt-consumption baseline with later
+authoritative state. Verified Claims, refuted Claims, committed steps, retired dependencies,
+repairs, Pivots, and computation plans must be post-baseline additions; closed obligations must
+have been open at consumption. Only those deltas can produce committed-step reuse, derived
+verified Claim, exact refutation, closed obligation, retired dependency, focus change, local
+repair, Semantic Pivot, computation plan, or final-proof citation.
 
 Proof debt is sampled before provider use at prompt consumption and after downstream
 integration. Utility is written only when both explicit lineage and a verified effect exist.
@@ -248,8 +264,10 @@ Checkpoint schema 16 -> 17 adds seven independent snapshots:
 Missing v16 fields deserialize to empty. Deterministic legacy migration accepts only complete,
 trusted mathematical records. A semantically complete verified lemma can migrate; generic
 failure, repair, bridge, strategy-rewrite, and unverified-insight messages remain audit-only and
-are not delivered. Legacy receipts without explicit lineage do not become verified modern
-utility. Migration calls no provider.
+are not delivered. Restored legacy `PROMPT_CONSUMED` deliveries are not reattached as active
+pending deliveries, do not receive automatic all-proof-step receipts, and do not contribute
+scheduler-active utility. The legacy message store remains checkpoint audit data. Migration
+calls no provider.
 
 Invalidation prevents later delivery and excludes invalidated utility from active attribution.
 Stable IDs make artifact, publication, delivery, prompt consumption, receipt, lineage, utility,
@@ -310,6 +328,10 @@ a duplicate.
 - Core coverage: `BrokerArtifactBranchCoverageTest` exercises all authority sources, projection
   validity, exact relevance branches, authority priorities, semantic contexts, every supported
   downstream effect, and unchanged-state rejection.
+- Final exact-attribution audit: pre-existing-state isolation, exact Counterexample/No-Go target
+  validation, exact obstruction repair targets, repair/Pivot/computation reverse lineage,
+  complete prompt payload projection, priority selection, legacy scheduler isolation, ledger
+  idempotency, migration trust boundaries, and rollback/hard-crash frontiers.
 - Server: the five required public prompt/contract boundary suites.
 - Desktop: the five pre-fix black boxes plus production publication, targeting, projection,
   explicit use, effects, not-used behavior, control isolation, invalidation, atomicity, hard
@@ -328,6 +350,7 @@ Phase 009 Server required suites:     5 tests, 0 failures, 0 errors, 0 skipped
 Phase 009 Desktop required suites:   21 tests, 0 failures, 0 errors, 0 skipped
 Additional contract coverage:        2 tests, 0 failures, 0 errors, 0 skipped
 Additional core branch coverage:     5 tests, 0 failures, 0 errors, 0 skipped
+Final exact-attribution patch:       14 tests, 0 failures, 0 errors, 0 skipped
 ```
 
 The fixed black-box outputs are:
@@ -342,6 +365,45 @@ ACCEPTED_USED_RECEIPTS=0
 FALSE_UTILITY_RECORDS=0
 BROKER_RECORDS_ACTUAL=2
 ACTUAL_DEBT_REDUCTION=1.5
+```
+
+The final audit was first run against the pre-patch implementation. All five black-box classes
+failed behaviorally, rather than merely failing to compile:
+
+```text
+Tests run: 5, Failures: 5, Errors: 0
+COUNTEREXAMPLE_WRONG_TARGET_USE_ACCEPTS=1
+COUNTEREXAMPLE_WRONG_OBLIGATION_USE_ACCEPTS=1
+OBSTRUCTION_WRONG_REPAIR_TARGET_ACCEPTS=1
+PREEXISTING_VERIFIED_CLAIM_UTILITIES=1
+PREEXISTING_REFUTED_CLAIM_UTILITIES=1
+PREEXISTING_CLOSED_OBLIGATION_UTILITIES=1
+COUNTEREXAMPLE_WITNESS_PROJECTION_LOSSES=1
+OBSTRUCTION_DETAIL_PROJECTION_LOSSES=1
+UNRELATED_REPAIR_EFFECTS=1
+UNRELATED_PIVOT_EFFECTS=1
+UNRELATED_COMPUTATION_EFFECTS=1
+```
+
+After commit `7f7061f`, the asserted diagnostic is:
+
+```text
+EXACT ATTRIBUTION CLOSURE DIAGNOSTIC
+PREEXISTING_VERIFIED_CLAIM_UTILITIES=0
+PREEXISTING_REFUTED_CLAIM_UTILITIES=0
+PREEXISTING_CLOSED_OBLIGATION_UTILITIES=0
+COUNTEREXAMPLE_WRONG_TARGET_USE_ACCEPTS=0
+COUNTEREXAMPLE_WRONG_OBLIGATION_USE_ACCEPTS=0
+OBSTRUCTION_WRONG_REPAIR_TARGET_ACCEPTS=0
+UNRELATED_REPAIR_EFFECTS=0
+UNRELATED_PIVOT_EFFECTS=0
+UNRELATED_COMPUTATION_EFFECTS=0
+LEGACY_AUTO_ACCEPTED_RECEIPTS=0
+LEGACY_SCHEDULER_ACTIVE_UTILITIES=0
+COUNTEREXAMPLE_WITNESS_PROJECTION_LOSSES=0
+OBSTRUCTION_DETAIL_PROJECTION_LOSSES=0
+HIGH_PRIORITY_ARTIFACT_EVICTIONS=0
+RESULT=PASS
 ```
 
 ## 14. Twenty-round production diagnostic
@@ -404,10 +466,10 @@ DIRECT_NEGATIVE_REGISTRATIONS=0
 MAIN_GOAL_CLOSURES=0
 REGISTRY_HASH_BEFORE_RESTORE=dd0241eaed3bdfddfeae8f307e4399363ff4d140bd7ffc2e197b2e076f77a241
 REGISTRY_HASH_AFTER_RESTORE=dd0241eaed3bdfddfeae8f307e4399363ff4d140bd7ffc2e197b2e076f77a241
-USE_HASH_BEFORE_RESTORE=bf144522a22ea3660dfd847410cf8d417cbbb74feb62914cd5feaeeffbdbdcec
-USE_HASH_AFTER_RESTORE=bf144522a22ea3660dfd847410cf8d417cbbb74feb62914cd5feaeeffbdbdcec
-UTILITY_HASH_BEFORE_RESTORE=f2b6ee951789c3b0fa80290673e3a0a9ebe367879c99e7d11c62acc6e0cd4ff7
-UTILITY_HASH_AFTER_RESTORE=f2b6ee951789c3b0fa80290673e3a0a9ebe367879c99e7d11c62acc6e0cd4ff7
+USE_HASH_BEFORE_RESTORE=d57f51985c649f0a90388d2a30c4e33dd06adbf78e253b5a5df2c368c4eafda7
+USE_HASH_AFTER_RESTORE=d57f51985c649f0a90388d2a30c4e33dd06adbf78e253b5a5df2c368c4eafda7
+UTILITY_HASH_BEFORE_RESTORE=e49e722ba9730999edd970e9a9721bf31c8b1636081c004934178677d7a421ad
+UTILITY_HASH_AFTER_RESTORE=e49e722ba9730999edd970e9a9721bf31c8b1636081c004934178677d7a421ad
 RESULT=PASS
 ```
 
@@ -456,11 +518,11 @@ Unit-test report totals were:
 
 ```text
 contracts:      61 tests, 0 failures, 0 errors, 0 skipped
-core:         1202 tests, 0 failures, 0 errors, 0 skipped
+core:         1215 tests, 0 failures, 0 errors, 0 skipped
 server:        864 tests, 0 failures, 0 errors, 3 skipped
-desktop:       224 tests, 0 failures, 0 errors, 1 skipped
+desktop:       225 tests, 0 failures, 0 errors, 1 skipped
 compatibility: 149 tests, 0 failures, 0 errors, 0 skipped
-TOTAL UNIT:   2500 tests, 0 failures, 0 errors, 4 skipped
+TOTAL UNIT:   2514 tests, 0 failures, 0 errors, 4 skipped
 ```
 
 Failsafe ran 26 integration tests with zero failures, errors, or skips. The requested PostgreSQL
@@ -478,12 +540,12 @@ No coverage, security, license, performance, or source-immutability threshold wa
 coverage was:
 
 ```text
-contracts adjusted line:   92.011991% PASS (gate 90%)
+contracts adjusted line:   92.016881% PASS (gate 90%)
 contracts adjusted branch: 85.973725% PASS (gate 85%)
-core line:                  90.930560% PASS (gate 85%)
-core branch:                75.006605% PASS (gate 75%)
+core line:                  91.451606% PASS (gate 85%)
+core branch:                75.543336% PASS (gate 75%)
 server line:                87.728838% PASS (gate 70%)
-desktop line:               78.343287% PASS (gate 70%)
+desktop line:               78.549718% PASS (gate 70%)
 critical scenarios:         9/9 PASS
 ```
 
@@ -500,15 +562,15 @@ FULL VERIFICATION: PASS
 
 ## 18. Diff and worktree
 
-Relative to baseline `20c0c9f`, the completed implementation and this record produce:
+The final exact-attribution production/test patch is:
 
 ```text
-121 files changed, 7538 insertions(+), 82 deletions(-)
+27 files changed, 1766 insertions(+), 180 deletions(-)
 ```
 
-Only Issue 009 source, compatibility adapters, tests, and this record are included. After the
-documentation commit, generated report refreshes were restored and `git status --short` was
-empty. No `target`, log, checkpoint, database, cache, or temporary file was committed.
+Only Issue 009 source, compatibility adapters, tests, and this record are included. Generated
+coverage, security, and license report refreshes were restored after verification. No `target`,
+log, checkpoint, database, cache, or temporary file was committed.
 
 ## 19. Final acceptance
 
@@ -519,6 +581,10 @@ empty. No `target`, log, checkpoint, database, cache, or temporary file was comm
 - Irrelevant-route deliveries: 0.
 - False used receipts and automatic all-step attribution: 0.
 - Utility without explicit lineage or verified effect: 0.
+- Utility from pre-existing Verified/Refuted/Closed state: 0.
+- Wrong exact target and unrelated repair/Pivot/computation attribution: 0.
+- Legacy automatic receipt and scheduler-active utility: 0.
+- Counterexample/obstruction prompt-detail loss and priority eviction: 0.
 - Restore loss/replay and invalidated redelivery: 0.
 - Root and Issue 002-008 authority hash changes: 0.
 - Issue 001-008 explicit regression: PASS.
