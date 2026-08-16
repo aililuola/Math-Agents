@@ -55,6 +55,7 @@ public final class NegativeKnowledgeRegistry {
             seed.quantifiers(),
             seed.variableBindings(),
             seed.scopeLimitations(),
+            seed.polarity(),
             NegativeKnowledgeSurface.STRATEGY_ADMISSION,
             NegativeCandidateIntent.AUDIT_ONLY);
     return register(
@@ -143,8 +144,12 @@ public final class NegativeKnowledgeRegistry {
     }
     synchronized (registry) {
       for (NegativeKnowledgeRecord record : snapshot.records()) {
-        registry.records.put(record.primarySemanticKey(), record);
-        registry.index(record);
+        NegativeKnowledgeRecord restored =
+            snapshot.schemaVersion() < NegativeKnowledgeSnapshot.CURRENT_SCHEMA_VERSION
+                ? migrateLegacyRecord(record)
+                : record;
+        registry.records.put(restored.primarySemanticKey(), restored);
+        registry.index(restored);
       }
       registry.audit.addAll(snapshot.audit());
     }
@@ -172,6 +177,7 @@ public final class NegativeKnowledgeRegistry {
         message.quantifiers(),
         message.variableBindings(),
         message.scopeLimitations(),
+        message.polarity(),
         surface,
         intent);
   }
@@ -217,6 +223,7 @@ public final class NegativeKnowledgeRegistry {
               candidate.quantifiers(),
               candidate.variableBindings(),
               candidate.scopeLimitations(),
+              candidate.polarity(),
               List.of(evidenceMessageId),
               firstSeenRound,
               permanent ? null : expiresAfterRound,
@@ -259,6 +266,7 @@ public final class NegativeKnowledgeRegistry {
             existing.quantifiers(),
             existing.variableBindings(),
             existing.scopeLimitations(),
+            existing.polarity(),
             List.copyOf(evidence),
             Math.min(existing.firstSeenRound(), firstSeenRound),
             mergedExpiry,
@@ -306,7 +314,7 @@ public final class NegativeKnowledgeRegistry {
 
   private Match possibleMatch(NegativeKnowledgeCandidate candidate, int currentRound) {
     for (NegativeKnowledgeRecord record : records.values()) {
-      if (!record.activeAt(currentRound) || !record.contextKey().equals(candidate.contextKey())) {
+      if (!record.activeAt(currentRound) || !possibleContextMatch(candidate, record)) {
         continue;
       }
       if (possiblyEquivalent(candidate.normalizedStatement(), record.normalizedStatement())
@@ -387,7 +395,62 @@ public final class NegativeKnowledgeRegistry {
         candidate.assumptions(),
         candidate.quantifiers(),
         candidate.variableBindings(),
-        candidate.scopeLimitations());
+        candidate.scopeLimitations(),
+        candidate.polarity());
+  }
+
+  private static boolean possibleContextMatch(
+      NegativeKnowledgeCandidate candidate, NegativeKnowledgeRecord record) {
+    if (record.contextKey().equals(candidate.contextKey())) {
+      return true;
+    }
+    boolean legacyPolarity =
+        NegativeKnowledgeSemanticKey.UNSPECIFIED_POLARITY.equals(candidate.polarity())
+            || NegativeKnowledgeSemanticKey.UNSPECIFIED_POLARITY.equals(record.polarity());
+    return legacyPolarity
+        && record.contextKeyIgnoringPolarity().equals(candidate.contextKeyIgnoringPolarity());
+  }
+
+  private static NegativeKnowledgeRecord migrateLegacyRecord(
+      NegativeKnowledgeRecord legacy) {
+    NegativeKnowledgeCandidate candidate =
+        new NegativeKnowledgeCandidate(
+            legacy.problemHash(),
+            legacy.targetType(),
+            legacy.statement(),
+            legacy.normalizedStatement(),
+            legacy.assumptions(),
+            legacy.quantifiers(),
+            legacy.variableBindings(),
+            legacy.scopeLimitations(),
+            NegativeKnowledgeSemanticKey.UNSPECIFIED_POLARITY,
+            NegativeKnowledgeSurface.RESTORE_REVALIDATION,
+            NegativeCandidateIntent.AUDIT_ONLY);
+    List<String> aliasStatements = legacy.trustedAliasStatements();
+    List<String> aliasKeys =
+        aliasStatements.stream()
+            .map(alias -> semanticKey(candidate, alias))
+            .distinct()
+            .toList();
+    return new NegativeKnowledgeRecord(
+        legacy.negativeId(),
+        legacy.problemHash(),
+        legacy.targetType(),
+        candidate.semanticKey(),
+        aliasKeys,
+        aliasStatements,
+        legacy.kinds(),
+        legacy.statement(),
+        legacy.normalizedStatement(),
+        legacy.assumptions(),
+        legacy.quantifiers(),
+        legacy.variableBindings(),
+        legacy.scopeLimitations(),
+        NegativeKnowledgeSemanticKey.UNSPECIFIED_POLARITY,
+        legacy.evidenceMessageIds(),
+        legacy.firstSeenRound(),
+        legacy.expiresAfterRound(),
+        legacy.version());
   }
 
   private static void requireVerifiedCounterexample(

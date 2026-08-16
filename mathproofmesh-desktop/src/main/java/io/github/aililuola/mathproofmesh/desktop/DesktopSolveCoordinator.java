@@ -97,6 +97,7 @@ import io.github.aililuola.mathproofmesh.contract.ComputationAuthorityMutationRe
 import io.github.aililuola.mathproofmesh.contract.ComputationDecisionAction;
 import io.github.aililuola.mathproofmesh.contract.ComputationMethod;
 import io.github.aililuola.mathproofmesh.contract.CriticalClaim;
+import io.github.aililuola.mathproofmesh.contract.CriticalClaimContextBinding;
 import io.github.aililuola.mathproofmesh.contract.CriticalClaimPreflightPlan;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
 import io.github.aililuola.mathproofmesh.contract.EvidenceRef;
@@ -386,6 +387,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /** Executes every migrated proof-control phase on the live desktop path. */
 final class DesktopSolveCoordinator {
@@ -7126,6 +7128,7 @@ final class DesktopSolveCoordinator {
             frozen.quantifiers(),
             frozen.variableBindings(),
             frozen.scopeLimitations(),
+            frozen.polarity(),
             NegativeKnowledgeSurface.RESTORE_REVALIDATION,
             NegativeCandidateIntent.AUDIT_ONLY);
     String semanticKey = candidate.semanticKey();
@@ -7803,6 +7806,10 @@ final class DesktopSolveCoordinator {
                     obligation.quantifiers(),
                     List.of(),
                     negativeKnowledgeScope(),
+                    proofGraph
+                        .canonicalTargetForObligation(obligation.obligationId())
+                        .map(record -> record.signature().polarity())
+                        .orElse(""),
                     NegativeKnowledgeSurface.PROOF_OBLIGATION_CREATION,
                     intent))
         .map(candidate -> negativeKnowledgeGate.evaluate(candidate, roundIndex.get()))
@@ -12646,7 +12653,11 @@ final class DesktopSolveCoordinator {
     statements.add(strategy.bottleneck());
     statements.addAll(strategy.expectedLemmas());
     statements.addAll(strategy.prerequisites());
+    Map<String, CriticalClaimContextBinding> claimBindings =
+        strategy.criticalClaimContextBindings().stream()
+            .collect(Collectors.toMap(CriticalClaimContextBinding::claimId, Function.identity()));
     strategy.criticalClaims().stream()
+        .filter(claim -> !claimBindings.containsKey(claim.claimId()))
         .map(io.github.aililuola.mathproofmesh.contract.CriticalClaim::statement)
         .forEach(statements::add);
     if (blueprint != null) {
@@ -12669,6 +12680,28 @@ final class DesktopSolveCoordinator {
                 NegativeCandidateIntent.POSITIVE_DEPENDENCY));
       }
     }
+    strategy.criticalClaims().stream()
+        .filter(claim -> claimBindings.containsKey(claim.claimId()))
+        .forEach(
+            claim -> {
+              var binding = claimBindings.get(claim.claimId());
+              for (NegativeKnowledgeTargetType targetType :
+                  NegativeKnowledgeTargetType.values()) {
+                candidates.add(
+                    new NegativeKnowledgeCandidate(
+                        problemHash,
+                        targetType,
+                        claim.statement(),
+                        topology.mathNormalize(claim.statement()),
+                        binding.localAssumptions(),
+                        binding.quantifiers(),
+                        binding.variableBindings(),
+                        binding.scopeLimitations(),
+                        binding.polarity(),
+                        surface,
+                        NegativeCandidateIntent.POSITIVE_DEPENDENCY));
+              }
+            });
     return List.copyOf(candidates);
   }
 

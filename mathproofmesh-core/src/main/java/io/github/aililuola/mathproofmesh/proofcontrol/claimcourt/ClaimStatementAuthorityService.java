@@ -67,6 +67,7 @@ public final class ClaimStatementAuthorityService {
             frozen.quantifiers(),
             frozen.variableBindings(),
             frozen.scopeLimitations(),
+            frozen.polarity(),
             NegativeKnowledgeSurface.RESTORE_REVALIDATION,
             NegativeCandidateIntent.FALSIFICATION_ONLY);
     NegativeKnowledgeDecision negativeDecision =

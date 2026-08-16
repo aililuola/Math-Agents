@@ -21,6 +21,7 @@ public record NegativeKnowledgeRecord(
     List<QuantifierSpec> quantifiers,
     List<VariableBinding> variableBindings,
     List<String> scopeLimitations,
+    String polarity,
     List<String> evidenceMessageIds,
     int firstSeenRound,
     Integer expiresAfterRound,
@@ -46,6 +47,7 @@ public record NegativeKnowledgeRecord(
     quantifiers = quantifiers == null ? List.of() : List.copyOf(quantifiers);
     variableBindings = variableBindings == null ? List.of() : List.copyOf(variableBindings);
     scopeLimitations = copy(scopeLimitations);
+    polarity = NegativeKnowledgeSemanticKey.normalizePolarity(polarity);
     evidenceMessageIds = copy(evidenceMessageIds);
     if (firstSeenRound < 0 || version < 1) {
       throw new IllegalArgumentException("negative knowledge round and version are invalid");
@@ -57,6 +59,45 @@ public record NegativeKnowledgeRecord(
     if (!permanent && (expiresAfterRound == null || expiresAfterRound < firstSeenRound)) {
       throw new IllegalArgumentException("temporary negative knowledge requires a valid expiry");
     }
+  }
+
+  public NegativeKnowledgeRecord(
+      String negativeId,
+      String problemHash,
+      NegativeKnowledgeTargetType targetType,
+      String primarySemanticKey,
+      List<String> trustedAliasKeys,
+      List<String> trustedAliasStatements,
+      Set<NegativeKnowledgeKind> kinds,
+      String statement,
+      String normalizedStatement,
+      List<String> assumptions,
+      List<QuantifierSpec> quantifiers,
+      List<VariableBinding> variableBindings,
+      List<String> scopeLimitations,
+      List<String> evidenceMessageIds,
+      int firstSeenRound,
+      Integer expiresAfterRound,
+      long version) {
+    this(
+        negativeId,
+        problemHash,
+        targetType,
+        primarySemanticKey,
+        trustedAliasKeys,
+        trustedAliasStatements,
+        kinds,
+        statement,
+        normalizedStatement,
+        assumptions,
+        quantifiers,
+        variableBindings,
+        scopeLimitations,
+        NegativeKnowledgeSemanticKey.UNSPECIFIED_POLARITY,
+        evidenceMessageIds,
+        firstSeenRound,
+        expiresAfterRound,
+        version);
   }
 
   public boolean permanent() {
@@ -72,6 +113,17 @@ public record NegativeKnowledgeRecord(
 
   public String contextKey() {
     return NegativeKnowledgeSemanticKey.contextKey(
+        problemHash,
+        targetType,
+        assumptions,
+        quantifiers,
+        variableBindings,
+        scopeLimitations,
+        polarity);
+  }
+
+  String contextKeyIgnoringPolarity() {
+    return NegativeKnowledgeSemanticKey.contextKeyIgnoringPolarity(
         problemHash, targetType, assumptions, quantifiers, variableBindings, scopeLimitations);
   }
 

@@ -81,6 +81,7 @@ public final class NegativeAwareProofGraphWriter {
                 obligation.quantifiers(),
                 List.of(),
                 defaultScope,
+                polarityForExisting(obligation),
                 NegativeKnowledgeSurface.RESTORE_REVALIDATION,
                 NegativeCandidateIntent.PROOF_TARGET);
         if (!gate.evaluate(candidate, round()).allowed()) {
@@ -110,6 +111,7 @@ public final class NegativeAwareProofGraphWriter {
                     obligation.quantifiers(),
                     List.of(),
                     defaultScope,
+                    store.pendingCreationPolarity(),
                     NegativeKnowledgeSurface.PROOF_OBLIGATION_CREATION,
                     intent))
         .toList();
@@ -128,8 +130,15 @@ public final class NegativeAwareProofGraphWriter {
         message.quantifiers(),
         message.variableBindings(),
         scope,
+        message.polarity(),
         NegativeKnowledgeSurface.PROOF_OBLIGATION_CREATION,
         intent);
+  }
+
+  private String polarityForExisting(ProofObligation obligation) {
+    return store.canonicalTargetForObligation(obligation.obligationId())
+        .map(record -> record.signature().polarity())
+        .orElse("");
   }
 
   private int round() {

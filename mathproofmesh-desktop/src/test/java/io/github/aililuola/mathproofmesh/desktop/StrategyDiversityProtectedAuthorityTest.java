@@ -16,13 +16,13 @@ class StrategyDiversityProtectedAuthorityTest {
   @Test
   void issue007DoesNotAlterEarlierAuthorityOwnersOrUseTheLegacySelector() throws Exception {
     Path root = projectRoot();
-    // Issue 008 intentionally extends the shared attempt-artifact and Claim lifecycle adapters.
+    // Issues 008 and 010 intentionally extend the shared Claim Court and negative-identity
+    // adapters. The remaining owners stay frozen at the Issue 007 boundary.
     List<String> protectedPaths =
         List.of(
             "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/proofcontrol/ExactGoalContractChecker.java",
             "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/proofcontrol/RootGoalContract.java",
             "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/proofcontrol/ProblemSemanticViewService.java",
-            "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/memory/NegativeKnowledgeRegistry.java",
             "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/memory/NegativeKnowledgeAdmissionGate.java",
             "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/research/ResearchCheckpointLedger.java",
             "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/proofcontrol/SemanticPivotLedger.java");
@@ -38,6 +38,15 @@ class StrategyDiversityProtectedAuthorityTest {
     String changed = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
     assertThat(process.exitValue()).isZero();
     assertThat(changed).isBlank();
+
+    String negativeRegistry =
+        Files.readString(
+            root.resolve(
+                "mathproofmesh-core/src/main/java/io/github/aililuola/mathproofmesh/memory/NegativeKnowledgeRegistry.java"));
+    assertThat(negativeRegistry)
+        .doesNotContain(
+            "io.github.aililuola.mathproofmesh.strategydiversity",
+            "io.github.aililuola.mathproofmesh.desktop");
 
     String coordinator =
         Files.readString(

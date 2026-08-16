@@ -173,7 +173,10 @@ class DesktopFailedRouteArtifactPublicationTest {
             2,
             frozen.variableBindings(),
             1.0d,
-            ClaimStatus.REJECTED);
+            ClaimStatus.REJECTED,
+            frozen.claimStatementHash(),
+            frozen.claimSemanticHash(),
+            frozen.polarity());
     harness
         .typedMemory()
         .applyVerifiedCounterexample(

@@ -443,6 +443,113 @@ PYTHON_SIDECAR_PERFORMANCE=PASS
 ISSUE_010_STATUS=CLOSED
 ```
 
+## 13. Permanent-negative polarity identity closure
+
+The final polarity audit found that claim-bound computation evidence retained `polarity` in its
+`MessageEnvelope`, but the downstream permanent Negative Knowledge identity discarded it. A
+counterexample to positive `P(x)` could therefore share a semantic key with negative `P(x)` when
+all other context fields were identical.
+
+This patch remains on `fix/010-reproducible-computation-evidence`. It closes only that Issue 010
+identity defect. Issues 001-009 retain their existing behavior and regression coverage, and Issue
+011 has not been started.
+
+### 13.1 Production behavior
+
+- `NegativeKnowledgeCandidate` and `NegativeKnowledgeRecord` now carry normalized
+  `positive`, `negative`, or `unspecified` polarity.
+- `NegativeKnowledgeSemanticKey` includes polarity in both the full semantic key and the context
+  key. Exact and trusted-alias matches therefore cannot cross concrete polarities.
+- Verified counterexamples copy `MessageEnvelope.polarity()` into the permanent registry.
+  Claim Court authority checks, strategy preflight, proof-obligation admission, deferred-target
+  revalidation, and coordinator claim gates pass their authoritative polarity when one exists.
+- Deterministic code seeds may declare polarity explicitly. The compatibility factory remains and
+  produces `unspecified`, never a guessed concrete polarity.
+- `NegativeKnowledgeSnapshot` is now schema version 2. Version 1 records migrate to
+  `polarity=unspecified`, with semantic and trusted-alias keys recomputed deterministically.
+- An `unspecified` legacy record may yield `POSSIBLE_EQUIVALENT` quarantine, but it cannot exact
+  block a modern positive or negative claim. Positive and negative concrete identities do not
+  even form a possible-equivalence match solely because their remaining context is equal.
+- Existing legacy constructors remain source-compatible and intentionally produce
+  `polarity=unspecified`.
+
+The source audit before this patch showed that the Negative Knowledge semantic payload contained
+the statement, assumptions, ordered quantifiers, variable bindings, scope, target type, and
+problem hash, but no polarity. `candidateFromMessage(...)` and
+`ClaimStatementAuthorityService` likewise did not forward the polarity already present on the
+claim-bound evidence. This is the pre-patch architecture defect; the report does not mislabel it
+as a separately captured behavioral test run.
+
+### 13.2 Polarity diagnostics
+
+The focused suite ran five tests through Core semantic-key registration, real computation
+counterexample projection, TypedMemory fact admission, Claim Court authority assessment,
+checkpoint JSON, and coordinator restore:
+
+```text
+PERMANENT NEGATIVE POLARITY DIAGNOSTIC
+POSITIVE_EXACT_REENTRY_BLOCKS=1
+NEGATIVE_POLARITY_FALSE_BLOCKS=0
+SAME_STATEMENT_POLARITY_COLLISIONS=0
+CLAIM_COURT_POSITIVE_EXACT_REFUTATIONS=1
+CLAIM_COURT_NEGATIVE_POLARITY_FALSE_REFUTATIONS=0
+EXACT_NEGATIVE_REENTRY_BLOCKS=1
+CROSS_QUANTIFIER_FALSE_BLOCKS=0
+CROSS_SCOPE_FALSE_BLOCKS=0
+CROSS_POLARITY_FALSE_BLOCKS=0
+POST_RESTORE_POLARITY_LOSSES=0
+LEGACY_UNSPECIFIED_EXACT_BLOCKS=0
+RESULT=PASS
+
+Core focused tests=1, failures=0, errors=0, skipped=0
+Desktop focused tests=4, failures=0, errors=0, skipped=0
+```
+
+The legacy assertion also verifies that the migrated record is inconclusive/quarantined rather
+than treated as an exact mathematical refutation. No model API, external network, Python sidecar,
+or database is used by the focused suite.
+
+### 13.3 Regression and release gates
+
+The Core/Desktop module regression passed after updating older test fixtures to emit modern,
+claim-bound counterexamples rather than legacy `unspecified` envelopes:
+
+```text
+Contracts=65, failures=0, errors=0, skipped=0
+Core=1322, failures=0, errors=0, skipped=0
+Server unit=871, failures=0, errors=0, skipped=3
+Desktop=263, failures=0, errors=0, skipped=1
+MODULE_TOTAL=2521, failures=0, errors=0, skipped=4
+```
+
+The first full verification attempt correctly failed closed because Docker Desktop was installed
+but its Linux engine was not running. After starting that existing local engine, the final
+`./scripts/verify-all.ps1 -Offline` run passed, including all PostgreSQL Testcontainers tests:
+
+```text
+FULL VERIFICATION: PASS
+Contracts=65, failures=0, errors=0, skipped=0
+Core=1322, failures=0, errors=0, skipped=0
+Server unit=871, failures=0, errors=0, skipped=3
+Server PostgreSQL IT=26, failures=0, errors=0, skipped=0
+Desktop=263, failures=0, errors=0, skipped=1
+Compatibility=149, failures=0, errors=0, skipped=0
+TOTAL=2696, failures=0, errors=0, skipped=4
+
+CORE_LINE_COVERAGE=90.168857%
+CORE_BRANCH_COVERAGE=75.152100%
+DESKTOP_LINE_COVERAGE=79.737476%
+SPOTBUGS_FINDBUGS_FINDINGS=0
+POSTGRESQL_ITS=PASS
+OWASP=PASS
+SECRET_SCAN=PASS
+LICENSE_GATE=PASS
+SOURCE_IMMUTABILITY=PASS
+PYTHON_SIDECAR_PERFORMANCE=PASS
+
+ISSUE_010_STATUS=CLOSED
+```
+
 Issue 011 尚未开始。
 
 ## 12. Exact claim-context authority projection closure

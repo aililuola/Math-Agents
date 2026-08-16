@@ -55,6 +55,7 @@ import io.github.aililuola.mathproofmesh.provider.ProviderClientRegistry;
 import io.github.aililuola.mathproofmesh.provider.ProviderRequest;
 import io.github.aililuola.mathproofmesh.research.ResearchCheckpointLedger;
 import io.github.aililuola.mathproofmesh.strategydiversity.CriticalClaimContext;
+import io.github.aililuola.mathproofmesh.strategydiversity.CriticalClaimKeyCompiler;
 import io.github.aililuola.mathproofmesh.strategydiversity.PortfolioReplenishmentLedger;
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyCandidateLedger;
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyDiversityConfig;
@@ -277,6 +278,7 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException("strategy has no required claim"));
     CriticalClaimContext context = productionClaimContext(strategy);
+    var semanticKey = new CriticalClaimKeyCompiler().compile(PROBLEM_HASH, claim, context);
     String statement = claim.statement();
     String artifact = "experiment://finite-graph/" + id;
     String raw = "artifact://finite-graph/" + id;
@@ -309,7 +311,10 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
             2,
             context.variableBindings(),
             1.0d,
-            ClaimStatus.REJECTED);
+            ClaimStatus.REJECTED,
+            CanonicalJson.stableHash(statement),
+            semanticKey.semanticKey(),
+            context.polarity());
     typedMemory()
         .applyVerifiedCounterexample(
             envelope,

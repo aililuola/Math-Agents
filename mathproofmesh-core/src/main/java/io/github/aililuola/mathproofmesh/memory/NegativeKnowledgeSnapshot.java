@@ -7,7 +7,7 @@ public record NegativeKnowledgeSnapshot(
     List<NegativeKnowledgeRecord> records,
     List<NegativeKnowledgeAuditEvent> audit) {
 
-  public static final int CURRENT_SCHEMA_VERSION = 1;
+  public static final int CURRENT_SCHEMA_VERSION = 2;
 
   public NegativeKnowledgeSnapshot {
     if (schemaVersion < 0 || schemaVersion > CURRENT_SCHEMA_VERSION) {

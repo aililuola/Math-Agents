@@ -209,6 +209,10 @@ public final class ProofGraphStore {
     return obligations.get(obligation.obligationId());
   }
 
+  synchronized String pendingCreationPolarity() {
+    return pendingCreationContext == null ? "" : pendingCreationContext.polarity();
+  }
+
   public synchronized MessageEnvelope addClaimNode(MessageEnvelope message) {
     return negativeAwareWriter.addClaimNode(message);
   }

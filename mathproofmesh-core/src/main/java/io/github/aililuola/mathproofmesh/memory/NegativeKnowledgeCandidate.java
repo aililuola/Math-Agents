@@ -13,6 +13,7 @@ public record NegativeKnowledgeCandidate(
     List<QuantifierSpec> quantifiers,
     List<VariableBinding> variableBindings,
     List<String> scopeLimitations,
+    String polarity,
     NegativeKnowledgeSurface surface,
     NegativeCandidateIntent intent) {
 
@@ -28,8 +29,34 @@ public record NegativeKnowledgeCandidate(
     quantifiers = quantifiers == null ? List.of() : List.copyOf(quantifiers);
     variableBindings = variableBindings == null ? List.of() : List.copyOf(variableBindings);
     scopeLimitations = scopeLimitations == null ? List.of() : List.copyOf(scopeLimitations);
+    polarity = NegativeKnowledgeSemanticKey.normalizePolarity(polarity);
     surface = java.util.Objects.requireNonNull(surface, "surface");
     intent = java.util.Objects.requireNonNull(intent, "intent");
+  }
+
+  public NegativeKnowledgeCandidate(
+      String problemHash,
+      NegativeKnowledgeTargetType targetType,
+      String statement,
+      String normalizedStatement,
+      List<String> assumptions,
+      List<QuantifierSpec> quantifiers,
+      List<VariableBinding> variableBindings,
+      List<String> scopeLimitations,
+      NegativeKnowledgeSurface surface,
+      NegativeCandidateIntent intent) {
+    this(
+        problemHash,
+        targetType,
+        statement,
+        normalizedStatement,
+        assumptions,
+        quantifiers,
+        variableBindings,
+        scopeLimitations,
+        NegativeKnowledgeSemanticKey.UNSPECIFIED_POLARITY,
+        surface,
+        intent);
   }
 
   public String semanticKey() {
@@ -40,11 +67,23 @@ public record NegativeKnowledgeCandidate(
         assumptions,
         quantifiers,
         variableBindings,
-        scopeLimitations);
+        scopeLimitations,
+        polarity);
   }
 
   public String contextKey() {
     return NegativeKnowledgeSemanticKey.contextKey(
+        problemHash,
+        targetType,
+        assumptions,
+        quantifiers,
+        variableBindings,
+        scopeLimitations,
+        polarity);
+  }
+
+  String contextKeyIgnoringPolarity() {
+    return NegativeKnowledgeSemanticKey.contextKeyIgnoringPolarity(
         problemHash, targetType, assumptions, quantifiers, variableBindings, scopeLimitations);
   }
 

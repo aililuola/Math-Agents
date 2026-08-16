@@ -67,6 +67,7 @@ public final class TrustedStrategyPreflightEvidenceSource
                 spec.context().quantifiers(),
                 spec.context().variableBindings(),
                 spec.context().scopeLimitations(),
+                spec.context().polarity(),
                 NegativeKnowledgeSurface.STRATEGY_ADMISSION,
                 NegativeCandidateIntent.POSITIVE_DEPENDENCY),
             currentRound);

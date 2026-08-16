@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.aililuola.mathproofmesh.computation.ComputationEvidenceGate;
+import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
 import io.github.aililuola.mathproofmesh.contract.ClaimCard;
 import io.github.aililuola.mathproofmesh.contract.ClaimStatus;
 import io.github.aililuola.mathproofmesh.contract.EvidenceType;
@@ -17,6 +18,7 @@ import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeRegistry;
 import io.github.aililuola.mathproofmesh.memory.NegativeKnowledgeTargetType;
 import io.github.aililuola.mathproofmesh.memory.VerifiedCounterexampleAuthority;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class TrustedStrategyPreflightEvidenceSourceTest {
@@ -63,6 +65,7 @@ class TrustedStrategyPreflightEvidenceSourceTest {
             List.of(),
             List.of(),
             List.of(),
+            "positive",
             "This shortcut is not justified."),
         0);
     TrustedStrategyPreflightEvidenceSource source = source(registry, null, null);
@@ -238,6 +241,16 @@ class TrustedStrategyPreflightEvidenceSourceTest {
         2,
         List.of(),
         1.0d,
-        ClaimStatus.REJECTED);
+        ClaimStatus.REJECTED,
+        CanonicalJson.stableHash(statement),
+        CanonicalJson.stableHash(
+            Map.of(
+                "statement", statement,
+                "assumptions", List.of(),
+                "quantifiers", List.of(),
+                "bindings", List.of(),
+                "scope", List.of(),
+                "polarity", "positive")),
+        "positive");
   }
 }

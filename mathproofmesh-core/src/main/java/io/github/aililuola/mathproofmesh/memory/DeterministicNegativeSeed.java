@@ -13,6 +13,7 @@ public final class DeterministicNegativeSeed {
   private final List<QuantifierSpec> quantifiers;
   private final List<VariableBinding> variableBindings;
   private final List<String> scopeLimitations;
+  private final String polarity;
   private final String reason;
 
   private DeterministicNegativeSeed(
@@ -24,6 +25,7 @@ public final class DeterministicNegativeSeed {
       List<QuantifierSpec> quantifiers,
       List<VariableBinding> variableBindings,
       List<String> scopeLimitations,
+      String polarity,
       String reason) {
     this.seedId = require(seedId, "seedId");
     this.targetType = java.util.Objects.requireNonNull(targetType, "targetType");
@@ -33,6 +35,7 @@ public final class DeterministicNegativeSeed {
     this.quantifiers = quantifiers == null ? List.of() : List.copyOf(quantifiers);
     this.variableBindings = variableBindings == null ? List.of() : List.copyOf(variableBindings);
     this.scopeLimitations = copy(scopeLimitations);
+    this.polarity = NegativeKnowledgeSemanticKey.normalizePolarity(polarity);
     this.reason = require(reason, "reason");
   }
 
@@ -46,6 +49,30 @@ public final class DeterministicNegativeSeed {
       List<VariableBinding> variableBindings,
       List<String> scopeLimitations,
       String reason) {
+    return trustedCodeSeed(
+        seedId,
+        targetType,
+        statement,
+        trustedAliases,
+        assumptions,
+        quantifiers,
+        variableBindings,
+        scopeLimitations,
+        NegativeKnowledgeSemanticKey.UNSPECIFIED_POLARITY,
+        reason);
+  }
+
+  public static DeterministicNegativeSeed trustedCodeSeed(
+      String seedId,
+      NegativeKnowledgeTargetType targetType,
+      String statement,
+      List<String> trustedAliases,
+      List<String> assumptions,
+      List<QuantifierSpec> quantifiers,
+      List<VariableBinding> variableBindings,
+      List<String> scopeLimitations,
+      String polarity,
+      String reason) {
     return new DeterministicNegativeSeed(
         seedId,
         targetType,
@@ -55,6 +82,7 @@ public final class DeterministicNegativeSeed {
         quantifiers,
         variableBindings,
         scopeLimitations,
+        polarity,
         reason);
   }
 
@@ -88,6 +116,10 @@ public final class DeterministicNegativeSeed {
 
   public List<String> scopeLimitations() {
     return List.copyOf(scopeLimitations);
+  }
+
+  public String polarity() {
+    return polarity;
   }
 
   public String reason() {

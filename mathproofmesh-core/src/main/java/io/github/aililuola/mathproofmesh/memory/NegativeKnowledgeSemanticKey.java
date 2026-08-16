@@ -20,6 +20,7 @@ import java.util.regex.Pattern;
     justification =
         "Semantic keys apply NFKC first and then use Locale.ROOT for deterministic case folding.")
 final class NegativeKnowledgeSemanticKey {
+  static final String UNSPECIFIED_POLARITY = "unspecified";
   private static final SparseTopologyRouter NORMALIZER = new SparseTopologyRouter();
   private static final Pattern CANONICAL_VARIABLE = Pattern.compile("\\bv\\d+\\b");
 
@@ -52,9 +53,18 @@ final class NegativeKnowledgeSemanticKey {
       List<String> assumptions,
       List<QuantifierSpec> quantifiers,
       List<VariableBinding> variableBindings,
-      List<String> scopeLimitations) {
-    Map<String, Object> payload = contextPayload(
-        problemHash, targetType, assumptions, quantifiers, variableBindings, scopeLimitations);
+      List<String> scopeLimitations,
+      String polarity) {
+    Map<String, Object> payload =
+        contextPayload(
+            problemHash,
+            targetType,
+            assumptions,
+            quantifiers,
+            variableBindings,
+            scopeLimitations,
+            polarity,
+            true);
     payload.put("normalized_statement", normalizeStatement(statement));
     return CanonicalJson.stableHash(payload);
   }
@@ -65,10 +75,48 @@ final class NegativeKnowledgeSemanticKey {
       List<String> assumptions,
       List<QuantifierSpec> quantifiers,
       List<VariableBinding> variableBindings,
+      List<String> scopeLimitations,
+      String polarity) {
+    return CanonicalJson.stableHash(
+        contextPayload(
+            problemHash,
+            targetType,
+            assumptions,
+            quantifiers,
+            variableBindings,
+            scopeLimitations,
+            polarity,
+            true));
+  }
+
+  static String contextKeyIgnoringPolarity(
+      String problemHash,
+      NegativeKnowledgeTargetType targetType,
+      List<String> assumptions,
+      List<QuantifierSpec> quantifiers,
+      List<VariableBinding> variableBindings,
       List<String> scopeLimitations) {
     return CanonicalJson.stableHash(
         contextPayload(
-            problemHash, targetType, assumptions, quantifiers, variableBindings, scopeLimitations));
+            problemHash,
+            targetType,
+            assumptions,
+            quantifiers,
+            variableBindings,
+            scopeLimitations,
+            UNSPECIFIED_POLARITY,
+            false));
+  }
+
+  static String normalizePolarity(String value) {
+    String normalized = normalizeText(value);
+    if (normalized.isBlank()) {
+      return UNSPECIFIED_POLARITY;
+    }
+    return switch (normalized) {
+      case "positive", "negative", UNSPECIFIED_POLARITY -> normalized;
+      default -> throw new IllegalArgumentException("unsupported negative knowledge polarity");
+    };
   }
 
   static double similarity(String left, String right) {
@@ -81,7 +129,9 @@ final class NegativeKnowledgeSemanticKey {
       List<String> assumptions,
       List<QuantifierSpec> quantifiers,
       List<VariableBinding> variableBindings,
-      List<String> scopeLimitations) {
+      List<String> scopeLimitations,
+      String polarity,
+      boolean includePolarity) {
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("problem_hash", require(problemHash, "problemHash"));
     payload.put("target_type", java.util.Objects.requireNonNull(targetType, "targetType").name());
@@ -89,6 +139,9 @@ final class NegativeKnowledgeSemanticKey {
     payload.put("quantifiers", normalizedQuantifiers(quantifiers));
     payload.put("variable_bindings", normalizedBindings(variableBindings));
     payload.put("scope_limitations", normalizedStrings(scopeLimitations));
+    if (includePolarity) {
+      payload.put("polarity", normalizePolarity(polarity));
+    }
     return payload;
   }
 

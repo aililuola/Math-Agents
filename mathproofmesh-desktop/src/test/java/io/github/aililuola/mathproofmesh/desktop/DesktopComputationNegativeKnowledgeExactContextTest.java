@@ -70,12 +70,13 @@ final class DesktopComputationNegativeKnowledgeExactContextTest {
               new NegativeKnowledgeCandidate(
                   negative.problemHash(),
                   NegativeKnowledgeTargetType.CLAIM,
-                  "Not (" + negative.statement() + ")",
-                  "",
+                  negative.statement(),
+                  negative.normalizedStatement(),
                   fixture.binding().assumptions(),
                   fixture.binding().quantifiers(),
                   fixture.binding().variableBindings(),
                   fixture.binding().scopeLimitations(),
+                  "negative",
                   NegativeKnowledgeSurface.STRATEGY_ADMISSION,
                   NegativeCandidateIntent.POSITIVE_DEPENDENCY),
               0);
@@ -118,6 +119,7 @@ final class DesktopComputationNegativeKnowledgeExactContextTest {
         quantifiers,
         binding.variableBindings(),
         scopeLimitations,
+        binding.polarity(),
         NegativeKnowledgeSurface.STRATEGY_ADMISSION,
         NegativeCandidateIntent.POSITIVE_DEPENDENCY);
   }
