@@ -30,6 +30,12 @@ final class RunStateHashes {
     return normalized;
   }
 
+  static boolean equalHash(String left, String right) {
+    return MessageDigest.isEqual(
+        Objects.requireNonNull(left, "left").getBytes(StandardCharsets.US_ASCII),
+        Objects.requireNonNull(right, "right").getBytes(StandardCharsets.US_ASCII));
+  }
+
   static String optional(String value) {
     return value == null ? "" : value.strip();
   }

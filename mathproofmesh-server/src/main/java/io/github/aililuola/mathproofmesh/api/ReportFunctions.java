@@ -7,6 +7,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -28,11 +30,21 @@ public final class ReportFunctions {
     Path target = reports.resolve("run_report.md");
     try {
       Files.createDirectories(reports);
-      Files.write(
-          target,
-          bytes,
-          StandardOpenOption.CREATE,
-          StandardOpenOption.TRUNCATE_EXISTING);
+      Path temporary = Files.createTempFile(reports, ".run-report-", ".tmp");
+      try {
+        Files.write(temporary, bytes, StandardOpenOption.TRUNCATE_EXISTING);
+        try {
+          Files.move(
+              temporary,
+              target,
+              StandardCopyOption.ATOMIC_MOVE,
+              StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException exception) {
+          Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+      } finally {
+        Files.deleteIfExists(temporary);
+      }
     } catch (IOException exception) {
       throw new IllegalStateException("run report could not be written", exception);
     }
@@ -53,7 +65,18 @@ public final class ReportFunctions {
             "",
             "- Run: `" + run.runId() + "`",
             "- Status: `" + run.status() + "`",
+            "- Execution status: `" + run.executionStatus() + "`",
+            "- Mathematical status: `" + run.mathStatus() + "`",
+            "- Usage status: `" + run.usageStatus() + "`",
+            "- Campaign status: `" + run.campaignStatus() + "`",
+            "- Report status: `" + run.reportStatus() + "`",
+            "- Terminal reason: `" + run.terminalReason() + "`",
+            "- Recoverable: `" + run.recoverable() + "`",
+            "- Authority state hash: `" + run.authorityStateHash() + "`",
             "- Current stage: `" + run.currentStage() + "`",
+            "- Provider calls: " + run.providerCalls(),
+            "- Total tokens: " + run.totalUsage().totalTokens(),
+            "- Estimated cost (USD): " + run.totalUsage().estimatedCostUsd(),
             "- Verified local claims: " + run.verifiedLocalClaimIds().size(),
             "- Independently passed routes: " + passedRoutes,
             "- Trace ID: `" + run.traceId() + "`",

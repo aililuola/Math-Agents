@@ -13,7 +13,23 @@ public record RunExecutionAttemptSnapshot(
             : attempts.stream()
                 .sorted(Comparator.comparingInt(RunExecutionAttemptRecord::ordinal))
                 .toList();
-    stableHash = RunStateHashes.generatedOrVerified(stableHash, attempts, "attempt ledger");
+    stableHash =
+        RunStateHashes.generatedOrVerified(
+            stableHash,
+            attempts.stream()
+                .map(
+                    item ->
+                        java.util.Map.of(
+                            "attemptId", item.attemptId(),
+                            "runId", item.runId(),
+                            "ordinal", item.ordinal(),
+                            "status", item.status(),
+                            "failureCode", item.failureCode(),
+                            "createdAt", item.createdAt().toString(),
+                            "updatedAt", item.updatedAt().toString(),
+                            "version", item.version()))
+                .toList(),
+            "attempt ledger");
   }
 
   public static RunExecutionAttemptSnapshot empty() {

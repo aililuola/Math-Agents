@@ -4,6 +4,16 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.api.ReasoningTraceStore;
+import io.github.aililuola.mathproofmesh.api.RunApiModels.RunView;
+import io.github.aililuola.mathproofmesh.runstate.FileRunStateStore;
+import io.github.aililuola.mathproofmesh.runstate.RunAuthoritySnapshot;
+import io.github.aililuola.mathproofmesh.runstate.RunCampaignStatus;
+import io.github.aililuola.mathproofmesh.runstate.RunExecutionStatus;
+import io.github.aililuola.mathproofmesh.runstate.RunProjectionSnapshot;
+import io.github.aililuola.mathproofmesh.runstate.RunStateEvidenceBundle;
+import io.github.aililuola.mathproofmesh.runstate.RunStateReconciler;
+import io.github.aililuola.mathproofmesh.runstate.RunTerminalReason;
+import io.github.aililuola.mathproofmesh.runstate.RunStateSnapshot;
 import java.awt.Desktop;
 import java.awt.GraphicsEnvironment;
 import java.io.IOException;
@@ -31,10 +41,14 @@ public final class RunRepository {
 
   private final DesktopPaths paths;
   private final ObjectMapper mapper;
+  private final FileRunStateStore runStateStore;
+  private final LegacyRunStateMigrator legacyRunStateMigrator;
 
   public RunRepository(DesktopPaths paths, ObjectMapper mapper) {
     this.paths = Objects.requireNonNull(paths, "paths");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
+    this.runStateStore = new FileRunStateStore(paths.runs());
+    this.legacyRunStateMigrator = new LegacyRunStateMigrator(paths.runs(), mapper);
   }
 
   public Path runDirectory(String runId) {
@@ -42,6 +56,15 @@ public final class RunRepository {
   }
 
   public void writeMetadata(DesktopRunMetadata metadata) {
+    writeMetadataProjection(metadata, null);
+  }
+
+  public void writeMetadataProjection(DesktopRunMetadata metadata, RunView view) {
+    if (view == null
+        && "resume".equals(metadata.mode())
+        && "queued".equals(metadata.lifecycle())) {
+      queueRecoverableResume(metadata);
+    }
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("run_id", metadata.runId());
     payload.put("profile", metadata.profile());
@@ -51,7 +74,117 @@ public final class RunRepository {
     payload.put("mode", metadata.mode());
     payload.put("error", metadata.error());
     payload.put("process_id", metadata.processId());
+    if (view != null) {
+      payload.put("execution_status", view.executionStatus().name());
+      payload.put("math_status", view.mathStatus().name());
+      payload.put("usage_status", view.usageStatus().name());
+      payload.put("campaign_status", view.campaignStatus().name());
+      payload.put("report_status", view.reportStatus().name());
+      payload.put("authority_state_hash", view.authorityStateHash());
+      payload.put("state_sequence", view.stateSequence());
+      payload.put("provider_calls", view.providerCalls());
+      payload.put("total_tokens", view.totalUsage().totalTokens());
+    }
     writeJsonAtomically(metadataPath(metadata.runId()), payload);
+  }
+
+  private void queueRecoverableResume(DesktopRunMetadata metadata) {
+    RunStateSnapshot previous = runStateStore.load(metadata.runId()).orElse(null);
+    if (previous == null
+        || previous.authority().campaignStatus() != RunCampaignStatus.RECOVERABLE) {
+      return;
+    }
+    RunAuthoritySnapshot before = previous.authority();
+    String attemptId = "desktop-resume-" + UUID.randomUUID().toString().replace("-", "");
+    RunStateSnapshot queued =
+        new RunStateReconciler()
+            .reconcile(
+                new RunStateEvidenceBundle(
+                    metadata.runId(),
+                    before.problemHash(),
+                    attemptId,
+                    RunExecutionStatus.QUEUED,
+                    RunTerminalReason.NONE,
+                    "resume",
+                    !before.latestSemanticCheckpointRef().isBlank(),
+                    false,
+                    before.latestSemanticCheckpointRef(),
+                    before.latestSemanticCheckpointHash(),
+                    before.proofGraphHash(),
+                    before.mathematicalProgress(),
+                    List.of(),
+                    previous,
+                    previous.projection(),
+                    metadata.updatedAt()))
+            .state();
+    runStateStore.compareAndSet(
+        metadata.runId(), before.version(), queued, "desktop-resume", 0L);
+  }
+
+  /** Reconciles a failed execution without erasing durable semantic or usage evidence. */
+  public RunStateSnapshot reconcileFailure(
+      String runId, DesktopRunMetadata metadata, String failureType) {
+    return reconcileExecution(
+        runId,
+        metadata,
+        RunExecutionStatus.FAILED,
+        RunTerminalReason.EXECUTION_FAILED,
+        "EXECUTION_FAILURE:" + failureType);
+  }
+
+  public RunStateSnapshot reconcileCancellation(String runId, DesktopRunMetadata metadata) {
+    return reconcileExecution(
+        runId,
+        metadata,
+        RunExecutionStatus.CANCELLED,
+        RunTerminalReason.USER_CANCELLED,
+        "EXECUTION_CANCELLED");
+  }
+
+  private RunStateSnapshot reconcileExecution(
+      String runId,
+      DesktopRunMetadata metadata,
+      RunExecutionStatus executionStatus,
+      RunTerminalReason terminalReason,
+      String diagnostic) {
+    Path directory = checkedExistingRun(runId);
+    RunStateSnapshot previous =
+        runStateStore.load(runId).orElseGet(() -> legacyRunStateMigrator.migrate(directory, metadata));
+    RunAuthoritySnapshot before = previous.authority();
+    RunStateSnapshot next =
+        new RunStateReconciler()
+            .reconcile(
+                new RunStateEvidenceBundle(
+                    runId,
+                    before.problemHash(),
+                    before.executionAttemptId(),
+                    executionStatus,
+                    terminalReason,
+                    before.currentStage(),
+                    !before.latestSemanticCheckpointRef().isBlank(),
+                    before.campaignStatus() == RunCampaignStatus.TERMINAL,
+                    before.latestSemanticCheckpointRef(),
+                    before.latestSemanticCheckpointHash(),
+                    before.proofGraphHash(),
+                    before.mathematicalProgress(),
+                    List.of(),
+                    previous,
+                    new RunProjectionSnapshot(
+                        before.authorityHash(),
+                        previous.projection().reportStatus(),
+                        previous.projection().runResultRef(),
+                        previous.projection().runResultHash(),
+                        previous.projection().desktopMetadataRef(),
+                        previous.projection().desktopMetadataHash(),
+                        previous.projection().reportRef(),
+                        previous.projection().reportHash(),
+                        previous.projection().latestActivitySequence(),
+                        List.of(diagnostic),
+                        null),
+                    Instant.now()))
+            .state();
+    return runStateStore.compareAndSet(
+        runId, before.version(), next, "desktop-run-manager", 0L);
   }
 
   public void writeResult(String runId, Map<String, Object> result) {
@@ -133,18 +266,13 @@ public final class RunRepository {
               null,
               0L);
     }
-    Map<String, Object> result = readObject(directory.resolve("structured").resolve("run_result.json"));
-    String lifecycle = metadata.lifecycle();
-    boolean active = SetLike.ACTIVE.contains(lifecycle);
-    if (!result.isEmpty() && !active) {
-      String execution = String.valueOf(result.getOrDefault("execution_status", "completed"));
-      lifecycle =
-          "failed".equals(execution)
-              ? "failed"
-              : "network_interrupted".equals(execution) ? "interrupted" : "completed";
-    } else if (SetLike.ACTIVE.contains(lifecycle) && metadata.processId() != ProcessHandle.current().pid()) {
-      lifecycle = "interrupted";
-    }
+    DesktopRunMetadata resolvedMetadata = metadata;
+    RunStateSnapshot state =
+        runStateStore
+            .load(runId)
+            .orElseGet(() -> legacyRunStateMigrator.migrate(directory, resolvedMetadata));
+    RunAuthoritySnapshot authority = state.authority();
+    String lifecycle = lifecycle(authority);
     String title = readTitle(directory, runId);
     Map<String, Object> summary = new LinkedHashMap<>();
     summary.put("run_id", runId);
@@ -154,20 +282,22 @@ public final class RunRepository {
     summary.put("mode", metadata.mode());
     summary.put("created_at", metadata.createdAt().toString());
     summary.put("updated_at", metadata.updatedAt().toString());
-    summary.put("status", active ? lifecycle : result.get("status"));
-    summary.put("task_status", active ? lifecycle : result.get("task_status"));
-    summary.put("math_status", active ? "unverified" : result.get("math_status"));
-    summary.put("execution_status", active ? lifecycle : result.get("execution_status"));
-    summary.put("total_calls", number(result.get("total_calls"), 0L));
-    Map<String, Object> usage = mapValue(result.get("total_usage"));
-    summary.put("total_tokens", number(usage.get("total_tokens"), 0L));
-    summary.put("estimated_cost_usd", decimal(usage.get("estimated_cost_usd"), 0.0));
-    summary.put(
-        "resumable",
-        Files.isDirectory(directory)
-            && ("interrupted".equals(lifecycle)
-                || "cancelled".equals(lifecycle)
-                || "failed".equals(lifecycle)));
+    summary.put("status", compatibleStatus(authority));
+    summary.put("task_status", compatibleStatus(authority));
+    summary.put("math_status", authority.mathStatus().name());
+    summary.put("execution_status", authority.executionStatus().name());
+    summary.put("usage_status", authority.usageStatus().name());
+    summary.put("campaign_status", authority.campaignStatus().name());
+    summary.put("report_status", state.projection().reportStatus().name());
+    summary.put("reconciliation_status", state.reconciliationStatus().name());
+    summary.put("terminal_reason", authority.terminalReason().name());
+    summary.put("authority_state_hash", authority.authorityHash());
+    summary.put("state_sequence", authority.authoritySequence());
+    summary.put("total_calls", authority.usage().providerCalls());
+    summary.put("provider_calls", authority.usage().providerCalls());
+    summary.put("total_tokens", authority.usage().totalTokens());
+    summary.put("estimated_cost_usd", authority.usage().estimatedCostUsd());
+    summary.put("resumable", authority.recoverable());
     return Collections.unmodifiableMap(summary);
   }
 
@@ -177,6 +307,7 @@ public final class RunRepository {
     Map<String, Object> summary = summary(runId);
     boolean active = SetLike.ACTIVE.contains(String.valueOf(summary.get("lifecycle")));
     detail.put("summary", summary);
+    detail.put("run_state", runStateStore.load(runId).orElseThrow());
     Map<String, Object> problem =
         readObject(directory.resolve("structured").resolve("problem_contract.json"));
     detail.put(
@@ -564,12 +695,36 @@ public final class RunRepository {
     return value instanceof Number number ? number.longValue() : fallback;
   }
 
-  private static double decimal(Object value, double fallback) {
-    return value instanceof Number number ? number.doubleValue() : fallback;
-  }
-
   private static Object first(Object primary, Object fallback) {
     return primary == null ? fallback : primary;
+  }
+
+  private static String lifecycle(RunAuthoritySnapshot authority) {
+    return switch (authority.executionStatus()) {
+      case QUEUED -> "queued";
+      case RUNNING -> "running";
+      case SUCCEEDED -> "completed";
+      case FAILED -> "failed";
+      case INTERRUPTED -> "interrupted";
+      case CANCELLED -> "cancelled";
+    };
+  }
+
+  private static String compatibleStatus(RunAuthoritySnapshot authority) {
+    if (authority.campaignStatus() == RunCampaignStatus.ACTIVE) {
+      return "running";
+    }
+    return switch (authority.executionStatus()) {
+      case FAILED -> "failed";
+      case INTERRUPTED -> "interrupted";
+      case CANCELLED -> "cancelled";
+      case QUEUED -> "queued";
+      default ->
+          authority.mathStatus()
+                  == io.github.aililuola.mathproofmesh.runstate.RunMathematicalStatus.VERIFIED
+              ? "completed"
+              : "unverified";
+    };
   }
 
   private static final class SetLike {

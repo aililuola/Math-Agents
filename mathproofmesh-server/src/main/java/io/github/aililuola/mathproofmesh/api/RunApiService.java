@@ -6,9 +6,13 @@ import io.github.aililuola.mathproofmesh.api.RunApiModels.ArtifactPayload;
 import io.github.aililuola.mathproofmesh.api.RunApiModels.ProofGraphView;
 import io.github.aililuola.mathproofmesh.api.RunApiModels.RouteView;
 import io.github.aililuola.mathproofmesh.api.RunApiModels.RunView;
-import io.github.aililuola.mathproofmesh.api.RunApiModels.UsageView;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphSnapshot;
+import io.github.aililuola.mathproofmesh.runstate.FileRunStateStore;
+import io.github.aililuola.mathproofmesh.runstate.RunCampaignStatus;
+import io.github.aililuola.mathproofmesh.runstate.RunReportStatus;
+import io.github.aililuola.mathproofmesh.runstate.RunStateSnapshot;
+import io.github.aililuola.mathproofmesh.runstate.RunResultProjectionService;
 import io.micrometer.core.instrument.Timer;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -20,6 +24,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,6 +43,7 @@ public final class RunApiService {
   private final Path runRoot;
   private final Semaphore runSlots;
   private final RunExecutionBackend executionBackend;
+  private final FileRunStateStore runStateStore;
   private final ConcurrentMap<String, StoredRun> runs = new ConcurrentHashMap<>();
 
   @Autowired
@@ -67,6 +73,7 @@ public final class RunApiService {
     this.runRoot = Path.of(runRoot).toAbsolutePath().normalize();
     this.runSlots = new Semaphore(Math.max(1, Math.min(64, maxConcurrentRuns)), true);
     this.executionBackend = executionBackend;
+    this.runStateStore = new FileRunStateStore(this.runRoot);
   }
 
   public RunView solve(SolveRequest request) {
@@ -98,10 +105,15 @@ public final class RunApiService {
       if (prior != null) {
         return prior.view();
       }
+      if (runStateStore.load(runId).isPresent()) {
+        StoredRun restored = restoreStoredRun(runId);
+        StoredRun winner = runs.putIfAbsent(runId, restored);
+        return (winner == null ? restored : winner).view();
+      }
       StoredRun created =
           allowConfiguredBackend && executionBackend != null
               ? executeConfigured(request, runId, traceId, eventObserver)
-              : executeMock(runId, traceId, eventObserver);
+              : executeMock(request, runId, traceId, eventObserver);
       StoredRun winner = runs.putIfAbsent(runId, created);
       return winner == null ? created.view() : winner.view();
     } catch (RuntimeException exception) {
@@ -132,7 +144,7 @@ public final class RunApiService {
     try {
       run = require(request.runId());
       synchronized (run) {
-        if ("completed".equals(run.view.status())) {
+        if (run.view.campaignStatus() == RunCampaignStatus.TERMINAL) {
           return run.view;
         }
         if (run.resuming) {
@@ -159,6 +171,7 @@ public final class RunApiService {
           return run.view;
         }
         run.resuming = true;
+        run.executionAttemptId = newAttemptId(request.runId());
       }
 
       RunExecutionBackend.RunExecutionResult result =
@@ -328,10 +341,16 @@ public final class RunApiService {
   }
 
   private StoredRun executeMock(
-      String runId, String traceId, Consumer<ApiEvent> eventObserver) {
+      SolveRequest request,
+      String runId,
+      String traceId,
+      Consumer<ApiEvent> eventObserver) {
     long started = System.nanoTime();
     List<ApiEvent> events = new ArrayList<>();
-    StoredRun run = new StoredRun(events, started, traceId, eventObserver, null);
+    StoredRun run =
+        new StoredRun(
+            events, started, traceId, eventObserver, request, newAttemptId(runId));
+    persistRequest(runId, request);
     run.add("run_started", "goal_preflight", null, "running", "Run accepted", null);
     run.add(
         "stage_changed",
@@ -391,45 +410,18 @@ public final class RunApiService {
                 "verified",
                 "Induction route independently reviewed",
                 List.of("claim-induction")));
-    RunView preReport =
-        new RunView(
-            runId,
+    applyConfiguredResult(
+        run,
+        runId,
+        traceId,
+        new RunExecutionBackend.RunExecutionResult(
             "completed",
             "report",
             "Mock proof completed and independently verified.",
-            null,
-            traceId,
-            10,
-            run.latestEventId(),
-            List.of("route-1"),
-            List.of("claim-induction"));
-    ReportFunctions.RunReport report =
-        ReportFunctions.writeRunReport(runRoot.resolve(runId), preReport, routes);
-    synchronized (run) {
-      run.artifacts.put(
-          report.hash(),
-          new ArtifactPayload(report.hash(), report.mediaType(), report.bytes()));
-      run.add(
-          "result",
-          "report",
-          null,
-          "completed",
-          "Verified result is available",
-          report.reference());
-      run.routes = routes;
-      run.view =
-          new RunView(
-              runId,
-              "completed",
-              "report",
-              "Mock proof completed and independently verified.",
-              report.reference(),
-              traceId,
-              10,
-              run.latestEventId(),
-              List.of("route-1"),
-              List.of("claim-induction"));
-    }
+            routes,
+            List.of("claim-induction"),
+            "",
+            10));
     observability.recordMockRun();
     return run;
   }
@@ -444,7 +436,14 @@ public final class RunApiService {
         new SolveRequest(
             request.problem(), runId, request.canonicalStatement(), request.profile());
     StoredRun run =
-        new StoredRun(new ArrayList<>(), started, traceId, eventObserver, boundRequest);
+        new StoredRun(
+            new ArrayList<>(),
+            started,
+            traceId,
+            eventObserver,
+            boundRequest,
+            newAttemptId(runId));
+    persistRequest(runId, boundRequest);
     run.add("run_started", "goal_preflight", null, "running", "Run accepted", null);
     RunExecutionBackend.RunExecutionResult result =
         executionBackend.execute(
@@ -462,57 +461,166 @@ public final class RunApiService {
       String runId,
       String traceId,
       RunExecutionBackend.RunExecutionResult result) {
-    RunView preReport =
-        new RunView(
+    RunStateSnapshot previous = runStateStore.load(runId).orElse(null);
+    RunStateSnapshot authorityState =
+        RunStateApiProjection.reconcile(
+            run.request,
             runId,
-            result.status(),
-            result.currentStage(),
+            run.executionAttemptId,
+            runRoot.resolve(runId),
+            result,
+            previous);
+    long expectedVersion = previous == null ? -1L : previous.authority().version();
+    runStateStore.compareAndSet(runId, expectedVersion, authorityState, "api-run-service", 0L);
+    var resultReceipt =
+        new RunResultProjectionService()
+            .project(
+                runRoot.resolve(runId),
+                authorityState,
+                java.util.Map.of(
+                    "run_id", runId,
+                    "summary", result.summary(),
+                    "completed_route_ids", result.routes().stream().map(RouteView::routeId).toList(),
+                    "verified_local_claim_ids", result.verifiedLocalClaimIds(),
+                    "logical_steps", result.logicalSteps()));
+    authorityState =
+        RunStateApiProjection.withResult(
+            authorityState,
+            resultReceipt.reference(),
+            resultReceipt.artifactHash(),
+            resultReceipt.errors());
+    runStateStore.compareAndSet(
+        runId,
+        authorityState.authority().version(),
+        authorityState,
+        "api-run-service",
+        0L);
+    RunView preReport =
+        RunStateApiProjection.view(
+            runId,
+            traceId,
             result.summary(),
             null,
-            traceId,
             result.logicalSteps(),
             run.latestEventId(),
             result.routes().stream().map(RouteView::routeId).toList(),
             result.verifiedLocalClaimIds(),
-            UsageView.from(result.usage()));
-    ReportFunctions.RunReport report =
-        ReportFunctions.writeRunReport(
-            runRoot.resolve(runId), preReport, result.routes(), result.reportBody());
+            authorityState);
+    RunReportProjectionService.Projection reportProjection =
+        new RunReportProjectionService()
+            .project(runRoot.resolve(runId), preReport, result.routes(), result.reportBody());
+    ReportFunctions.RunReport report = reportProjection.report();
+    var receipt = reportProjection.receipt();
+    RunStateSnapshot projectedState =
+        RunStateApiProjection.withReport(
+            authorityState,
+            receipt.status(),
+            receipt.reference(),
+            receipt.artifactHash(),
+            receipt.errors());
+    runStateStore.compareAndSet(
+        runId,
+        authorityState.authority().version(),
+        projectedState,
+        "api-run-service",
+        0L);
+    String reportReference = report == null ? null : report.reference();
     synchronized (run) {
-      run.artifacts.put(
-          report.hash(),
-          new ArtifactPayload(report.hash(), report.mediaType(), report.bytes()));
+      if (report != null) {
+        run.artifacts.put(
+            report.hash(),
+            new ArtifactPayload(report.hash(), report.mediaType(), report.bytes()));
+      }
       run.add(
           "result",
           result.currentStage(),
           null,
-          result.status(),
+          RunStateApiProjection.compatibleStatus(projectedState),
           "Run result is available",
-          report.reference());
+          reportReference);
       run.routes = result.routes();
       run.view =
-          new RunView(
+          RunStateApiProjection.view(
               runId,
-              result.status(),
-              result.currentStage(),
-              result.summary(),
-              report.reference(),
               traceId,
+              result.summary(),
+              reportReference,
               result.logicalSteps(),
               run.latestEventId(),
               result.routes().stream().map(RouteView::routeId).toList(),
               result.verifiedLocalClaimIds(),
-              UsageView.from(result.usage()));
+              projectedState);
       return run.view;
     }
   }
 
   private StoredRun require(String runId) {
-    StoredRun run = runs.get(runId);
+    StoredRun run = runs.computeIfAbsent(runId, this::restoreStoredRun);
     if (run == null) {
       throw new ApiNotFoundException("run cannot be resumed or queried");
     }
     return run;
+  }
+
+  private StoredRun restoreStoredRun(String runId) {
+    RunStateSnapshot state = runStateStore.load(runId).orElse(null);
+    if (state == null) {
+      return null;
+    }
+    String traceId = TraceContext.currentOrCreate();
+    SolveRequest request = readRequest(runId);
+    StoredRun restored =
+        new StoredRun(
+            new ArrayList<>(),
+            System.nanoTime(),
+            traceId,
+            null,
+            request,
+            state.authority().executionAttemptId());
+    synchronized (restored) {
+      restored.view =
+          RunStateApiProjection.view(
+              runId,
+              traceId,
+              "Durable run state restored",
+              state.projection().reportRef().isBlank() ? null : state.projection().reportRef(),
+              0,
+              0L,
+              List.of(),
+              List.of(),
+              state);
+    }
+    return restored;
+  }
+
+  private void persistRequest(String runId, SolveRequest request) {
+    Path path = runRoot.resolve(runId).resolve("structured").resolve("solve_request.json");
+    try {
+      Files.createDirectories(Objects.requireNonNull(path.getParent(), "solve request parent"));
+      Files.writeString(path, ContractObjectMapper.write(request), StandardCharsets.UTF_8);
+    } catch (IOException exception) {
+      throw new IllegalStateException("solve request could not be persisted", exception);
+    }
+  }
+
+  private SolveRequest readRequest(String runId) {
+    Path path = runRoot.resolve(runId).resolve("structured").resolve("solve_request.json");
+    if (!Files.isRegularFile(path)) {
+      return null;
+    }
+    try {
+      return ContractObjectMapper.read(
+          Files.readString(path, StandardCharsets.UTF_8), SolveRequest.class);
+    } catch (IOException | RuntimeException exception) {
+      return null;
+    }
+  }
+
+  private static String newAttemptId(String runId) {
+    return "execution-attempt-"
+        + io.github.aililuola.mathproofmesh.contract.CanonicalJson.stableHash(
+                List.of(runId, UUID.randomUUID().toString()))
+            .substring(0, 24);
   }
 
   private static final class StoredRun {
@@ -525,18 +633,21 @@ public final class RunApiService {
     private List<RouteView> routes = List.of();
     private RunView view;
     private boolean resuming;
+    private String executionAttemptId;
 
     private StoredRun(
         List<ApiEvent> events,
         long startedNanos,
         String traceId,
         Consumer<ApiEvent> eventObserver,
-        SolveRequest request) {
+        SolveRequest request,
+        String executionAttemptId) {
       this.events = events;
       this.startedNanos = startedNanos;
       this.traceId = TraceContext.validate(traceId);
       this.eventObserver = eventObserver;
       this.request = request;
+      this.executionAttemptId = executionAttemptId;
     }
 
     private synchronized void add(

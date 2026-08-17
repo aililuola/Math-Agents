@@ -1,6 +1,7 @@
 package io.github.aililuola.mathproofmesh.api;
 
 import io.github.aililuola.mathproofmesh.api.RunApiModels.RouteView;
+import io.github.aililuola.mathproofmesh.runstate.RunStateSnapshot;
 import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.util.List;
@@ -47,7 +48,8 @@ public interface RunExecutionBackend {
       List<String> verifiedLocalClaimIds,
       String reportBody,
       int logicalSteps,
-      ExecutionUsage usage) {
+      ExecutionUsage usage,
+      RunStateSnapshot runState) {
     public RunExecutionResult {
       status = required(status, "status");
       currentStage = required(currentStage, "currentStage");
@@ -69,6 +71,27 @@ public interface RunExecutionBackend {
         List<RouteView> routes,
         List<String> verifiedLocalClaimIds,
         String reportBody,
+        int logicalSteps,
+        ExecutionUsage usage) {
+      this(
+          status,
+          currentStage,
+          summary,
+          routes,
+          verifiedLocalClaimIds,
+          reportBody,
+          logicalSteps,
+          usage,
+          null);
+    }
+
+    public RunExecutionResult(
+        String status,
+        String currentStage,
+        String summary,
+        List<RouteView> routes,
+        List<String> verifiedLocalClaimIds,
+        String reportBody,
         int logicalSteps) {
       this(
           status,
@@ -78,7 +101,8 @@ public interface RunExecutionBackend {
           verifiedLocalClaimIds,
           reportBody,
           logicalSteps,
-          ExecutionUsage.zero());
+          ExecutionUsage.zero(),
+          null);
     }
 
     @Override

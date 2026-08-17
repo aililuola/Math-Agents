@@ -176,6 +176,7 @@ public final class DesktopRunManager implements AutoCloseable {
         task.cancel(true);
       }
       updateLifecycle(session, "cancelled", null);
+      repository.reconcileCancellation(session.metadata().runId(), session.metadata());
       session.publish("state", session.snapshot());
       session.publish(
           "terminal", Map.of("run_id", session.metadata().runId(), "reason", "cancelled"));
@@ -336,22 +337,47 @@ public final class DesktopRunManager implements AutoCloseable {
       for (ApiEvent event : runs.eventsAfter(result.runId(), latestPublishedApiEvent)) {
         publishActivity(session, event, cursor);
       }
-      String lifecycle = desktopLifecycle(result.status());
-      String executionStatus = executionStatus(result.status());
-      String error = "failed".equals(executionStatus) ? result.summary() : null;
+      String lifecycle = desktopLifecycle(result);
+      String executionStatus = result.executionStatus().name();
+      String error = "FAILED".equals(executionStatus) ? result.summary() : null;
       Map<String, Object> payload = new LinkedHashMap<>();
       payload.put("run_id", result.runId());
       payload.put("status", result.status());
       payload.put("task_status", result.status());
       payload.put(
-          "math_status", "completed".equals(result.status()) ? "verified" : "unverified");
-      payload.put("execution_status", executionStatus);
+          "math_status",
+          result.mathStatus()
+                  == io.github.aililuola.mathproofmesh.runstate.RunMathematicalStatus.VERIFIED
+              ? "verified"
+              : "unverified");
+      payload.put("canonical_math_status", result.mathStatus().name());
+      payload.put(
+          "execution_status",
+          switch (result.executionStatus()) {
+            case FAILED -> "failed";
+            case INTERRUPTED -> "interrupted";
+            case CANCELLED -> "cancelled";
+            case QUEUED -> "queued";
+            case RUNNING -> "running";
+            case SUCCEEDED -> "completed";
+          });
+      payload.put("canonical_execution_status", executionStatus);
+      payload.put("usage_status", result.usageStatus().name());
+      payload.put("campaign_status", result.campaignStatus().name());
+      payload.put("report_status", result.reportStatus().name());
+      payload.put("reconciliation_status", result.reconciliationStatus().name());
+      payload.put("terminal_reason", result.terminalReason().name());
+      payload.put("recoverable", result.recoverable());
+      payload.put("authority_state_hash", result.authorityStateHash());
+      payload.put("state_sequence", result.stateSequence());
       payload.put("current_stage", result.currentStage());
       payload.put("summary", result.summary());
       payload.put("result_reference", result.resultReference());
       payload.put("completed_route_ids", result.completedRouteIds());
       payload.put("verified_local_claim_ids", result.verifiedLocalClaimIds());
-      payload.put("total_calls", result.budget());
+      payload.put("total_calls", result.providerCalls());
+      payload.put("provider_calls", result.providerCalls());
+      payload.put("logical_steps", result.logicalSteps());
       Map<String, Object> usage = new LinkedHashMap<>();
       usage.put("input_tokens", result.totalUsage().inputTokens());
       usage.put("output_tokens", result.totalUsage().outputTokens());
@@ -362,7 +388,9 @@ public final class DesktopRunManager implements AutoCloseable {
       payload.put("total_tokens", result.totalUsage().totalTokens());
       payload.put("estimated_cost_usd", result.totalUsage().estimatedCostUsd());
       repository.writeResult(result.runId(), payload);
-      updateLifecycle(session, lifecycle, error);
+      DesktopRunMetadata updated = session.metadata().withLifecycle(lifecycle, error);
+      session.metadata(updated);
+      repository.writeMetadataProjection(updated, result);
       session.publish("state", session.snapshot());
       session.publish("result", payload);
       session.publish(
@@ -370,20 +398,15 @@ public final class DesktopRunManager implements AutoCloseable {
     }
   }
 
-  private static String desktopLifecycle(String resultStatus) {
-    return switch (resultStatus) {
-      case "failed" -> "failed";
-      case "network_interrupted", "interrupted" -> "interrupted";
-      case "cancelled" -> "cancelled";
-      default -> "completed";
-    };
-  }
-
-  private static String executionStatus(String resultStatus) {
-    return switch (resultStatus) {
-      case "failed" -> "failed";
-      case "network_interrupted", "interrupted" -> "network_interrupted";
-      case "cancelled" -> "cancelled";
+  private static String desktopLifecycle(RunView result) {
+    if (result.campaignStatus()
+        == io.github.aililuola.mathproofmesh.runstate.RunCampaignStatus.ACTIVE) {
+      return "running";
+    }
+    return switch (result.executionStatus()) {
+      case FAILED -> "failed";
+      case INTERRUPTED -> "interrupted";
+      case CANCELLED -> "cancelled";
       default -> "completed";
     };
   }
@@ -434,6 +457,7 @@ public final class DesktopRunManager implements AutoCloseable {
       String type = exception.getClass().getSimpleName();
       LOGGER.error("Desktop run failed: {}", type);
       updateLifecycle(session, "failed", type);
+      repository.reconcileFailure(session.metadata().runId(), session.metadata(), type);
       session.publish("state", session.snapshot());
       session.publish("error", Map.of("error_type", type, "message", "desktop run failed"));
       session.publish(

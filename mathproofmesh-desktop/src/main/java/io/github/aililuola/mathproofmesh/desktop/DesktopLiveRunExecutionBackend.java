@@ -159,14 +159,17 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
                       + (failureLocation.isBlank()
                           ? ""
                           : "- Failure location: `" + failureLocation + "`\n"));
-      return new RunExecutionResult(
-          status,
-          "report",
-          summary,
-          List.of(),
-          List.of(),
-          body,
-          0);
+      return new io.github.aililuola.mathproofmesh.api.RunStateReconciliationService()
+          .reconcileFailure(
+              runDirectory,
+              new RunExecutionResult(
+                  status,
+                  "report",
+                  summary,
+                  List.of(),
+                  List.of(),
+                  body,
+                  0));
     } finally {
       if (activity != null) {
         try {

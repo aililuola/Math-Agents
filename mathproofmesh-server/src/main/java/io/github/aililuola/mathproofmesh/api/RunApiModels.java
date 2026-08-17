@@ -2,6 +2,13 @@ package io.github.aililuola.mathproofmesh.api;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.github.aililuola.mathproofmesh.api.RunExecutionBackend.ExecutionUsage;
+import io.github.aililuola.mathproofmesh.runstate.RunCampaignStatus;
+import io.github.aililuola.mathproofmesh.runstate.RunExecutionStatus;
+import io.github.aililuola.mathproofmesh.runstate.RunMathematicalStatus;
+import io.github.aililuola.mathproofmesh.runstate.RunReconciliationStatus;
+import io.github.aililuola.mathproofmesh.runstate.RunReportStatus;
+import io.github.aililuola.mathproofmesh.runstate.RunTerminalReason;
+import io.github.aililuola.mathproofmesh.runstate.RunUsageStatus;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
@@ -82,7 +89,19 @@ public final class RunApiModels {
       @JsonProperty("latest_event_id") long latestEventId,
       @JsonProperty("completed_route_ids") List<String> completedRouteIds,
       @JsonProperty("verified_local_claim_ids") List<String> verifiedLocalClaimIds,
-      @JsonProperty("total_usage") UsageView totalUsage) {
+      @JsonProperty("total_usage") UsageView totalUsage,
+      @JsonProperty("execution_status") RunExecutionStatus executionStatus,
+      @JsonProperty("math_status") RunMathematicalStatus mathStatus,
+      @JsonProperty("usage_status") RunUsageStatus usageStatus,
+      @JsonProperty("campaign_status") RunCampaignStatus campaignStatus,
+      @JsonProperty("report_status") RunReportStatus reportStatus,
+      @JsonProperty("reconciliation_status") RunReconciliationStatus reconciliationStatus,
+      @JsonProperty("terminal_reason") RunTerminalReason terminalReason,
+      boolean recoverable,
+      @JsonProperty("authority_state_hash") String authorityStateHash,
+      @JsonProperty("state_sequence") long stateSequence,
+      @JsonProperty("provider_calls") long providerCalls,
+      @JsonProperty("logical_steps") int logicalSteps) {
     public RunView {
       runId = safeRunId(runId);
       status = ActivitySanitizer.identifier(status, 40);
@@ -90,12 +109,75 @@ public final class RunApiModels {
       summary = ActivitySanitizer.text(summary, 800);
       resultReference = ActivitySanitizer.nullableIdentifier(resultReference, 240);
       traceId = TraceContext.validate(traceId);
-      if (budget < 0 || latestEventId < 0) {
+      if (budget < 0
+          || latestEventId < 0
+          || stateSequence < 0L
+          || providerCalls < 0L
+          || logicalSteps < 0) {
         throw new IllegalArgumentException("run counters must be nonnegative");
       }
       completedRouteIds = List.copyOf(completedRouteIds);
       verifiedLocalClaimIds = List.copyOf(verifiedLocalClaimIds);
       totalUsage = totalUsage == null ? UsageView.zero() : totalUsage;
+      executionStatus =
+          executionStatus == null ? legacyExecutionStatus(status) : executionStatus;
+      mathStatus =
+          mathStatus == null
+              ? "completed".equals(status)
+                  ? RunMathematicalStatus.VERIFIED
+                  : RunMathematicalStatus.NOT_STARTED
+              : mathStatus;
+      usageStatus = usageStatus == null ? RunUsageStatus.NOT_RECORDED : usageStatus;
+      campaignStatus =
+          campaignStatus == null ? legacyCampaignStatus(status, mathStatus) : campaignStatus;
+      reportStatus = reportStatus == null ? RunReportStatus.ABSENT : reportStatus;
+      reconciliationStatus =
+          reconciliationStatus == null
+              ? RunReconciliationStatus.CONSISTENT
+              : reconciliationStatus;
+      terminalReason = terminalReason == null ? RunTerminalReason.NONE : terminalReason;
+      authorityStateHash =
+          authorityStateHash == null || authorityStateHash.isBlank()
+              ? ""
+              : ActivitySanitizer.identifier(authorityStateHash, 64);
+    }
+
+    public RunView(
+        String runId,
+        String status,
+        String currentStage,
+        String summary,
+        String resultReference,
+        String traceId,
+        int budget,
+        long latestEventId,
+        List<String> completedRouteIds,
+        List<String> verifiedLocalClaimIds,
+        UsageView totalUsage) {
+      this(
+          runId,
+          status,
+          currentStage,
+          summary,
+          resultReference,
+          traceId,
+          budget,
+          latestEventId,
+          completedRouteIds,
+          verifiedLocalClaimIds,
+          totalUsage,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          false,
+          "",
+          0L,
+          0L,
+          budget);
     }
 
     public RunView(
@@ -121,6 +203,26 @@ public final class RunApiModels {
           completedRouteIds,
           verifiedLocalClaimIds,
           UsageView.zero());
+    }
+
+    private static RunExecutionStatus legacyExecutionStatus(String status) {
+      return switch (status) {
+        case "failed" -> RunExecutionStatus.FAILED;
+        case "network_interrupted", "interrupted" -> RunExecutionStatus.INTERRUPTED;
+        case "cancelled" -> RunExecutionStatus.CANCELLED;
+        case "running" -> RunExecutionStatus.RUNNING;
+        default -> RunExecutionStatus.SUCCEEDED;
+      };
+    }
+
+    private static RunCampaignStatus legacyCampaignStatus(
+        String status, RunMathematicalStatus mathStatus) {
+      if ("running".equals(status)) {
+        return RunCampaignStatus.ACTIVE;
+      }
+      return mathStatus == RunMathematicalStatus.VERIFIED
+          ? RunCampaignStatus.TERMINAL
+          : RunCampaignStatus.RECOVERABLE;
     }
   }
 

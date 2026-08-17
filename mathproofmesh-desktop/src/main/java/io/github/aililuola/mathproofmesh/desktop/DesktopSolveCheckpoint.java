@@ -68,6 +68,7 @@ import io.github.aililuola.mathproofmesh.provider.UsageTotals;
 import io.github.aililuola.mathproofmesh.inspiration.InspirationSnapshot;
 import io.github.aililuola.mathproofmesh.verification.EscalationPlan;
 import io.github.aililuola.mathproofmesh.verification.ValidationExecution;
+import io.github.aililuola.mathproofmesh.runstate.RunStateAnchor;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -137,9 +138,10 @@ record DesktopSolveCheckpoint(
     List<String> completedStages,
     ProofGraphConvergenceSnapshot proofGraphConvergence,
     DeferredExpansionSnapshot deferredExpansions,
+    RunStateAnchor runStateAnchor,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 18;
+  static final int CURRENT_SCHEMA_VERSION = 19;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {
@@ -241,6 +243,7 @@ record DesktopSolveCheckpoint(
             : proofGraphConvergence;
     deferredExpansions =
         deferredExpansions == null ? DeferredExpansionSnapshot.empty() : deferredExpansions;
+    runStateAnchor = runStateAnchor == null ? RunStateAnchor.empty() : runStateAnchor;
   }
 
   @Override

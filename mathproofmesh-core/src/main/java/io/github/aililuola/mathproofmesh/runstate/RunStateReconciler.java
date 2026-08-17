@@ -63,10 +63,7 @@ public final class RunStateReconciler {
             evidence.proofGraphHash(),
             null,
             version);
-    RunProjectionSnapshot projection =
-        evidence.projection() == null
-            ? RunProjectionSnapshot.absent(authority.authorityHash())
-            : evidence.projection();
+    RunProjectionSnapshot projection = alignProjection(evidence.projection(), authority.authorityHash());
     RunReconciliationStatus reconciliation =
         conflicts.isEmpty()
             ? previous == null ? RunReconciliationStatus.CONSISTENT : RunReconciliationStatus.REPAIRED
@@ -75,6 +72,28 @@ public final class RunStateReconciler {
         RunStateSnapshot.create(authority, projection, reconciliation, conflicts, evidence.observedAt());
     transitionPolicy.validate(previous, next);
     return new RunStateReconciliationResult(next, conflicts);
+  }
+
+  private static RunProjectionSnapshot alignProjection(
+      RunProjectionSnapshot projection, String authorityHash) {
+    if (projection == null) {
+      return RunProjectionSnapshot.absent(authorityHash);
+    }
+    if (RunStateHashes.equalHash(authorityHash, projection.authorityHash())) {
+      return projection;
+    }
+    return new RunProjectionSnapshot(
+        authorityHash,
+        projection.reportStatus(),
+        projection.runResultRef(),
+        projection.runResultHash(),
+        projection.desktopMetadataRef(),
+        projection.desktopMetadataHash(),
+        projection.reportRef(),
+        projection.reportHash(),
+        projection.latestActivitySequence(),
+        projection.projectionErrors(),
+        null);
   }
 
   public static RunMathematicalStatus deriveMath(
@@ -113,8 +132,11 @@ public final class RunStateReconciler {
     if ((execution == RunExecutionStatus.FAILED
             || execution == RunExecutionStatus.INTERRUPTED
             || execution == RunExecutionStatus.CANCELLED)
-        && checkpointPresent
         && !checkpointTerminal) {
+      return RunCampaignStatus.RECOVERABLE;
+    }
+    if (execution == RunExecutionStatus.SUCCEEDED
+        && math != RunMathematicalStatus.VERIFIED) {
       return RunCampaignStatus.RECOVERABLE;
     }
     return execution == RunExecutionStatus.QUEUED

@@ -249,6 +249,7 @@ import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlModels;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofIdentity;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProblemSemanticViewService;
 import io.github.aililuola.mathproofmesh.proofcontrol.RootGoalContract;
+import io.github.aililuola.mathproofmesh.runstate.RunStateAnchor;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyArchive;
 import io.github.aililuola.mathproofmesh.proofcontrol.StrategyBlueprintCompiler;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimBlindReviewPacket;
@@ -494,6 +495,7 @@ final class DesktopSolveCoordinator {
   private ValidationExecution finalValidationExecution;
   private FormalizationCoverageReport formalizationCoverage;
   private String currentStage = "goal_preflight";
+  private RunStateAnchor runStateAnchor = RunStateAnchor.empty();
 
   private final SparseTopologyRouter topology = new SparseTopologyRouter();
   private final ContinuationFunctions.CheckpointLedger checkpoints =
@@ -11230,6 +11232,7 @@ final class DesktopSolveCoordinator {
     }
     ledger.restoreCommittedUsage(persistedUsage);
     currentStage = checkpoint.currentStage();
+    runStateAnchor = checkpoint.runStateAnchor();
     roundIndex.set(checkpoint.roundIndex());
     frozenProblem = checkpoint.problem();
     rootGoal =
@@ -12105,6 +12108,7 @@ final class DesktopSolveCoordinator {
             new ArrayList<>(completedStages),
             proofGraphConvergence.snapshot(),
             deferredExpansions.snapshot(),
+            runStateAnchor,
             terminal);
     Path structured = runDirectory.resolve("structured");
     Files.createDirectories(structured);
