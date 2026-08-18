@@ -247,6 +247,16 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
     ProviderCallRepository providerCalls =
         Objects.requireNonNull(callRepositories.get(), "provider call repository");
     liveContext.set(new LiveExecutionContext(ledger, providerCalls, config));
+    Path semanticCheckpoint =
+        runDirectory.resolve("structured").resolve("desktop-solve-state.json");
+    if (!Files.isRegularFile(semanticCheckpoint)) {
+      DurableProviderUsageCollector.Result startupUsage =
+          DurableProviderUsageCollector.collect(runDirectory, config, ledger.totals(), List.of());
+      if (startupUsage.status().conflict()) {
+        throw new IllegalStateException("durable provider usage conflicts with startup aggregate");
+      }
+      ledger.restoreCommittedUsage(startupUsage.totals());
+    }
 
     try (AgentPool pool = new AgentPool(config, runtimes.openProviders(runtime))) {
       StructuredAgentRunner runner =
@@ -262,8 +272,7 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
               config.runtime().jsonRepairMaxOutputTokens());
       boolean resumeRequested =
           config.continuation().processResumeEnabled()
-              && Files.isRegularFile(
-                  runDirectory.resolve("structured").resolve("desktop-solve-state.json"));
+              && Files.isRegularFile(semanticCheckpoint);
       return new DesktopSolveCoordinator(
               request,
               runId,
@@ -1257,20 +1266,15 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
     } catch (RuntimeException ignored) {
       // The live ledger remains a safe aggregate fallback if repository recovery fails.
     }
-    List<ProviderCallUsageEvidence> artifactEvidence = List.of();
     try {
-      artifactEvidence = ProviderUsageRecovery.recoverEvidence(runDirectory, context.config());
-    } catch (RuntimeException | java.io.IOException ignored) {
-      // A damaged optional artifact cannot erase the live ledger's committed usage.
-    }
-    try {
-      List<ProviderCallUsageEvidence> evidence =
-          ProviderUsageRecovery.mergeEvidence(repositoryEvidence, artifactEvidence);
-      UsageTotals evidenceTotals = ProviderUsageRecovery.totals(evidence);
-      if (dominates(evidenceTotals, liveTotals)) {
-        return executionUsage(evidenceTotals, evidence);
+      DurableProviderUsageCollector.Result collected =
+          DurableProviderUsageCollector.collect(
+              runDirectory, context.config(), liveTotals, repositoryEvidence);
+      if (!collected.status().conflict()
+          && !collected.evidence().isEmpty()) {
+        return executionUsage(collected.totals(), collected.evidence());
       }
-    } catch (RuntimeException ignored) {
+    } catch (RuntimeException | java.io.IOException ignored) {
       // Conflicting request evidence is not guessed into a cumulative failure result.
     }
     return executionUsage(liveTotals);
@@ -1298,14 +1302,6 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
               call.responseArtifactHash()));
     }
     return List.copyOf(evidence);
-  }
-
-  private static boolean dominates(UsageTotals candidate, UsageTotals other) {
-    return candidate.calls() >= other.calls()
-        && candidate.inputTokens() >= other.inputTokens()
-        && candidate.outputTokens() >= other.outputTokens()
-        && candidate.costUsd().compareTo(other.costUsd()) >= 0
-        && candidate.latencyMs() >= other.latencyMs();
   }
 
   private static ExecutionUsage executionUsage(

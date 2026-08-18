@@ -11228,9 +11228,15 @@ final class DesktopSolveCoordinator {
   private void restore(DesktopSolveCheckpoint checkpoint) throws IOException {
     UsageTotals persistedUsage = checkpoint.usageTotals();
     if (persistedUsage == null) {
-      persistedUsage = ProviderUsageRecovery.recover(runDirectory, config);
+      persistedUsage = UsageTotals.zero();
     }
-    ledger.restoreCommittedUsage(persistedUsage);
+    DurableProviderUsageCollector.Result collectedUsage =
+        DurableProviderUsageCollector.collect(runDirectory, config, persistedUsage, List.of());
+    if (collectedUsage.status().conflict()) {
+      throw new IllegalStateException(
+          "durable provider usage conflicts with the semantic checkpoint aggregate");
+    }
+    ledger.restoreCommittedUsage(collectedUsage.totals());
     currentStage = checkpoint.currentStage();
     runStateAnchor = checkpoint.runStateAnchor();
     roundIndex.set(checkpoint.roundIndex());

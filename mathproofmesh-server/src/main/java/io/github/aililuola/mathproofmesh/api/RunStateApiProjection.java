@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import io.github.aililuola.mathproofmesh.api.RunApiModels.RunView;
 import io.github.aililuola.mathproofmesh.api.RunApiModels.UsageView;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
+import io.github.aililuola.mathproofmesh.runstate.ClaimLifecycleProgressExtractor;
 import io.github.aililuola.mathproofmesh.runstate.RunExecutionStatus;
 import io.github.aililuola.mathproofmesh.runstate.RunMathematicalProgressSnapshot;
 import io.github.aililuola.mathproofmesh.runstate.RunProjectionSnapshot;
@@ -247,28 +248,11 @@ final class RunStateApiProjection {
             || checkpoint.path("finalReview").path("problemIntegrityOk").asBoolean(false);
     int obligations = checkpoint.path("proofGraph").path("obligations").size();
     Set<String> verifiedClaimIds = new LinkedHashSet<>(result.verifiedLocalClaimIds());
-    Set<String> refutedClaimIds = new LinkedHashSet<>();
-    JsonNode lifecycleEntries = checkpoint.path("claimLifecycle").path("entries");
-    if (lifecycleEntries.isObject()) {
-      lifecycleEntries.properties()
-          .forEach(
-              entry -> {
-                String id = entry.getValue().path("claimId").asText(entry.getKey());
-                String state = entry.getValue().path("state").asText("");
-                if (Set.of(
-                        "LOCALLY_VERIFIED",
-                        "INDEPENDENTLY_VERIFIED",
-                        "REFEREE_ACCEPTED",
-                        "FACT_CANDIDATE",
-                        "EXTERNALLY_ADMITTED_FACT")
-                    .contains(state)) {
-                  verifiedClaimIds.add(id);
-                }
-                if (Set.of("INVALIDATED", "REJECTED").contains(state)) {
-                  refutedClaimIds.add(id);
-                }
-              });
-    }
+    ClaimLifecycleProgressExtractor.Progress lifecycleProgress =
+        ClaimLifecycleProgressExtractor.extract(checkpoint.path("claimLifecycle"));
+    verifiedClaimIds.addAll(lifecycleProgress.verifiedClaimIds());
+    Set<String> refutedClaimIds =
+        new LinkedHashSet<>(lifecycleProgress.refutedClaimIds());
     return new RunMathematicalProgressSnapshot(
         verifiedClaimIds.size(),
         refutedClaimIds.size(),

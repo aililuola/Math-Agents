@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 final class DesktopLiveFailureUsageTestSupport {
   static final String PROFILE = "scripted";
@@ -34,16 +35,20 @@ final class DesktopLiveFailureUsageTestSupport {
 
   static DesktopLiveRunExecutionBackend backend(
       Path dataRoot, FailingProviderCallRepository repository) {
+    return backend(dataRoot, repository, "usage-request-");
+  }
+
+  static DesktopLiveRunExecutionBackend backend(
+      Path dataRoot, FailingProviderCallRepository repository, String requestIdPrefix) {
     DesktopRuntimeLocator locator =
         new DesktopRuntimeLocator(DesktopLiveRunExecutionBackendTest.projectRoot(), null);
-    SystemConfig config =
-        DesktopLiveRunExecutionBackendTest.mockConfig(
-            locator.loadProfile("proof-control-active.yaml"));
+    SystemConfig config = config(locator);
     DesktopLiveRuntimeFactory.PreparedRuntime prepared =
         new DesktopLiveRuntimeFactory.PreparedRuntime(PROFILE, config, Map.of(), false);
     DesktopLiveRuntimeFactory runtimes = mock(DesktopLiveRuntimeFactory.class);
     when(runtimes.prepare(eq(PROFILE), any(DesktopSettings.class))).thenReturn(prepared);
-    when(runtimes.openProviders(prepared)).thenAnswer(ignored -> providers(config));
+    when(runtimes.openProviders(prepared))
+        .thenAnswer(ignored -> providers(config, requestIdPrefix));
     DesktopPaths paths = DesktopTestSupport.paths(dataRoot);
     return new DesktopLiveRunExecutionBackend(
         paths,
@@ -52,6 +57,16 @@ final class DesktopLiveFailureUsageTestSupport {
         locator,
         new DockerSandboxPreflight(),
         () -> repository);
+  }
+
+  static SystemConfig config() {
+    return config(
+        new DesktopRuntimeLocator(DesktopLiveRunExecutionBackendTest.projectRoot(), null));
+  }
+
+  private static SystemConfig config(DesktopRuntimeLocator locator) {
+    return DesktopLiveRunExecutionBackendTest.mockConfig(
+        locator.loadProfile("proof-control-active.yaml"));
   }
 
   static RunExecutionBackend.RunExecutionResult execute(
@@ -64,7 +79,7 @@ final class DesktopLiveFailureUsageTestSupport {
         (type, stage, agentId, status, summary, reference) -> {});
   }
 
-  private static ProviderClientRegistry providers(SystemConfig config) {
+  private static ProviderClientRegistry providers(SystemConfig config, String requestIdPrefix) {
     AtomicLong requestIds = new AtomicLong();
     MockResponder responder =
         request -> {
@@ -78,7 +93,7 @@ final class DesktopLiveFailureUsageTestSupport {
               source.inputTokens(),
               source.outputTokens(),
               source.latencyMs(),
-              "usage-request-" + requestIds.incrementAndGet(),
+              requestIdPrefix + requestIds.incrementAndGet(),
               source.finishReason(),
               source.streaming(),
               source.metadata());
@@ -103,14 +118,24 @@ final class DesktopLiveFailureUsageTestSupport {
     private final int successfulCallsBeforeFailure;
     private final FailureMode mode;
     private final Runnable beforeFailure;
+    private final Supplier<? extends Error> hardFailure;
     private final AtomicInteger plannedCalls = new AtomicInteger();
     private final AtomicInteger successfulCalls = new AtomicInteger();
 
     FailingProviderCallRepository(
         int successfulCallsBeforeFailure, FailureMode mode, Runnable beforeFailure) {
+      this(successfulCallsBeforeFailure, mode, beforeFailure, null);
+    }
+
+    FailingProviderCallRepository(
+        int successfulCallsBeforeFailure,
+        FailureMode mode,
+        Runnable beforeFailure,
+        Supplier<? extends Error> hardFailure) {
       this.successfulCallsBeforeFailure = successfulCallsBeforeFailure;
       this.mode = mode;
       this.beforeFailure = beforeFailure;
+      this.hardFailure = hardFailure;
     }
 
     int successfulCalls() {
@@ -129,7 +154,8 @@ final class DesktopLiveFailureUsageTestSupport {
     @Override
     public ProviderCallRecord transition(ProviderCallTransition transition) {
       if (mode == FailureMode.AFTER_RESPONSE_ARTIFACT
-          && transition.target() == ProviderCallState.SUCCEEDED) {
+          && transition.target() == ProviderCallState.SUCCEEDED
+          && successfulCalls.get() >= successfulCallsBeforeFailure) {
         fail();
       }
       ProviderCallRecord result = delegate.transition(transition);
@@ -158,6 +184,9 @@ final class DesktopLiveFailureUsageTestSupport {
 
     private void fail() {
       beforeFailure.run();
+      if (hardFailure != null) {
+        throw hardFailure.get();
+      }
       throw new IllegalStateException("injected live provider usage failure");
     }
   }

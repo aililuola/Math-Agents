@@ -527,6 +527,12 @@ public final class StructuredAgentRunner {
         }
       }
       String safeResponseText = redactor.redact(response.text());
+      BigDecimal cost =
+          CallLedger.tokenCost(
+              response.inputTokens(),
+              response.outputTokens(),
+              agent.config().pricing().inputPerMillion(),
+              agent.config().pricing().outputPerMillion());
       String responseRef =
           artifacts.writeText(
               ContractObjectMapper.write(
@@ -543,18 +549,13 @@ public final class StructuredAgentRunner {
                           Map.of(
                               "input_tokens", response.inputTokens(),
                               "output_tokens", response.outputTokens(),
-                              "latency_ms", response.latencyMs()),
+                              "latency_ms", response.latencyMs(),
+                              "cost_usd", cost),
                       "metadata", response.metadata())),
               "application/json",
               "provider-response:" + bundle.stage() + ":" + agent.id(),
               "short-term",
               "provider_response");
-      BigDecimal cost =
-          CallLedger.tokenCost(
-              response.inputTokens(),
-              response.outputTokens(),
-              agent.config().pricing().inputPerMillion(),
-              agent.config().pricing().outputPerMillion());
       calls.transition(
           new ProviderCallTransition(
               runId,

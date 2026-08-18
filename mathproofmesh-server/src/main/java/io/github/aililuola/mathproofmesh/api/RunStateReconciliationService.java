@@ -3,14 +3,13 @@ package io.github.aililuola.mathproofmesh.api;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import io.github.aililuola.mathproofmesh.api.RunApiModels.RouteView;
+import io.github.aililuola.mathproofmesh.runstate.ClaimLifecycleProgressExtractor;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 /** Recovers durable checkpoint projections before an execution failure is returned. */
 public final class RunStateReconciliationService {
@@ -25,7 +24,9 @@ public final class RunStateReconciliationService {
     try {
       JsonNode root = JSON.readTree(Files.readAllBytes(checkpoint));
       List<RouteView> routes = routes(root.path("routes"));
-      List<String> verifiedClaims = verifiedClaims(root.path("claimLifecycle").path("entries"));
+      List<String> verifiedClaims =
+          ClaimLifecycleProgressExtractor.extract(root.path("claimLifecycle"))
+              .verifiedClaimIds();
       JsonNode usage = root.path("usageTotals");
       RunExecutionBackend.ExecutionUsage recoveredUsage =
           new RunExecutionBackend.ExecutionUsage(
@@ -79,39 +80,6 @@ public final class RunStateReconciliationService {
       }
     }
     return List.copyOf(result);
-  }
-
-  private static List<String> verifiedClaims(JsonNode records) {
-    Set<String> ids = new LinkedHashSet<>();
-    if (records.isArray()) {
-      records.forEach(node -> addVerified(ids, node));
-    } else if (records.isObject()) {
-      records.properties().forEach(entry -> addVerified(ids, entry.getValue(), entry.getKey()));
-    }
-    return List.copyOf(ids);
-  }
-
-  private static void addVerified(Set<String> ids, JsonNode node) {
-    addVerified(ids, node, node.path("claimId").asText(""));
-  }
-
-  private static void addVerified(Set<String> ids, JsonNode node, String fallbackId) {
-    String lifecycleState =
-        node.path("state").asText(node.path("status").asText(""));
-    if (java.util.Set.of(
-            "VERIFIED",
-            "verified",
-            "LOCALLY_VERIFIED",
-            "INDEPENDENTLY_VERIFIED",
-            "REFEREE_ACCEPTED",
-            "FACT_CANDIDATE",
-            "EXTERNALLY_ADMITTED_FACT")
-        .contains(lifecycleState)) {
-      String id = node.path("claimId").asText(fallbackId);
-      if (!id.isBlank()) {
-        ids.add(id);
-      }
-    }
   }
 
   private static BigDecimal decimal(JsonNode node) {

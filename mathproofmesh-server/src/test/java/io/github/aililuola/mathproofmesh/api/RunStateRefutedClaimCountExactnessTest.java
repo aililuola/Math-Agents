@@ -13,7 +13,7 @@ final class RunStateRefutedClaimCountExactnessTest {
   @TempDir Path temporaryDirectory;
 
   @Test
-  void onlyRejectedOrInvalidatedLifecycleEntriesCountAsRefuted() throws Exception {
+  void onlyTrustedExactStatementRefutationsCountAsRefuted() throws Exception {
     Path structured = temporaryDirectory.resolve("structured");
     Files.createDirectories(structured);
     Files.writeString(
@@ -23,6 +23,13 @@ final class RunStateRefutedClaimCountExactnessTest {
           "terminal": false,
           "claimLifecycle": {
             "entries": {
+              "claim-refuted": {
+                "claimId":"claim-refuted",
+                "state":"REJECTED",
+                "invalidationReason":"verified exact statement refutation hash",
+                "invalidatingEvidenceIds":["evidence-1"],
+                "history":["rejected:verified exact statement refutation hash"]
+              },
               "claim-rejected": {"claimId":"claim-rejected","state":"REJECTED"},
               "claim-invalidated": {"claimId":"claim-invalidated","state":"INVALIDATED"},
               "claim-verified": {"claimId":"claim-verified","state":"INDEPENDENTLY_VERIFIED"}
@@ -45,6 +52,8 @@ final class RunStateRefutedClaimCountExactnessTest {
             null);
 
     assertThat(state.authority().mathematicalProgress().verifiedLocalClaims()).isEqualTo(1);
-    assertThat(state.authority().mathematicalProgress().refutedClaims()).isEqualTo(2);
+    assertThat(state.authority().mathematicalProgress().refutedClaims()).isEqualTo(1);
+    assertThat(state.authority().mathematicalProgress().refutedClaimIds())
+        .containsExactly("claim-refuted");
   }
 }

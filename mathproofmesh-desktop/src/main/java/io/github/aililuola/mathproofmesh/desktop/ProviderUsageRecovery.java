@@ -25,20 +25,27 @@ import java.util.stream.Stream;
 final class ProviderUsageRecovery {
   private ProviderUsageRecovery() {}
 
-  static UsageTotals recover(Path runDirectory, SystemConfig config) throws IOException {
-    return totals(recoverEvidence(runDirectory, config));
-  }
-
   static List<ProviderCallUsageEvidence> recoverEvidence(
       Path runDirectory, SystemConfig config) throws IOException {
+    Map<String, PricingConfig> pricing = new LinkedHashMap<>();
+    for (AgentConfig agent : config.agents()) {
+      pricing.put(agent.id(), agent.pricing());
+    }
+    return recoverEvidence(runDirectory, pricing, false);
+  }
+
+  static List<ProviderCallUsageEvidence> recoverEmbeddedCostEvidence(Path runDirectory)
+      throws IOException {
+    return recoverEvidence(runDirectory, Map.of(), true);
+  }
+
+  private static List<ProviderCallUsageEvidence> recoverEvidence(
+      Path runDirectory, Map<String, PricingConfig> pricing, boolean requireEmbeddedCost)
+      throws IOException {
     Path artifactRoot =
         runDirectory.resolve("runtime-artifacts").resolve("artifacts").resolve("sha256");
     if (!Files.isDirectory(artifactRoot, NOFOLLOW_LINKS)) {
       return List.of();
-    }
-    Map<String, PricingConfig> pricing = new LinkedHashMap<>();
-    for (AgentConfig agent : config.agents()) {
-      pricing.put(agent.id(), agent.pricing());
     }
     List<ProviderCallUsageEvidence> recovered = new ArrayList<>();
     try (Stream<Path> files = Files.walk(artifactRoot, 2)) {
@@ -51,14 +58,17 @@ final class ProviderUsageRecovery {
           continue;
         }
         PricingConfig agentPricing = pricing.get(call.agentId());
-        if (agentPricing == null) {
+        if (call.embeddedCost() == null && requireEmbeddedCost) {
+          continue;
+        }
+        if (call.embeddedCost() == null && agentPricing == null) {
           throw new IllegalStateException(
               "legacy provider usage references an unknown agent: " + call.agentId());
         }
         recovered.add(call.toEvidence(agentPricing));
       }
     }
-    return mergeEvidence(recovered);
+    return List.copyOf(recovered);
   }
 
   @SafeVarargs
@@ -132,10 +142,13 @@ final class ProviderUsageRecovery {
     long inputTokens = input.longValue();
     long outputTokens = output.longValue();
     double latencyMs = latency.doubleValue();
+    JsonNode cost = usage.path("cost_usd");
+    java.math.BigDecimal embeddedCost = cost.isNumber() ? decimal(cost) : null;
     if (inputTokens < 0L
         || outputTokens < 0L
         || !Double.isFinite(latencyMs)
-        || latencyMs < 0.0d) {
+        || latencyMs < 0.0d
+        || (embeddedCost != null && embeddedCost.signum() < 0)) {
       throw new IllegalStateException("legacy provider usage contains invalid counters");
     }
     String requestId = root.path("request_id").textValue().strip();
@@ -153,7 +166,16 @@ final class ProviderUsageRecovery {
         inputTokens,
         outputTokens,
         latencyMs,
+        embeddedCost,
         sourceArtifactHash);
+  }
+
+  private static java.math.BigDecimal decimal(JsonNode node) {
+    try {
+      return node.decimalValue();
+    } catch (ArithmeticException exception) {
+      throw new IllegalStateException("legacy provider usage contains invalid cost", exception);
+    }
   }
 
   private record RecoveredCall(
@@ -162,17 +184,20 @@ final class ProviderUsageRecovery {
       long inputTokens,
       long outputTokens,
       double latencyMs,
+      java.math.BigDecimal embeddedCost,
       String sourceArtifactHash) {
     private ProviderCallUsageEvidence toEvidence(PricingConfig pricing) {
       return new ProviderCallUsageEvidence(
           requestId,
           inputTokens,
           outputTokens,
-          CallLedger.tokenCost(
-              inputTokens,
-              outputTokens,
-              pricing.inputPerMillion(),
-              pricing.outputPerMillion()),
+          embeddedCost == null
+              ? CallLedger.tokenCost(
+                  inputTokens,
+                  outputTokens,
+                  pricing.inputPerMillion(),
+                  pricing.outputPerMillion())
+              : embeddedCost,
           latencyMs,
           sourceArtifactHash);
     }

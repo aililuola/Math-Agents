@@ -3,6 +3,8 @@ package io.github.aililuola.mathproofmesh.desktop;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
+import io.github.aililuola.mathproofmesh.provider.UsageTotals;
+import io.github.aililuola.mathproofmesh.runstate.ClaimLifecycleProgressExtractor;
 import io.github.aililuola.mathproofmesh.runstate.FileRunStateStore;
 import io.github.aililuola.mathproofmesh.runstate.RunExecutionStatus;
 import io.github.aililuola.mathproofmesh.runstate.RunMathematicalProgressSnapshot;
@@ -50,6 +52,7 @@ final class LegacyRunStateMigrator {
         checkpointUsage.totalTokens() > 0L || checkpointUsage.providerCalls() > 0L
             ? checkpointUsage
             : resultUsage;
+    DurableProviderUsageCollector.Result durableUsage = collectUsage(runDirectory, selected);
     RunMathematicalProgressSnapshot progress = progress(checkpoint);
     RunProjectionSnapshot projection =
         new RunProjectionSnapshot(
@@ -88,13 +91,7 @@ final class LegacyRunStateMigrator {
                     hash(checkpointPath),
                     hash(runDirectory.resolve("structured/proof-graph.json")),
                     progress,
-                    List.of(
-                        RunUsageEvidence.aggregate(
-                            selected == checkpointUsage
-                                ? RunUsageEvidenceSource.SEMANTIC_CHECKPOINT
-                                : RunUsageEvidenceSource.RESULT_PROJECTION,
-                            selected,
-                            selected == checkpointUsage ? "semantic-checkpoint" : "run-result")),
+                    usageEvidence(selected, checkpointUsage, durableUsage),
                     null,
                     projection,
                     metadata == null ? Instant.now() : metadata.updatedAt()))
@@ -104,14 +101,8 @@ final class LegacyRunStateMigrator {
 
   private RunMathematicalProgressSnapshot progress(JsonNode checkpoint) {
     boolean problem = checkpoint.hasNonNull("problem") || checkpoint.hasNonNull("problemHash");
-    int verified =
-        checkpoint.path("claimLifecycle").path("records").isObject()
-            ? countText(checkpoint.path("claimLifecycle").path("records"), "VERIFIED")
-            : 0;
-    int refuted =
-        checkpoint.path("claimLifecycle").path("records").isObject()
-            ? countText(checkpoint.path("claimLifecycle").path("records"), "REFUTED")
-            : 0;
+    ClaimLifecycleProgressExtractor.Progress claimProgress =
+        ClaimLifecycleProgressExtractor.extract(checkpoint.path("claimLifecycle"));
     int obligations =
         checkpoint.path("proofGraph").path("obligations").isObject()
             ? checkpoint.path("proofGraph").path("obligations").size()
@@ -124,8 +115,8 @@ final class LegacyRunStateMigrator {
         !checkpoint.hasNonNull("finalReview")
             || checkpoint.path("finalReview").path("problemIntegrityOk").asBoolean(true);
     return new RunMathematicalProgressSnapshot(
-        verified,
-        refuted,
+        claimProgress.verifiedClaimIds().size(),
+        claimProgress.refutedClaimIds().size(),
         obligations,
         problem,
         checkpoint.path("admittedStrategies").size() > 0,
@@ -137,7 +128,15 @@ final class LegacyRunStateMigrator {
         finalProof,
         checkpoint.path("finalValidationPassed").asBoolean(false),
         finalReviewPassed,
-        integrity);
+        integrity,
+        claimProgress.verifiedClaimIds(),
+        claimProgress.refutedClaimIds(),
+        "",
+        "",
+        finalProof ? CanonicalJson.stableHash(checkpoint.path("finalProof")) : "",
+        checkpoint.hasNonNull("finalReview")
+            ? CanonicalJson.stableHash(checkpoint.path("finalReview"))
+            : "");
   }
 
   private static RunExecutionStatus execution(
@@ -213,16 +212,62 @@ final class LegacyRunStateMigrator {
     }
   }
 
-  private static int countText(JsonNode object, String value) {
-    int count = 0;
-    for (JsonNode item : object) {
-      if (("VERIFIED".equals(value) && java.util.Set.of("VERIFIED", "verified")
-              .contains(item.path("status").asText()))
-          || value.equals(item.path("status").asText())) {
-        count++;
-      }
+  private static DurableProviderUsageCollector.Result collectUsage(
+      Path runDirectory, RunUsageSnapshot selected) {
+    UsageTotals aggregate =
+        new UsageTotals(
+            selected.providerCalls(),
+            selected.inputTokens(),
+            selected.outputTokens(),
+            selected.estimatedCostUsd(),
+            selected.latencyMs());
+    try {
+      return DurableProviderUsageCollector.collect(runDirectory, aggregate);
+    } catch (IOException exception) {
+      return new DurableProviderUsageCollector.Result(
+          aggregate, List.of(), DurableProviderUsageCollector.Status.AGGREGATE_PRESERVED);
     }
-    return count;
+  }
+
+  private static List<RunUsageEvidence> usageEvidence(
+      RunUsageSnapshot selected,
+      RunUsageSnapshot checkpointUsage,
+      DurableProviderUsageCollector.Result durable) {
+    RunUsageEvidence aggregate =
+        RunUsageEvidence.aggregate(
+            selected == checkpointUsage
+                ? RunUsageEvidenceSource.SEMANTIC_CHECKPOINT
+                : RunUsageEvidenceSource.RESULT_PROJECTION,
+            selected,
+            selected == checkpointUsage ? "semantic-checkpoint" : "run-result");
+    if (durable.evidence().isEmpty()) {
+      return List.of(aggregate);
+    }
+    RunUsageEvidence requests =
+        RunUsageEvidence.providerCalls(
+            durable.evidence(), "durable-provider-response-artifacts");
+    if (durable.status() == DurableProviderUsageCollector.Status.REQUEST_CONFLICT) {
+      return List.of(requests);
+    }
+    if (durable.status() == DurableProviderUsageCollector.Status.AGGREGATE_CONFLICT) {
+      UsageTotals durableTotals = ProviderUsageRecovery.totals(durable.evidence());
+      RunUsageSnapshot durableAggregate =
+          RunUsageSnapshot.of(
+              durableTotals.calls(),
+              durableTotals.inputTokens(),
+              durableTotals.outputTokens(),
+              durableTotals.costUsd(),
+              durableTotals.latencyMs(),
+              "",
+              "");
+      return List.of(
+          aggregate,
+          RunUsageEvidence.aggregate(
+              RunUsageEvidenceSource.DURABLE_PROVIDER_REQUESTS,
+              durableAggregate,
+              "durable-provider-response-artifacts"));
+    }
+    return List.of(requests);
   }
 
   private static String text(JsonNode node, String fallback) {
