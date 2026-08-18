@@ -15,6 +15,12 @@ public record AgentRuntimeMetric(
     long failedAttempts,
     Map<String, Long> failureCategories,
     int activeCalls,
+    int reservedCalls,
+    long leasedCalls,
+    double leaseQueueWaitMs,
+    double leaseBusyMs,
+    double providerBusyMs,
+    double idleWhileEligibleMs,
     boolean lastExecutionWasVirtual) {
 
   public AgentRuntimeMetric {

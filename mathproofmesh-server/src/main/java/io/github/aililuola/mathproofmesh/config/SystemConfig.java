@@ -18,11 +18,12 @@ public record SystemConfig(
     @JsonProperty(value = "continuation") ContinuationConfig continuation,
     @JsonProperty(value = "deep_exploration_policy") DeepExplorationPolicyConfig deepExplorationPolicy,
     @JsonProperty(value = "computation") ComputationConfig computation,
+    @JsonProperty(value = "concurrency") ConcurrencyConfig concurrency,
     @JsonProperty(value = "runtime") RuntimeConfig runtime
 ) implements ConfigModel {
 
   @JsonCreator
-  public SystemConfig(String systemName, List<AgentConfig> agents, BudgetConfig budget, SchedulerConfig scheduler, TopologyConfig topology, VerificationConfig verification, ContinuationConfig continuation, DeepExplorationPolicyConfig deepExplorationPolicy, ComputationConfig computation, RuntimeConfig runtime) {
+  public SystemConfig(String systemName, List<AgentConfig> agents, BudgetConfig budget, SchedulerConfig scheduler, TopologyConfig topology, VerificationConfig verification, ContinuationConfig continuation, DeepExplorationPolicyConfig deepExplorationPolicy, ComputationConfig computation, ConcurrencyConfig concurrency, RuntimeConfig runtime) {
     if (systemName == null) {
       systemName = "MathProofMesh";
     }
@@ -50,6 +51,9 @@ public record SystemConfig(
     if (computation == null) {
       computation = ComputationConfig.defaults();
     }
+    if (concurrency == null) {
+      concurrency = ConcurrencyConfig.defaults();
+    }
     if (runtime == null) {
       runtime = RuntimeConfig.defaults();
     }
@@ -62,8 +66,34 @@ public record SystemConfig(
     this.continuation = continuation;
     this.deepExplorationPolicy = deepExplorationPolicy;
     this.computation = computation;
+    this.concurrency = concurrency;
     this.runtime = runtime;
     ConfigInvariants.validate(this);
+  }
+
+  public SystemConfig(
+      String systemName,
+      List<AgentConfig> agents,
+      BudgetConfig budget,
+      SchedulerConfig scheduler,
+      TopologyConfig topology,
+      VerificationConfig verification,
+      ContinuationConfig continuation,
+      DeepExplorationPolicyConfig deepExplorationPolicy,
+      ComputationConfig computation,
+      RuntimeConfig runtime) {
+    this(
+        systemName,
+        agents,
+        budget,
+        scheduler,
+        topology,
+        verification,
+        continuation,
+        deepExplorationPolicy,
+        computation,
+        null,
+        runtime);
   }
 
   @JsonProperty("agents")

@@ -1,8 +1,19 @@
 package io.github.aililuola.mathproofmesh.provider;
 
 import io.github.aililuola.mathproofmesh.config.AgentConfig;
+import io.github.aililuola.mathproofmesh.config.ConcurrencyConfig;
 import io.github.aililuola.mathproofmesh.config.RuntimeConfig;
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
+import io.github.aililuola.mathproofmesh.concurrency.AgentLeaseClass;
+import io.github.aililuola.mathproofmesh.concurrency.AgentLeaseLedger;
+import io.github.aililuola.mathproofmesh.concurrency.AgentLeaseRecord;
+import io.github.aililuola.mathproofmesh.concurrency.AgentLeaseRequest;
+import io.github.aililuola.mathproofmesh.concurrency.AgentLeaseSnapshot;
+import io.github.aililuola.mathproofmesh.concurrency.AgentLeaseStatus;
+import io.github.aililuola.mathproofmesh.concurrency.ConcurrencyEventType;
+import io.github.aililuola.mathproofmesh.concurrency.ConcurrencyTelemetryLedger;
+import io.github.aililuola.mathproofmesh.concurrency.ConcurrencyTelemetrySnapshot;
+import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -15,6 +26,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -25,6 +37,14 @@ public final class AgentPool implements AutoCloseable {
   private final ProviderClientRegistry registry;
   private final ExecutorService virtualExecutor;
   private final Map<String, AgentRuntime> agents;
+  private final ConcurrencyConfig concurrency;
+  private final int leaseCapacity;
+  private final AgentLeaseLedger leaseLedger = new AgentLeaseLedger();
+  private final ConcurrencyTelemetryLedger telemetry = new ConcurrencyTelemetryLedger();
+  private final Map<String, Map<String, Long>> epochBusyNanos = new LinkedHashMap<>();
+  private final Map<String, Map<String, Long>> runLeaseCounts = new LinkedHashMap<>();
+  private int leasedCapacity;
+  private int leasedResearchCapacity;
   private long selectionCounter;
 
   public AgentPool(SystemConfig config, ProviderClientRegistry registry) {
@@ -45,6 +65,7 @@ public final class AgentPool implements AutoCloseable {
     Objects.requireNonNull(config, "config");
     this.registry = Objects.requireNonNull(registry, "registry");
     this.virtualExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    this.concurrency = config.concurrency();
     RuntimeConfig runtime = config.runtime();
     Semaphore global = new Semaphore(runtime.maxParallelCalls(), true);
     ProviderCircuitBreaker breaker =
@@ -75,6 +96,10 @@ public final class AgentPool implements AutoCloseable {
               clock));
     }
     this.agents = Map.copyOf(created);
+    this.leaseCapacity =
+        Math.min(
+            runtime.maxParallelCalls(),
+            created.values().stream().mapToInt(agent -> agent.config().maxConcurrency()).sum());
   }
 
   public List<AgentRuntime> agents() {
@@ -155,6 +180,113 @@ public final class AgentPool implements AutoCloseable {
         specialtyHints,
         null,
         true);
+  }
+
+  /** Atomically selects and reserves a credential before provider work can begin. */
+  public AgentLease acquireLease(AgentLeaseRequest request) {
+    Objects.requireNonNull(request, "request");
+    long started = System.nanoTime();
+    long timeoutNanos = Duration.ofSeconds(concurrency.leaseTimeoutSeconds()).toNanos();
+    synchronized (this) {
+      while (true) {
+        Optional<AgentLease> lease = tryAcquireLeaseLocked(request, started);
+        if (lease.isPresent()) {
+          return lease.orElseThrow();
+        }
+        long remaining = timeoutNanos - Math.max(0L, System.nanoTime() - started);
+        if (remaining <= 0L) {
+          throw new IllegalStateException(
+              "timed out acquiring agent lease for work item " + request.workItemId());
+        }
+        try {
+          long millis = Math.max(1L, Math.min(100L, remaining / 1_000_000L));
+          wait(millis);
+        } catch (InterruptedException exception) {
+          Thread.currentThread().interrupt();
+          throw ProviderException.cancelled();
+        }
+      }
+    }
+  }
+
+  public synchronized Optional<AgentLease> tryAcquireLease(AgentLeaseRequest request) {
+    Objects.requireNonNull(request, "request");
+    return tryAcquireLeaseLocked(request, System.nanoTime());
+  }
+
+  public synchronized AgentLeaseSnapshot leaseSnapshot() {
+    return leaseLedger.snapshot();
+  }
+
+  public synchronized ConcurrencyTelemetrySnapshot concurrencyTelemetrySnapshot() {
+    return telemetry.snapshot();
+  }
+
+  public synchronized void restoreLeases(AgentLeaseSnapshot snapshot, String activeRunId) {
+    leaseLedger.restore(snapshot, requireText(activeRunId, "activeRunId"));
+    leasedCapacity = 0;
+    leasedResearchCapacity = 0;
+    epochBusyNanos.clear();
+    runLeaseCounts.clear();
+    for (AgentRuntime agent : agents.values()) {
+      while (agent.reservedCalls() > 0) {
+        agent.releaseLease(1, 0L);
+      }
+    }
+    notifyAll();
+  }
+
+  synchronized AgentLeaseRecord markLeaseRunning(String leaseId) {
+    return leaseLedger.transition(leaseId, AgentLeaseStatus.RUNNING, System.nanoTime());
+  }
+
+  synchronized void providerCallStarted(AgentLeaseRecord record, int readyWorkCount) {
+    telemetry.record(
+        ConcurrencyEventType.PROVIDER_CALL_STARTED,
+        record.epochId(),
+        record.workItemId(),
+        record.agentId(),
+        readyWorkCount);
+  }
+
+  synchronized void providerCallCompleted(AgentLeaseRecord record, int readyWorkCount) {
+    telemetry.record(
+        ConcurrencyEventType.PROVIDER_CALL_COMPLETED,
+        record.epochId(),
+        record.workItemId(),
+        record.agentId(),
+        readyWorkCount);
+  }
+
+  synchronized AgentLeaseRecord releaseLease(
+      String leaseId, AgentRuntime agent, int permits, long acquiredNanos) {
+    long now = System.nanoTime();
+    AgentLeaseRecord prior =
+        leaseLedger.snapshot().leases().stream()
+            .filter(record -> record.leaseId().equals(leaseId))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("unknown lease: " + leaseId));
+    AgentLeaseRecord released =
+        leaseLedger.transition(leaseId, AgentLeaseStatus.RELEASED, now);
+    if (!prior.terminal()) {
+      leasedCapacity = Math.max(0, leasedCapacity - permits);
+      if (prior.leaseClass() == AgentLeaseClass.RESEARCH) {
+        leasedResearchCapacity = Math.max(0, leasedResearchCapacity - permits);
+      }
+      long busyNanos = Math.max(0L, now - acquiredNanos);
+      agent.releaseLease(permits, busyNanos);
+      epochBusyNanos
+          .computeIfAbsent(prior.epochId(), ignored -> new LinkedHashMap<>())
+          .merge(agent.id(), busyNanos, Long::sum);
+      telemetry.record(
+          ConcurrencyEventType.LEASE_RELEASED,
+          prior.epochId(),
+          prior.workItemId(),
+          prior.agentId(),
+          0);
+      notifyAll();
+    }
+    return released;
   }
 
   public List<AgentRuntime> failoverCandidates(
@@ -242,6 +374,79 @@ public final class AgentPool implements AutoCloseable {
     registry.close();
   }
 
+  private Optional<AgentLease> tryAcquireLeaseLocked(
+      AgentLeaseRequest request, long queueStartedNanos) {
+    int permits = request.requiredPermits();
+    if (!concurrency.enabled()) {
+      return Optional.empty();
+    }
+    if (leasedCapacity + permits > Math.min(leaseCapacity, concurrency.maxInFlightTasks())) {
+      return Optional.empty();
+    }
+    if (request.leaseClass() == AgentLeaseClass.RESEARCH
+        && concurrency.reserveCoordinationCapacity()
+        && !concurrency.allowCoordinationBorrowing()
+        && leasedResearchCapacity + permits > concurrency.researchSlots()) {
+      return Optional.empty();
+    }
+    Map<String, Long> epochBusy =
+        epochBusyNanos.computeIfAbsent(request.epochId(), ignored -> new LinkedHashMap<>());
+    Map<String, Long> runCounts =
+        runLeaseCounts.computeIfAbsent(request.runId(), ignored -> new LinkedHashMap<>());
+    Comparator<AgentRuntime> order =
+        Comparator.comparingLong((AgentRuntime agent) -> epochBusy.getOrDefault(agent.id(), 0L))
+            .thenComparingLong(agent -> runCounts.getOrDefault(agent.id(), 0L))
+            .thenComparing(
+                (AgentRuntime agent) -> agent.specialtyScore(request.specialtyHints()),
+                Comparator.reverseOrder())
+            .thenComparing(AgentRuntime::trust, Comparator.reverseOrder())
+            .thenComparingInt(
+                agent ->
+                    request.preferredDifferentProvider().isEmpty()
+                            || !request.preferredDifferentProvider().equals(agent.provider())
+                        ? 0
+                        : 1)
+            .thenComparing(AgentRuntime::id);
+    Optional<AgentRuntime> selected =
+        agents().stream()
+            .filter(agent -> !request.excludedAgentIds().contains(agent.id()))
+            .filter(agent -> agent.supportsRole(request.requiredRole()))
+            .filter(agent -> !agent.inCooldown())
+            .filter(agent -> agent.availableLeaseCapacity() >= permits)
+            .min(order);
+    if (selected.isEmpty()) {
+      return Optional.empty();
+    }
+    AgentRuntime agent = selected.orElseThrow();
+    long now = System.nanoTime();
+    long queueWait = Math.max(0L, now - queueStartedNanos);
+    agent.reserveLease(permits, queueWait);
+    leasedCapacity += permits;
+    if (request.leaseClass() == AgentLeaseClass.RESEARCH) {
+      leasedResearchCapacity += permits;
+    }
+    runCounts.merge(agent.id(), 1L, Long::sum);
+    String leaseId =
+        "lease-"
+            + CanonicalJson.stableHash(
+                    List.of(
+                        request.runId(),
+                        request.epochId(),
+                        request.workItemId(),
+                        request.leaseClass().name(),
+                        agent.id(),
+                        runCounts.get(agent.id())))
+                .substring(0, 24);
+    AgentLeaseRecord record = leaseLedger.acquire(leaseId, request, agent.id(), now);
+    telemetry.record(
+        ConcurrencyEventType.LEASE_ACQUIRED,
+        request.epochId(),
+        request.workItemId(),
+        agent.id(),
+        0);
+    return Optional.of(new AgentLease(this, agent, record, permits, now));
+  }
+
   private static double score(
       AgentRuntime agent,
       List<String> specialtyHints,
@@ -254,7 +459,8 @@ public final class AgentPool implements AutoCloseable {
             : 0.0d;
     double specialty = 0.18d * agent.specialtyScore(specialtyHints);
     double loadPenalty =
-        0.08d * metric.activeCalls() + 0.001d * metric.calls();
+        0.08d * (metric.activeCalls() + metric.reservedCalls())
+            + 0.001d * metric.calls();
     long stable = stableId(agent.id());
     double rotation = Math.floorMod(stable + rotationCounter, 17L) / 10_000.0d;
     return agent.trust()

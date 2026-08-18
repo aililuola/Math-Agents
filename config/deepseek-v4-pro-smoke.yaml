@@ -249,6 +249,15 @@ computation:
   broad_search_requires_meta_review: true
   cache_results: true
 
+concurrency:
+  enabled: true
+  research_slots: 4
+  coordination_slots: 1
+  max_in_flight_tasks: 5
+  max_focused_parallel_roles: 4
+  reserve_coordination_capacity: true
+  allow_coordination_borrowing: false
+
 runtime:
   run_root: runs
   output_language: zh-CN

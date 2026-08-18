@@ -16,6 +16,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** One credential-isolated agent with fair concurrency and bounded retries. */
 public final class AgentRuntime {
@@ -31,6 +32,12 @@ public final class AgentRuntime {
   private final RetrySleeper retrySleeper;
   private final Clock clock;
   private final AtomicInteger activeCalls = new AtomicInteger();
+  private final AtomicInteger reservedCalls = new AtomicInteger();
+  private final AtomicLong leasedCalls = new AtomicLong();
+  private final AtomicLong leaseQueueWaitNanos = new AtomicLong();
+  private final AtomicLong leaseBusyNanos = new AtomicLong();
+  private final AtomicLong providerBusyNanos = new AtomicLong();
+  private final AtomicLong idleWhileEligibleNanos = new AtomicLong();
 
   private long calls;
   private long failures;
@@ -153,13 +160,17 @@ public final class AgentRuntime {
   private LLMResponse callOnVirtualThread(ProviderRequest request) {
     boolean globalAcquired = false;
     boolean agentAcquired = false;
-    activeCalls.incrementAndGet();
+    boolean active = false;
+    long providerStarted = 0L;
     try {
       rateLimiter.acquire();
       globalSemaphore.acquire();
       globalAcquired = true;
       agentSemaphore.acquire();
       agentAcquired = true;
+      activeCalls.incrementAndGet();
+      active = true;
+      providerStarted = System.nanoTime();
       ProviderException lastFailure = null;
       int attemptedRetries = 0;
       ProviderRequest attemptRequest = request;
@@ -202,13 +213,16 @@ public final class AgentRuntime {
       Thread.currentThread().interrupt();
       throw ProviderException.cancelled();
     } finally {
+      if (active) {
+        providerBusyNanos.addAndGet(Math.max(0L, System.nanoTime() - providerStarted));
+        activeCalls.decrementAndGet();
+      }
       if (agentAcquired) {
         agentSemaphore.release();
       }
       if (globalAcquired) {
         globalSemaphore.release();
       }
-      activeCalls.decrementAndGet();
     }
   }
 
@@ -311,6 +325,37 @@ public final class AgentRuntime {
     return activeCalls.get();
   }
 
+  public int reservedCalls() {
+    return reservedCalls.get();
+  }
+
+  int availableLeaseCapacity() {
+    return Math.max(0, config.maxConcurrency() - activeCalls.get() - reservedCalls.get());
+  }
+
+  void reserveLease(int permits, long queueWaitNanos) {
+    int reserved = reservedCalls.addAndGet(permits);
+    if (activeCalls.get() + reserved > config.maxConcurrency()) {
+      reservedCalls.addAndGet(-permits);
+      throw new IllegalStateException("agent lease capacity exceeded: " + id());
+    }
+    leasedCalls.incrementAndGet();
+    leaseQueueWaitNanos.addAndGet(Math.max(0L, queueWaitNanos));
+  }
+
+  void releaseLease(int permits, long busyNanos) {
+    int remaining = reservedCalls.addAndGet(-permits);
+    if (remaining < 0) {
+      reservedCalls.addAndGet(permits);
+      throw new IllegalStateException("agent lease released more than once: " + id());
+    }
+    leaseBusyNanos.addAndGet(Math.max(0L, busyNanos));
+  }
+
+  void recordIdleWhileEligible(long idleNanos) {
+    idleWhileEligibleNanos.addAndGet(Math.max(0L, idleNanos));
+  }
+
   public int lastCallRetries() {
     return lastCallRetries;
   }
@@ -328,6 +373,12 @@ public final class AgentRuntime {
         failedAttempts,
         Map.copyOf(failureCategories),
         activeCalls(),
+        reservedCalls(),
+        leasedCalls.get(),
+        leaseQueueWaitNanos.get() / 1_000_000.0d,
+        leaseBusyNanos.get() / 1_000_000.0d,
+        providerBusyNanos.get() / 1_000_000.0d,
+        idleWhileEligibleNanos.get() / 1_000_000.0d,
         lastExecutionWasVirtual);
   }
 

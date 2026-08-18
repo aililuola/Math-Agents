@@ -1,0 +1,15 @@
+package io.github.aililuola.mathproofmesh.concurrency;
+
+public enum ConcurrencyEventType {
+  WORK_QUEUED,
+  LEASE_ACQUIRED,
+  PROVIDER_CALL_STARTED,
+  FIRST_TOKEN_RECEIVED,
+  PROVIDER_CALL_COMPLETED,
+  RESULT_DURABLE,
+  LEASE_RELEASED,
+  BARRIER_ENTERED,
+  BARRIER_RELEASED,
+  MERGE_STARTED,
+  MERGE_COMPLETED
+}

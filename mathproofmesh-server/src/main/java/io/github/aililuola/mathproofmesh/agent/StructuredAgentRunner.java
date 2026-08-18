@@ -14,6 +14,7 @@ import io.github.aililuola.mathproofmesh.contract.UsageRecord;
 import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
 import io.github.aililuola.mathproofmesh.provider.AgentCallFailure;
 import io.github.aililuola.mathproofmesh.provider.AgentFailoverExhausted;
+import io.github.aililuola.mathproofmesh.provider.AgentLease;
 import io.github.aililuola.mathproofmesh.provider.AgentPool;
 import io.github.aililuola.mathproofmesh.provider.AgentRuntime;
 import io.github.aililuola.mathproofmesh.provider.ChatMessage;
@@ -126,6 +127,31 @@ public final class StructuredAgentRunner {
         budgetBucket,
         null,
         null);
+  }
+
+  /** Executes a planned concurrent work item on its already reserved credential. */
+  public <T> StructuredCallResult<T> callLeased(
+      String runId,
+      String idempotencyKey,
+      PromptBundle<T> bundle,
+      AgentLease lease,
+      String budgetBucket,
+      Boolean thinkingEnabled,
+      String reasoningEffort) {
+    Objects.requireNonNull(lease, "lease");
+    AgentRuntime agent = lease.agent();
+    return callSingle(
+        runId,
+        idempotencyKey,
+        bundle,
+        agent,
+        budgetBucket,
+        List.of(agent.id()),
+        thinkingEnabled,
+        reasoningEffort,
+        parseRetries,
+        null,
+        lease);
   }
 
   public <T> StructuredCallResult<T> call(
@@ -379,6 +405,11 @@ public final class StructuredAgentRunner {
         result.runId(), result.callId(), applicationKey);
   }
 
+  private static LLMResponse providerCall(
+      AgentRuntime agent, AgentLease lease, ProviderRequest request) {
+    return lease == null ? agent.call(request) : lease.call(request);
+  }
+
   public boolean apply(
       String runId, StructuredCallResult<?> result, String applicationKey) {
     Objects.requireNonNull(result, "result");
@@ -409,6 +440,32 @@ public final class StructuredAgentRunner {
       String reasoningEffort,
       int remainingParseRetries,
       CheckpointContext checkpointContext) {
+    return callSingle(
+        runId,
+        idempotencyKey,
+        bundle,
+        agent,
+        budgetBucket,
+        attemptedAgents,
+        thinkingEnabled,
+        reasoningEffort,
+        remainingParseRetries,
+        checkpointContext,
+        null);
+  }
+
+  private <T> StructuredCallResult<T> callSingle(
+      String runId,
+      String idempotencyKey,
+      PromptBundle<T> bundle,
+      AgentRuntime agent,
+      String budgetBucket,
+      List<String> attemptedAgents,
+      Boolean thinkingEnabled,
+      String reasoningEffort,
+      int remainingParseRetries,
+      CheckpointContext checkpointContext,
+      AgentLease lease) {
     String safeSystem = redactor.redact(bundle.system());
     String safeUser = redactor.redact(bundle.user());
     String promptRef =
@@ -467,7 +524,8 @@ public final class StructuredAgentRunner {
           promptRef,
           attemptedAgents,
           remainingParseRetries,
-          checkpointContext);
+          checkpointContext,
+          lease);
     }
 
     if (checkpointContext != null) {
@@ -510,7 +568,7 @@ public final class StructuredAgentRunner {
               null);
       LLMResponse response;
       if (reasoningTraces == null) {
-        response = agent.call(request);
+        response = providerCall(agent, lease, request);
       } else {
         ReasoningTraceBinding binding =
             new ReasoningTraceBinding(
@@ -521,7 +579,7 @@ public final class StructuredAgentRunner {
                 generatedCallId);
         ReasoningTraceBinding.Scope scope = binding.bind();
         try {
-          response = agent.call(request);
+          response = providerCall(agent, lease, request);
         } finally {
           scope.close();
         }
@@ -586,7 +644,8 @@ public final class StructuredAgentRunner {
           cost,
           attemptedAgents,
           remainingParseRetries,
-          checkpointContext);
+          checkpointContext,
+          lease);
     } catch (AgentCallFailure failure) {
       completeFailure(
           runId,
@@ -687,7 +746,8 @@ public final class StructuredAgentRunner {
       String promptRef,
       List<String> attemptedAgents,
       int remainingParseRetries,
-      CheckpointContext checkpointContext) {
+      CheckpointContext checkpointContext,
+      AgentLease lease) {
     if (existing.state() != ProviderCallState.SUCCEEDED
         || existing.responseArtifactHash() == null) {
       throw new IllegalStateException(
@@ -725,7 +785,8 @@ public final class StructuredAgentRunner {
         existing.costUsd(),
         attemptedAgents,
         remainingParseRetries,
-        checkpointContext);
+        checkpointContext,
+        lease);
   }
 
   private <T> StructuredCallResult<T> parseOrRepair(
@@ -742,7 +803,8 @@ public final class StructuredAgentRunner {
       BigDecimal cost,
       List<String> attemptedAgents,
       int remainingParseRetries,
-      CheckpointContext checkpointContext) {
+      CheckpointContext checkpointContext,
+      AgentLease lease) {
     if (checkpointContext != null) {
       checkpointContext.capture(
           callId, responseRef, safeResponseText, reasoningTraces, redactor, bundle.responseType());
@@ -790,7 +852,8 @@ public final class StructuredAgentRunner {
               false,
               null,
               remainingParseRetries - 1,
-              checkpointContext);
+              checkpointContext,
+              lease);
       return new StructuredCallResult<>(
           repaired.value(),
           repaired.runId(),

@@ -40,6 +40,7 @@ final class DesktopLiveRuntimeFactory {
             loaded.continuation(),
             loaded.deepExplorationPolicy(),
             loaded.computation().withSandboxedPythonEnabled(sandboxEnabled),
+            loaded.concurrency(),
             loaded.runtime());
     validateLiveProfile(effective, prepared.injectedCredentials());
     return new PreparedRuntime(
@@ -61,6 +62,11 @@ final class DesktopLiveRuntimeFactory {
     long enabled = config.agents().stream().filter(AgentConfig::enabled).count();
     if (enabled != REQUIRED_AGENT_COUNT) {
       throw new IllegalStateException("desktop live profile must enable exactly five agents");
+    }
+    if (config.concurrency().researchSlots() != 4
+        || config.concurrency().coordinationSlots() != 1) {
+      throw new IllegalStateException(
+          "desktop live profile must reserve four research slots and one coordination slot");
     }
     for (AgentConfig agent : config.agents()) {
       if (!agent.enabled()) {

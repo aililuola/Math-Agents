@@ -233,6 +233,20 @@ final class ConfigInvariants {
     if (agents.stream().map(AgentConfig::id).anyMatch(id -> !ids.add(id))) {
       throw invalid("agent ids must be unique");
     }
+    int configuredSlots =
+        config.concurrency().researchSlots() + config.concurrency().coordinationSlots();
+    int enabledCapacity =
+        agents.stream()
+            .filter(AgentConfig::enabled)
+            .mapToInt(AgentConfig::maxConcurrency)
+            .sum();
+    if (config.concurrency().enabled()
+        && configuredSlots > config.runtime().maxParallelCalls()) {
+      throw invalid("concurrency slots cannot exceed runtime.max_parallel_calls");
+    }
+    if (config.concurrency().enabled() && configuredSlots > enabledCapacity) {
+      throw invalid("concurrency slots cannot exceed enabled agent capacity");
+    }
 
     TopologyConfig topology = config.topology();
     boolean activeHierarchical =
