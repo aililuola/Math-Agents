@@ -9,6 +9,7 @@
 - Commit B: `a674a54` (`fix(run-state): reconcile durable state and atomic report projections`)
 - Commit C: `ddf3e37` (`fix(run-state): close authority usage and crash consistency gaps`)
 - Commit D: `ea14186` (`fix(run-state): preserve live usage across backend failures`)
+- Commit E: `5f312ba` (`fix(run-state): recover crash-durable usage and legacy claim progress`)
 - Desktop checkpoint schema: `18 -> 19`
 - PostgreSQL migration: `V5__run_state_reconciliation.sql`
 - Issue 012 was not started. Scheduling, API-key concurrency, budget, token limits, and stop-policy logic were not changed.
@@ -28,14 +29,14 @@ database fields as projections.
 | Desktop execution | `DesktopRunManager.start`, `resume`, `cancel`, `executeSolve`, `executeResume` | Each execution attempt is represented independently; failure does not erase mathematical or usage evidence. |
 | Desktop result/failure | `DesktopRunManager.publishResult`, `publishFailure`, `updateLifecycle` | Authority is committed/reconciled before result and metadata projections. |
 | Desktop repository | `RunRepository.writeMetadataProjection`, `writeResult`, `reconcileFailure`, `reconcileCancellation`, `summary`, `detail` | `structured/run_state.json` is read first; legacy files are migrated rather than heuristically merged on every read. |
-| Live backend failure | `DesktopLiveRunExecutionBackend.execute` and resume path | The outer catch receives the live `CallLedger`, provider-call repository, and pricing context. It reconciles current ledger totals with request-level repository and durable response-artifact evidence before checkpoint reconciliation. |
-| Semantic checkpoint | `DesktopSolveCoordinator.persistUnchecked`, `restore`; `DesktopSolveCheckpoint.runStateAnchor` | Checkpoints hold only an authority anchor. They do not become a second Run State authority. |
+| Live backend failure | `DesktopLiveRunExecutionBackend.execute` and resume path | The outer catch receives the live `CallLedger`, provider-call repository, and pricing context. It reconciles current ledger totals with request-level repository and durable response-artifact evidence before checkpoint reconciliation. Before the first semantic checkpoint, startup also recovers complete response artifacts from a dead prior process. |
+| Semantic checkpoint | `DesktopSolveCoordinator.persistUnchecked`, `restore`; `DesktopSolveCheckpoint.runStateAnchor` | Checkpoints hold only an authority anchor. They do not become a second Run State authority. Every restore reconciles its usage aggregate with newer durable request evidence, including when `usageTotals` is non-null. |
 | API solve/resume/status | `RunApiService.solve`, `resume`, `status`, `applyConfiguredResult`, `restoreStoredRun` | The in-memory map is a cache. Cache misses restore from the file authority; terminal resume makes no provider call. |
 | API view | `RunStateApiProjection` and `RunApiModels.RunView` | Execution, math, usage, campaign, report, reconciliation, and terminal reason are projected separately. |
 | Result/report/metadata | `RunResultProjectionService`, `RunReportProjectionService`, `DesktopMetadataProjectionService`, `ReportFunctions` | Projection failure changes only projection state, never mathematical authority. |
 | File authority | `FileRunStateStore.load`, `compareAndSet`, `transitions` | File lock, optimistic version, temp write, file fsync, atomic move, directory fsync when supported, and journal fallback. |
 | PostgreSQL authority | `JdbcRunStateStore.load`, `compareAndSet`, `transitions` | State, transition, legacy run projection, and outbox are committed in one transaction under lease/fencing/version checks. |
-| Legacy restore | `LegacyRunStateMigrator.migrate` | Evidence precedence is checkpoint and durable artifacts first, then result/metadata/report/activity projections. No provider or computation call is made. |
+| Legacy restore | `LegacyRunStateMigrator.migrate` | Evidence precedence is checkpoint and durable artifacts first, then result/metadata/report/activity projections. It reads modern `claimLifecycle.entries[*].state` and legacy `records[*].status` through the same conservative extractor used by API projection. No provider or computation call is made. |
 
 Audited write surfaces include `desktop_run.json`, `run_result.json`, `run_report.md`,
 `activity.jsonl`, `desktop-solve-state.json`, API `RunView`, legacy `run.status/current_stage`,
@@ -76,6 +77,16 @@ backend had no injectable provider-call repository or live failure context. This
 absence evidence; the old zero-usage catch and checkpoint-only reconciler provided the direct
 behavioral source trace.
 
+The final independent restore audit then found two remaining Issue 011 gaps before Commit E.
+First, `DesktopSolveCoordinator.restore` scanned response artifacts only when checkpoint usage was
+null, so a hard process death after durable call 21 could restore the non-null 20-call aggregate.
+Second, `LegacyRunStateMigrator` read only `claimLifecycle.records[*].status`, while current
+checkpoints persist `entries[*].state`. The test-first build failed with four compilation errors
+because the shared `ClaimLifecycleProgressExtractor` did not exist. Subsequent hard-crash fixtures
+also exposed the missing post-checkpoint and pre-checkpoint recovery behavior before the collector
+was connected to all three production entry points. This is recorded as architecture-absence plus
+behavioral source evidence, not as a claim that compilation failure alone proved the runtime bug.
+
 ## 4. State model
 
 The new core package `io.github.aililuola.mathproofmesh.runstate` separates five dimensions:
@@ -105,6 +116,12 @@ the live ledger. If legacy checkpoint totals cannot be decomposed into request i
 backend retains the larger live cumulative aggregate rather than attaching an incomplete evidence
 set. A response artifact written immediately before provider-repository or ledger commit is still
 recoverable and is counted exactly once.
+`DurableProviderUsageCollector` is shared by live failure handling, semantic-checkpoint restore,
+and legacy migration. It merges request evidence by `providerRequestId`; a monotonic durable
+extension advances the aggregate, incomplete evidence preserves the more complete aggregate, and
+incomparable aggregates or request-identity conflicts fail closed instead of being guessed or
+added. Provider response artifacts now persist their computed `cost_usd`, so a fresh process can
+reconstruct the exact aggregate without relying on mutable pricing configuration.
 `RunExecutionAttemptLedger` preserves separate attempts, while `RunStateTransitionLedger` records
 stable, exactly-once state transitions.
 
@@ -113,7 +130,10 @@ preserves final-proof and final-review hashes, retains an existing proof-graph h
 is absent, and raises typed authority conflicts when the same frontier supplies incompatible
 mathematical evidence. The transition policy validates these concrete invariants in addition to
 the summary math-status rank. Claim lifecycle recovery reads the real `entries[*].state` field,
-with `status` retained only as a legacy compatibility fallback.
+with `status` retained only as a legacy compatibility fallback. A modern `REJECTED` entry counts
+as a refuted Claim only when it carries the verified exact-statement-refutation reason, evidence
+IDs, and matching lifecycle history. `INVALIDATED` and unclassified legacy rejections are not
+silently upgraded to mathematical refutations.
 
 ## 5. Durable stores and projections
 
@@ -187,6 +207,10 @@ per-execution failure context, merges repository and response-artifact evidence 
 request ID, preserves schema-1 artifact compatibility, and drives the real outer catch with
 controlled in-memory provider-call failures. Code-and-test diff: `7 files changed, 578
 insertions(+), 46 deletions(-)`.
+Commit E adds the shared durable-usage collector and shared Claim Lifecycle progress extractor,
+embeds exact cost in response artifacts, makes every restore reconcile newer durable evidence,
+and adds hard-process-death, second-restore, modern migration, and legacy compatibility tests.
+Code-and-test diff: `19 files changed, 963 insertions(+), 141 deletions(-)`.
 No target directories, logs, databases, checkpoints, caches, or generated verification reports
 are included.
 
@@ -203,6 +227,7 @@ Final explicit commands and results:
 | Commit C Server gap suite | 13 | 0 | 0 | 0 | PASS |
 | Commit C Desktop/protected suite | 2 | 0 | 0 | 0 | PASS |
 | Commit D Live Backend suite | 16 | 0 | 0 | 0 | PASS |
+| Commit E focused closure suite | 11 | 0 | 0 | 0 | PASS |
 
 The Server suite used the local Docker Desktop/Testcontainers path, not a mock database.
 The specialized tests make no real DeepSeek or external network call.
@@ -212,6 +237,12 @@ three new real failure-chain tests. The latter execute
 `DesktopLiveRunExecutionBackend -> StructuredAgentRunner -> Fake Provider -> CallLedger -> outer
 catch -> RunStateReconciliationService`; they do not directly call the reconciler with a fabricated
 result.
+
+Commit E's focused suite comprises two Core extractor cases and nine Desktop cases: four collector
+policy cases, two Claim Lifecycle migration cases, and three hard-crash/restore cases. The hard
+crash tests throw `SimulatedProcessTermination extends Error`, discard the old backend/coordinator,
+construct a fresh production backend, and read the real checkpoint and artifact directory. They
+do not catch `Error` in production or simulate recovery by directly calling the collector.
 
 ## 8. Live failure usage diagnostic
 
@@ -235,6 +266,41 @@ RESULT=PASS
 FAILURE USAGE ARTIFACT RECOVERY DIAGNOSTIC
 ARTIFACT_PROVIDER_CALLS_RECOVERED=1
 DUPLICATE_PROVIDER_CALL_COUNTS=0
+RESULT=PASS
+```
+
+### 8.1 Hard process-death restore
+
+```text
+PROVIDER USAGE HARD CRASH RESTORE DIAGNOSTIC
+HARD_CRASHES_INJECTED=2
+CHECKPOINT_PROVIDER_CALLS=20
+DURABLE_ARTIFACT_PROVIDER_CALLS=21
+POST_RESTORE_PROVIDER_CALLS=21
+POST_RESTORE_PROVIDER_CALL_LOSSES=0
+PRECHECKPOINT_DURABLE_PROVIDER_CALLS=3
+PRECHECKPOINT_POST_RESTORE_PROVIDER_CALLS=3
+EARLY_HARD_CRASH_PROVIDER_CALL_LOSSES=0
+POST_SECOND_RESTORE_PROVIDER_CALLS=21
+POST_SECOND_RESTORE_DUPLICATE_CALLS=0
+RESULT=PASS
+```
+
+### 8.2 Claim Lifecycle migration
+
+```text
+LEGACY CLAIM LIFECYCLE MIGRATION DIAGNOSTIC
+CHECKPOINT_VERIFIED_CLAIMS=2
+MIGRATED_VERIFIED_CLAIMS=2
+VERIFIED_CLAIM_MIGRATION_LOSSES=0
+CHECKPOINT_REFUTED_CLAIMS=1
+MIGRATED_REFUTED_CLAIMS=1
+REFUTED_CLAIM_MIGRATION_LOSSES=0
+PROPOSED_CLAIMS_FALSE_VERIFIED=0
+INVALIDATED_CLAIMS_FALSE_VERIFIED=0
+LEGACY_UNCLASSIFIED_REJECTIONS_FALSE_REFUTED=0
+SECOND_MIGRATION_STATE_CHANGES=0
+PROVIDER_CALLS_DURING_MIGRATION=0
 RESULT=PASS
 ```
 
@@ -307,12 +373,12 @@ current test, including all explicit Issue 001-010 regression classes and Issue 
 | Module/suite | Tests | Failures | Errors | Skipped |
 | --- | ---: | ---: | ---: | ---: |
 | Contracts unit | 65 | 0 | 0 | 0 |
-| Core unit | 1350 | 0 | 0 | 0 |
+| Core unit | 1352 | 0 | 0 | 0 |
 | Server unit | 895 | 0 | 0 | 3 |
 | Server integration | 26 | 0 | 0 | 0 |
-| Desktop unit | 283 | 0 | 0 | 1 |
+| Desktop unit | 292 | 0 | 0 | 1 |
 | Compatibility unit | 149 | 0 | 0 | 0 |
-| Total | 2768 | 0 | 0 | 4 conditional |
+| Total | 2779 | 0 | 0 | 4 conditional |
 
 The five Docker-backed PostgreSQL suites passed, including `PersistencePostgresIT`,
 `MemoryProofGraphPostgresIT`, and the new Run State atomicity path. No integration test was
@@ -321,9 +387,9 @@ skipped because Docker was available.
 Release gates:
 
 - `FULL VERIFICATION: PASS`
-- Core line coverage: `90.130135%`; Core branch coverage: `75.102041%` (gate unchanged).
+- Core line coverage: `90.125694%`; Core branch coverage: `75.083887%` (gate unchanged).
 - Contracts adjusted line: `91.628382%`; adjusted branch: `85.397898%`.
-- Server line: `87.295534%`; Desktop line: `79.978976%`.
+- Server line: `87.297274%`; Desktop line: `79.990361%`.
 - SpotBugs/FindSecBugs: PASS, including constant-time authority hash comparisons.
 - OWASP/dependency/security/secret scan: PASS.
 - License gate: PASS.
@@ -368,6 +434,13 @@ POST_CHECKPOINT_PROVIDER_CALL_LOSSES=0
 POST_CHECKPOINT_TOKEN_LOSSES=0
 FAILURE_RESPONSE_ARTIFACT_RECOVERIES=1
 DUPLICATE_FAILURE_PROVIDER_CALL_COUNTS=0
+HARD_CRASHES_INJECTED=2
+HARD_CRASH_POST_CHECKPOINT_PROVIDER_CALLS=21
+HARD_CRASH_PRECHECKPOINT_PROVIDER_CALLS=3
+POST_SECOND_RESTORE_DUPLICATE_CALLS=0
+VERIFIED_CLAIM_MIGRATION_LOSSES=0
+REFUTED_CLAIM_MIGRATION_LOSSES=0
+LEGACY_UNCLASSIFIED_REJECTIONS_FALSE_REFUTED=0
 CAMPAIGN_RECOVERABILITY_ERRORS=0
 REPORT_AUTHORITY_ESCALATIONS=0
 RUN_RESULT_METADATA_SPLIT_BRAINS=0
