@@ -13,5 +13,13 @@ public interface RunStateStore {
       String ownerId,
       long fencingToken);
 
+  RunStateSnapshot compareAndSetProjection(
+      String runId,
+      String expectedStateHash,
+      long expectedProjectionVersion,
+      RunStateSnapshot next,
+      String ownerId,
+      long fencingToken);
+
   List<RunStateTransition> transitions(String runId);
 }

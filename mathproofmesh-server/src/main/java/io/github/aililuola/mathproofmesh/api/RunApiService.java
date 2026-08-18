@@ -483,15 +483,18 @@ public final class RunApiService {
                     "completed_route_ids", result.routes().stream().map(RouteView::routeId).toList(),
                     "verified_local_claim_ids", result.verifiedLocalClaimIds(),
                     "logical_steps", result.logicalSteps()));
+    String resultExpectedStateHash = authorityState.stateHash();
+    long resultExpectedProjectionVersion = authorityState.projection().projectionVersion();
     authorityState =
         RunStateApiProjection.withResult(
             authorityState,
             resultReceipt.reference(),
             resultReceipt.artifactHash(),
             resultReceipt.errors());
-    runStateStore.compareAndSet(
+    runStateStore.compareAndSetProjection(
         runId,
-        authorityState.authority().version(),
+        resultExpectedStateHash,
+        resultExpectedProjectionVersion,
         authorityState,
         "api-run-service",
         0L);
@@ -518,9 +521,10 @@ public final class RunApiService {
             receipt.reference(),
             receipt.artifactHash(),
             receipt.errors());
-    runStateStore.compareAndSet(
+    runStateStore.compareAndSetProjection(
         runId,
-        authorityState.authority().version(),
+        authorityState.stateHash(),
+        authorityState.projection().projectionVersion(),
         projectedState,
         "api-run-service",
         0L);

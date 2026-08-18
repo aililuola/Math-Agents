@@ -5,15 +5,29 @@ import java.util.List;
 
 public final class RunStateReconciler {
   private final RunUsageReconciler usageReconciler;
+  private final RunMathematicalProgressReconciler mathematicalProgressReconciler;
   private final RunStateTransitionPolicy transitionPolicy;
 
   public RunStateReconciler() {
-    this(new RunUsageReconciler(), new RunStateTransitionPolicy());
+    this(
+        new RunUsageReconciler(),
+        new RunMathematicalProgressReconciler(),
+        new RunStateTransitionPolicy());
   }
 
   public RunStateReconciler(
       RunUsageReconciler usageReconciler, RunStateTransitionPolicy transitionPolicy) {
+    this(usageReconciler, new RunMathematicalProgressReconciler(), transitionPolicy);
+  }
+
+  public RunStateReconciler(
+      RunUsageReconciler usageReconciler,
+      RunMathematicalProgressReconciler mathematicalProgressReconciler,
+      RunStateTransitionPolicy transitionPolicy) {
     this.usageReconciler = java.util.Objects.requireNonNull(usageReconciler, "usageReconciler");
+    this.mathematicalProgressReconciler =
+        java.util.Objects.requireNonNull(
+            mathematicalProgressReconciler, "mathematicalProgressReconciler");
     this.transitionPolicy =
         java.util.Objects.requireNonNull(transitionPolicy, "transitionPolicy");
   }
@@ -29,7 +43,17 @@ public final class RunStateReconciler {
       conflicts.add(
           new RunStateConflict(conflict.code(), conflict.providerRequestId(), conflict.evidenceRefs()));
     }
-    RunMathematicalStatus math = deriveMath(evidence.mathematicalProgress());
+    RunMathematicalProgressReconciliationResult mathematicalProgress =
+        mathematicalProgressReconciler.reconcile(
+            evidence.mathematicalProgress(),
+            previous == null ? null : previous.authority().mathematicalProgress());
+    conflicts.addAll(mathematicalProgress.conflicts());
+    String proofGraphHash = reconcileProofGraphHash(previous, evidence, conflicts);
+    RunMathematicalStatus math = deriveMath(mathematicalProgress.progress());
+    if (!conflicts.isEmpty()
+        && conflicts.stream().anyMatch(conflict -> isMathematicalConflict(conflict.code()))) {
+      math = RunMathematicalStatus.AUTHORITY_CONFLICT;
+    }
     if (previous != null
         && RunStateTransitionPolicy.mathRank(math)
             < RunStateTransitionPolicy.mathRank(previous.authority().mathStatus())) {
@@ -57,10 +81,10 @@ public final class RunStateReconciler {
             evidence.currentStage(),
             campaign == RunCampaignStatus.RECOVERABLE,
             usage.usage(),
-            evidence.mathematicalProgress(),
+            mathematicalProgress.progress(),
             evidence.semanticCheckpointRef(),
             evidence.semanticCheckpointHash(),
-            evidence.proofGraphHash(),
+            proofGraphHash,
             null,
             version);
     RunProjectionSnapshot projection = alignProjection(evidence.projection(), authority.authorityHash());
@@ -72,6 +96,37 @@ public final class RunStateReconciler {
         RunStateSnapshot.create(authority, projection, reconciliation, conflicts, evidence.observedAt());
     transitionPolicy.validate(previous, next);
     return new RunStateReconciliationResult(next, conflicts);
+  }
+
+  private static boolean isMathematicalConflict(String code) {
+    return code.startsWith("FINAL_")
+        || code.startsWith("VERIFIED_CLAIM_")
+        || code.startsWith("REFUTED_CLAIM_")
+        || code.startsWith("PROOF_GRAPH_");
+  }
+
+  private static String reconcileProofGraphHash(
+      RunStateSnapshot previous,
+      RunStateEvidenceBundle evidence,
+      List<RunStateConflict> conflicts) {
+    String current = evidence.proofGraphHash();
+    if (previous == null || previous.authority().proofGraphHash().isEmpty()) {
+      return current;
+    }
+    String prior = previous.authority().proofGraphHash();
+    if (current.isEmpty() || prior.equals(current)) {
+      return prior;
+    }
+    if (!evidence.semanticCheckpointHash().isEmpty()
+        && evidence
+            .semanticCheckpointHash()
+            .equals(previous.authority().latestSemanticCheckpointHash())) {
+      conflicts.add(
+          new RunStateConflict(
+              "PROOF_GRAPH_HASH_CONFLICT", "proof_graph", List.of(prior, current)));
+      return prior;
+    }
+    return current;
   }
 
   private static RunProjectionSnapshot alignProjection(
@@ -93,6 +148,7 @@ public final class RunStateReconciler {
         projection.reportHash(),
         projection.latestActivitySequence(),
         projection.projectionErrors(),
+        projection.projectionVersion(),
         null);
   }
 

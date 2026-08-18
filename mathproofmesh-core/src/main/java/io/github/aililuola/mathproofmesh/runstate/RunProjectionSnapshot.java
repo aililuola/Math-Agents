@@ -16,7 +16,35 @@ public record RunProjectionSnapshot(
     String reportHash,
     long latestActivitySequence,
     List<String> projectionErrors,
+    long projectionVersion,
     String projectionHash) {
+
+  public RunProjectionSnapshot(
+      String authorityHash,
+      RunReportStatus reportStatus,
+      String runResultRef,
+      String runResultHash,
+      String desktopMetadataRef,
+      String desktopMetadataHash,
+      String reportRef,
+      String reportHash,
+      long latestActivitySequence,
+      List<String> projectionErrors,
+      String projectionHash) {
+    this(
+        authorityHash,
+        reportStatus,
+        runResultRef,
+        runResultHash,
+        desktopMetadataRef,
+        desktopMetadataHash,
+        reportRef,
+        reportHash,
+        latestActivitySequence,
+        projectionErrors,
+        0L,
+        projectionHash);
+  }
 
   public RunProjectionSnapshot {
     authorityHash = RunStateHashes.optional(authorityHash);
@@ -28,8 +56,8 @@ public record RunProjectionSnapshot(
     reportRef = RunStateHashes.optional(reportRef);
     reportHash = RunStateHashes.optional(reportHash);
     projectionErrors = projectionErrors == null ? List.of() : List.copyOf(projectionErrors);
-    if (latestActivitySequence < 0L) {
-      throw new IllegalArgumentException("latestActivitySequence must not be negative");
+    if (latestActivitySequence < 0L || projectionVersion < 0L) {
+      throw new IllegalArgumentException("projection counters must not be negative");
     }
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("authorityHash", authorityHash);
@@ -42,6 +70,7 @@ public record RunProjectionSnapshot(
     payload.put("reportHash", reportHash);
     payload.put("latestActivitySequence", latestActivitySequence);
     payload.put("projectionErrors", projectionErrors);
+    payload.put("projectionVersion", projectionVersion);
     projectionHash = RunStateHashes.generatedOrVerified(projectionHash, payload, "projection");
   }
 
@@ -57,6 +86,7 @@ public record RunProjectionSnapshot(
         "",
         0L,
         List.of(),
+        0L,
         null);
   }
 

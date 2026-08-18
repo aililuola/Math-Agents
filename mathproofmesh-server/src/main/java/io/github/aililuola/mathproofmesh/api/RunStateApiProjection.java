@@ -23,7 +23,10 @@ import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 final class RunStateApiProjection {
   private static final JsonMapper JSON = JsonMapper.builder().findAndAddModules().build();
@@ -37,37 +40,44 @@ final class RunStateApiProjection {
       Path runDirectory,
       RunExecutionBackend.RunExecutionResult result,
       RunStateSnapshot previous) {
-    if (result.runState() != null) {
-      String expectedProblemHash = CanonicalJson.stableHash(request.problem());
-      if (!runId.equals(result.runState().authority().runId())
-          || !equalHash(expectedProblemHash, result.runState().authority().problemHash())) {
+    String expectedProblemHash = CanonicalJson.stableHash(request.problem());
+    if (result.runState() != null
+        && (!runId.equals(result.runState().authority().runId())
+            || !equalHash(expectedProblemHash, result.runState().authority().problemHash()))) {
         throw new IllegalArgumentException("backend run state immutable identity mismatch");
-      }
-      return result.runState();
     }
     JsonNode checkpoint = checkpoint(runDirectory);
     RunUsageSnapshot checkpointUsage = checkpointUsage(checkpoint);
     RunUsageSnapshot resultUsage =
         RunUsageSnapshot.of(
-            0L,
+            result.usage().providerCalls(),
             result.usage().inputTokens(),
             result.usage().outputTokens(),
             result.usage().estimatedCostUsd(),
             result.usage().latencyMs(),
             "",
             "");
-    List<RunUsageEvidence> usage =
-        checkpointUsage.providerCalls() > 0L || checkpointUsage.totalTokens() > 0L
-            ? List.of(
-                RunUsageEvidence.aggregate(
-                    RunUsageEvidenceSource.SEMANTIC_CHECKPOINT,
-                    checkpointUsage,
-                    "semantic-checkpoint"),
-                RunUsageEvidence.aggregate(
-                    RunUsageEvidenceSource.RESULT_PROJECTION, resultUsage, "execution-result"))
-            : List.of(
-                RunUsageEvidence.aggregate(
-                    RunUsageEvidenceSource.RESULT_PROJECTION, resultUsage, "execution-result"));
+    List<RunUsageEvidence> usage = new ArrayList<>();
+    if (checkpointUsage.providerCalls() > 0L || checkpointUsage.totalTokens() > 0L) {
+      usage.add(
+          RunUsageEvidence.aggregate(
+              RunUsageEvidenceSource.SEMANTIC_CHECKPOINT,
+              checkpointUsage,
+              "semantic-checkpoint"));
+    }
+    usage.add(
+        result.usage().providerCallEvidence().isEmpty()
+            ? RunUsageEvidence.aggregate(
+                RunUsageEvidenceSource.RESULT_PROJECTION, resultUsage, "execution-result")
+            : RunUsageEvidence.providerCalls(
+                result.usage().providerCallEvidence(), "execution-result-provider-requests"));
+    if (result.runState() != null) {
+      usage.add(
+          RunUsageEvidence.aggregate(
+              RunUsageEvidenceSource.RESULT_PROJECTION,
+              result.runState().authority().usage(),
+              "backend-run-state-evidence"));
+    }
     RunMathematicalProgressSnapshot progress = progress(checkpoint, result);
     String checkpointHash =
         checkpoint.isMissingNode() ? "" : CanonicalJson.stableHash(checkpoint);
@@ -88,7 +98,7 @@ final class RunStateApiProjection {
         .reconcile(
             new RunStateEvidenceBundle(
                 runId,
-                CanonicalJson.stableHash(request.problem()),
+                expectedProblemHash,
                 attemptId,
                 execution(result.status()),
                 RunTerminalReason.NONE,
@@ -126,6 +136,7 @@ final class RunStateApiProjection {
             reportHash,
             state.projection().latestActivitySequence(),
             errors,
+            state.projection().projectionVersion() + 1L,
             null);
     return RunStateSnapshot.create(
         state.authority(), projection, state.reconciliationStatus(), state.conflicts(), Instant.now());
@@ -145,6 +156,7 @@ final class RunStateApiProjection {
             state.projection().reportHash(),
             state.projection().latestActivitySequence(),
             errors,
+            state.projection().projectionVersion() + 1L,
             null);
     return RunStateSnapshot.create(
         state.authority(), projection, state.reconciliationStatus(), state.conflicts(), Instant.now());
@@ -225,21 +237,41 @@ final class RunStateApiProjection {
 
   private static RunMathematicalProgressSnapshot progress(
       JsonNode checkpoint, RunExecutionBackend.RunExecutionResult result) {
-    boolean completed = "completed".equals(result.status());
-    boolean finalProof = checkpoint.hasNonNull("finalProof") || completed;
-    boolean finalValidation = checkpoint.path("finalValidationPassed").asBoolean(completed);
+    boolean finalProof = checkpoint.hasNonNull("finalProof");
+    boolean finalValidation = checkpoint.path("finalValidationPassed").asBoolean(false);
     boolean finalReview =
-        completed
-            || java.util.Set.of("PASS", "pass")
-                .contains(checkpoint.path("finalReview").path("verdict").asText());
+        Set.of("PASS", "pass")
+            .contains(checkpoint.path("finalReview").path("verdict").asText());
     boolean integrity =
-        completed
-            || !checkpoint.hasNonNull("finalReview")
-            || checkpoint.path("finalReview").path("problemIntegrityOk").asBoolean(true);
+        !checkpoint.hasNonNull("finalReview")
+            || checkpoint.path("finalReview").path("problemIntegrityOk").asBoolean(false);
     int obligations = checkpoint.path("proofGraph").path("obligations").size();
+    Set<String> verifiedClaimIds = new LinkedHashSet<>(result.verifiedLocalClaimIds());
+    Set<String> refutedClaimIds = new LinkedHashSet<>();
+    JsonNode lifecycleEntries = checkpoint.path("claimLifecycle").path("entries");
+    if (lifecycleEntries.isObject()) {
+      lifecycleEntries.properties()
+          .forEach(
+              entry -> {
+                String id = entry.getValue().path("claimId").asText(entry.getKey());
+                String state = entry.getValue().path("state").asText("");
+                if (Set.of(
+                        "LOCALLY_VERIFIED",
+                        "INDEPENDENTLY_VERIFIED",
+                        "REFEREE_ACCEPTED",
+                        "FACT_CANDIDATE",
+                        "EXTERNALLY_ADMITTED_FACT")
+                    .contains(state)) {
+                  verifiedClaimIds.add(id);
+                }
+                if (Set.of("INVALIDATED", "REJECTED").contains(state)) {
+                  refutedClaimIds.add(id);
+                }
+              });
+    }
     return new RunMathematicalProgressSnapshot(
-        result.verifiedLocalClaimIds().size(),
-        checkpoint.path("claimLifecycle").path("records").size(),
+        verifiedClaimIds.size(),
+        refutedClaimIds.size(),
         obligations,
         !checkpoint.isMissingNode(),
         checkpoint.path("admittedStrategies").size() > 0,
@@ -250,7 +282,15 @@ final class RunStateApiProjection {
         finalProof,
         finalValidation,
         finalReview,
-        integrity);
+        integrity,
+        List.copyOf(verifiedClaimIds),
+        List.copyOf(refutedClaimIds),
+        "",
+        "",
+        finalProof ? CanonicalJson.stableHash(checkpoint.path("finalProof")) : "",
+        checkpoint.hasNonNull("finalReview")
+            ? CanonicalJson.stableHash(checkpoint.path("finalReview"))
+            : "");
   }
 
   private static JsonNode checkpoint(Path runDirectory) {

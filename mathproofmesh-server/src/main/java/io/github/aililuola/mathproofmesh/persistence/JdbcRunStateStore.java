@@ -12,6 +12,8 @@ import io.github.aililuola.mathproofmesh.runstate.RunStateTransitionSnapshot;
 import io.github.aililuola.mathproofmesh.runstate.RunStateTransitionTrigger;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +26,56 @@ import org.springframework.transaction.support.TransactionTemplate;
 public final class JdbcRunStateStore implements RunStateStore {
   private static final String LOAD_SQL =
       "SELECT state_payload::text FROM run_state_snapshot WHERE run_id = :runId";
+  private static final String UPSERT_AUTHORITY_SQL =
+      """
+      INSERT INTO run_state_snapshot (
+        run_id, authority_sequence, execution_attempt_id, execution_status,
+        math_status, usage_status, campaign_status, report_status,
+        authority_hash, state_hash, state_payload, version
+      ) VALUES (
+        :runId, :sequence, :attemptId, :execution, :math, :usage, :campaign,
+        :report, :authorityHash, :stateHash, CAST(:payload AS jsonb), :version
+      )
+      ON CONFLICT (run_id) DO UPDATE SET
+        authority_sequence = EXCLUDED.authority_sequence,
+        execution_attempt_id = EXCLUDED.execution_attempt_id,
+        execution_status = EXCLUDED.execution_status,
+        math_status = EXCLUDED.math_status,
+        usage_status = EXCLUDED.usage_status,
+        campaign_status = EXCLUDED.campaign_status,
+        report_status = EXCLUDED.report_status,
+        authority_hash = EXCLUDED.authority_hash,
+        state_hash = EXCLUDED.state_hash,
+        state_payload = EXCLUDED.state_payload,
+        version = EXCLUDED.version,
+        updated_at = clock_timestamp()
+      WHERE run_state_snapshot.version = :expectedVersion
+      """;
+  private static final String UPSERT_PROJECTION_SQL =
+      """
+      INSERT INTO run_state_snapshot (
+        run_id, authority_sequence, execution_attempt_id, execution_status,
+        math_status, usage_status, campaign_status, report_status,
+        authority_hash, state_hash, state_payload, version
+      ) VALUES (
+        :runId, :sequence, :attemptId, :execution, :math, :usage, :campaign,
+        :report, :authorityHash, :stateHash, CAST(:payload AS jsonb), :version
+      )
+      ON CONFLICT (run_id) DO UPDATE SET
+        authority_sequence = EXCLUDED.authority_sequence,
+        execution_attempt_id = EXCLUDED.execution_attempt_id,
+        execution_status = EXCLUDED.execution_status,
+        math_status = EXCLUDED.math_status,
+        usage_status = EXCLUDED.usage_status,
+        campaign_status = EXCLUDED.campaign_status,
+        report_status = EXCLUDED.report_status,
+        authority_hash = EXCLUDED.authority_hash,
+        state_hash = EXCLUDED.state_hash,
+        state_payload = EXCLUDED.state_payload,
+        version = EXCLUDED.version,
+        updated_at = clock_timestamp()
+      WHERE run_state_snapshot.state_hash = :expectedStateHash
+      """;
   private final JdbcClient jdbc;
   private final TransactionTemplate transactions;
   private final ObjectMapper mapper = JsonMapper.builder().findAndAddModules().build();
@@ -52,16 +104,52 @@ public final class JdbcRunStateStore implements RunStateStore {
     Objects.requireNonNull(next, "next");
     return Objects.requireNonNull(
         transactions.execute(
-            ignored -> commit(runId, expectedVersion, next, ownerId, fencingToken)),
+            ignored ->
+                commit(
+                    runId,
+                    expectedVersion,
+                    "",
+                    -1L,
+                    next,
+                    ownerId,
+                    fencingToken,
+                    false)),
         "run state transaction result");
+  }
+
+  @Override
+  public RunStateSnapshot compareAndSetProjection(
+      String runId,
+      String expectedStateHash,
+      long expectedProjectionVersion,
+      RunStateSnapshot next,
+      String ownerId,
+      long fencingToken) {
+    Objects.requireNonNull(next, "next");
+    return Objects.requireNonNull(
+        transactions.execute(
+            ignored ->
+                commit(
+                    runId,
+                    -1L,
+                    expectedStateHash,
+                    expectedProjectionVersion,
+                    next,
+                    ownerId,
+                    fencingToken,
+                    true)),
+        "run state projection transaction result");
   }
 
   private RunStateSnapshot commit(
       String runId,
       long expectedVersion,
+      String expectedStateHash,
+      long expectedProjectionVersion,
       RunStateSnapshot next,
       String ownerId,
-      long fencingToken) {
+      long fencingToken,
+      boolean projectionOnly) {
     if (!runId.equals(next.authority().runId())) {
       throw new IllegalArgumentException("run state identity mismatch");
     }
@@ -82,36 +170,28 @@ public final class JdbcRunStateStore implements RunStateStore {
     }
     RunStateSnapshot previous = load(runId).orElse(null);
     long actualVersion = previous == null ? -1L : previous.authority().version();
-    if (actualVersion != expectedVersion) {
+    if (projectionOnly) {
+      if (previous == null
+          || !equalHash(previous.stateHash(), expectedStateHash)
+          || previous.projection().projectionVersion() != expectedProjectionVersion
+          || !equalHash(
+              previous.authority().authorityHash(), next.authority().authorityHash())
+          || previous.authority().version() != next.authority().version()
+          || next.projection().projectionVersion() != expectedProjectionVersion + 1L) {
+        throw new OptimisticLockException(runId, actualVersion);
+      }
+    } else if (actualVersion != expectedVersion) {
       throw new OptimisticLockException(runId, expectedVersion);
+    } else if (previous != null
+        && equalHash(previous.authority().authorityHash(), next.authority().authorityHash())
+        && !equalHash(previous.stateHash(), next.stateHash())) {
+      throw new IllegalStateException("projection-only update requires projection compare-and-set");
     }
     String json = encode(next);
+    var upsert =
+        projectionOnly ? jdbc.sql(UPSERT_PROJECTION_SQL) : jdbc.sql(UPSERT_AUTHORITY_SQL);
     int updated =
-        jdbc.sql(
-                """
-                INSERT INTO run_state_snapshot (
-                  run_id, authority_sequence, execution_attempt_id, execution_status,
-                  math_status, usage_status, campaign_status, report_status,
-                  authority_hash, state_hash, state_payload, version
-                ) VALUES (
-                  :runId, :sequence, :attemptId, :execution, :math, :usage, :campaign,
-                  :report, :authorityHash, :stateHash, CAST(:payload AS jsonb), :version
-                )
-                ON CONFLICT (run_id) DO UPDATE SET
-                  authority_sequence = EXCLUDED.authority_sequence,
-                  execution_attempt_id = EXCLUDED.execution_attempt_id,
-                  execution_status = EXCLUDED.execution_status,
-                  math_status = EXCLUDED.math_status,
-                  usage_status = EXCLUDED.usage_status,
-                  campaign_status = EXCLUDED.campaign_status,
-                  report_status = EXCLUDED.report_status,
-                  authority_hash = EXCLUDED.authority_hash,
-                  state_hash = EXCLUDED.state_hash,
-                  state_payload = EXCLUDED.state_payload,
-                  version = EXCLUDED.version,
-                  updated_at = clock_timestamp()
-                WHERE run_state_snapshot.version = :expectedVersion
-                """)
+        upsert
             .param("runId", runId)
             .param("sequence", next.authority().authoritySequence())
             .param("attemptId", next.authority().executionAttemptId())
@@ -124,8 +204,14 @@ public final class JdbcRunStateStore implements RunStateStore {
             .param("stateHash", next.stateHash())
             .param("payload", json)
             .param("version", next.authority().version())
-            .param("expectedVersion", expectedVersion)
+            .param(
+                projectionOnly ? "expectedStateHash" : "expectedVersion",
+                projectionOnly ? expectedStateHash : expectedVersion)
             .update();
+    /*
+     * SQL remains a static, reviewable text block; the chosen CAS frontier only changes its
+     * final predicate.
+     */
     if (updated != 1) {
       throw new OptimisticLockException(runId, expectedVersion);
     }
@@ -145,7 +231,7 @@ public final class JdbcRunStateStore implements RunStateStore {
     if (runUpdated != 1) {
       throw new LeaseConflictException(runId);
     }
-    if (previous == null || !previous.stateHash().equals(next.stateHash())) {
+    if (previous == null || !equalHash(previous.stateHash(), next.stateHash())) {
       RunStateTransition transition = transition(previous, next);
       jdbc.sql(
               """
@@ -261,5 +347,10 @@ public final class JdbcRunStateStore implements RunStateStore {
               ? "completed"
               : "unverified";
     };
+  }
+
+  private static boolean equalHash(String left, String right) {
+    return MessageDigest.isEqual(
+        left.getBytes(StandardCharsets.US_ASCII), right.getBytes(StandardCharsets.US_ASCII));
   }
 }

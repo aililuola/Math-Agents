@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.nio.file.Path;
+import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -17,6 +19,19 @@ final class RunApiTerminalResumeNoProviderCallTest {
     RunExecutionBackend backend =
         (request, runId, traceId, directory, progress) -> {
           calls.incrementAndGet();
+          try {
+            Files.createDirectories(directory.resolve("structured"));
+            Files.writeString(
+                directory.resolve("structured/desktop-solve-state.json"),
+                """
+                {"terminal":true,"finalProof":{"statement":"P"},
+                "finalValidationPassed":true,
+                "finalReview":{"verdict":"PASS","problemIntegrityOk":true}}
+                """,
+                StandardCharsets.UTF_8);
+          } catch (java.io.IOException exception) {
+            throw new IllegalStateException(exception);
+          }
           return RunApiRecoverableResumeTest.result("completed");
         };
     RunApiService service =

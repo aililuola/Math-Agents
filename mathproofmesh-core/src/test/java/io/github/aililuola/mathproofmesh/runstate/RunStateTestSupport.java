@@ -64,4 +64,32 @@ final class RunStateTestSupport {
                 Instant.parse("2026-01-01T00:00:00Z")))
         .state();
   }
+
+  static RunStateSnapshot stateWithProofGraph(
+      RunMathematicalProgressSnapshot progress,
+      RunStateSnapshot previous,
+      String proofGraphHash) {
+    return new RunStateReconciler()
+        .reconcile(
+            new RunStateEvidenceBundle(
+                "run-1",
+                "a".repeat(64),
+                previous == null ? "attempt-1" : "attempt-2",
+                RunExecutionStatus.RUNNING,
+                RunTerminalReason.NONE,
+                "proof",
+                true,
+                false,
+                "structured/desktop-solve-state.json",
+                "b".repeat(64),
+                proofGraphHash,
+                progress,
+                List.of(),
+                previous,
+                previous == null
+                    ? RunProjectionSnapshot.absent("")
+                    : previous.projection(),
+                Instant.parse("2026-01-01T00:00:00Z")))
+        .state();
+  }
 }

@@ -3,7 +3,6 @@ package io.github.aililuola.mathproofmesh.runstate;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -93,20 +92,53 @@ public final class RunUsageReconciler {
   }
 
   private static RunUsageReconciliationResult reconcileAggregates(List<RunUsageEvidence> evidence) {
-    RunUsageEvidence selected =
+    List<RunUsageEvidence> candidates =
         evidence.stream()
             .filter(item -> item.aggregate().providerCalls() > 0L || item.aggregate().totalTokens() > 0L)
-            .max(Comparator.comparingInt(item -> item.source().priority()))
-            .orElse(null);
-    if (selected == null) {
+            .toList();
+    if (candidates.isEmpty()) {
       return new RunUsageReconciliationResult(
           RunUsageStatus.NOT_RECORDED, RunUsageSnapshot.empty(), List.of());
     }
+    List<RunUsageEvidence> extensions =
+        candidates.stream()
+            .filter(
+                candidate ->
+                    candidates.stream()
+                        .allMatch(other -> dominates(candidate.aggregate(), other.aggregate())))
+            .toList();
+    if (extensions.isEmpty()) {
+      return new RunUsageReconciliationResult(
+          RunUsageStatus.CONFLICT,
+          candidates.getFirst().aggregate(),
+          List.of(
+              new RunUsageConflict(
+                  "aggregate",
+                  "INCOMPARABLE_AGGREGATE_USAGE",
+                  candidates.stream()
+                      .map(RunUsageEvidence::evidenceRef)
+                      .filter(ref -> !ref.isEmpty())
+                      .sorted()
+                      .toList())));
+    }
+    RunUsageEvidence selected =
+        extensions.stream()
+            .max(java.util.Comparator.comparingInt(item -> item.source().priority()))
+            .orElseThrow();
     RunUsageStatus status =
         selected.source() == RunUsageEvidenceSource.RESULT_PROJECTION
             ? RunUsageStatus.PARTIAL_RECORDED
             : RunUsageStatus.RECORDED;
     return new RunUsageReconciliationResult(status, selected.aggregate(), List.of());
+  }
+
+  private static boolean dominates(RunUsageSnapshot candidate, RunUsageSnapshot other) {
+    return candidate.providerCalls() >= other.providerCalls()
+        && candidate.inputTokens() >= other.inputTokens()
+        && candidate.outputTokens() >= other.outputTokens()
+        && candidate.totalTokens() >= other.totalTokens()
+        && candidate.estimatedCostUsd().compareTo(other.estimatedCostUsd()) >= 0
+        && candidate.latencyMs() >= other.latencyMs();
   }
 
   private static boolean sameCounters(

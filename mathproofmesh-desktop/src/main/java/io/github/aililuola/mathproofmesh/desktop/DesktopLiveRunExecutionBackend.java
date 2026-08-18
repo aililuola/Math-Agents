@@ -1206,6 +1206,7 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
   static ExecutionUsage executionUsage(UsageTotals totals) {
     Objects.requireNonNull(totals, "totals");
     return new ExecutionUsage(
+        totals.calls(),
         totals.inputTokens(),
         totals.outputTokens(),
         totals.costUsd(),

@@ -125,13 +125,36 @@ public interface RunExecutionBackend {
   }
 
   record ExecutionUsage(
+      long providerCalls,
       long inputTokens,
       long outputTokens,
       BigDecimal estimatedCostUsd,
-      double latencyMs) {
+      double latencyMs,
+      List<io.github.aililuola.mathproofmesh.runstate.ProviderCallUsageEvidence>
+          providerCallEvidence) {
+    public ExecutionUsage(
+        long inputTokens,
+        long outputTokens,
+        BigDecimal estimatedCostUsd,
+        double latencyMs) {
+      this(0L, inputTokens, outputTokens, estimatedCostUsd, latencyMs, List.of());
+    }
+
+    public ExecutionUsage(
+        long providerCalls,
+        long inputTokens,
+        long outputTokens,
+        BigDecimal estimatedCostUsd,
+        double latencyMs) {
+      this(providerCalls, inputTokens, outputTokens, estimatedCostUsd, latencyMs, List.of());
+    }
+
     public ExecutionUsage {
       estimatedCostUsd = Objects.requireNonNull(estimatedCostUsd, "estimatedCostUsd");
-      if (inputTokens < 0L
+      providerCallEvidence =
+          providerCallEvidence == null ? List.of() : List.copyOf(providerCallEvidence);
+      if (providerCalls < 0L
+          || inputTokens < 0L
           || outputTokens < 0L
           || estimatedCostUsd.signum() < 0
           || !Double.isFinite(latencyMs)
@@ -147,8 +170,14 @@ public interface RunExecutionBackend {
       return Math.addExact(inputTokens, outputTokens);
     }
 
+    @Override
+    public List<io.github.aililuola.mathproofmesh.runstate.ProviderCallUsageEvidence>
+        providerCallEvidence() {
+      return List.copyOf(providerCallEvidence);
+    }
+
     public static ExecutionUsage zero() {
-      return new ExecutionUsage(0L, 0L, BigDecimal.ZERO, 0.0d);
+      return new ExecutionUsage(0L, 0L, 0L, BigDecimal.ZERO, 0.0d, List.of());
     }
   }
 }

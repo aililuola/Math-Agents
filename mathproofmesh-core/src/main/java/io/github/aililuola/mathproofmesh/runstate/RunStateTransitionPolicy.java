@@ -26,6 +26,18 @@ public final class RunStateTransitionPolicy {
         || after.usage().estimatedCostUsd().compareTo(before.usage().estimatedCostUsd()) < 0) {
       throw new IllegalArgumentException("usage totals must not regress");
     }
+    RunMathematicalProgressSnapshot prior = before.mathematicalProgress();
+    RunMathematicalProgressSnapshot current = after.mathematicalProgress();
+    if (current.verifiedLocalClaims() < prior.verifiedLocalClaims()
+        || current.refutedClaims() < prior.refutedClaims()
+        || !current.verifiedClaimIds().containsAll(prior.verifiedClaimIds())
+        || !current.refutedClaimIds().containsAll(prior.refutedClaimIds())
+        || (prior.finalProofPresent() && !current.finalProofPresent())
+        || (prior.finalValidationPassed() && !current.finalValidationPassed())
+        || (prior.finalReviewPassed() && !current.finalReviewPassed())
+        || (!before.proofGraphHash().isEmpty() && after.proofGraphHash().isEmpty())) {
+      throw new IllegalArgumentException("mathematical progress must not regress");
+    }
     if (before.campaignStatus() == RunCampaignStatus.TERMINAL
         && after.campaignStatus() != RunCampaignStatus.TERMINAL
         && after.campaignStatus() != RunCampaignStatus.ARCHIVED) {

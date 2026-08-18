@@ -133,7 +133,7 @@ class RunExecutionBackendTest {
     assertTrue(
         resumedEvents.stream().anyMatch(event -> "agent_completed".equals(event.type())));
 
-    assertEquals("completed", service.demo("demo-provider-free").status());
+    assertEquals("unverified", service.demo("demo-provider-free").status());
     assertEquals(2, calls.get());
   }
 
@@ -175,7 +175,7 @@ class RunExecutionBackendTest {
     RunApiModels.RunView result =
         service.solve(new SolveRequest("Prove the claim.", "semantic-run", null, "active"));
 
-    assertEquals("completed", result.status());
+    assertEquals("unverified", result.status());
     assertEquals(
         3,
         service.eventsAfter("semantic-run", 0).stream()

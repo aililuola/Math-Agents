@@ -164,7 +164,7 @@ class ApiGateTest {
                 .content("{\"run_id\":\"sse-run\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.run_id").value("sse-run"))
-        .andExpect(jsonPath("$.status").value("completed"));
+        .andExpect(jsonPath("$.status").value("unverified"));
   }
 
   @Test
@@ -308,7 +308,7 @@ class ApiGateTest {
             "cli-run",
             "--config",
             config.toString()));
-    assertTrue(output.toString().contains("\"status\":\"completed\""));
+    assertTrue(output.toString().contains("\"status\":\"unverified\""));
     clear(output);
     assertEquals(0, executeCli(output, error, (path, host, port) -> {}, "demo"));
     assertTrue(output.toString().contains("\"run_id\":\"demo-run\""));
