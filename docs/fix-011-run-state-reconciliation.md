@@ -7,6 +7,7 @@
 - Baseline contains the completed Issue 010 implementation.
 - Commit A: `e6522f2` (`fix(run-state): separate execution math usage and campaign status`)
 - Commit B: `a674a54` (`fix(run-state): reconcile durable state and atomic report projections`)
+- Commit C: `ddf3e37` (`fix(run-state): close authority usage and crash consistency gaps`)
 - Desktop checkpoint schema: `18 -> 19`
 - PostgreSQL migration: `V5__run_state_reconciliation.sql`
 - Issue 012 was not started. Scheduling, API-key concurrency, budget, token limits, and stop-policy logic were not changed.
@@ -55,6 +56,16 @@ types. The tests exercise the old public/production behavior with legacy files a
 | `ServerRunStateRestartLossBlackBoxTest` | A fresh `RunApiService` instance could not load status from the prior process and returned not found. |
 | `DesktopOriginalFailureVectorReconciliationTest` | The 215-call failure vector lost usage/math/recoverability under the legacy single-status projection. |
 
+The independent follow-up audit was also reproduced before Commit C. The six new Core cases all
+failed: the 23-call aggregate was reduced to 20, incomparable aggregate evidence was accepted as
+`RECORDED`, final proof/review evidence and the proof-graph hash disappeared, and verified/refuted
+claim counts fell to zero. Of the first six Server cases, five failed behaviorally: a backend could
+choose the authority frontier, manufacture `VERIFIED`, reduce usage from 7 calls to 3,
+`status=completed` implied mathematical verification, and two refuted claims were reported as
+zero. The initial file-crash fixture had one setup error because its bare test mapper lacked the
+Java time module; after correcting the fixture, the production crash window was exercised through
+the real `FileRunStateStore` failure injector.
+
 ## 4. State model
 
 The new core package `io.github.aililuola.mathproofmesh.runstate` separates five dimensions:
@@ -75,18 +86,36 @@ binds both layers, reconciliation status, typed conflicts, stable hash, and time
 `RECOVERABLE`; `SUCCEEDED` without final mathematical verification is also not silently terminal.
 Math and usage are monotonic unless a typed authority conflict is raised.
 
-`RunUsageReconciler` uses exact request identity and artifact provenance. It rejects conflicting
-totals rather than hiding them behind `max(old, new)`, and deduplicates committed provider calls.
+`RunUsageReconciler` uses exact request identity and artifact provenance. It accepts an aggregate
+only when it is a coordinate-wise monotonic extension of every earlier aggregate; incomparable
+totals become `CONFLICT_QUARANTINED` rather than being selected by source priority. Request-level
+evidence remains deduplicated by provider request ID.
 `RunExecutionAttemptLedger` preserves separate attempts, while `RunStateTransitionLedger` records
 stable, exactly-once state transitions.
+
+`RunMathematicalProgressReconciler` now merges concrete verified/refuted Claim identities,
+preserves final-proof and final-review hashes, retains an existing proof-graph hash when evidence
+is absent, and raises typed authority conflicts when the same frontier supplies incompatible
+mathematical evidence. The transition policy validates these concrete invariants in addition to
+the summary math-status rank. Claim lifecycle recovery reads the real `entries[*].state` field,
+with `status` retained only as a legacy compatibility fallback.
 
 ## 5. Durable stores and projections
 
 ### 5.1 File and desktop
 
-`FileRunStateStore` writes `structured/run_state.json` and the transition ledger atomically.
-`RunRepository.summary/detail` prefer this authority. If it is missing, `LegacyRunStateMigrator`
+`FileRunStateStore` writes one canonical `structured/run_state_commit.json` envelope containing
+the complete `RunStateSnapshot` and transition frontier. `run_state.json` and
+`run_state_transitions.json` are repairable legacy projections, not separate authorities. A crash
+after either projection write deterministically rolls them forward from the committed envelope;
+an uncommitted projection is rolled back on load. `RunRepository.summary/detail` prefer this
+authority. If it is missing, `LegacyRunStateMigrator`
 constructs a single canonical state from v18/legacy evidence and writes projections from it.
+
+Projection-only updates use an independent monotonic `projectionVersion` and compare both the
+expected state hash and projection version. The file and JDBC stores therefore reject two writers
+that start from the same authority version instead of allowing the later projection to overwrite
+the earlier one.
 
 Desktop schema 19 adds only `RunStateAnchor(authoritySequence, authorityHash,
 executionAttemptId)` to the semantic checkpoint. A v18 checkpoint receives an empty anchor and is
@@ -136,6 +165,8 @@ Commit B changes or adds the following production groups:
   were updated for V5 and its two tables.
 
 Code-only diff for Commits A and B: `102 files changed, 5142 insertions(+), 135 deletions(-)`.
+Commit C adds the narrowly scoped audit closure: `42 files changed, 1935 insertions(+), 120
+deletions(-)`.
 No target directories, logs, databases, checkpoints, caches, or generated verification reports
 are included.
 
@@ -148,6 +179,9 @@ Final explicit commands and results:
 | Core exact command | 14 | 0 | 0 | 0 | PASS |
 | Server exact command | 10 | 0 | 0 | 0 | PASS |
 | Desktop exact command | 17 | 0 | 0 | 0 | PASS |
+| Commit C Core gap suite | 9 | 0 | 0 | 0 | PASS |
+| Commit C Server gap suite | 13 | 0 | 0 | 0 | PASS |
+| Commit C Desktop/protected suite | 2 | 0 | 0 | 0 | PASS |
 
 The Server suite used the local Docker Desktop/Testcontainers path, not a mock database.
 The specialized tests make no real DeepSeek or external network call.
@@ -221,12 +255,12 @@ current test, including all explicit Issue 001-010 regression classes and Issue 
 | Module/suite | Tests | Failures | Errors | Skipped |
 | --- | ---: | ---: | ---: | ---: |
 | Contracts unit | 65 | 0 | 0 | 0 |
-| Core unit | 1341 | 0 | 0 | 0 |
-| Server unit | 882 | 0 | 0 | 3 |
+| Core unit | 1350 | 0 | 0 | 0 |
+| Server unit | 895 | 0 | 0 | 3 |
 | Server integration | 26 | 0 | 0 | 0 |
 | Desktop unit | 280 | 0 | 0 | 1 |
 | Compatibility unit | 149 | 0 | 0 | 0 |
-| Total | 2743 | 0 | 0 | 4 conditional |
+| Total | 2765 | 0 | 0 | 4 conditional |
 
 The five Docker-backed PostgreSQL suites passed, including `PersistencePostgresIT`,
 `MemoryProofGraphPostgresIT`, and the new Run State atomicity path. No integration test was
@@ -235,9 +269,9 @@ skipped because Docker was available.
 Release gates:
 
 - `FULL VERIFICATION: PASS`
-- Core line coverage: `89.976388%`; Core branch coverage: `75.059726%` (gate unchanged).
+- Core line coverage: `90.130135%`; Core branch coverage: `75.102041%` (gate unchanged).
 - Contracts adjusted line: `91.628382%`; adjusted branch: `85.397898%`.
-- Server line: `86.948308%`; Desktop line: `79.807927%`.
+- Server line: `87.295534%`; Desktop line: `79.793294%`.
 - SpotBugs/FindSecBugs: PASS, including constant-time authority hash comparisons.
 - OWASP/dependency/security/secret scan: PASS.
 - License gate: PASS.
@@ -267,9 +301,19 @@ PROTECTED_FILES_NO_DIFF=PASS
 ISSUE 011 RUN STATE RECONCILIATION DIAGNOSTIC
 ================================================================
 STATE_DIMENSION_SEPARATION=PASS
+COMPLETED_WITHOUT_PROOF_VERIFIED=0
+BACKEND_RUN_STATE_RECONCILER_BYPASSES=0
 EXECUTION_STATUS_CONFLICTS=0
 MATH_STATUS_REGRESSIONS=0
+MATHEMATICAL_PROGRESS_REGRESSIONS=0
+VERIFIED_CLAIM_COUNT_LOSSES=0
+REFUTED_CLAIM_COUNT_LOSSES=0
+REFUTED_CLAIM_FALSE_COUNTS=0
+PROOF_GRAPH_HASH_LOSSES=0
 USAGE_ZEROING_EVENTS=0
+EARLY_FAILURE_PROVIDER_CALL_LOSSES=0
+POST_CHECKPOINT_PROVIDER_CALL_LOSSES=0
+POST_CHECKPOINT_TOKEN_LOSSES=0
 CAMPAIGN_RECOVERABILITY_ERRORS=0
 REPORT_AUTHORITY_ESCALATIONS=0
 RUN_RESULT_METADATA_SPLIT_BRAINS=0
@@ -287,6 +331,10 @@ POST_RESTART_DUPLICATE_PROVIDER_CALLS=0
 POST_RESTORE_STATE_TRANSITION_REPLAYS=0
 REPORT_PROJECTION_FAILURE_AUTHORITY_CHANGES=0
 STALE_PROJECTIONS_AFTER_REPAIR=0
+AUTHORITY_WITHOUT_TRANSITION=0
+TRANSITION_WITHOUT_AUTHORITY=0
+DUPLICATE_TRANSITIONS=0
+STALE_PROJECTION_OVERWRITES=0
 ORIGINAL_FAILURE_EXECUTION_STATUS=FAILED
 ORIGINAL_FAILURE_MATH_STATUS=PARTIAL_UNVERIFIED
 ORIGINAL_FAILURE_USAGE_STATUS=RECORDED
