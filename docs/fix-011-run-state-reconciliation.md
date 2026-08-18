@@ -8,6 +8,7 @@
 - Commit A: `e6522f2` (`fix(run-state): separate execution math usage and campaign status`)
 - Commit B: `a674a54` (`fix(run-state): reconcile durable state and atomic report projections`)
 - Commit C: `ddf3e37` (`fix(run-state): close authority usage and crash consistency gaps`)
+- Commit D: `ea14186` (`fix(run-state): preserve live usage across backend failures`)
 - Desktop checkpoint schema: `18 -> 19`
 - PostgreSQL migration: `V5__run_state_reconciliation.sql`
 - Issue 012 was not started. Scheduling, API-key concurrency, budget, token limits, and stop-policy logic were not changed.
@@ -27,7 +28,7 @@ database fields as projections.
 | Desktop execution | `DesktopRunManager.start`, `resume`, `cancel`, `executeSolve`, `executeResume` | Each execution attempt is represented independently; failure does not erase mathematical or usage evidence. |
 | Desktop result/failure | `DesktopRunManager.publishResult`, `publishFailure`, `updateLifecycle` | Authority is committed/reconciled before result and metadata projections. |
 | Desktop repository | `RunRepository.writeMetadataProjection`, `writeResult`, `reconcileFailure`, `reconcileCancellation`, `summary`, `detail` | `structured/run_state.json` is read first; legacy files are migrated rather than heuristically merged on every read. |
-| Live backend failure | `DesktopLiveRunExecutionBackend.execute` and resume path | Failure reconciliation reads the latest checkpoint and durable usage instead of returning empty routes, claims, steps, and usage. |
+| Live backend failure | `DesktopLiveRunExecutionBackend.execute` and resume path | The outer catch receives the live `CallLedger`, provider-call repository, and pricing context. It reconciles current ledger totals with request-level repository and durable response-artifact evidence before checkpoint reconciliation. |
 | Semantic checkpoint | `DesktopSolveCoordinator.persistUnchecked`, `restore`; `DesktopSolveCheckpoint.runStateAnchor` | Checkpoints hold only an authority anchor. They do not become a second Run State authority. |
 | API solve/resume/status | `RunApiService.solve`, `resume`, `status`, `applyConfiguredResult`, `restoreStoredRun` | The in-memory map is a cache. Cache misses restore from the file authority; terminal resume makes no provider call. |
 | API view | `RunStateApiProjection` and `RunApiModels.RunView` | Execution, math, usage, campaign, report, reconciliation, and terminal reason are projected separately. |
@@ -66,6 +67,15 @@ zero. The initial file-crash fixture had one setup error because its bare test m
 Java time module; after correcting the fixture, the production crash window was exercised through
 the real `FileRunStateStore` failure injector.
 
+The final Live Backend audit found one remaining production gap before Commit D. The outer catch
+used the compatibility `RunExecutionResult` constructor, so it supplied `ExecutionUsage.zero()`;
+its local `CallLedger` and provider-call repository were unreachable. Consequently, a checkpoint
+at 20 calls followed by three committed calls could reconcile back to 20, and three calls before
+an available checkpoint could reconcile to zero. The test-first build failed because the old
+backend had no injectable provider-call repository or live failure context. This was architecture
+absence evidence; the old zero-usage catch and checkpoint-only reconciler provided the direct
+behavioral source trace.
+
 ## 4. State model
 
 The new core package `io.github.aililuola.mathproofmesh.runstate` separates five dimensions:
@@ -90,6 +100,11 @@ Math and usage are monotonic unless a typed authority conflict is raised.
 only when it is a coordinate-wise monotonic extension of every earlier aggregate; incomparable
 totals become `CONFLICT_QUARANTINED` rather than being selected by source priority. Request-level
 evidence remains deduplicated by provider request ID.
+On a Live Backend exception, complete request-level evidence is returned when its counters cover
+the live ledger. If legacy checkpoint totals cannot be decomposed into request identities, the
+backend retains the larger live cumulative aggregate rather than attaching an incomplete evidence
+set. A response artifact written immediately before provider-repository or ledger commit is still
+recoverable and is counted exactly once.
 `RunExecutionAttemptLedger` preserves separate attempts, while `RunStateTransitionLedger` records
 stable, exactly-once state transitions.
 
@@ -167,6 +182,11 @@ Commit B changes or adds the following production groups:
 Code-only diff for Commits A and B: `102 files changed, 5142 insertions(+), 135 deletions(-)`.
 Commit C adds the narrowly scoped audit closure: `42 files changed, 1935 insertions(+), 120
 deletions(-)`.
+Commit D changes only two Desktop production files and five Desktop test files. It exposes a
+per-execution failure context, merges repository and response-artifact evidence by provider
+request ID, preserves schema-1 artifact compatibility, and drives the real outer catch with
+controlled in-memory provider-call failures. Code-and-test diff: `7 files changed, 578
+insertions(+), 46 deletions(-)`.
 No target directories, logs, databases, checkpoints, caches, or generated verification reports
 are included.
 
@@ -182,11 +202,43 @@ Final explicit commands and results:
 | Commit C Core gap suite | 9 | 0 | 0 | 0 | PASS |
 | Commit C Server gap suite | 13 | 0 | 0 | 0 | PASS |
 | Commit C Desktop/protected suite | 2 | 0 | 0 | 0 | PASS |
+| Commit D Live Backend suite | 16 | 0 | 0 | 0 | PASS |
 
 The Server suite used the local Docker Desktop/Testcontainers path, not a mock database.
 The specialized tests make no real DeepSeek or external network call.
 
-## 8. Original failure vector
+Commit D's 16 tests comprise all 13 existing `DesktopLiveRunExecutionBackendTest` cases plus the
+three new real failure-chain tests. The latter execute
+`DesktopLiveRunExecutionBackend -> StructuredAgentRunner -> Fake Provider -> CallLedger -> outer
+catch -> RunStateReconciliationService`; they do not directly call the reconciler with a fabricated
+result.
+
+## 8. Live failure usage diagnostic
+
+```text
+LIVE FAILURE AFTER CHECKPOINT USAGE DIAGNOSTIC
+CHECKPOINT_PROVIDER_CALLS=20
+LIVE_LEDGER_PROVIDER_CALLS=23
+FAILURE_RESULT_PROVIDER_CALLS=23
+RECONCILED_PROVIDER_CALLS=23
+POST_CHECKPOINT_PROVIDER_CALL_LOSSES=0
+POST_CHECKPOINT_TOKEN_LOSSES=0
+RESULT=PASS
+
+LIVE FAILURE BEFORE CHECKPOINT USAGE DIAGNOSTIC
+LIVE_LEDGER_PROVIDER_CALLS=3
+FAILURE_RESULT_PROVIDER_CALLS=3
+RECONCILED_PROVIDER_CALLS=3
+EARLY_FAILURE_PROVIDER_CALL_LOSSES=0
+RESULT=PASS
+
+FAILURE USAGE ARTIFACT RECOVERY DIAGNOSTIC
+ARTIFACT_PROVIDER_CALLS_RECOVERED=1
+DUPLICATE_PROVIDER_CALL_COUNTS=0
+RESULT=PASS
+```
+
+## 9. Original failure vector
 
 ```text
 ORIGINAL FAILURE VECTOR DIAGNOSTIC
@@ -205,7 +257,7 @@ RECOVERABILITY_LOSSES=0
 RESULT=PASS
 ```
 
-## 9. Twenty-round restore diagnostic
+## 10. Twenty-round restore diagnostic
 
 All counts and hashes below were emitted by `DesktopRunStateMultiRoundRestoreTest` from the real
 file authority and transition ledger. Round 10 destroys the store instance and reloads it.
@@ -247,7 +299,7 @@ Separate production tests prove report failure does not change authority, stale 
 deterministic, activity tails cannot override canonical state, hard-crash recovery loses neither
 usage nor math progress, and terminal resume makes zero provider calls.
 
-## 10. Regression and release gates
+## 11. Regression and release gates
 
 The complete Core/Server/Desktop reactor passed. The final offline release gate executed every
 current test, including all explicit Issue 001-010 regression classes and Issue 011 tests:
@@ -258,9 +310,9 @@ current test, including all explicit Issue 001-010 regression classes and Issue 
 | Core unit | 1350 | 0 | 0 | 0 |
 | Server unit | 895 | 0 | 0 | 3 |
 | Server integration | 26 | 0 | 0 | 0 |
-| Desktop unit | 280 | 0 | 0 | 1 |
+| Desktop unit | 283 | 0 | 0 | 1 |
 | Compatibility unit | 149 | 0 | 0 | 0 |
-| Total | 2765 | 0 | 0 | 4 conditional |
+| Total | 2768 | 0 | 0 | 4 conditional |
 
 The five Docker-backed PostgreSQL suites passed, including `PersistencePostgresIT`,
 `MemoryProofGraphPostgresIT`, and the new Run State atomicity path. No integration test was
@@ -271,7 +323,7 @@ Release gates:
 - `FULL VERIFICATION: PASS`
 - Core line coverage: `90.130135%`; Core branch coverage: `75.102041%` (gate unchanged).
 - Contracts adjusted line: `91.628382%`; adjusted branch: `85.397898%`.
-- Server line: `87.295534%`; Desktop line: `79.793294%`.
+- Server line: `87.295534%`; Desktop line: `79.978976%`.
 - SpotBugs/FindSecBugs: PASS, including constant-time authority hash comparisons.
 - OWASP/dependency/security/secret scan: PASS.
 - License gate: PASS.
@@ -295,7 +347,7 @@ ISSUE_010_REGRESSION=PASS
 PROTECTED_FILES_NO_DIFF=PASS
 ```
 
-## 11. Acceptance conclusion
+## 12. Acceptance conclusion
 
 ```text
 ISSUE 011 RUN STATE RECONCILIATION DIAGNOSTIC
@@ -314,6 +366,8 @@ USAGE_ZEROING_EVENTS=0
 EARLY_FAILURE_PROVIDER_CALL_LOSSES=0
 POST_CHECKPOINT_PROVIDER_CALL_LOSSES=0
 POST_CHECKPOINT_TOKEN_LOSSES=0
+FAILURE_RESPONSE_ARTIFACT_RECOVERIES=1
+DUPLICATE_FAILURE_PROVIDER_CALL_COUNTS=0
 CAMPAIGN_RECOVERABILITY_ERRORS=0
 REPORT_AUTHORITY_ESCALATIONS=0
 RUN_RESULT_METADATA_SPLIT_BRAINS=0
