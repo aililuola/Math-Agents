@@ -70,6 +70,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
@@ -483,7 +484,22 @@ final class DesktopLiveRunExecutionBackendTest {
   }
 
   private static ProviderClientRegistry providers(SystemConfig config, Mode mode) {
-    MockResponder responder = request -> response(request, mode);
+    AtomicLong requestIds = new AtomicLong();
+    MockResponder responder =
+        request -> {
+          LLMResponse source = response(request, mode);
+          return new LLMResponse(
+              source.text(),
+              source.model(),
+              source.provider(),
+              source.inputTokens(),
+              source.outputTokens(),
+              source.latencyMs(),
+              source.requestId() + "-" + requestIds.incrementAndGet(),
+              source.finishReason(),
+              source.streaming(),
+              source.metadata());
+        };
     Map<String, MockResponder> responders = new LinkedHashMap<>();
     config.agents().forEach(agent -> responders.put(agent.id(), responder));
     HttpTransport unusedTransport = request -> {
@@ -493,7 +509,7 @@ final class DesktopLiveRunExecutionBackendTest {
         config, responders, ignored -> unusedTransport, false, ignored -> null);
   }
 
-  private static LLMResponse response(ProviderRequest request, Mode mode) {
+  static LLMResponse response(ProviderRequest request, Mode mode) {
     String user = request.messages().getLast().content();
     Object payload =
         switch (request.schemaName()) {
@@ -1018,7 +1034,7 @@ final class DesktopLiveRunExecutionBackendTest {
         List.of("scripted-attempt"));
   }
 
-  private static SystemConfig mockConfig(SystemConfig source) {
+  static SystemConfig mockConfig(SystemConfig source) {
     List<AgentConfig> agents = source.agents().stream().map(DesktopLiveRunExecutionBackendTest::mockAgent).toList();
     return new SystemConfig(
         source.systemName(),
@@ -1064,7 +1080,7 @@ final class DesktopLiveRunExecutionBackendTest {
     return mode != Mode.REJECTED_COMPUTATION;
   }
 
-  private static Path projectRoot() {
+  static Path projectRoot() {
     Path current = Path.of("").toAbsolutePath().normalize();
     while (current != null) {
       if (Files.isRegularFile(current.resolve("config/proof-control-active.yaml"))) {
@@ -1075,7 +1091,7 @@ final class DesktopLiveRunExecutionBackendTest {
     throw new IllegalStateException("project root was not found");
   }
 
-  private enum Mode {
+  enum Mode {
     COMPLETED,
     REPAIRED_COMPUTATION,
     REJECTED_COMPUTATION

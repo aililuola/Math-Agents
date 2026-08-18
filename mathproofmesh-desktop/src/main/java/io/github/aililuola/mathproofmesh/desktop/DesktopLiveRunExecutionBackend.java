@@ -52,10 +52,14 @@ import io.github.aililuola.mathproofmesh.provider.AgentPool;
 import io.github.aililuola.mathproofmesh.provider.AgentRuntime;
 import io.github.aililuola.mathproofmesh.provider.InMemoryProviderCallRepository;
 import io.github.aililuola.mathproofmesh.provider.ProviderClientRegistry;
+import io.github.aililuola.mathproofmesh.provider.ProviderCallRecord;
+import io.github.aililuola.mathproofmesh.provider.ProviderCallRepository;
+import io.github.aililuola.mathproofmesh.provider.ProviderCallState;
 import io.github.aililuola.mathproofmesh.provider.ProviderCircuitOpenError;
 import io.github.aililuola.mathproofmesh.provider.ProviderErrorKind;
 import io.github.aililuola.mathproofmesh.provider.ProviderException;
 import io.github.aililuola.mathproofmesh.provider.UsageTotals;
+import io.github.aililuola.mathproofmesh.runstate.ProviderCallUsageEvidence;
 import io.github.aililuola.mathproofmesh.sidecar.PythonSandboxAstValidator;
 import io.github.aililuola.mathproofmesh.sidecar.PythonSidecarComputationHandler;
 import io.github.aililuola.mathproofmesh.sidecar.PythonSidecarWorkerPool;
@@ -74,6 +78,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /** Production desktop solve pipeline backed by isolated live providers and bounded computation. */
 final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
@@ -84,6 +90,7 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
   private final DesktopLiveRuntimeFactory runtimes;
   private final DesktopRuntimeLocator locator;
   private final DockerSandboxPreflight dockerPreflight;
+  private final Supplier<ProviderCallRepository> callRepositories;
 
   DesktopLiveRunExecutionBackend(
       DesktopPaths paths,
@@ -91,11 +98,28 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
       DesktopLiveRuntimeFactory runtimes,
       DesktopRuntimeLocator locator,
       DockerSandboxPreflight dockerPreflight) {
+    this(
+        paths,
+        settings,
+        runtimes,
+        locator,
+        dockerPreflight,
+        InMemoryProviderCallRepository::new);
+  }
+
+  DesktopLiveRunExecutionBackend(
+      DesktopPaths paths,
+      SettingsStore settings,
+      DesktopLiveRuntimeFactory runtimes,
+      DesktopRuntimeLocator locator,
+      DockerSandboxPreflight dockerPreflight,
+      Supplier<ProviderCallRepository> callRepositories) {
     Objects.requireNonNull(paths, "paths");
     this.settings = Objects.requireNonNull(settings, "settings");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.locator = Objects.requireNonNull(locator, "locator");
     this.dockerPreflight = Objects.requireNonNull(dockerPreflight, "dockerPreflight");
+    this.callRepositories = Objects.requireNonNull(callRepositories, "callRepositories");
   }
 
   @Override
@@ -110,12 +134,13 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
     DesktopLiveRuntimeFactory.PreparedRuntime runtime = null;
     ActivityStream activity = null;
     ProgressSink recordedProgress = progress;
+    AtomicReference<LiveExecutionContext> liveContext = new AtomicReference<>();
     try {
       Files.createDirectories(runDirectory);
       activity = new ActivityStream(runDirectory, "zh", true, ignored -> {});
       recordedProgress = new AuditedProgressSink(activity, progress);
       runtime = runtimes.prepare(request.profile(), settings.load());
-      return executeLive(request, runId, runDirectory, recordedProgress, runtime);
+      return executeLive(request, runId, runDirectory, recordedProgress, runtime, liveContext);
     } catch (RuntimeException | java.io.IOException exception) {
       boolean cancelled =
           exception instanceof ProviderException providerException
@@ -141,6 +166,7 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
           summary,
           null);
       String profile = runtime == null ? "unavailable" : runtime.profile();
+      ExecutionUsage failureUsage = failureUsage(runDirectory, runId, liveContext.get());
       String body =
           (cancelled ? "### Execution cancelled\n\n" : "### Execution failure\n\n")
               + "The live run stopped before a verified proof was produced. "
@@ -169,7 +195,9 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
                   List.of(),
                   List.of(),
                   body,
-                  0));
+                  0,
+                  failureUsage,
+                  null));
     } finally {
       if (activity != null) {
         try {
@@ -186,7 +214,8 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
       String runId,
       Path runDirectory,
       ProgressSink progress,
-      DesktopLiveRuntimeFactory.PreparedRuntime runtime)
+      DesktopLiveRuntimeFactory.PreparedRuntime runtime,
+      AtomicReference<LiveExecutionContext> liveContext)
       throws java.io.IOException {
     SystemConfig config = runtime.config();
     String problemHash = sha256(request.problem());
@@ -215,13 +244,16 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
     PromptFactory prompts = new PromptFactory(config.runtime().outputLanguage());
     ReasoningTraceStore reasoningTraces =
         new ReasoningTraceStore(runDirectory, runId, runtime.credentials().values());
+    ProviderCallRepository providerCalls =
+        Objects.requireNonNull(callRepositories.get(), "provider call repository");
+    liveContext.set(new LiveExecutionContext(ledger, providerCalls, config));
 
     try (AgentPool pool = new AgentPool(config, runtimes.openProviders(runtime))) {
       StructuredAgentRunner runner =
           new StructuredAgentRunner(
               pool,
               artifacts,
-              new InMemoryProviderCallRepository(),
+              providerCalls,
               ledger,
               redactor,
               new BoundedJsonRepairer(1_500_000),
@@ -1213,6 +1245,81 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
         totals.latencyMs());
   }
 
+  private static ExecutionUsage failureUsage(
+      Path runDirectory, String runId, LiveExecutionContext context) {
+    if (context == null) {
+      return ExecutionUsage.zero();
+    }
+    UsageTotals liveTotals = context.ledger().totals();
+    List<ProviderCallUsageEvidence> repositoryEvidence = List.of();
+    try {
+      repositoryEvidence = repositoryEvidence(context.providerCalls(), runId);
+    } catch (RuntimeException ignored) {
+      // The live ledger remains a safe aggregate fallback if repository recovery fails.
+    }
+    List<ProviderCallUsageEvidence> artifactEvidence = List.of();
+    try {
+      artifactEvidence = ProviderUsageRecovery.recoverEvidence(runDirectory, context.config());
+    } catch (RuntimeException | java.io.IOException ignored) {
+      // A damaged optional artifact cannot erase the live ledger's committed usage.
+    }
+    try {
+      List<ProviderCallUsageEvidence> evidence =
+          ProviderUsageRecovery.mergeEvidence(repositoryEvidence, artifactEvidence);
+      UsageTotals evidenceTotals = ProviderUsageRecovery.totals(evidence);
+      if (dominates(evidenceTotals, liveTotals)) {
+        return executionUsage(evidenceTotals, evidence);
+      }
+    } catch (RuntimeException ignored) {
+      // Conflicting request evidence is not guessed into a cumulative failure result.
+    }
+    return executionUsage(liveTotals);
+  }
+
+  private static List<ProviderCallUsageEvidence> repositoryEvidence(
+      ProviderCallRepository repository, String runId) {
+    List<ProviderCallUsageEvidence> evidence = new ArrayList<>();
+    for (ProviderCallRecord call : repository.findByRun(runId)) {
+      if (call.state() != ProviderCallState.SUCCEEDED
+          && call.state() != ProviderCallState.AMBIGUOUS) {
+        continue;
+      }
+      String requestId = call.requestId();
+      if (requestId == null || requestId.isBlank()) {
+        requestId = "provider-call:" + call.callId();
+      }
+      evidence.add(
+          new ProviderCallUsageEvidence(
+              requestId,
+              call.inputTokens(),
+              call.outputTokens(),
+              call.costUsd().add(call.possibleDuplicateCostUsd()),
+              call.latencyMs(),
+              call.responseArtifactHash()));
+    }
+    return List.copyOf(evidence);
+  }
+
+  private static boolean dominates(UsageTotals candidate, UsageTotals other) {
+    return candidate.calls() >= other.calls()
+        && candidate.inputTokens() >= other.inputTokens()
+        && candidate.outputTokens() >= other.outputTokens()
+        && candidate.costUsd().compareTo(other.costUsd()) >= 0
+        && candidate.latencyMs() >= other.latencyMs();
+  }
+
+  private static ExecutionUsage executionUsage(
+      UsageTotals totals, List<ProviderCallUsageEvidence> evidence) {
+    Objects.requireNonNull(totals, "totals");
+    return new ExecutionUsage(
+        totals.calls(),
+        totals.inputTokens(),
+        totals.outputTokens(),
+        totals.costUsd(),
+        totals.latencyMs(),
+        evidence);
+  }
+
   private static int safeInt(long value) {
     return (int) Math.min(Integer.MAX_VALUE, Math.max(0L, value));
   }
@@ -1326,6 +1433,9 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
       ComputationBroker broker,
       boolean sandboxEnabled,
       java.util.function.LongSupplier remainingCalls) {}
+
+  private record LiveExecutionContext(
+      CallLedger ledger, ProviderCallRepository providerCalls, SystemConfig config) {}
 
   private record ComputationTrace(
       String routeId,
