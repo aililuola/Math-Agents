@@ -20,7 +20,7 @@ final class ResearchEpochCommitStateMachineTest {
                     epoch,
                     epoch.authority().stableHash(),
                     Optional.empty(),
-                    false,
+                    Optional.empty(),
                     true)
                 .action())
         .isEqualTo(ResearchEpochCommitStateMachine.RecoveryAction.REPLAY_PREPARED);
@@ -36,7 +36,7 @@ final class ResearchEpochCommitStateMachineTest {
                     epoch(ResearchEpochStatus.COMMITTED),
                     receipt.authorityHashAfter(),
                     Optional.of(receipt),
-                    true,
+                    Optional.of(mergeReceipt(receipt)),
                     true)
                 .action())
         .isEqualTo(ResearchEpochCommitStateMachine.RecoveryAction.NO_OP_COMMITTED);
@@ -46,7 +46,7 @@ final class ResearchEpochCommitStateMachineTest {
                     epoch(ResearchEpochStatus.MERGE_PREPARED),
                     receipt.authorityHashAfter(),
                     Optional.of(receipt),
-                    false,
+                    Optional.empty(),
                     true)
                 .action())
         .isEqualTo(ResearchEpochCommitStateMachine.RecoveryAction.ROLL_FORWARD_RECEIPTED);
@@ -59,7 +59,7 @@ final class ResearchEpochCommitStateMachineTest {
             epoch(ResearchEpochStatus.MERGE_PREPARED),
             "partially-advanced-authority",
             Optional.empty(),
-            false,
+            Optional.empty(),
             true);
 
     assertThat(decision.quarantined()).isTrue();
@@ -76,7 +76,13 @@ final class ResearchEpochCommitStateMachineTest {
                     epoch,
                     epoch.authority().stableHash(),
                     Optional.empty(),
-                    true,
+                    Optional.of(
+                        new ResearchMergeReceipt(
+                            epoch.epochId(),
+                            epoch.mergePlanHash(),
+                            List.of("result-a"),
+                            List.of(),
+                            "authority-after")),
                     true)
                 .quarantined())
         .isTrue();
@@ -96,7 +102,7 @@ final class ResearchEpochCommitStateMachineTest {
                     epoch,
                     foreign.authorityHashAfter(),
                     Optional.of(foreign),
-                    false,
+                    Optional.empty(),
                     true)
                 .quarantined())
         .isTrue();
@@ -110,23 +116,46 @@ final class ResearchEpochCommitStateMachineTest {
                     epoch(ResearchEpochStatus.COMMITTED),
                     "legacy-authority",
                     Optional.empty(),
-                    false,
+                    Optional.empty(),
                     false)
                 .action())
         .isEqualTo(ResearchEpochCommitStateMachine.RecoveryAction.LEGACY_NO_RECEIPT);
   }
 
+  @Test
+  void legacyCommittedEpochWithOnlyOneReceiptIsQuarantined() {
+    ResearchEpochRecord epoch =
+        epoch(ResearchEpochStatus.COMMITTED)
+            .withAuthorityCommitProtocol(
+                ResearchAuthorityCommitProtocol.LEGACY_NO_RECEIPT);
+
+    assertThat(
+            stateMachine
+                .reconcile(
+                    epoch,
+                    "later-authority",
+                    Optional.of(receipt()),
+                    Optional.empty(),
+                    false)
+                .quarantined())
+        .isTrue();
+  }
+
   private static ResearchEpochRecord epoch(ResearchEpochStatus status) {
     FrozenResearchSnapshot frozen = ConcurrencyTestFixtures.snapshot();
-    return new ResearchEpochRecord(
-        frozen.epochId(),
-        frozen.snapshotHash(),
-        status,
-        List.of("work-a"),
-        List.of("result-a"),
-        "merge",
-        frozen.authority(),
-        1L);
+    ResearchEpochRecord epoch =
+        new ResearchEpochRecord(
+            frozen.epochId(),
+            frozen.snapshotHash(),
+            status,
+            List.of("work-a"),
+            List.of("result-a"),
+            "merge",
+            frozen.authority(),
+            1L);
+    return status == ResearchEpochStatus.COMMITTED
+        ? epoch.withAuthorityHashAfterCommit("authority-after")
+        : epoch;
   }
 
   private static ResearchAuthorityMutationReceipt receipt() {
@@ -140,5 +169,15 @@ final class ResearchEpochCommitStateMachineTest {
         List.of("claim-a"),
         List.of(),
         List.of());
+  }
+
+  private static ResearchMergeReceipt mergeReceipt(
+      ResearchAuthorityMutationReceipt mutation) {
+    return new ResearchMergeReceipt(
+        mutation.epochId(),
+        mutation.mergePlanHash(),
+        mutation.acceptedResultHashes(),
+        List.of(),
+        mutation.authorityHashAfter());
   }
 }

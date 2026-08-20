@@ -10,6 +10,8 @@
 - Documentation commit: `2173a31` (`docs(concurrency): record issue 012 verification`)
 - Final production-chain patch: `fix(concurrency): wire frozen epochs into authoritative desktop stages`
 - Final crash-atomic patch: `fix(concurrency): make epoch authority commits crash-atomic`
+- Legacy commit-protocol closure baseline: `0f2b186ea800fbc9a5f31a633c780b773cd3fcbf`
+- Legacy commit-protocol closure: `fix(concurrency): preserve legacy epoch commit protocol across upgrades`
 - Desktop checkpoint schema: `19 -> 20 -> 21`
 - PostgreSQL migration: `V6__research_concurrency_epochs.sql`
 
@@ -78,6 +80,20 @@ The first test-first build also failed because the baseline had no `FrozenResear
 merge plan, or concurrency telemetry API. That establishes the missing architecture, not by itself
 the complete runtime defect. The direct baseline source traces and the credential-selection race
 above provide the behavioral evidence; the fixed production tests provide the closure evidence.
+
+### 3.3 Legacy committed-Epoch behavioral evidence
+
+The final compatibility audit first reproduced the behavior through JSON checkpoint and restore
+boundaries before the production protocol API was added. Against `0f2b186`, a real schema-20
+checkpoint containing a committed Epoch without receipts
+restored once and was upgraded to schema 21, but a fresh Coordinator failed the second restore
+with `QUARANTINED_PARTIAL_AUTHORITY_COMMIT: committed epoch lacks durable receipts`.
+
+The same baseline Desktop restore path accepted four independently tampered modern committed
+receipts: merge-plan hash, authority-before hash, authority-after hash, and accepted-result hashes.
+Foreign-Epoch and dangling-merge cases were already rejected. A newly created schema-21 Epoch
+without receipts was also already rejected; that passing boundary was retained to ensure the
+legacy repair did not weaken the modern protocol.
 
 ## 4. Concurrency configuration
 
@@ -245,8 +261,17 @@ Desktop schema 21 adds `ResearchAuthorityMutationSnapshot`, containing the serve
 `ResearchAuthorityMutationReceipt` and its matching `ResearchMergeReceipt`. A receipt binds the
 Epoch ID, merge-plan hash, authority hashes before and after the batch, accepted result hashes,
 projected Claim IDs, Fact message IDs, and refuted obligation IDs. Its content hash and snapshot
-hash are checked during deserialization. A v20 checkpoint without this field migrates to an empty
-receipt ledger without a Provider call; all new committed Epochs require both receipts.
+hash are checked during deserialization.
+
+Receipt requirements are now an Epoch property rather than an inference from the outer checkpoint
+schema. `ResearchEpochRecord.authorityCommitProtocol` is either `LEGACY_NO_RECEIPT` or
+`RECEIPT_V1`, and `authorityHashAfterCommit` durably binds a modern committed receipt to its Epoch
+without incorrectly comparing an old Epoch with a later Campaign authority frontier. New Epochs
+are always `RECEIPT_V1`. A v19/v20 Epoch without protocol metadata migrates to
+`LEGACY_NO_RECEIPT`; the marker survives every subsequent schema-21 save and restore. An old
+pre-protocol schema-21 committed Epoch is classified as legacy only when both receipts are absent;
+when both receipts exist, migration derives its durable after-hash once and preserves the modern
+protocol. No receipt is synthesized and no Provider call is made during migration.
 
 The v19 migration supplies empty snapshots and rebuilds only the concurrency projection. It makes
 no model call and does not copy or reinterpret mathematical authority. Existing durable attempts
@@ -301,9 +326,14 @@ replayed once; a complete committed receipt is a no-op; a fully receipted prepar
 roll forward without reprojecting mathematics; and an advanced or internally inconsistent
 frontier without a complete receipt is quarantined as
 `QUARANTINED_PARTIAL_AUTHORITY_COMMIT`. Dangling merge receipts and receipts bound to another
-Epoch are also quarantined. The compatibility `executeFrozenResearchEpoch` path now records a
-no-authority-change receipt and commits its Epoch instead of leaving a permanent prepared
-frontier.
+Epoch are also quarantined. Every committed Epoch now traverses the same
+`ResearchEpochCommitStateMachine`; the former Desktop early-`continue` bypass was removed. The
+state machine validates Epoch ID, merge-plan hash, authority-before and durable authority-after
+hashes, accepted-result identity, exact accepted/rejected partition, and mutation/merge receipt
+agreement. A legacy committed Epoch is read-only compatible only when both receipts are absent;
+an inconsistent partial legacy receipt is quarantined. The compatibility
+`executeFrozenResearchEpoch` path records a no-authority-change receipt and commits its Epoch
+instead of leaving a permanent prepared frontier.
 
 ## 12. Twenty-round diagnostic
 
@@ -333,6 +363,36 @@ LEASE_HASH_AFTER_RESTORE=8270a46efc355a488dfd1738856fc7bc7700f8f2cd7b81f72fe6286
 TELEMETRY_HASH_BEFORE_RESTORE=1d7f53d7fbbdaa2d02a40806847f46d36fe4688e670069c3cf6c33738555fc1e
 TELEMETRY_HASH_AFTER_RESTORE=1d7f53d7fbbdaa2d02a40806847f46d36fe4688e670069c3cf6c33738555fc1e
 ROOT_HASH_CHANGES=0
+RESULT=PASS
+```
+
+### 12.1 Legacy protocol and committed-receipt diagnostics
+
+```text
+LEGACY COMMITTED EPOCH SECOND-RESTORE DIAGNOSTIC
+LEGACY_COMMITTED_EPOCHS=1
+FIRST_RESTORE_FAILURES=0
+SECOND_RESTORE_FAILURES=0
+THIRD_RESTORE_FAILURES=0
+LEGACY_EPOCH_PROTOCOL_LOSSES=0
+LEGACY_RECEIPTS_SYNTHESIZED=0
+PROVIDER_CALLS_DURING_MIGRATION=0
+POST_SECOND_RESTORE_EPOCH_STATUS=COMMITTED
+POST_SECOND_RESTORE_AUTHORITY_CHANGES=0
+RESULT=PASS
+
+COMMITTED EPOCH RECEIPT BINDING DIAGNOSTIC
+FOREIGN_EPOCH_RECEIPT_ACCEPTS=0
+MERGE_PLAN_MISMATCH_ACCEPTS=0
+AUTHORITY_BEFORE_MISMATCH_ACCEPTS=0
+AUTHORITY_AFTER_MISMATCH_ACCEPTS=0
+ACCEPTED_RESULT_MISMATCH_ACCEPTS=0
+DANGLING_MERGE_RECEIPT_ACCEPTS=0
+RESULT=PASS
+
+MODERN COMMITTED EPOCH MISSING-RECEIPT DIAGNOSTIC
+MODERN_COMMITTED_EPOCHS_WITHOUT_RECEIPT=1
+MODERN_MISSING_RECEIPT_QUARANTINES=1
 RESULT=PASS
 ```
 
@@ -367,7 +427,7 @@ TEMPORAL_REPLAY_DUPLICATE_CHILDREN=0
 DESKTOP_TEMPORAL_MERGE_HASH_MISMATCHES=0
 ```
 
-### 12.1 Final production-chain diagnostics
+### 12.2 Final production-chain diagnostics
 
 The final audit patch adds five black-box tests against the real Coordinator path. The figures
 below are computed from asserted state, not fixed status text.
@@ -500,6 +560,15 @@ rollback snapshot. It adds Core receipt/rollback/state-machine tests, a v20-to-v
 the four-window production hard-crash test, and an architecture test that forbids formal
 per-result persistence inside stable Epoch commit methods.
 
+The legacy protocol closure adds `ResearchAuthorityCommitProtocol`, the immutable protocol and
+after-authority binding on `ResearchEpochRecord`, and
+`ResearchEpochCommitProtocolMigration`. The pure migration policy was deliberately extracted from
+`DesktopSolveCoordinator`, keeping the Coordinator below SpotBugs' class-analysis limit without
+disabling or filtering any finding. Desktop restore now sends legacy and modern committed Epochs
+through the common state machine. Three new Desktop black-box suites cover schema-20 first,
+second, and third restore, six receipt-binding corruptions, old pre-protocol schema-21 migration,
+and the modern missing-receipt fail-closed boundary.
+
 Code-and-test diff by functional commit:
 
 - Commit A: `88 files changed, 3066 insertions(+), 12 deletions(-)`.
@@ -524,6 +593,7 @@ network call.
 | Desktop exact Issue 012 suite, including final five tests | 29 | 0 | 0 | 0 | PASS |
 | Final production and legacy Claim Court compatibility focus | 10 | 0 | 0 | 0 | PASS |
 | Desktop authority hard-crash/migration/architecture focus | 7 | 0 | 0 | 0 | PASS |
+| Legacy protocol and committed-receipt closure focus | 11 | 0 | 0 | 0 | PASS |
 
 Coverage includes configuration, frozen identity, work conflicts, state transitions, monotonic
 snapshots, atomic leases, fairness, role isolation, cooldown/failure isolation, actual global and
@@ -534,20 +604,21 @@ batches, atomicity, four in-commit hard-crash windows, v19/v20 migration, protec
 
 ## 15. Module and full verification
 
-The module regression command completed with `2693` tests, zero failures, zero errors, and four
-intentional skips across Contracts, Core, Server, and Desktop.
+The module regression command completed with `2698` tests, zero failures, zero errors, and four
+intentional skips across Contracts, Core, Server, and Desktop. The direct
+Core/Server/Desktop aggregate was `2633` tests with zero failures and zero errors.
 
-The final `./scripts/verify-all.ps1 -Offline` completed in `769 s` with:
+The final `./scripts/verify-all.ps1 -Offline` completed in `13 min 23 s` with:
 
 | Module/suite | Tests | Failures | Errors | Skipped |
 | --- | ---: | ---: | ---: | ---: |
 | Contracts unit | 65 | 0 | 0 | 0 |
-| Core unit | 1386 | 0 | 0 | 0 |
+| Core unit | 1387 | 0 | 0 | 0 |
 | Server unit | 917 | 0 | 0 | 3 |
-| Desktop unit | 325 | 0 | 0 | 1 |
+| Desktop unit | 329 | 0 | 0 | 1 |
 | Compatibility | 149 | 0 | 0 | 0 |
 | PostgreSQL/Sandbox failsafe IT | 26 | 0 | 0 | 0 |
-| **Total** | **2868** | **0** | **0** | **4** |
+| **Total** | **2873** | **0** | **0** | **4** |
 
 The Docker-backed integration run included `MathProofMeshApplicationIT`,
 `JdbcMessageRepositoryIT`, `MemoryProofGraphPostgresIT`, `PersistencePostgresIT`,
@@ -559,6 +630,12 @@ the two deliberate transaction exception rethrows. They were fixed with narrowly
 annotations after immutable copying and rollback behavior were verified; no SpotBugs rule was
 disabled. A sandboxed retry could not reach the Windows Docker named pipe. The final run used the
 local Docker Engine `29.6.2` outside that sandbox and passed all PostgreSQL/Testcontainers gates.
+
+The legacy closure's first clean release-gate attempt pushed `DesktopSolveCoordinator` just over
+SpotBugs' class-analysis limit and produced one `SKIPPED_CLASS_TOO_BIG` plus cascading suppression
+and unread-field findings. Moving the pure protocol migration into its own Core class restored
+full analysis. The standalone Desktop SpotBugs check and the final clean release gate then both
+reported zero findings; no rule, baseline, threshold, or suppression policy was weakened.
 
 All unchanged release gates passed:
 
@@ -613,6 +690,8 @@ ISSUE_013_AUTHORITY_FILES_NO_DIFF=PASS
   Provider replay or duplicate authority: PASS.
 - Desktop/Temporal deterministic parity: PASS.
 - Schema 20 and schema 21 compatibility migrations plus Flyway V6: PASS.
+- Per-Epoch legacy/modern commit protocol survives schema upgrade and repeated restore: PASS.
+- Modern committed receipt binding and missing-receipt fail-closed behavior: PASS.
 - Issues 001-011 regression and protected-file isolation: PASS.
 - Full offline verification including Docker PostgreSQL: PASS.
 - Issue 013 budget/token/stop-policy work: not started.

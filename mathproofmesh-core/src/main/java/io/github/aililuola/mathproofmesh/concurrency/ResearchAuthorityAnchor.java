@@ -58,6 +58,25 @@ public record ResearchAuthorityAnchor(
             runAuthorityHash));
   }
 
+  /** Hash of the mathematical authority projection that is stable across checkpoint restore. */
+  public String restoreStableHash() {
+    return CanonicalJson.stableHash(
+        List.of(
+            problemHash,
+            rootGoalHash,
+            negativeRegistryHash,
+            attemptArtifactLedgerHash,
+            claimLifecycleHash,
+            researchCheckpointHash,
+            proofGraphHash,
+            convergenceHash,
+            semanticPivotHash,
+            strategyPortfolioHash,
+            claimCourtHash,
+            brokerHash,
+            computationHash));
+  }
+
   private static String hash(String value, String label) {
     Objects.requireNonNull(value, label);
     String normalized = value.strip();

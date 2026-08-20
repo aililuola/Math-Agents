@@ -29,6 +29,8 @@ public final class ResearchEpochLedger {
             List.of(),
             "",
             snapshot.authority(),
+            ResearchAuthorityCommitProtocol.RECEIPT_V1,
+            "",
             1L);
     epochs.put(record.epochId(), record);
     version++;
@@ -42,6 +44,17 @@ public final class ResearchEpochLedger {
       String mergePlanHash) {
     ResearchEpochRecord prior = require(epochId);
     ResearchEpochRecord next = prior.transition(status, resultIds, mergePlanHash);
+    epochs.put(epochId, next);
+    version++;
+    return next;
+  }
+
+  public synchronized ResearchEpochRecord commit(String epochId, String authorityHashAfterCommit) {
+    ResearchEpochRecord prior = require(epochId);
+    ResearchEpochRecord next =
+        prior
+            .transition(ResearchEpochStatus.COMMITTED, null, null)
+            .withAuthorityHashAfterCommit(authorityHashAfterCommit);
     epochs.put(epochId, next);
     version++;
     return next;

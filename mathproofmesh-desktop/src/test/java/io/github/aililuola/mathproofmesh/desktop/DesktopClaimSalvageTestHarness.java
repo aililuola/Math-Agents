@@ -64,6 +64,7 @@ import io.github.aililuola.mathproofmesh.memory.TypedMemory;
 import io.github.aililuola.mathproofmesh.communication.MessageStoreSnapshot;
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactPromptBatch;
 import io.github.aililuola.mathproofmesh.communication.artifact.MathematicalArtifactBroker;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchAuthorityAnchor;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactUseManifest;
 import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactLedger;
@@ -296,6 +297,10 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
 
   DesktopSolveCoordinator.AuthoritativeConcurrencyDiagnostics concurrencyDiagnostics() {
     return coordinator.authoritativeConcurrencyDiagnosticsForTest();
+  }
+
+  ResearchAuthorityAnchor researchAuthorityAnchor() {
+    return coordinator.currentResearchAuthorityAnchorForTest();
   }
 
   void freezeAndCreateRoute(StrategyCard strategy) throws Exception {

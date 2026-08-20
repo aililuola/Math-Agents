@@ -11,6 +11,8 @@ public record ResearchEpochRecord(
     List<String> durableResultIds,
     String mergePlanHash,
     ResearchAuthorityAnchor authority,
+    ResearchAuthorityCommitProtocol authorityCommitProtocol,
+    String authorityHashAfterCommit,
     long version) {
   public ResearchEpochRecord {
     epochId = text(epochId, "epochId");
@@ -20,12 +22,14 @@ public record ResearchEpochRecord(
     durableResultIds =
         durableResultIds == null ? List.of() : durableResultIds.stream().distinct().sorted().toList();
     mergePlanHash = mergePlanHash == null ? "" : mergePlanHash.strip();
+    authorityHashAfterCommit =
+        authorityHashAfterCommit == null ? "" : authorityHashAfterCommit.strip();
     if (version < 1L) {
       throw new IllegalArgumentException("version must be positive");
     }
   }
 
-  /** Backward-compatible constructor for schema-20 snapshots without the frozen authority body. */
+  /** Source-compatible constructor for callers without the frozen authority body. */
   public ResearchEpochRecord(
       String epochId,
       String snapshotHash,
@@ -42,6 +46,31 @@ public record ResearchEpochRecord(
         durableResultIds,
         mergePlanHash,
         null,
+        ResearchAuthorityCommitProtocol.RECEIPT_V1,
+        "",
+        version);
+  }
+
+  /** Source-compatible constructor for callers created before commit protocols were durable. */
+  public ResearchEpochRecord(
+      String epochId,
+      String snapshotHash,
+      ResearchEpochStatus status,
+      List<String> workItemIds,
+      List<String> durableResultIds,
+      String mergePlanHash,
+      ResearchAuthorityAnchor authority,
+      long version) {
+    this(
+        epochId,
+        snapshotHash,
+        status,
+        workItemIds,
+        durableResultIds,
+        mergePlanHash,
+        authority,
+        ResearchAuthorityCommitProtocol.RECEIPT_V1,
+        "",
         version);
   }
 
@@ -59,7 +88,41 @@ public record ResearchEpochRecord(
         resultIds == null ? durableResultIds : resultIds,
         nextMergePlanHash == null ? mergePlanHash : nextMergePlanHash,
         authority,
+        authorityCommitProtocol,
+        authorityHashAfterCommit,
         version + 1L);
+  }
+
+  public ResearchEpochRecord withAuthorityCommitProtocol(
+      ResearchAuthorityCommitProtocol protocol) {
+    return new ResearchEpochRecord(
+        epochId,
+        snapshotHash,
+        status,
+        workItemIds,
+        durableResultIds,
+        mergePlanHash,
+        authority,
+        Objects.requireNonNull(protocol, "protocol"),
+        authorityHashAfterCommit,
+        version);
+  }
+
+  public ResearchEpochRecord withAuthorityHashAfterCommit(String authorityHash) {
+    if (status != ResearchEpochStatus.COMMITTED) {
+      throw new IllegalStateException("only a committed epoch can bind authorityHashAfterCommit");
+    }
+    return new ResearchEpochRecord(
+        epochId,
+        snapshotHash,
+        status,
+        workItemIds,
+        durableResultIds,
+        mergePlanHash,
+        authority,
+        authorityCommitProtocol,
+        text(authorityHash, "authorityHashAfterCommit"),
+        version);
   }
 
   @Override

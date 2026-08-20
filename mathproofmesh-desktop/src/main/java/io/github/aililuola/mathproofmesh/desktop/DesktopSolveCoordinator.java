@@ -169,10 +169,12 @@ import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochCommitter;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochCommitResult;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochCommitStateMachine;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochRecord;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochCommitProtocolMigration;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochSnapshot;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochStatus;
 import io.github.aililuola.mathproofmesh.concurrency.FrozenResearchSnapshot;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchAuthorityAnchor;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchAuthorityCommitProtocol;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchAuthorityMutationLedger;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchAuthorityMutationReceipt;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchAuthorityMutationSnapshot;
@@ -727,7 +729,7 @@ final class DesktopSolveCoordinator {
                     snapshot.epochId(),
                     plan.mergePlanHash(),
                     frozenAuthorityHash,
-                    frozenAuthorityHash,
+                    snapshot.authority().restoreStableHash(),
                     acceptedResultHashes,
                     List.of(),
                     List.of(),
@@ -753,7 +755,7 @@ final class DesktopSolveCoordinator {
               null,
               null);
         });
-    researchEpochs.transition(snapshot.epochId(), ResearchEpochStatus.COMMITTED, null, null);
+    researchEpochs.commit(snapshot.epochId(), commit.authorityMutation().authorityHashAfter());
     return settled;
   }
 
@@ -913,7 +915,7 @@ final class DesktopSolveCoordinator {
                     null,
                     null,
                     null));
-        researchEpochs.transition(epochId, ResearchEpochStatus.COMMITTED, null, null);
+        researchEpochs.commit(epochId, commit.authorityMutation().authorityHashAfter());
         restorablePreparedEpochIds.remove(epochId);
         failAuthoritativeConcurrencyAt(
             AuthoritativeConcurrencyFailurePoint.AFTER_EPOCH_MARKED_COMMITTED_BEFORE_CHECKPOINT);
@@ -1004,46 +1006,49 @@ final class DesktopSolveCoordinator {
     return Optional.empty();
   }
 
-  private void reconcileResearchEpochAuthorityCommitsAfterRestore(int schemaVersion) {
-    boolean receiptsRequired = schemaVersion >= 21;
+  private void reconcileResearchEpochAuthorityCommitsAfterRestore() {
     restorablePreparedEpochIds.clear();
     for (ResearchEpochRecord epoch : researchEpochs.snapshot().epochs()) {
       Optional<ResearchAuthorityMutationReceipt> mutation =
           researchAuthorityMutations.authorityMutation(epoch.epochId());
       Optional<ResearchMergeReceipt> merge =
           researchAuthorityMutations.mergeReceipt(epoch.epochId());
-      if (epoch.status() == ResearchEpochStatus.COMMITTED) {
-        if (receiptsRequired && (mutation.isEmpty() || merge.isEmpty())) {
-          throw new IllegalStateException(
-              "QUARANTINED_PARTIAL_AUTHORITY_COMMIT: committed epoch lacks durable receipts");
-        }
-        continue;
-      }
-      if (epoch.status() != ResearchEpochStatus.MERGE_PREPARED || epoch.authority() == null) {
-        continue;
-      }
       ResearchAuthorityAnchor current = currentResearchAuthorityAnchor();
-      if (mutation.isEmpty()
+      if (epoch.status() == ResearchEpochStatus.MERGE_PREPARED
+          && epoch.authority() != null
+          && mutation.isEmpty()
           && merge.isEmpty()
           && authorityEquivalentAcrossRestore(epoch.authority(), current)) {
         restorablePreparedEpochIds.add(epoch.epochId());
         continue;
       }
+      ResearchAuthorityCommitProtocol protocol =
+          Objects.requireNonNull(
+              epoch.authorityCommitProtocol(), "restored epoch authority commit protocol");
       ResearchEpochCommitStateMachine.RecoveryDecision decision =
           researchEpochCommitStateMachine.reconcile(
               epoch,
-              current.stableHash(),
+              current.restoreStableHash(),
               mutation,
-              merge.isPresent(),
-              receiptsRequired);
+              merge,
+              protocol == ResearchAuthorityCommitProtocol.RECEIPT_V1);
       if (decision.action()
           == ResearchEpochCommitStateMachine.RecoveryAction.ROLL_FORWARD_RECEIPTED) {
         rollForwardReceiptedResearchEpoch(epoch, mutation.orElseThrow(), merge);
+      } else if (decision.action()
+          == ResearchEpochCommitStateMachine.RecoveryAction.REPLAY_PREPARED) {
+        restorablePreparedEpochIds.add(epoch.epochId());
       } else if (decision.quarantined()) {
-        researchEpochs.transition(
-            epoch.epochId(), ResearchEpochStatus.QUARANTINED, null, null);
+        if (epoch.status() != ResearchEpochStatus.COMMITTED) {
+          researchEpochs.transition(
+              epoch.epochId(), ResearchEpochStatus.QUARANTINED, null, null);
+        }
         throw new IllegalStateException(
-            decision.code() + ": " + changedAuthorityProjections(epoch.authority(), current));
+            decision.code()
+                + ": "
+                + (epoch.authority() == null
+                    ? "missing frozen epoch authority"
+                    : changedAuthorityProjections(epoch.authority(), current)));
       }
     }
   }
@@ -1080,7 +1085,7 @@ final class DesktopSolveCoordinator {
               null,
               null);
         });
-    researchEpochs.transition(epoch.epochId(), ResearchEpochStatus.COMMITTED, null, null);
+    researchEpochs.commit(epoch.epochId(), mutation.authorityHashAfter());
     restorablePreparedEpochIds.remove(epoch.epochId());
   }
 
@@ -1310,7 +1315,7 @@ final class DesktopSolveCoordinator {
         frozen.epochId(),
         mergePlanHash,
         frozen.authority().stableHash(),
-        currentResearchAuthorityAnchor().stableHash(),
+        currentResearchAuthorityAnchor().restoreStableHash(),
         acceptedResultHashes,
         projectedClaimIds,
         factMessageIds,
@@ -1440,6 +1445,10 @@ final class DesktopSolveCoordinator {
             .collect(
                 java.util.stream.Collectors.toCollection(
                     () -> java.util.EnumSet.noneOf(ResearchWorkKind.class))));
+  }
+
+  ResearchAuthorityAnchor currentResearchAuthorityAnchorForTest() {
+    return currentResearchAuthorityAnchor();
   }
 
   private void failAuthoritativeConcurrencyAt(AuthoritativeConcurrencyFailurePoint point) {
@@ -12964,10 +12973,14 @@ final class DesktopSolveCoordinator {
     migrateAndRevalidateLegacyCanonicalProofTasks(checkpoint.schemaVersion());
     attemptArtifacts = AttemptArtifactLedger.restore(checkpoint.attemptArtifacts());
     researchCheckpoints = ResearchCheckpointLedger.restore(checkpoint.researchCheckpoints());
-    researchEpochs.restore(checkpoint.researchEpochs());
     researchTasks.restore(checkpoint.researchTasks());
     researchResults.restore(checkpoint.researchResults());
     researchAuthorityMutations.restore(checkpoint.researchAuthorityMutations());
+    researchEpochs.restore(
+        ResearchEpochCommitProtocolMigration.migrate(
+            checkpoint.schemaVersion(),
+            checkpoint.researchEpochs(),
+            checkpoint.researchAuthorityMutations()));
     restorablePreparedEpochIds.clear();
     checkpoint.researchEpochs().epochs().stream()
         .filter(epoch -> epoch.status() == ResearchEpochStatus.MERGE_PREPARED)
@@ -13178,7 +13191,7 @@ final class DesktopSolveCoordinator {
                 strategyArchive.rejectChild(
                     strategyId, "negative-knowledge://restore-revalidation"));
     rebuildRouteRegistry();
-    reconcileResearchEpochAuthorityCommitsAfterRestore(checkpoint.schemaVersion());
+    reconcileResearchEpochAuthorityCommitsAfterRestore();
     if (checkpoint.schemaVersion() < 17) {
       mathematicalArtifactBroker.migrateLegacy(
           checkpoint.messageStore(),
