@@ -40,6 +40,16 @@ public record ResearchEpochRecord(
         version + 1L);
   }
 
+  @Override
+  public List<String> workItemIds() {
+    return List.copyOf(workItemIds);
+  }
+
+  @Override
+  public List<String> durableResultIds() {
+    return List.copyOf(durableResultIds);
+  }
+
   private static boolean allowed(ResearchEpochStatus prior, ResearchEpochStatus next) {
     if (prior == next) {
       return true;

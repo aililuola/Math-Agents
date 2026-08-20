@@ -21,6 +21,11 @@ import io.github.aililuola.mathproofmesh.contract.StrategySet;
 import io.github.aililuola.mathproofmesh.contract.TriageResult;
 import io.github.aililuola.mathproofmesh.contract.ToolAuditReport;
 import io.github.aililuola.mathproofmesh.contract.VerificationReport;
+import io.github.aililuola.mathproofmesh.concurrency.AgentLeaseSnapshot;
+import io.github.aililuola.mathproofmesh.concurrency.ConcurrencyTelemetrySnapshot;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochSnapshot;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchResultSnapshot;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchTaskSnapshot;
 import io.github.aililuola.mathproofmesh.communication.MessageStoreSnapshot;
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactDeliverySnapshot;
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactInvalidationSnapshot;
@@ -99,6 +104,11 @@ record DesktopSolveCheckpoint(
     ClaimCourtSnapshot claimCourt,
     ClaimCourtStageExecutionSnapshot claimCourtExecutions,
     ResearchCheckpointSnapshot researchCheckpoints,
+    ResearchEpochSnapshot researchEpochs,
+    ResearchTaskSnapshot researchTasks,
+    ResearchResultSnapshot researchResults,
+    AgentLeaseSnapshot agentLeases,
+    ConcurrencyTelemetrySnapshot concurrencyTelemetry,
     MessageStoreSnapshot messageStore,
     BrokerArtifactRegistrySnapshot brokerArtifactRegistry,
     BrokerArtifactPublicationSnapshot brokerArtifactPublications,
@@ -141,7 +151,7 @@ record DesktopSolveCheckpoint(
     RunStateAnchor runStateAnchor,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 19;
+  static final int CURRENT_SCHEMA_VERSION = 20;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {
@@ -169,6 +179,14 @@ record DesktopSolveCheckpoint(
             : claimCourtExecutions;
     researchCheckpoints =
         researchCheckpoints == null ? ResearchCheckpointSnapshot.empty() : researchCheckpoints;
+    researchEpochs = researchEpochs == null ? ResearchEpochSnapshot.empty() : researchEpochs;
+    researchTasks = researchTasks == null ? ResearchTaskSnapshot.empty() : researchTasks;
+    researchResults = researchResults == null ? ResearchResultSnapshot.empty() : researchResults;
+    agentLeases = agentLeases == null ? AgentLeaseSnapshot.empty() : agentLeases;
+    concurrencyTelemetry =
+        concurrencyTelemetry == null
+            ? ConcurrencyTelemetrySnapshot.empty()
+            : concurrencyTelemetry;
     brokerArtifactRegistry =
         brokerArtifactRegistry == null
             ? BrokerArtifactRegistrySnapshot.empty()

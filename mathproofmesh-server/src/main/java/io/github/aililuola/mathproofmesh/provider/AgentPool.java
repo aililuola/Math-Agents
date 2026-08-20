@@ -11,6 +11,7 @@ import io.github.aililuola.mathproofmesh.concurrency.AgentLeaseRequest;
 import io.github.aililuola.mathproofmesh.concurrency.AgentLeaseSnapshot;
 import io.github.aililuola.mathproofmesh.concurrency.AgentLeaseStatus;
 import io.github.aililuola.mathproofmesh.concurrency.ConcurrencyEventType;
+import io.github.aililuola.mathproofmesh.concurrency.ConcurrencyMetrics;
 import io.github.aililuola.mathproofmesh.concurrency.ConcurrencyTelemetryLedger;
 import io.github.aililuola.mathproofmesh.concurrency.ConcurrencyTelemetrySnapshot;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
@@ -222,18 +223,41 @@ public final class AgentPool implements AutoCloseable {
     return telemetry.snapshot();
   }
 
+  public synchronized ConcurrencyMetrics concurrencyMetrics() {
+    return telemetry.metrics(
+        concurrency.researchSlots(), concurrency.researchSlots() + concurrency.coordinationSlots());
+  }
+
+  public synchronized void recordConcurrencyEvent(
+      ConcurrencyEventType type,
+      String epochId,
+      String workItemId,
+      String agentId,
+      int readyWorkCount) {
+    telemetry.record(type, epochId, workItemId, agentId, readyWorkCount);
+  }
+
   public synchronized void restoreLeases(AgentLeaseSnapshot snapshot, String activeRunId) {
     leaseLedger.restore(snapshot, requireText(activeRunId, "activeRunId"));
     leasedCapacity = 0;
     leasedResearchCapacity = 0;
     epochBusyNanos.clear();
     runLeaseCounts.clear();
+    for (AgentLeaseRecord record : snapshot.leases()) {
+      runLeaseCounts
+          .computeIfAbsent(record.runId(), ignored -> new LinkedHashMap<>())
+          .merge(record.agentId(), 1L, Long::sum);
+    }
     for (AgentRuntime agent : agents.values()) {
       while (agent.reservedCalls() > 0) {
         agent.releaseLease(1, 0L);
       }
     }
     notifyAll();
+  }
+
+  public synchronized void restoreConcurrencyTelemetry(ConcurrencyTelemetrySnapshot snapshot) {
+    telemetry.restore(Objects.requireNonNull(snapshot, "snapshot"));
   }
 
   synchronized AgentLeaseRecord markLeaseRunning(String leaseId) {

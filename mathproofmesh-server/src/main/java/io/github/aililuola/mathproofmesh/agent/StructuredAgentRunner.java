@@ -214,6 +214,57 @@ public final class StructuredAgentRunner {
       String reasoningEffort,
       ResearchCheckpointSink sink,
       ResearchCheckpointFallbackEvidence fallbackEvidence) {
+    return callCheckpointedBound(
+        runId,
+        idempotencyKey,
+        role,
+        bundle,
+        fixedAgent,
+        budgetBucket,
+        thinkingEnabled,
+        reasoningEffort,
+        sink,
+        fallbackEvidence,
+        null);
+  }
+
+  public <T> CheckpointedStructuredCallResult<T> callCheckpointedLeased(
+      String runId,
+      String idempotencyKey,
+      CheckpointedPromptBundle<T> bundle,
+      AgentLease lease,
+      String budgetBucket,
+      Boolean thinkingEnabled,
+      String reasoningEffort,
+      ResearchCheckpointSink sink,
+      ResearchCheckpointFallbackEvidence fallbackEvidence) {
+    Objects.requireNonNull(lease, "lease");
+    return callCheckpointedBound(
+        runId,
+        idempotencyKey,
+        "",
+        bundle,
+        lease.agent(),
+        budgetBucket,
+        thinkingEnabled,
+        reasoningEffort,
+        sink,
+        fallbackEvidence,
+        lease);
+  }
+
+  private <T> CheckpointedStructuredCallResult<T> callCheckpointedBound(
+      String runId,
+      String idempotencyKey,
+      String role,
+      CheckpointedPromptBundle<T> bundle,
+      AgentRuntime fixedAgent,
+      String budgetBucket,
+      Boolean thinkingEnabled,
+      String reasoningEffort,
+      ResearchCheckpointSink sink,
+      ResearchCheckpointFallbackEvidence fallbackEvidence,
+      AgentLease lease) {
     Objects.requireNonNull(bundle, "bundle");
     AgentRuntime agent =
         fixedAgent == null
@@ -235,7 +286,8 @@ public final class StructuredAgentRunner {
             thinkingEnabled,
             reasoningEffort,
             parseRetries,
-            context);
+            context,
+            lease);
     CheckpointedResearchEnvelope envelope = context.validatedEnvelope(envelopeResult.value());
     StructuredCallResult<T> mapped;
     try {
@@ -253,7 +305,8 @@ public final class StructuredAgentRunner {
               false,
               null,
               0,
-              null);
+              null,
+              lease);
       mapped =
           new StructuredCallResult<>(
               repairedResult.value(),
@@ -424,11 +477,6 @@ public final class StructuredAgentRunner {
     return reasoningTraces.findByProviderCallId(providerCallId);
   }
 
-  @SuppressFBWarnings(
-      value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
-      justification =
-          "After persisting the correct terminal ledger state, this private boundary "
-              + "must preserve the original typed provider or parsing failure.")
   private <T> StructuredCallResult<T> callSingle(
       String runId,
       String idempotencyKey,
@@ -454,6 +502,11 @@ public final class StructuredAgentRunner {
         null);
   }
 
+  @SuppressFBWarnings(
+      value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
+      justification =
+          "After persisting the correct terminal ledger state, this private boundary "
+              + "must preserve the original typed provider or parsing failure.")
   private <T> StructuredCallResult<T> callSingle(
       String runId,
       String idempotencyKey,

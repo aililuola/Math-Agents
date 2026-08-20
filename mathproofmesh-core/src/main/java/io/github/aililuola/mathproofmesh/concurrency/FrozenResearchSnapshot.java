@@ -1,6 +1,8 @@
 package io.github.aililuola.mathproofmesh.concurrency;
 
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Map;
 import java.util.Objects;
 
@@ -20,7 +22,7 @@ public record FrozenResearchSnapshot(
                 "authority_hash", authority.stableHash(),
                 "public_input_refs", publicInputRefs));
     snapshotHash = snapshotHash == null || snapshotHash.isBlank() ? computed : snapshotHash.strip();
-    if (!computed.equals(snapshotHash)) {
+    if (!hashEquals(computed, snapshotHash)) {
       throw new IllegalArgumentException("snapshotHash does not match frozen content");
     }
   }
@@ -42,5 +44,10 @@ public record FrozenResearchSnapshot(
       throw new IllegalArgumentException(label + " must not be blank");
     }
     return normalized;
+  }
+
+  private static boolean hashEquals(String left, String right) {
+    return MessageDigest.isEqual(
+        left.getBytes(StandardCharsets.US_ASCII), right.getBytes(StandardCharsets.US_ASCII));
   }
 }

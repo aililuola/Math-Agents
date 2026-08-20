@@ -15,9 +15,12 @@ import io.github.aililuola.mathproofmesh.workflow.WorkflowContracts.SolveResult;
 import io.github.aililuola.mathproofmesh.workflow.WorkflowContracts.WakeRouteSignal;
 import io.temporal.api.enums.v1.ParentClosePolicy;
 import io.temporal.workflow.ChildWorkflowOptions;
+import io.temporal.workflow.Async;
+import io.temporal.workflow.Promise;
 import io.temporal.workflow.UpdateValidatorMethod;
 import io.temporal.workflow.Workflow;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -67,6 +70,7 @@ public final class MathProofMeshSolveWorkflowImpl implements MathProofMeshSolveW
 
     advance(RunStageMachine.Stage.ROUTE_EXPLORATION);
     ArrayList<String> claimIds = new ArrayList<>();
+    List<Promise<RouteResult>> routePromises = new ArrayList<>();
     for (int index = 0; index < request.routeCount(); index++) {
       waitIfPaused();
       if (cancelled) {
@@ -78,18 +82,32 @@ public final class MathProofMeshSolveWorkflowImpl implements MathProofMeshSolveW
           Workflow.newChildWorkflowStub(
               RouteExplorationWorkflow.class,
               ChildWorkflowOptions.newBuilder()
-                  .setWorkflowId(request.runId() + "-" + routeId)
+                  .setWorkflowId(
+                      request.runId()
+                          + "-route-epoch-g"
+                          + request.generation()
+                          + "-work-"
+                          + routeId)
                   .setTaskQueue(WorkflowContracts.TASK_QUEUE)
                   .setParentClosePolicy(ParentClosePolicy.PARENT_CLOSE_POLICY_REQUEST_CANCEL)
                   .build());
-      RouteResult route =
-          child.explore(
+      routePromises.add(
+          Async.function(
+              child::explore,
               new RouteRequest(
                   request.runId(),
                   routeId,
                   "strategy-" + index,
                   checkpointId,
-                  Math.max(0, budget / request.routeCount())));
+                  Math.max(0, budget / request.routeCount()))));
+    }
+    Promise.allOf(routePromises).get();
+    List<RouteResult> routeResults =
+        routePromises.stream()
+            .map(Promise::get)
+            .sorted(Comparator.comparing(RouteResult::routeId))
+            .toList();
+    for (RouteResult route : routeResults) {
       if (route.accepted()) {
         completedRoutes.add(route.routeId());
         claimIds.addAll(route.verifiedClaimIds());

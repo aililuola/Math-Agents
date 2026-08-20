@@ -27,4 +27,36 @@ final class AgentLeaseHardCrashRecoveryTest {
       }
     }
   }
+
+  @Test
+  void reacquiringTheSameWorkIdentityAfterRestoreUsesANewLeaseFence() {
+    SystemConfig config = AgentLeaseTestSupport.config();
+    AgentLeaseSnapshot checkpoint;
+    String firstLeaseId;
+    try (AgentPool pool = AgentLeaseTestSupport.pool(config, AgentLeaseTestSupport.responders(config))) {
+      try (AgentLease lease =
+          pool.acquireLease(
+              AgentLeaseTestSupport.request("same-work", AgentLeaseClass.RESEARCH, "explorer"))) {
+        firstLeaseId = lease.leaseId();
+      }
+      checkpoint = pool.leaseSnapshot();
+    }
+
+    try (AgentPool restored =
+        AgentLeaseTestSupport.pool(config, AgentLeaseTestSupport.responders(config))) {
+      restored.restoreLeases(checkpoint, "run");
+      String restoredLeaseId;
+      try (AgentLease lease =
+          restored.acquireLease(
+              AgentLeaseTestSupport.request("same-work", AgentLeaseClass.RESEARCH, "explorer"))) {
+        restoredLeaseId = lease.leaseId();
+      }
+      assertThat(restoredLeaseId).isNotEqualTo(firstLeaseId);
+      try (AgentLease next =
+          restored.acquireLease(
+              AgentLeaseTestSupport.request("next-work", AgentLeaseClass.RESEARCH, "explorer"))) {
+        assertThat(next.agent()).isNotNull();
+      }
+    }
+  }
 }

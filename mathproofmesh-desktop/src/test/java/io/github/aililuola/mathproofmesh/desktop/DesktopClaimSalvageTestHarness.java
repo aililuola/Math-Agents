@@ -14,6 +14,7 @@ import io.github.aililuola.mathproofmesh.computation.ComputationHandlerRegistry;
 import io.github.aililuola.mathproofmesh.computation.ComputationLimits;
 import io.github.aililuola.mathproofmesh.computation.InMemoryComputationCache;
 import io.github.aililuola.mathproofmesh.config.AgentConfig;
+import io.github.aililuola.mathproofmesh.config.ConcurrencyConfig;
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
 import io.github.aililuola.mathproofmesh.contract.AttemptStatus;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
@@ -91,11 +92,14 @@ import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 
 final class DesktopClaimSalvageTestHarness implements AutoCloseable {
   static final String SOURCE = DesktopNegativeKnowledgeTestHarness.SOURCE;
@@ -171,6 +175,43 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
 
   void freezeAndCreateRoute() throws Exception {
     freezeAndCreateRoute(validStrategy());
+  }
+
+  void prepareIndependentClaimCourtBatch(int routeCount) throws Exception {
+    if (routeCount < 2) {
+      throw new IllegalArgumentException("routeCount must be at least two");
+    }
+    freezeAndCreateRoute();
+    @SuppressWarnings("unchecked")
+    Map<String, Object> blueprints =
+        (Map<String, Object>) rawField(coordinator, "strategyBlueprints");
+    Object baseBlueprint = blueprints.get(validStrategy().strategyId());
+    while (routes(coordinator).size() < routeCount) {
+      StrategyCard strategy = validStrategy("claim-court-batch-" + routes(coordinator).size());
+      blueprints.put(strategy.strategyId(), baseBlueprint);
+      invoke(
+          "addRoute",
+          new Class<?>[] {StrategyCard.class, int.class},
+          new Object[] {strategy, 0});
+    }
+    setRound(1);
+    List<Object> activeRoutes = routes(coordinator);
+    for (int index = 0; index < routeCount; index++) {
+      installFailedAttempt(
+          activeRoutes.get(index),
+          100 + index,
+          List.of(
+              claim(
+                  "parallel-claim-" + index,
+                  "PARALLEL_VALID_LOCAL_" + index + ": every even square is divisible by four.",
+                  List.of("local_lemma"))),
+          List.of(),
+          null);
+    }
+  }
+
+  int maximumConcurrentClaimCourtCalls() {
+    return responder.maximumConcurrentCourtCalls();
   }
 
   void freezeAndCreateRoute(StrategyCard strategy) throws Exception {
@@ -322,7 +363,16 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
       Integer contextManifestVersion)
       throws ReflectiveOperationException {
     setRound(round);
-    Object route = route();
+    installFailedAttempt(route(), round, claims, contextBindings, contextManifestVersion);
+  }
+
+  private static void installFailedAttempt(
+      Object route,
+      int round,
+      List<ClaimCard> claims,
+      List<ClaimSemanticContextBinding> contextBindings,
+      Integer contextManifestVersion)
+      throws ReflectiveOperationException {
     AgentRuntime author = field(route, "author", AgentRuntime.class);
     StrategyCard strategy = field(route, "strategy", StrategyCard.class);
     ProofAttempt attempt =
@@ -911,12 +961,24 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
         source.continuation(),
         source.deepExplorationPolicy(),
         source.computation().withSandboxedPythonEnabled(false),
+        new ConcurrencyConfig(true, 4, 1, 5, 4, true, false, 25, 2),
         source.runtime());
   }
 
   private static AgentConfig mockAgent(AgentConfig source) {
+    LinkedHashSet<String> roles = new LinkedHashSet<>(source.roles());
+    roles.addAll(
+        List.of(
+            "counterexample_hunter",
+            "route_skeptic",
+            "detailed_verifier",
+            "route_referee",
+            "route_prover",
+            "explorer",
+            "bridge_prover",
+            "final_verifier"));
     return new AgentConfig(
-        source.id(), "mock", "claim-review-model", null, null, null, source.roles(),
+        source.id(), "mock", "claim-review-model", null, null, null, List.copyOf(roles),
         source.specialties(), source.maxConcurrency(), source.requestsPerMinute(),
         source.temperature(), source.maxOutputTokens(), source.providerMaxOutputTokens(),
         source.timeoutSeconds(), source.trustPrior(), source.enabled(), source.pricing(), Map.of(),
@@ -956,13 +1018,27 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
       String court) {}
 
   private static final class ClaimReviewResponder implements MockResponder {
-    private final List<ProviderRequest> requests = new ArrayList<>();
-    private final Map<String, Integer> reviewCalls = new LinkedHashMap<>();
+    private final List<ProviderRequest> requests = new CopyOnWriteArrayList<>();
+    private final Map<String, Integer> reviewCalls = new ConcurrentHashMap<>();
     private final List<List<String>> explorationVerifiedFacts = new ArrayList<>();
     private final List<List<String>> explorationBrokerArtifactIds = new ArrayList<>();
+    private final AtomicInteger activeCourtCalls = new AtomicInteger();
+    private final AtomicInteger maximumCourtCalls = new AtomicInteger();
 
     @Override
     public LLMResponse respond(ProviderRequest request) {
+      boolean courtCall = request.schemaName().startsWith("Claim");
+      if (courtCall) {
+        int active = activeCourtCalls.incrementAndGet();
+        maximumCourtCalls.accumulateAndGet(active, Math::max);
+        try {
+          Thread.sleep(500L);
+        } catch (InterruptedException exception) {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException("claim court test call interrupted", exception);
+        }
+      }
+      try {
       if ("InitialExplorationTurn".equals(request.schemaName())) {
         JsonNode context = sanitizedContext(request);
         List<String> facts = new ArrayList<>();
@@ -1046,6 +1122,15 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
               "artifact://claim-review/" + attemptId,
               new UsageRecord());
       return response(request, ContractObjectMapper.write(batch));
+      } finally {
+        if (courtCall) {
+          activeCourtCalls.decrementAndGet();
+        }
+      }
+    }
+
+    int maximumConcurrentCourtCalls() {
+      return maximumCourtCalls.get();
     }
 
     private LLMResponse statementFalsification(ProviderRequest request) {

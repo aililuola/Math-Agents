@@ -1,6 +1,8 @@
 package io.github.aililuola.mathproofmesh.concurrency;
 
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -28,7 +30,7 @@ public record ResearchMergePlan(
         CanonicalJson.stableHash(
             List.of(epochId, snapshotHash, CanonicalJson.stableHash(decisions)));
     mergePlanHash = mergePlanHash == null || mergePlanHash.isBlank() ? computed : mergePlanHash.strip();
-    if (epochId.isEmpty() || snapshotHash.isEmpty() || !computed.equals(mergePlanHash)) {
+    if (epochId.isEmpty() || snapshotHash.isEmpty() || !hashEquals(computed, mergePlanHash)) {
       throw new IllegalArgumentException("invalid deterministic merge plan");
     }
   }
@@ -48,5 +50,10 @@ public record ResearchMergePlan(
         .filter(ResearchMergeDecision::accepted)
         .map(ResearchMergeDecision::resultHash)
         .toList();
+  }
+
+  private static boolean hashEquals(String left, String right) {
+    return MessageDigest.isEqual(
+        left.getBytes(StandardCharsets.US_ASCII), right.getBytes(StandardCharsets.US_ASCII));
   }
 }

@@ -1,6 +1,8 @@
 package io.github.aililuola.mathproofmesh.concurrency;
 
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -43,7 +45,7 @@ public record ResearchWorkResultEnvelope(
                 CanonicalJson.stableHash(computationRefs),
                 CanonicalJson.stableHash(usageRefs)));
     resultHash = resultHash == null || resultHash.isBlank() ? computed : resultHash.strip();
-    if (!computed.equals(resultHash)) {
+    if (!hashEquals(computed, resultHash)) {
       throw new IllegalArgumentException("resultHash does not match result content");
     }
   }
@@ -78,6 +80,21 @@ public record ResearchWorkResultEnvelope(
     return Map.copyOf(publicStructuredResult);
   }
 
+  @Override
+  public List<String> researchCheckpointRefs() {
+    return List.copyOf(researchCheckpointRefs);
+  }
+
+  @Override
+  public List<String> computationRefs() {
+    return List.copyOf(computationRefs);
+  }
+
+  @Override
+  public List<String> usageRefs() {
+    return List.copyOf(usageRefs);
+  }
+
   private static List<String> safe(List<String> values) {
     return values == null ? List.of() : List.copyOf(values);
   }
@@ -89,5 +106,10 @@ public record ResearchWorkResultEnvelope(
       throw new IllegalArgumentException(label + " must not be blank");
     }
     return normalized;
+  }
+
+  private static boolean hashEquals(String left, String right) {
+    return MessageDigest.isEqual(
+        left.getBytes(StandardCharsets.US_ASCII), right.getBytes(StandardCharsets.US_ASCII));
   }
 }

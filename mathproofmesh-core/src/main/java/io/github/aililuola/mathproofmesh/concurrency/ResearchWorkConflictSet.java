@@ -24,6 +24,31 @@ public record ResearchWorkConflictSet(
         || overlaps(strategyEpochIds, other.strategyEpochIds);
   }
 
+  @Override
+  public Set<String> routeIds() {
+    return Set.copyOf(routeIds);
+  }
+
+  @Override
+  public Set<String> claimCaseIds() {
+    return Set.copyOf(claimCaseIds);
+  }
+
+  @Override
+  public Set<String> pivotIds() {
+    return Set.copyOf(pivotIds);
+  }
+
+  @Override
+  public Set<String> obligationIds() {
+    return Set.copyOf(obligationIds);
+  }
+
+  @Override
+  public Set<String> strategyEpochIds() {
+    return Set.copyOf(strategyEpochIds);
+  }
+
   public static ResearchWorkConflictSet empty() {
     return new ResearchWorkConflictSet(Set.of(), Set.of(), Set.of(), Set.of(), Set.of());
   }

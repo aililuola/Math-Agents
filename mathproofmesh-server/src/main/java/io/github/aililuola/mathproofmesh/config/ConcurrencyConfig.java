@@ -3,6 +3,7 @@ package io.github.aililuola.mathproofmesh.config;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.Objects;
 
 /** Provider-work concurrency policy, independent from call and token budgets. */
 @JsonIgnoreProperties(ignoreUnknown = false)
@@ -20,17 +21,20 @@ public record ConcurrencyConfig(
 
   @JsonCreator
   public ConcurrencyConfig {
-    enabled = enabled == null || enabled;
-    researchSlots = researchSlots == null ? 1 : researchSlots;
-    coordinationSlots = coordinationSlots == null ? 0 : coordinationSlots;
-    maxInFlightTasks = maxInFlightTasks == null ? 1 : maxInFlightTasks;
-    maxFocusedParallelRoles = maxFocusedParallelRoles == null ? 1 : maxFocusedParallelRoles;
+    enabled = Objects.requireNonNullElse(enabled, Boolean.TRUE);
+    researchSlots = Objects.requireNonNullElse(researchSlots, Integer.valueOf(1));
+    coordinationSlots = Objects.requireNonNullElse(coordinationSlots, Integer.valueOf(0));
+    maxInFlightTasks = Objects.requireNonNullElse(maxInFlightTasks, Integer.valueOf(1));
+    maxFocusedParallelRoles =
+        Objects.requireNonNullElse(maxFocusedParallelRoles, Integer.valueOf(1));
     reserveCoordinationCapacity =
-        reserveCoordinationCapacity != null && reserveCoordinationCapacity;
+        Objects.requireNonNullElse(reserveCoordinationCapacity, Boolean.FALSE);
     allowCoordinationBorrowing =
-        allowCoordinationBorrowing != null && allowCoordinationBorrowing;
-    telemetrySampleMillis = telemetrySampleMillis == null ? 25 : telemetrySampleMillis;
-    leaseTimeoutSeconds = leaseTimeoutSeconds == null ? 30 : leaseTimeoutSeconds;
+        Objects.requireNonNullElse(allowCoordinationBorrowing, Boolean.FALSE);
+    telemetrySampleMillis =
+        Objects.requireNonNullElse(telemetrySampleMillis, Integer.valueOf(25));
+    leaseTimeoutSeconds =
+        Objects.requireNonNullElse(leaseTimeoutSeconds, Integer.valueOf(30));
     ConfigValidation.minimum("research_slots", researchSlots, 1);
     ConfigValidation.maximum("research_slots", researchSlots, 128);
     ConfigValidation.minimum("coordination_slots", coordinationSlots, 0);

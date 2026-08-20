@@ -56,23 +56,31 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
   private final AgentPool pool;
   private final Path runDirectory;
   private final String runId;
+  private final boolean concurrencyProviderEnabled;
 
   private DesktopComputationIssue010CoordinatorHarness(
       DesktopSolveCoordinator coordinator,
       ComputationBroker computation,
       AgentPool pool,
       Path runDirectory,
-      String runId) {
+      String runId,
+      boolean concurrencyProviderEnabled) {
     this.coordinator = coordinator;
     this.computation = computation;
     this.pool = pool;
     this.runDirectory = runDirectory;
     this.runId = runId;
+    this.concurrencyProviderEnabled = concurrencyProviderEnabled;
   }
 
   static DesktopComputationIssue010CoordinatorHarness open(
       Path runDirectory, String runId) {
-    return open(runDirectory, runId, ComputationHandlerRegistry.javaOnly());
+    return open(runDirectory, runId, ComputationHandlerRegistry.javaOnly(), false);
+  }
+
+  static DesktopComputationIssue010CoordinatorHarness openForConcurrency(
+      Path runDirectory, String runId) {
+    return open(runDirectory, runId, ComputationHandlerRegistry.javaOnly(), true);
   }
 
   static DesktopComputationIssue010CoordinatorHarness openWithFakeFormalKernel(
@@ -108,14 +116,19 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
                     List.of("verified by the test-only independent formal kernel"),
                     null);
               }
-            }));
+        }),
+        false);
   }
 
   private static DesktopComputationIssue010CoordinatorHarness open(
-      Path runDirectory, String runId, ComputationHandlerRegistry handlers) {
+      Path runDirectory,
+      String runId,
+      ComputationHandlerRegistry handlers,
+      boolean concurrencyProviderEnabled) {
     SystemConfig source =
         new DesktopRuntimeLocator(projectRoot(), null).loadProfile("proof-control-active.yaml");
-    SystemConfig config = mockConfig(source);
+    SystemConfig config =
+        concurrencyProviderEnabled ? concurrencyConfig(source) : mockConfig(source);
     Map<String, io.github.aililuola.mathproofmesh.provider.MockResponder> responders =
         new java.util.LinkedHashMap<>();
     config
@@ -124,11 +137,10 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
             agent ->
                 responders.put(
                     agent.id(),
-                    request -> {
-                      throw new AssertionError(
-                          "Issue 010 persistence test attempted a model call: "
-                              + request.schemaName());
-                    }));
+                    request ->
+                        concurrencyProviderEnabled
+                            ? concurrencyResponse(request)
+                            : rejectedProviderCall(request.schemaName())));
     ProviderClientRegistry providers =
         new ProviderClientRegistry(
             config,
@@ -182,7 +194,12 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
             DesktopNegativeKnowledgeTestHarness.PROBLEM_HASH);
     DesktopComputationIssue010CoordinatorHarness harness =
         new DesktopComputationIssue010CoordinatorHarness(
-            coordinator, computation, pool, runDirectory, runId);
+            coordinator,
+            computation,
+            pool,
+            runDirectory,
+            runId,
+            concurrencyProviderEnabled);
     computation.setStatePersister(
         (reason, state) -> {
           try {
@@ -397,6 +414,10 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
     return readCheckpoint();
   }
 
+  DesktopSolveCoordinator coordinator() {
+    return coordinator;
+  }
+
   DesktopSolveCheckpoint readCheckpoint() throws Exception {
     Path state = runDirectory.resolve("structured/desktop-solve-state.json");
     DesktopSolveCheckpoint checkpoint =
@@ -417,7 +438,9 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
   DesktopComputationIssue010CoordinatorHarness restored(DesktopSolveCheckpoint checkpoint)
       throws Exception {
     DesktopComputationIssue010CoordinatorHarness restored =
-        open(runDirectory, runId);
+        concurrencyProviderEnabled
+            ? openForConcurrency(runDirectory, runId)
+            : open(runDirectory, runId);
     restored.restore(checkpoint);
     return restored;
   }
@@ -539,6 +562,45 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
         source.deepExplorationPolicy(),
         source.computation().withSandboxedPythonEnabled(false),
         source.runtime());
+  }
+
+  private static SystemConfig concurrencyConfig(SystemConfig source) {
+    SystemConfig concurrency = DesktopResearchConcurrencyTestSupport.config();
+    return new SystemConfig(
+        source.systemName(),
+        concurrency.agents(),
+        source.budget(),
+        source.scheduler(),
+        source.topology(),
+        source.verification(),
+        source.continuation(),
+        source.deepExplorationPolicy(),
+        source.computation().withSandboxedPythonEnabled(false),
+        concurrency.concurrency(),
+        concurrency.runtime());
+  }
+
+  private static io.github.aililuola.mathproofmesh.provider.LLMResponse concurrencyResponse(
+      io.github.aililuola.mathproofmesh.provider.ProviderRequest request) {
+    java.util.concurrent.locks.LockSupport.parkNanos(
+        java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(20L));
+    return new io.github.aililuola.mathproofmesh.provider.LLMResponse(
+        "{}",
+        "mock",
+        "issue-012-model",
+        1,
+        1,
+        20.0d,
+        "request-" + request.messages().getLast().content(),
+        "stop",
+        false,
+        null);
+  }
+
+  private static io.github.aililuola.mathproofmesh.provider.LLMResponse rejectedProviderCall(
+      String schemaName) {
+    throw new AssertionError(
+        "Issue 010 persistence test attempted a model call: " + schemaName);
   }
 
   private static AgentConfig mockAgent(AgentConfig source) {

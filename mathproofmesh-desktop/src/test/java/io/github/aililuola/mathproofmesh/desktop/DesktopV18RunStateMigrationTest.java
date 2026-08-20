@@ -12,7 +12,7 @@ final class DesktopV18RunStateMigrationTest {
   @TempDir Path temporaryDirectory;
 
   @Test
-  void missingV18AnchorDefaultsEmptyAndNextCheckpointUsesSchema19() throws Exception {
+  void missingV18AnchorDefaultsEmptyAndNextCheckpointUsesCurrentSchema() throws Exception {
     Path runDirectory = temporaryDirectory.resolve("v18-run");
     DesktopSolveCheckpoint base;
     try (var harness = DesktopComputationIssue010CoordinatorHarness.open(runDirectory, "v18-run")) {
@@ -27,9 +27,9 @@ final class DesktopV18RunStateMigrationTest {
 
     try (var restored = DesktopComputationIssue010CoordinatorHarness.open(runDirectory, "v18-run")) {
       restored.restore(version18);
-      DesktopSolveCheckpoint version19 = restored.checkpointRoundTrip();
-      assertThat(version19.schemaVersion()).isEqualTo(19);
-      assertThat(version19.runStateAnchor()).isNotNull();
+      DesktopSolveCheckpoint current = restored.checkpointRoundTrip();
+      assertThat(current.schemaVersion()).isEqualTo(DesktopSolveCheckpoint.CURRENT_SCHEMA_VERSION);
+      assertThat(current.runStateAnchor()).isNotNull();
     }
   }
 }

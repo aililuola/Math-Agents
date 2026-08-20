@@ -156,6 +156,14 @@ import io.github.aililuola.mathproofmesh.contract.ToolAuditReport;
 import io.github.aililuola.mathproofmesh.contract.ToolRequest;
 import io.github.aililuola.mathproofmesh.contract.UsageRecord;
 import io.github.aililuola.mathproofmesh.contract.VerificationReport;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochLedger;
+import io.github.aililuola.mathproofmesh.concurrency.FrozenResearchSnapshot;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchResultLedger;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchTaskLedger;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchWorkItem;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchWorkResultEnvelope;
+import io.github.aililuola.mathproofmesh.concurrency.AgentLeaseClass;
+import io.github.aililuola.mathproofmesh.concurrency.AgentLeaseRequest;
 import io.github.aililuola.mathproofmesh.contract.VerificationStage;
 import io.github.aililuola.mathproofmesh.contract.VerificationVerdict;
 import io.github.aililuola.mathproofmesh.contract.VariableBinding;
@@ -312,6 +320,7 @@ import io.github.aililuola.mathproofmesh.research.ResearchFindingStatus;
 import io.github.aililuola.mathproofmesh.provider.UsageTotals;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphSnapshot;
 import io.github.aililuola.mathproofmesh.provider.AgentPool;
+import io.github.aililuola.mathproofmesh.provider.AgentLease;
 import io.github.aililuola.mathproofmesh.provider.AgentCallFailure;
 import io.github.aililuola.mathproofmesh.provider.AgentRuntime;
 import io.github.aililuola.mathproofmesh.provider.ProviderErrorKind;
@@ -521,6 +530,9 @@ final class DesktopSolveCoordinator {
   private ClaimCourtFailurePoint claimCourtFailurePoint = ClaimCourtFailurePoint.NONE;
   private ClaimCourtFailurePoint claimCourtHardCrashPoint = ClaimCourtFailurePoint.NONE;
   private ResearchCheckpointLedger researchCheckpoints = new ResearchCheckpointLedger();
+  private final ResearchEpochLedger researchEpochs = new ResearchEpochLedger();
+  private final ResearchTaskLedger researchTasks = new ResearchTaskLedger();
+  private final ResearchResultLedger researchResults = new ResearchResultLedger();
   private TypedMemory typedMemory;
   private ProofGraphStore proofGraph;
   private ProofGraphConvergenceMonitor proofGraphConvergence =
@@ -638,6 +650,22 @@ final class DesktopSolveCoordinator {
         new PersistentMetaStrategist(TriggerPolicy.TriggerRules.defaults());
     this.metaDirectives =
         new MetaDirectiveController(inspirationPolicy, routeControls(config.budget().maxPaths()));
+  }
+
+  List<ResearchWorkResultEnvelope> executeFrozenResearchEpoch(
+      FrozenResearchSnapshot snapshot,
+      List<ResearchWorkItem> workItems,
+      DesktopResearchEpochExecutor.Worker worker) {
+    DesktopResearchEpochExecutor executor =
+        new DesktopResearchEpochExecutor(
+            runId,
+            pool,
+            config.concurrency().maxInFlightTasks(),
+            worker,
+            researchEpochs,
+            researchTasks,
+            researchResults);
+    return executor.execute(snapshot, workItems);
   }
 
   RunExecutionBackend.RunExecutionResult execute(boolean resumeRequested) throws IOException {
@@ -2144,34 +2172,49 @@ final class DesktopSolveCoordinator {
             ? "Exploring admitted routes concurrently in isolated contexts"
             : "Continuing selected routes from committed checkpoints");
     try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-      List<Future<?>> futures = new ArrayList<>();
+      java.util.concurrent.CompletionService<RouteBatchCompletion> completions =
+          new java.util.concurrent.ExecutorCompletionService<>(executor);
       for (RouteState route : pending) {
-        futures.add(executor.submit(() -> exploreRoute(route)));
+        completions.submit(
+            () -> {
+              try {
+                exploreRoute(route);
+                return new RouteBatchCompletion(route, null);
+              } catch (RuntimeException failure) {
+                return new RouteBatchCompletion(route, failure);
+              }
+            });
       }
-      for (int index = 0; index < futures.size(); index++) {
-        RouteState route = pending.get(index);
+      for (int index = 0; index < pending.size(); index++) {
         try {
-          futures.get(index).get();
+          RouteBatchCompletion completion = completions.take().get();
+          if (completion.failure() != null) {
+            failIsolatedRoute(completion.route(), completion.failure());
+          }
         } catch (InterruptedException exception) {
           Thread.currentThread().interrupt();
           throw new IllegalStateException("isolated exploration was interrupted", exception);
         } catch (ExecutionException exception) {
           Throwable cause = exception.getCause() == null ? exception : exception.getCause();
-          route.status = "failed";
-          route.failureReason = cause.getClass().getSimpleName();
-          event(
-              "agent_failed",
-              "isolated_exploration",
-              route.author.id(),
-              "failed",
-              "Isolated route stopped without contaminating sibling routes: "
-                  + cause.getClass().getSimpleName(),
-              null);
+          throw new IllegalStateException("isolated route worker failed", cause);
         }
       }
     }
     complete(RoutePipelineFunctions.RunStage.ISOLATED_EXPLORATION);
     persistUnchecked("isolated_exploration", false);
+  }
+
+  private void failIsolatedRoute(RouteState route, RuntimeException failure) {
+    route.status = "failed";
+    route.failureReason = failure.getClass().getSimpleName();
+    event(
+        "agent_failed",
+        "isolated_exploration",
+        route.author.id(),
+        "failed",
+        "Isolated route stopped without contaminating sibling routes: "
+            + failure.getClass().getSimpleName(),
+        null);
   }
 
   private void exploreRoute(RouteState route) {
@@ -4165,13 +4208,7 @@ final class DesktopSolveCoordinator {
     stage(
         RoutePipelineFunctions.RunStage.INDEPENDENT_REVIEW,
         "Running Skeptic, Tool Specialist, structural, and detailed Referee gates");
-    for (RouteState route : submitted) {
-      if (!route.reviewComplete) {
-        independentlyReview(route);
-        route.reviewComplete = true;
-      }
-      persistUnchecked("independent_review", false);
-    }
+    reviewRoutesConcurrently(submitted);
     complete(RoutePipelineFunctions.RunStage.INDEPENDENT_REVIEW);
 
     stage(
@@ -4230,9 +4267,10 @@ final class DesktopSolveCoordinator {
     stage(
         RoutePipelineFunctions.RunStage.CLAIM_MEMORY_GRAPH,
         "Extracting claims and updating lemma memory, typed memory, and proof graph");
+    Map<String, List<AttemptArtifactRecord>> reviewedByRoute =
+        reviewRouteClaimsConcurrently(submitted);
     for (RouteState route : submitted) {
-      List<AttemptArtifactRecord> harvested = harvestAttemptArtifacts(route);
-      List<AttemptArtifactRecord> reviewed = reviewAttemptArtifacts(route, harvested);
+      List<AttemptArtifactRecord> reviewed = reviewedByRoute.getOrDefault(route.routeId, List.of());
       integrateVerifiedAttemptArtifacts(route, reviewed);
       if ("verified".equals(route.status)) {
         integrateRouteTheorem(route, reviewed);
@@ -4246,6 +4284,162 @@ final class DesktopSolveCoordinator {
     }
     complete(RoutePipelineFunctions.RunStage.CLAIM_MEMORY_GRAPH);
     persistUnchecked("claim_memory_graph", false);
+  }
+
+  private Map<String, List<AttemptArtifactRecord>> reviewRouteClaimsConcurrently(
+      List<RouteState> submitted) {
+    Map<String, List<AttemptArtifactRecord>> harvestedByRoute = new LinkedHashMap<>();
+    submitted.stream()
+        .sorted(java.util.Comparator.comparing(route -> route.routeId))
+        .forEach(route -> harvestedByRoute.put(route.routeId, harvestAttemptArtifacts(route)));
+    if (submitted.size() == 1) {
+      RouteState route = submitted.getFirst();
+      return Map.of(
+          route.routeId,
+          reviewAttemptArtifacts(route, harvestedByRoute.getOrDefault(route.routeId, List.of())));
+    }
+
+    Map<String, List<AttemptArtifactRecord>> reviewedByRoute = new LinkedHashMap<>();
+    List<RouteState> remaining =
+        new ArrayList<>(
+            submitted.stream()
+                .sorted(java.util.Comparator.comparing(route -> route.routeId))
+                .toList());
+    while (!remaining.isEmpty()) {
+      List<RouteState> wave = new ArrayList<>();
+      Set<String> claimedKeys = new LinkedHashSet<>();
+      for (RouteState route : List.copyOf(remaining)) {
+        Set<String> routeKeys =
+            claimConflictKeys(harvestedByRoute.getOrDefault(route.routeId, List.of()));
+        if (java.util.Collections.disjoint(claimedKeys, routeKeys)) {
+          wave.add(route);
+          claimedKeys.addAll(routeKeys);
+          remaining.remove(route);
+        }
+      }
+      reviewClaimWave(wave, harvestedByRoute, reviewedByRoute);
+    }
+    return Map.copyOf(reviewedByRoute);
+  }
+
+  @SuppressFBWarnings(
+      value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
+      justification =
+          "The ordered batch boundary deliberately propagates the original Claim Court failure "
+              + "after every concurrent case has settled.")
+  private void reviewClaimWave(
+      List<RouteState> wave,
+      Map<String, List<AttemptArtifactRecord>> harvestedByRoute,
+      Map<String, List<AttemptArtifactRecord>> reviewedByRoute) {
+    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      java.util.concurrent.CompletionService<ClaimBatchCompletion> completions =
+          new java.util.concurrent.ExecutorCompletionService<>(executor);
+      for (RouteState route : wave) {
+        List<AttemptArtifactRecord> harvested =
+            harvestedByRoute.getOrDefault(route.routeId, List.of());
+        completions.submit(
+            () -> {
+              try {
+                return new ClaimBatchCompletion(
+                    route, reviewAttemptArtifacts(route, harvested), null);
+              } catch (RuntimeException failure) {
+                return new ClaimBatchCompletion(route, List.of(), failure);
+              }
+            });
+      }
+      Map<String, RuntimeException> failures = new LinkedHashMap<>();
+      for (int index = 0; index < wave.size(); index++) {
+        ClaimBatchCompletion completion = takeClaimBatchCompletion(completions);
+        reviewedByRoute.put(completion.route().routeId, completion.reviewed());
+        if (completion.failure() != null) {
+          failures.put(completion.route().routeId, completion.failure());
+        }
+      }
+      for (RouteState route : wave) {
+        RuntimeException failure = failures.get(route.routeId);
+        if (failure != null) {
+          throw failure;
+        }
+      }
+    }
+  }
+
+  private static Set<String> claimConflictKeys(List<AttemptArtifactRecord> harvested) {
+    LinkedHashSet<String> keys = new LinkedHashSet<>();
+    for (AttemptArtifactRecord artifact : harvested) {
+      keys.add("claim:" + artifact.claimId());
+      keys.add("content:" + artifact.contentHash());
+    }
+    return Set.copyOf(keys);
+  }
+
+  private static ClaimBatchCompletion takeClaimBatchCompletion(
+      java.util.concurrent.CompletionService<ClaimBatchCompletion> completions) {
+    try {
+      return completions.take().get();
+    } catch (InterruptedException exception) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("Claim Court batch was interrupted", exception);
+    } catch (ExecutionException exception) {
+      Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+      throw new IllegalStateException("Claim Court batch worker failed", cause);
+    }
+  }
+
+  private void reviewRoutesConcurrently(List<RouteState> submitted) {
+    List<RouteState> pending = submitted.stream().filter(route -> !route.reviewComplete).toList();
+    if (!pending.isEmpty()) {
+      try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+        java.util.concurrent.CompletionService<RouteBatchCompletion> completions =
+            new java.util.concurrent.ExecutorCompletionService<>(executor);
+        for (RouteState route : pending) {
+          completions.submit(
+              () -> {
+                try {
+                  independentlyReview(route);
+                  return new RouteBatchCompletion(route, null);
+                } catch (RuntimeException failure) {
+                  return new RouteBatchCompletion(route, failure);
+                }
+              });
+        }
+        Map<String, RuntimeException> failures = new LinkedHashMap<>();
+        for (int index = 0; index < pending.size(); index++) {
+          try {
+            RouteBatchCompletion completion = completions.take().get();
+            if (completion.failure() != null) {
+              failures.put(completion.route().routeId, completion.failure());
+            }
+          } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("independent route review was interrupted", exception);
+          } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+            throw new IllegalStateException("independent route review worker failed", cause);
+          }
+        }
+        for (RouteState route : pending) {
+          RuntimeException failure = failures.get(route.routeId);
+          if (failure != null) {
+            route.status = "unverified";
+            route.failureReason = failure.getClass().getSimpleName();
+            event(
+                "agent_failed",
+                "independent_review",
+                route.author.id(),
+                "failed",
+                "Independent route review failed without contaminating sibling routes: "
+                    + failure.getClass().getSimpleName(),
+                route.deltaId);
+          }
+          route.reviewComplete = true;
+          persistUnchecked("independent_review", false);
+        }
+      }
+    }
+    submitted.stream()
+        .filter(route -> route.reviewComplete && !pending.contains(route))
+        .forEach(route -> persistUnchecked("independent_review", false));
   }
 
   private void independentlyReview(RouteState route) {
@@ -4924,7 +5118,9 @@ final class DesktopSolveCoordinator {
     ClaimCourtRecord existing = claimCourt.findProofCase(frozen).orElse(null);
     route.courtCaseIds.add(existing == null ? frozen.courtCaseId() : existing.courtCaseId());
     ClaimCourtRolePolicy.Assignment assignment =
-        existing == null ? claimCourtAssignment(frozen.authorAgentId()).orElse(null) : existing.roleAssignment();
+        existing == null
+            ? claimCourtAssignment(frozen.authorAgentId(), route.routeId).orElse(null)
+            : existing.roleAssignment();
     if (existing == null && assignment == null) {
       ClaimCourtRecord deferred = claimCourt.deferIndependence(frozen);
       return claimCourtResult(deferred, original, "claim-court");
@@ -5629,29 +5825,35 @@ final class DesktopSolveCoordinator {
     failClaimCourtAt(ClaimCourtFailurePoint.AFTER_FINAL_CHECKPOINT_PERSIST);
   }
 
-  private Optional<ClaimCourtRolePolicy.Assignment> claimCourtAssignment(String authorAgentId) {
+  private Optional<ClaimCourtRolePolicy.Assignment> claimCourtAssignment(
+      String authorAgentId, String routeId) {
+    int rotation = deterministicRouteRotation(routeId);
     LinkedHashSet<String> excluded = new LinkedHashSet<>();
     excluded.add(authorAgentId);
     Optional<AgentRuntime> falsifier =
-        selectClaimCourtAgent(excluded, List.of("counterexample_hunter", "route_skeptic"));
+        selectClaimCourtAgent(
+            excluded, List.of("counterexample_hunter", "route_skeptic"), rotation);
     if (falsifier.isEmpty()) {
       return Optional.empty();
     }
     excluded.add(falsifier.get().id());
     Optional<AgentRuntime> auditor =
-        selectClaimCourtAgent(excluded, List.of("detailed_verifier", "route_referee"));
+        selectClaimCourtAgent(
+            excluded, List.of("detailed_verifier", "route_referee"), rotation);
     if (auditor.isEmpty()) {
       return Optional.empty();
     }
     excluded.add(auditor.get().id());
     Optional<AgentRuntime> repairer =
-        selectClaimCourtAgent(excluded, List.of("route_prover", "explorer", "bridge_prover"));
+        selectClaimCourtAgent(
+            excluded, List.of("route_prover", "explorer", "bridge_prover"), rotation);
     if (repairer.isEmpty()) {
       return Optional.empty();
     }
     excluded.add(repairer.get().id());
     Optional<AgentRuntime> adjudicator =
-        selectClaimCourtAgent(excluded, List.of("final_verifier", "detailed_verifier"));
+        selectClaimCourtAgent(
+            excluded, List.of("final_verifier", "detailed_verifier"), rotation);
     if (adjudicator.isEmpty()) {
       return Optional.empty();
     }
@@ -5665,15 +5867,32 @@ final class DesktopSolveCoordinator {
   }
 
   private Optional<AgentRuntime> selectClaimCourtAgent(
-      Set<String> excluded, List<String> preferredRoles) {
-    Optional<AgentRuntime> preferred =
+      Set<String> excluded, List<String> preferredRoles, int rotation) {
+    List<AgentRuntime> preferred =
         pool.agents().stream()
             .filter(agent -> !excluded.contains(agent.id()))
             .filter(agent -> preferredRoles.stream().anyMatch(agent::supportsRole))
-            .findFirst();
-    return preferred.isPresent()
-        ? preferred
-        : pool.agents().stream().filter(agent -> !excluded.contains(agent.id())).findFirst();
+            .toList();
+    if (!preferred.isEmpty()) {
+      return Optional.of(preferred.get(Math.floorMod(rotation, preferred.size())));
+    }
+    List<AgentRuntime> fallback =
+        pool.agents().stream().filter(agent -> !excluded.contains(agent.id())).toList();
+    return fallback.isEmpty()
+        ? Optional.empty()
+        : Optional.of(fallback.get(Math.floorMod(rotation, fallback.size())));
+  }
+
+  private static int deterministicRouteRotation(String routeId) {
+    int separator = routeId.lastIndexOf('-');
+    if (separator >= 0 && separator + 1 < routeId.length()) {
+      try {
+        return Math.max(0, Integer.parseInt(routeId.substring(separator + 1)) - 1);
+      } catch (NumberFormatException ignored) {
+        // Fall through to the stable hash for non-numeric route identifiers.
+      }
+    }
+    return routeId.hashCode() & Integer.MAX_VALUE;
   }
 
   private ClaimStatementFalsificationBatch bindStatementFalsification(
@@ -7296,10 +7515,10 @@ final class DesktopSolveCoordinator {
               "VERIFY completed through independent route-team, replay, escalation, and checkpoint gates",
               "scheduler://round-" + roundIndex.get() + "/verify");
         }
-        boolean scheduled = schedulePendingProofTask();
+        boolean scheduled = schedulePendingProofTasksBatch();
         if (!scheduled) {
           enqueueDebtRepairTaskIfStalled();
-          scheduled = schedulePendingProofTask();
+          scheduled = schedulePendingProofTasksBatch();
         }
         BudgetDecision decision = null;
         if (!scheduled) {
@@ -7313,21 +7532,7 @@ final class DesktopSolveCoordinator {
                   routes.isEmpty()
                       ? 1.0d
                       : 1.0d - verifiedRoutes().size() / (double) routes.size());
-          for (BudgetAction action : decision.actions()) {
-            if (action.action() == ActionKind.DEEPEN) {
-              scheduled = deepenRoute(action.targetId());
-              eventSchedulerAction("DEEPEN", scheduled, decision.rationale());
-            } else if (action.action() == ActionKind.REVISE) {
-              scheduled = reviseFailedRoute(action.targetId());
-              eventSchedulerAction("REVISE", scheduled, decision.rationale());
-            } else if (action.action() == ActionKind.WIDEN) {
-              scheduled = widenRoutes();
-              eventSchedulerAction("WIDEN", scheduled, decision.rationale());
-            }
-            if (scheduled) {
-              break;
-            }
-          }
+          scheduled = applyCompatibleSchedulerActions(decision);
         }
         if (!scheduled && verifiedRoutes().isEmpty() && ledger.remainingCalls() > 0) {
           RouteState partial = routes.stream().filter(this::canDeepenRoute).findFirst().orElse(null);
@@ -7465,6 +7670,51 @@ final class DesktopSolveCoordinator {
             + roundIndex.get()
             + "/"
             + action.toLowerCase(Locale.ROOT));
+  }
+
+  private boolean applyCompatibleSchedulerActions(BudgetDecision decision) {
+    boolean scheduled = false;
+    for (BudgetAction action :
+        compatibleSchedulerActions(decision.actions(), config.scheduler().maxActionsPerRound())) {
+      boolean applied =
+          switch (action.action()) {
+            case DEEPEN -> deepenRoute(action.targetId());
+            case REVISE -> reviseFailedRoute(action.targetId());
+            case WIDEN -> widenRoutes();
+            default -> false;
+          };
+      eventSchedulerAction(action.action().name(), applied, decision.rationale());
+      scheduled |= applied;
+    }
+    return scheduled;
+  }
+
+  static List<BudgetAction> compatibleSchedulerActions(
+      List<BudgetAction> actions, int maximumActions) {
+    if (maximumActions <= 0) {
+      throw new IllegalArgumentException("maximumActions must be positive");
+    }
+    List<BudgetAction> selected = new ArrayList<>();
+    Set<String> claimedTargets = new LinkedHashSet<>();
+    for (BudgetAction action : actions) {
+      if (action.action() != ActionKind.DEEPEN
+          && action.action() != ActionKind.REVISE
+          && action.action() != ActionKind.WIDEN) {
+        continue;
+      }
+      String targetId = Objects.toString(action.targetId(), "").strip();
+      String conflictKey =
+          action.action() == ActionKind.WIDEN
+              ? "scheduler-global-widen"
+              : targetId.isEmpty() ? "route-unbound" : "route:" + targetId;
+      if (claimedTargets.add(conflictKey)) {
+        selected.add(action);
+      }
+      if (selected.size() == maximumActions) {
+        break;
+      }
+    }
+    return List.copyOf(selected);
   }
 
   private void bindMetaTarget(MetaReview review) {
@@ -8059,6 +8309,20 @@ final class DesktopSolveCoordinator {
       }
     }
     return false;
+  }
+
+  private boolean schedulePendingProofTasksBatch() {
+    int scheduled = 0;
+    while (scheduled < config.scheduler().maxActionsPerRound() && !pendingProofTasks.isEmpty()) {
+      int pendingBefore = pendingProofTasks.size();
+      if (schedulePendingProofTask()) {
+        scheduled++;
+      }
+      if (pendingProofTasks.size() >= pendingBefore) {
+        break;
+      }
+    }
+    return scheduled > 0;
   }
 
   private void enqueueDebtRepairTaskIfStalled() {
@@ -11354,6 +11618,11 @@ final class DesktopSolveCoordinator {
     migrateAndRevalidateLegacyCanonicalProofTasks(checkpoint.schemaVersion());
     attemptArtifacts = AttemptArtifactLedger.restore(checkpoint.attemptArtifacts());
     researchCheckpoints = ResearchCheckpointLedger.restore(checkpoint.researchCheckpoints());
+    researchEpochs.restore(checkpoint.researchEpochs());
+    researchTasks.restore(checkpoint.researchTasks());
+    researchResults.restore(checkpoint.researchResults());
+    pool.restoreLeases(checkpoint.agentLeases(), runId);
+    pool.restoreConcurrencyTelemetry(checkpoint.concurrencyTelemetry());
     proofControl.claims().load(checkpoint.claimLifecycle());
     installNegativeKnowledgeRuntime();
     restoreStrategyDiversityState(checkpoint);
@@ -12075,6 +12344,11 @@ final class DesktopSolveCoordinator {
             claimCourt.snapshot(),
             claimCourtExecutions.snapshot(),
             researchCheckpoints.snapshot(),
+            researchEpochs.snapshot(),
+            researchTasks.snapshot(),
+            researchResults.snapshot(),
+            pool.leaseSnapshot(),
+            pool.concurrencyTelemetrySnapshot(),
             messageRepository.snapshot(),
             mathematicalArtifactBroker.registrySnapshot(),
             mathematicalArtifactBroker.publicationSnapshot(),
@@ -12132,6 +12406,12 @@ final class DesktopSolveCoordinator {
     writeJsonAtomically(
         structured.resolve("research-finding-audit.json"),
         checkpoint.researchCheckpoints().audit());
+    writeJsonAtomically(structured.resolve("research-epochs.json"), checkpoint.researchEpochs());
+    writeJsonAtomically(structured.resolve("research-tasks.json"), checkpoint.researchTasks());
+    writeJsonAtomically(structured.resolve("research-results.json"), checkpoint.researchResults());
+    writeJsonAtomically(structured.resolve("agent-leases.json"), checkpoint.agentLeases());
+    writeJsonAtomically(
+        structured.resolve("concurrency-telemetry.json"), checkpoint.concurrencyTelemetry());
     writeJsonAtomically(
         structured.resolve("proof-graph-convergence.json"),
         checkpoint.proofGraphConvergence());
@@ -12251,7 +12531,7 @@ final class DesktopSolveCoordinator {
     throw lastFailure;
   }
 
-  private void persistUnchecked(String stage, boolean terminal) {
+  private synchronized void persistUnchecked(String stage, boolean terminal) {
     try {
       persist(stage, terminal);
     } catch (IOException exception) {
@@ -13405,7 +13685,7 @@ final class DesktopSolveCoordinator {
     int outputLimit = outputTokens(config, stage);
     StageThinkingPolicy thinking = stageThinkingPolicy(config, stage, outputLimit);
     StructuredCallResult<T> result;
-    try {
+    try (AgentLease lease = acquireStageLease(idempotencyKey, stage, agent)) {
       result =
           callStageOnce(
               idempotencyKey,
@@ -13417,7 +13697,8 @@ final class DesktopSolveCoordinator {
               outputLimit,
               thinking.enabled(),
               thinking.effort(),
-              null);
+              null,
+              lease);
     } catch (ReasoningBudgetExhaustedError exhausted) {
       event(
           "reasoning_budget_exhausted",
@@ -13474,18 +13755,22 @@ final class DesktopSolveCoordinator {
           incrementCheckpointRecovery(routeId);
           persistUnchecked("research_checkpoint_recovery", false);
         }
-        result =
-            callStageOnce(
-                idempotencyKey + ":artifact-recovery",
-                stage,
-                responseType,
-                recoveryContext,
-                agent,
-                budgetBucket,
-                recoveryLimit,
-                false,
-                null,
-                fallbackEvidence);
+        try (AgentLease recoveryLease =
+            acquireStageLease(idempotencyKey + ":artifact-recovery", stage, agent)) {
+          result =
+              callStageOnce(
+                  idempotencyKey + ":artifact-recovery",
+                  stage,
+                  responseType,
+                  recoveryContext,
+                  agent,
+                  budgetBucket,
+                  recoveryLimit,
+                  false,
+                  null,
+                  fallbackEvidence,
+                  recoveryLease);
+        }
       } catch (RuntimeException failure) {
         event(
             "agent_failed",
@@ -13527,17 +13812,17 @@ final class DesktopSolveCoordinator {
       int outputLimit,
       Boolean thinkingEnabled,
       String reasoningEffort,
-      ResearchCheckpointFallbackEvidence fallbackEvidence) {
+      ResearchCheckpointFallbackEvidence fallbackEvidence,
+      AgentLease lease) {
     var prompt =
         prompts.typedStage(
             promptStage(stage), responseType, context, 0.0d, outputLimit, false);
     if (!ResearchCheckpointedPromptFactory.isAllowedResearchStage(prompt.stage())) {
-      return runner.call(
+      return runner.callLeased(
           runId,
           idempotencyKey,
-          roleForStage(stage, agent),
           prompt,
-          agent,
+          lease,
           budgetBucket,
           thinkingEnabled,
           reasoningEffort);
@@ -13545,18 +13830,50 @@ final class DesktopSolveCoordinator {
     String routeId = checkpointRouteId(context);
     CheckpointedPromptBundle<T> checkpointed = checkpointedPrompts.checkpoint(prompt);
     CheckpointedStructuredCallResult<T> result =
-        runner.callCheckpointed(
+        runner.callCheckpointedLeased(
             runId,
             idempotencyKey,
-            roleForStage(stage, agent),
             checkpointed,
-            agent,
+            lease,
             budgetBucket,
             thinkingEnabled,
             reasoningEffort,
             capture -> commitResearchCheckpoint(routeId, stage, capture),
             fallbackEvidence);
     return result.result();
+  }
+
+  private AgentLease acquireStageLease(
+      String idempotencyKey, String stage, AgentRuntime fixedAgent) {
+    Set<String> excluded =
+        pool.agents().stream()
+            .map(AgentRuntime::id)
+            .filter(agentId -> !agentId.equals(fixedAgent.id()))
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    AgentLeaseClass leaseClass =
+        isCoordinationStage(stage) ? AgentLeaseClass.COORDINATION : AgentLeaseClass.RESEARCH;
+    return pool.acquireLease(
+        new AgentLeaseRequest(
+            runId,
+            "desktop-" + currentStage + "-r" + roundIndex.get(),
+            idempotencyKey,
+            leaseClass,
+            roleForStage(stage, fixedAgent),
+            excluded,
+            List.of(stage),
+            "",
+            "",
+            1));
+  }
+
+  private static boolean isCoordinationStage(String stage) {
+    String normalized = stage.toLowerCase(Locale.ROOT);
+    return normalized.contains("review")
+        || normalized.contains("verif")
+        || normalized.contains("audit")
+        || normalized.contains("adjudicat")
+        || normalized.contains("referee")
+        || normalized.contains("synthes");
   }
 
   private synchronized void commitResearchCheckpoint(
@@ -14002,6 +14319,15 @@ final class DesktopSolveCoordinator {
 
     private static AuthorityMutationIds none() {
       return new AuthorityMutationIds("", "", "", "", "");
+    }
+  }
+
+  private record RouteBatchCompletion(RouteState route, RuntimeException failure) {}
+
+  private record ClaimBatchCompletion(
+      RouteState route, List<AttemptArtifactRecord> reviewed, RuntimeException failure) {
+    private ClaimBatchCompletion {
+      reviewed = List.copyOf(reviewed);
     }
   }
 
