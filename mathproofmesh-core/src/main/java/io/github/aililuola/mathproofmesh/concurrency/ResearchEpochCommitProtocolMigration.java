@@ -43,11 +43,13 @@ public final class ResearchEpochCommitProtocolMigration {
     }
     ResearchAuthorityMutationReceipt mutation = mutationByEpoch.get(epoch.epochId());
     ResearchMergeReceipt merge = mergeByEpoch.get(epoch.epochId());
-    ResearchAuthorityCommitProtocol protocol =
+    boolean historicalCommittedWithoutReceipts =
         schemaVersion <= 20
-                || (epoch.status() == ResearchEpochStatus.COMMITTED
-                    && mutation == null
-                    && merge == null)
+            && epoch.status() == ResearchEpochStatus.COMMITTED
+            && mutation == null
+            && merge == null;
+    ResearchAuthorityCommitProtocol protocol =
+        historicalCommittedWithoutReceipts
             ? ResearchAuthorityCommitProtocol.LEGACY_NO_RECEIPT
             : ResearchAuthorityCommitProtocol.RECEIPT_V1;
     ResearchEpochRecord classified = epoch.withAuthorityCommitProtocol(protocol);

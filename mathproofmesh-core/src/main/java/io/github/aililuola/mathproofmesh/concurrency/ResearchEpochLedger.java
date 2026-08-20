@@ -54,6 +54,7 @@ public final class ResearchEpochLedger {
     ResearchEpochRecord next =
         prior
             .transition(ResearchEpochStatus.COMMITTED, null, null)
+            .withAuthorityCommitProtocol(ResearchAuthorityCommitProtocol.RECEIPT_V1)
             .withAuthorityHashAfterCommit(authorityHashAfterCommit);
     epochs.put(epochId, next);
     version++;
