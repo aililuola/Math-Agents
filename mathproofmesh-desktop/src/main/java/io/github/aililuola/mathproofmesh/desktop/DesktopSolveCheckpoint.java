@@ -23,6 +23,7 @@ import io.github.aililuola.mathproofmesh.contract.ToolAuditReport;
 import io.github.aililuola.mathproofmesh.contract.VerificationReport;
 import io.github.aililuola.mathproofmesh.concurrency.AgentLeaseSnapshot;
 import io.github.aililuola.mathproofmesh.concurrency.ConcurrencyTelemetrySnapshot;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchAuthorityMutationSnapshot;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochSnapshot;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchResultSnapshot;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchTaskSnapshot;
@@ -107,6 +108,7 @@ record DesktopSolveCheckpoint(
     ResearchEpochSnapshot researchEpochs,
     ResearchTaskSnapshot researchTasks,
     ResearchResultSnapshot researchResults,
+    ResearchAuthorityMutationSnapshot researchAuthorityMutations,
     AgentLeaseSnapshot agentLeases,
     ConcurrencyTelemetrySnapshot concurrencyTelemetry,
     MessageStoreSnapshot messageStore,
@@ -151,7 +153,7 @@ record DesktopSolveCheckpoint(
     RunStateAnchor runStateAnchor,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 20;
+  static final int CURRENT_SCHEMA_VERSION = 21;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {
@@ -182,6 +184,10 @@ record DesktopSolveCheckpoint(
     researchEpochs = researchEpochs == null ? ResearchEpochSnapshot.empty() : researchEpochs;
     researchTasks = researchTasks == null ? ResearchTaskSnapshot.empty() : researchTasks;
     researchResults = researchResults == null ? ResearchResultSnapshot.empty() : researchResults;
+    researchAuthorityMutations =
+        researchAuthorityMutations == null
+            ? ResearchAuthorityMutationSnapshot.empty()
+            : researchAuthorityMutations;
     agentLeases = agentLeases == null ? AgentLeaseSnapshot.empty() : agentLeases;
     concurrencyTelemetry =
         concurrencyTelemetry == null

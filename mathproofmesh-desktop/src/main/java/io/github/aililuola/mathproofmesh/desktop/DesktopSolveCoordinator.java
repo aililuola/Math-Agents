@@ -20,14 +20,22 @@ import io.github.aililuola.mathproofmesh.api.RunExecutionBackend;
 import io.github.aililuola.mathproofmesh.api.SolveRequest;
 import io.github.aililuola.mathproofmesh.communication.InMemoryMessageRepository;
 import io.github.aililuola.mathproofmesh.communication.MessageDelivery;
+import io.github.aililuola.mathproofmesh.communication.MessageStoreSnapshot;
 import io.github.aililuola.mathproofmesh.communication.PromptDeliveryBatch;
 import io.github.aililuola.mathproofmesh.communication.RouteRegistry;
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactCompilationRequest;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactDeliverySnapshot;
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactCompiler;
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactEffectObservation;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactInvalidationSnapshot;
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactPromptBatch;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactPublicationSnapshot;
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactPublishResult;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactReceiptSnapshot;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactRegistrySnapshot;
 import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactSourceKind;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactUseSnapshot;
+import io.github.aililuola.mathproofmesh.communication.artifact.BrokerArtifactUtilitySnapshot;
 import io.github.aililuola.mathproofmesh.communication.artifact.MathematicalArtifactBroker;
 import io.github.aililuola.mathproofmesh.communication.artifact.RouteMathematicalNeedProfile;
 import io.github.aililuola.mathproofmesh.computation.ComputationBroker;
@@ -158,13 +166,23 @@ import io.github.aililuola.mathproofmesh.contract.UsageRecord;
 import io.github.aililuola.mathproofmesh.contract.VerificationReport;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochLedger;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochCommitter;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochCommitResult;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochCommitStateMachine;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochRecord;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochSnapshot;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochStatus;
 import io.github.aililuola.mathproofmesh.concurrency.FrozenResearchSnapshot;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchAuthorityAnchor;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchAuthorityMutationLedger;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchAuthorityMutationReceipt;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchAuthorityMutationSnapshot;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchAuthorityMutationTransaction;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchMergeReceipt;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchMergePlan;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchResultLedger;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchResultSnapshot;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchTaskLedger;
+import io.github.aililuola.mathproofmesh.concurrency.ResearchTaskSnapshot;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchWorkConflictSet;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchWorkItem;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchWorkKind;
@@ -325,6 +343,7 @@ import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofTaskScope;
 import io.github.aililuola.mathproofmesh.research.ResearchCheckpointLedger;
 import io.github.aililuola.mathproofmesh.research.ResearchCheckpointRecord;
+import io.github.aililuola.mathproofmesh.research.ResearchCheckpointSnapshot;
 import io.github.aililuola.mathproofmesh.research.ResearchFindingRecord;
 import io.github.aililuola.mathproofmesh.research.ResearchFindingStatus;
 import io.github.aililuola.mathproofmesh.provider.UsageTotals;
@@ -543,10 +562,15 @@ final class DesktopSolveCoordinator {
   private final ResearchTaskLedger researchTasks = new ResearchTaskLedger();
   private final ResearchResultLedger researchResults = new ResearchResultLedger();
   private final ResearchEpochCommitter researchEpochCommitter = new ResearchEpochCommitter();
-  private final List<ResearchMergeReceipt> researchMergeReceipts = new ArrayList<>();
+  private final ResearchAuthorityMutationLedger researchAuthorityMutations =
+      new ResearchAuthorityMutationLedger();
+  private final ResearchEpochCommitStateMachine researchEpochCommitStateMachine =
+      new ResearchEpochCommitStateMachine();
   private final Set<String> restorablePreparedEpochIds = new LinkedHashSet<>();
   private final ThreadLocal<ResearchWorkerContext> activeResearchWorker = new ThreadLocal<>();
   private final ThreadLocal<ClaimCourtWorkerContext> activeClaimCourtWorker = new ThreadLocal<>();
+  private final ThreadLocal<EpochAuthorityCommitContext> activeEpochAuthorityCommit =
+      new ThreadLocal<>();
   private final java.util.concurrent.atomic.AtomicLong directWorkerAuthorityMutations =
       new java.util.concurrent.atomic.AtomicLong();
   private AuthoritativeConcurrencyFailurePoint authoritativeConcurrencyFailurePoint =
@@ -683,9 +707,61 @@ final class DesktopSolveCoordinator {
             researchEpochs,
             researchTasks,
             researchResults);
-    return executor.execute(snapshot, workItems);
+    List<ResearchWorkResultEnvelope> settled = executor.execute(snapshot, workItems);
+    ResearchMergePlan plan = executor.latestMergePlan();
+    String frozenAuthorityHash = snapshot.authority().stableHash();
+    ResearchEpochCommitResult commit =
+        researchEpochCommitter.commit(
+            snapshot,
+            plan,
+            snapshot::authority,
+            new ResearchAuthorityMutationTransaction<String>() {
+              @Override
+              public String snapshot() {
+                return frozenAuthorityHash;
+              }
+
+              @Override
+              public ResearchAuthorityMutationReceipt apply(List<String> acceptedResultHashes) {
+                return ResearchAuthorityMutationReceipt.create(
+                    snapshot.epochId(),
+                    plan.mergePlanHash(),
+                    frozenAuthorityHash,
+                    frozenAuthorityHash,
+                    acceptedResultHashes,
+                    List.of(),
+                    List.of(),
+                    List.of());
+              }
+
+              @Override
+              public void restore(String ignored) {}
+            });
+    researchAuthorityMutations.recordAuthorityMutation(commit.authorityMutation());
+    researchAuthorityMutations.recordMergeReceipt(commit.mergeReceipt());
+    Set<String> accepted = Set.copyOf(commit.mergeReceipt().acceptedResultHashes());
+    workItems.forEach(
+        item -> {
+          String resultHash = researchResults.require(item.workItemId()).envelope().resultHash();
+          researchTasks.transition(
+              item.workItemId(),
+              accepted.contains(resultHash)
+                  ? ResearchWorkStatus.MERGED
+                  : ResearchWorkStatus.SUPERSEDED,
+              null,
+              null,
+              null,
+              null);
+        });
+    researchEpochs.transition(snapshot.epochId(), ResearchEpochStatus.COMMITTED, null, null);
+    return settled;
   }
 
+  @SuppressFBWarnings(
+      value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
+      justification =
+          "The epoch transaction restores the complete authority snapshot before deliberately"
+              + " preserving the original mutation exception.")
   private AuthoritativeEpochRun executeAuthoritativeEpoch(
       String stageKey,
       List<AuthoritativeWorkSpec> workSpecs,
@@ -783,35 +859,70 @@ final class DesktopSolveCoordinator {
         throw new IllegalStateException(
             "STALE_SNAPSHOT: " + changed);
       }
-      ResearchMergeReceipt receipt =
-          researchEpochCommitter.commit(
-              frozen,
-              executor.latestMergePlan(),
-              resumable.isPresent()
-                  ? () -> frozen.authority()
-                  : this::currentResearchAuthorityAnchor,
-              acceptedHashes -> {
-                Set<String> accepted = Set.copyOf(acceptedHashes);
-                stableCommit.accept(
-                    settled.stream()
-                        .filter(result -> accepted.contains(result.resultHash()))
-                        .toList());
-                return currentResearchAuthorityAnchor().stableHash();
-              });
-      researchMergeReceipts.add(receipt);
-      executor.latestMergePlan().decisions().forEach(
-          decision ->
-              researchTasks.transition(
-                  decision.workItemId(),
-                  decision.accepted()
-                      ? ResearchWorkStatus.MERGED
-                      : ResearchWorkStatus.SUPERSEDED,
-                  null,
-                  null,
-                  null,
-                  null));
-      researchEpochs.transition(epochId, ResearchEpochStatus.COMMITTED, null, null);
-      restorablePreparedEpochIds.remove(epochId);
+      ResearchEpochAuthorityMutationSnapshot authorityBefore =
+          captureResearchEpochAuthorityMutation();
+      activeEpochAuthorityCommit.set(new EpochAuthorityCommitContext(epochId));
+      try {
+        ResearchEpochCommitResult commit =
+            researchEpochCommitter.commit(
+                frozen,
+                executor.latestMergePlan(),
+                resumable.isPresent()
+                    ? () -> frozen.authority()
+                    : this::currentResearchAuthorityAnchor,
+                new ResearchAuthorityMutationTransaction<
+                    ResearchEpochAuthorityMutationSnapshot>() {
+                  @Override
+                  public ResearchEpochAuthorityMutationSnapshot snapshot() {
+                    return authorityBefore;
+                  }
+
+                  @Override
+                  public ResearchAuthorityMutationReceipt apply(
+                      List<String> acceptedResultHashes) {
+                    Set<String> accepted = Set.copyOf(acceptedResultHashes);
+                    stableCommit.accept(
+                        settled.stream()
+                            .filter(result -> accepted.contains(result.resultHash()))
+                            .toList());
+                    return createResearchAuthorityMutationReceipt(
+                        frozen,
+                        executor.latestMergePlan().mergePlanHash(),
+                        acceptedResultHashes,
+                        authorityBefore);
+                  }
+
+                  @Override
+                  public void restore(ResearchEpochAuthorityMutationSnapshot snapshot) {
+                    restoreResearchEpochAuthorityMutation(snapshot);
+                  }
+                });
+        researchAuthorityMutations.recordAuthorityMutation(commit.authorityMutation());
+        researchAuthorityMutations.recordMergeReceipt(commit.mergeReceipt());
+        failAuthoritativeConcurrencyAt(
+            AuthoritativeConcurrencyFailurePoint
+                .AFTER_ALL_AUTHORITY_RESULTS_APPLIED_BEFORE_EPOCH_COMMIT);
+        executor.latestMergePlan().decisions().forEach(
+            decision ->
+                researchTasks.transition(
+                    decision.workItemId(),
+                    decision.accepted()
+                        ? ResearchWorkStatus.MERGED
+                        : ResearchWorkStatus.SUPERSEDED,
+                    null,
+                    null,
+                    null,
+                    null));
+        researchEpochs.transition(epochId, ResearchEpochStatus.COMMITTED, null, null);
+        restorablePreparedEpochIds.remove(epochId);
+        failAuthoritativeConcurrencyAt(
+            AuthoritativeConcurrencyFailurePoint.AFTER_EPOCH_MARKED_COMMITTED_BEFORE_CHECKPOINT);
+      } catch (RuntimeException exception) {
+        restoreResearchEpochAuthorityMutation(authorityBefore);
+        throw exception;
+      } finally {
+        activeEpochAuthorityCommit.remove();
+      }
       persistUnchecked("research_epoch_committed", false);
     }
     return new AuthoritativeEpochRun(frozen, items, settled, executor.latestMergePlan());
@@ -891,6 +1002,86 @@ final class DesktopSolveCoordinator {
       return Optional.of(epoch);
     }
     return Optional.empty();
+  }
+
+  private void reconcileResearchEpochAuthorityCommitsAfterRestore(int schemaVersion) {
+    boolean receiptsRequired = schemaVersion >= 21;
+    restorablePreparedEpochIds.clear();
+    for (ResearchEpochRecord epoch : researchEpochs.snapshot().epochs()) {
+      Optional<ResearchAuthorityMutationReceipt> mutation =
+          researchAuthorityMutations.authorityMutation(epoch.epochId());
+      Optional<ResearchMergeReceipt> merge =
+          researchAuthorityMutations.mergeReceipt(epoch.epochId());
+      if (epoch.status() == ResearchEpochStatus.COMMITTED) {
+        if (receiptsRequired && (mutation.isEmpty() || merge.isEmpty())) {
+          throw new IllegalStateException(
+              "QUARANTINED_PARTIAL_AUTHORITY_COMMIT: committed epoch lacks durable receipts");
+        }
+        continue;
+      }
+      if (epoch.status() != ResearchEpochStatus.MERGE_PREPARED || epoch.authority() == null) {
+        continue;
+      }
+      ResearchAuthorityAnchor current = currentResearchAuthorityAnchor();
+      if (mutation.isEmpty()
+          && merge.isEmpty()
+          && authorityEquivalentAcrossRestore(epoch.authority(), current)) {
+        restorablePreparedEpochIds.add(epoch.epochId());
+        continue;
+      }
+      ResearchEpochCommitStateMachine.RecoveryDecision decision =
+          researchEpochCommitStateMachine.reconcile(
+              epoch,
+              current.stableHash(),
+              mutation,
+              merge.isPresent(),
+              receiptsRequired);
+      if (decision.action()
+          == ResearchEpochCommitStateMachine.RecoveryAction.ROLL_FORWARD_RECEIPTED) {
+        rollForwardReceiptedResearchEpoch(epoch, mutation.orElseThrow(), merge);
+      } else if (decision.quarantined()) {
+        researchEpochs.transition(
+            epoch.epochId(), ResearchEpochStatus.QUARANTINED, null, null);
+        throw new IllegalStateException(
+            decision.code() + ": " + changedAuthorityProjections(epoch.authority(), current));
+      }
+    }
+  }
+
+  private void rollForwardReceiptedResearchEpoch(
+      ResearchEpochRecord epoch,
+      ResearchAuthorityMutationReceipt mutation,
+      Optional<ResearchMergeReceipt> existingMerge) {
+    Set<String> accepted = Set.copyOf(mutation.acceptedResultHashes());
+    ResearchMergeReceipt merge =
+        existingMerge.orElseGet(
+            () ->
+                new ResearchMergeReceipt(
+                    epoch.epochId(),
+                    mutation.mergePlanHash(),
+                    mutation.acceptedResultHashes(),
+                    epoch.workItemIds().stream()
+                        .map(researchResults::require)
+                        .map(artifact -> artifact.envelope().resultHash())
+                        .filter(resultHash -> !accepted.contains(resultHash))
+                        .toList(),
+                    mutation.authorityHashAfter()));
+    researchAuthorityMutations.recordMergeReceipt(merge);
+    epoch.workItemIds().forEach(
+        workItemId -> {
+          String resultHash = researchResults.require(workItemId).envelope().resultHash();
+          researchTasks.transition(
+              workItemId,
+              accepted.contains(resultHash)
+                  ? ResearchWorkStatus.MERGED
+                  : ResearchWorkStatus.SUPERSEDED,
+              null,
+              null,
+              null,
+              null);
+        });
+    researchEpochs.transition(epoch.epochId(), ResearchEpochStatus.COMMITTED, null, null);
+    restorablePreparedEpochIds.remove(epoch.epochId());
   }
 
   private static boolean sameResearchWork(
@@ -1007,6 +1198,139 @@ final class DesktopSolveCoordinator {
         authoritativeRunProjectionHash());
   }
 
+  private ResearchEpochAuthorityMutationSnapshot captureResearchEpochAuthorityMutation() {
+    return new ResearchEpochAuthorityMutationSnapshot(
+        currentResearchAuthorityAnchor(),
+        attemptArtifacts.snapshot(),
+        lemmaMemory.snapshot(),
+        proofControl.claims().snapshot(),
+        claimProofRevisions.snapshot(),
+        claimCourt.snapshot(),
+        claimCourtExecutions.snapshot(),
+        typedMemory.snapshot(),
+        proofGraph.snapshot(),
+        checkpoints.snapshot(),
+        List.copyOf(pendingProofTasks),
+        researchCheckpoints.snapshot(),
+        researchEpochs.snapshot(),
+        researchTasks.snapshot(),
+        researchResults.snapshot(),
+        researchAuthorityMutations.snapshot(),
+        routes.stream().map(DesktopSolveCoordinator::copyRouteState).toList(),
+        List.copyOf(computationTraces),
+        List.copyOf(computationAudits),
+        computation.snapshot(),
+        messageRepository.snapshot(),
+        mathematicalArtifactBroker.registrySnapshot(),
+        mathematicalArtifactBroker.publicationSnapshot(),
+        mathematicalArtifactBroker.deliverySnapshot(),
+        mathematicalArtifactBroker.receiptSnapshot(),
+        mathematicalArtifactBroker.useSnapshot(),
+        mathematicalArtifactBroker.utilitySnapshot(),
+        mathematicalArtifactBroker.invalidationSnapshot(),
+        Set.copyOf(restorablePreparedEpochIds));
+  }
+
+  private void restoreResearchEpochAuthorityMutation(
+      ResearchEpochAuthorityMutationSnapshot snapshot) {
+    attemptArtifacts = AttemptArtifactLedger.restore(snapshot.attemptArtifacts());
+    lemmaMemory = LemmaMemory.restore(snapshot.lemmaMemory());
+    proofControl.claims().load(snapshot.claimLifecycle());
+    claimProofRevisions.restore(snapshot.claimProofRevisions());
+    claimCourt.restore(snapshot.claimCourt());
+    claimCourtExecutions.restore(snapshot.claimCourtExecutions());
+    typedMemory = TypedMemory.restore(snapshot.typedMemory(), memoryPolicy());
+    proofGraph = ProofGraphStore.restore(snapshot.proofGraph(), ProofGraphPolicy.defaults());
+    checkpoints.restore(snapshot.checkpoints());
+    pendingProofTasks.clear();
+    pendingProofTasks.addAll(snapshot.pendingProofTasks());
+    researchCheckpoints = ResearchCheckpointLedger.restore(snapshot.researchCheckpoints());
+    researchEpochs.restore(snapshot.researchEpochs());
+    researchTasks.restore(snapshot.researchTasks());
+    researchResults.restore(snapshot.researchResults());
+    researchAuthorityMutations.restore(snapshot.researchAuthorityMutations());
+    routes.clear();
+    snapshot.routes().stream()
+        .map(DesktopSolveCoordinator::copyRouteState)
+        .forEach(routes::add);
+    computationTraces.clear();
+    computationTraces.addAll(snapshot.computationTraces());
+    computationAudits.clear();
+    computationAudits.addAll(snapshot.computationAudits());
+    computation.restore(snapshot.computation());
+    messageRepository = new InMemoryMessageRepository(snapshot.messageStore());
+    mathematicalArtifactBroker.restore(
+        snapshot.brokerArtifactRegistry(),
+        snapshot.brokerArtifactPublications(),
+        snapshot.brokerArtifactDeliveries(),
+        snapshot.brokerArtifactReceipts(),
+        snapshot.brokerArtifactUses(),
+        snapshot.brokerArtifactUtilities(),
+        snapshot.brokerArtifactInvalidations());
+    restorablePreparedEpochIds.clear();
+    restorablePreparedEpochIds.addAll(snapshot.restorablePreparedEpochIds());
+    installNegativeKnowledgeRuntime();
+    resetRouteRuntimeRegistry();
+    ResearchAuthorityAnchor restored = currentResearchAuthorityAnchor();
+    if (!authorityEquivalentAcrossRestore(snapshot.authority(), restored)) {
+      throw new IllegalStateException(
+          "epoch authority rollback did not restore the frozen projection: "
+              + changedAuthorityProjections(snapshot.authority(), restored));
+    }
+  }
+
+  private ResearchAuthorityMutationReceipt createResearchAuthorityMutationReceipt(
+      FrozenResearchSnapshot frozen,
+      String mergePlanHash,
+      List<String> acceptedResultHashes,
+      ResearchEpochAuthorityMutationSnapshot before) {
+    ClaimLifecycleSnapshot claimsAfter = proofControl.claims().snapshot();
+    List<String> projectedClaimIds =
+        claimsAfter.entries().entrySet().stream()
+            .filter(
+                entry ->
+                    !Objects.equals(
+                        before.claimLifecycle().entries().get(entry.getKey()), entry.getValue()))
+            .map(Map.Entry::getKey)
+            .sorted()
+            .toList();
+    Set<String> factsBefore = factMessageIds(before.typedMemory());
+    List<String> factMessageIds =
+        factMessageIds(typedMemory.snapshot()).stream()
+            .filter(id -> !factsBefore.contains(id))
+            .sorted()
+            .toList();
+    Set<String> refutedBefore = refutedObligationIds(before.proofGraph());
+    List<String> refutedObligationIds =
+        refutedObligationIds(proofGraph.snapshot()).stream()
+            .filter(id -> !refutedBefore.contains(id))
+            .sorted()
+            .toList();
+    return ResearchAuthorityMutationReceipt.create(
+        frozen.epochId(),
+        mergePlanHash,
+        frozen.authority().stableHash(),
+        currentResearchAuthorityAnchor().stableHash(),
+        acceptedResultHashes,
+        projectedClaimIds,
+        factMessageIds,
+        refutedObligationIds);
+  }
+
+  private static Set<String> factMessageIds(TypedMemorySnapshot snapshot) {
+    return snapshot.tiers().entrySet().stream()
+        .filter(entry -> entry.getValue() == MemoryTier.FACT)
+        .map(Map.Entry::getKey)
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+  }
+
+  private static Set<String> refutedObligationIds(ProofGraphSnapshot snapshot) {
+    return snapshot.obligations().entrySet().stream()
+        .filter(entry -> "refuted".equals(entry.getValue().status()))
+        .map(Map.Entry::getKey)
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+  }
+
   private String authoritativeRunProjectionHash() {
     return CanonicalJson.stableHash(authoritativeRunProjectionParts());
   }
@@ -1109,7 +1433,7 @@ final class DesktopSolveCoordinator {
         epochSnapshot.epochs().stream()
             .filter(epoch -> epoch.status() == ResearchEpochStatus.COMMITTED)
             .count(),
-        researchMergeReceipts.size(),
+        researchAuthorityMutations.snapshot().mergeReceipts().size(),
         directWorkerAuthorityMutations.get(),
         taskSnapshot.tasks().stream()
             .map(record -> record.item().kind())
@@ -5167,6 +5491,7 @@ final class DesktopSolveCoordinator {
       Map<String, List<ClaimCourtProjectionTarget>> targetsByCourtCase) {
     boolean batch =
         targetsByCourtCase.values().stream().mapToInt(List::size).sum() > 1;
+    int appliedResults = 0;
     for (ResearchWorkResultEnvelope envelope : results) {
       ClaimCourtCaseDraft draft =
           ContractObjectMapper.read(
@@ -5212,6 +5537,11 @@ final class DesktopSolveCoordinator {
               "A failed Claim Court projection was isolated after all sibling cases settled",
               artifact.artifactId());
         }
+      }
+      appliedResults++;
+      if (appliedResults == 1) {
+        failAuthoritativeConcurrencyAt(
+            AuthoritativeConcurrencyFailurePoint.AFTER_FIRST_AUTHORITY_RESULT_APPLIED);
       }
     }
   }
@@ -6861,8 +7191,14 @@ final class DesktopSolveCoordinator {
       integrateVerifiedAttemptArtifacts(route, List.of(projected));
     }
     failClaimCourtAt(ClaimCourtFailurePoint.AFTER_FACT_PROJECTION_BEFORE_PERSIST);
-    persistUnchecked("claim_court_projection", false);
+    persistAuthorityProjectionOutsideEpoch("claim_court_projection");
     failClaimCourtAt(ClaimCourtFailurePoint.AFTER_FINAL_CHECKPOINT_PERSIST);
+  }
+
+  private void persistAuthorityProjectionOutsideEpoch(String reason) {
+    if (activeEpochAuthorityCommit.get() == null) {
+      persistUnchecked(reason, false);
+    }
   }
 
   private Optional<ClaimCourtRolePolicy.Assignment> claimCourtAssignment(
@@ -12631,6 +12967,7 @@ final class DesktopSolveCoordinator {
     researchEpochs.restore(checkpoint.researchEpochs());
     researchTasks.restore(checkpoint.researchTasks());
     researchResults.restore(checkpoint.researchResults());
+    researchAuthorityMutations.restore(checkpoint.researchAuthorityMutations());
     restorablePreparedEpochIds.clear();
     checkpoint.researchEpochs().epochs().stream()
         .filter(epoch -> epoch.status() == ResearchEpochStatus.MERGE_PREPARED)
@@ -12841,6 +13178,7 @@ final class DesktopSolveCoordinator {
                 strategyArchive.rejectChild(
                     strategyId, "negative-knowledge://restore-revalidation"));
     rebuildRouteRegistry();
+    reconcileResearchEpochAuthorityCommitsAfterRestore(checkpoint.schemaVersion());
     if (checkpoint.schemaVersion() < 17) {
       mathematicalArtifactBroker.migrateLegacy(
           checkpoint.messageStore(),
@@ -13363,6 +13701,7 @@ final class DesktopSolveCoordinator {
             researchEpochs.snapshot(),
             researchTasks.snapshot(),
             researchResults.snapshot(),
+            researchAuthorityMutations.snapshot(),
             pool.leaseSnapshot(),
             pool.concurrencyTelemetrySnapshot(),
             messageRepository.snapshot(),
@@ -13409,6 +13748,10 @@ final class DesktopSolveCoordinator {
     Path structured = runDirectory.resolve("structured");
     Files.createDirectories(structured);
     writeJsonAtomically(statePath(), checkpoint);
+    if ("research_epoch_committed".equals(stage)) {
+      failAuthoritativeConcurrencyAt(
+          AuthoritativeConcurrencyFailurePoint.AFTER_ATOMIC_CHECKPOINT_MOVE);
+    }
     failSemanticPivotAt(SemanticPivotFailurePoint.DURING_CHECKPOINT_PERSIST);
     writeJsonAtomically(structured.resolve("proof-graph.json"), checkpoint.proofGraph());
     writeJsonAtomically(structured.resolve("lemma-memory.json"), checkpoint.lemmaMemory());
@@ -13425,6 +13768,9 @@ final class DesktopSolveCoordinator {
     writeJsonAtomically(structured.resolve("research-epochs.json"), checkpoint.researchEpochs());
     writeJsonAtomically(structured.resolve("research-tasks.json"), checkpoint.researchTasks());
     writeJsonAtomically(structured.resolve("research-results.json"), checkpoint.researchResults());
+    writeJsonAtomically(
+        structured.resolve("research-authority-mutations.json"),
+        checkpoint.researchAuthorityMutations());
     writeJsonAtomically(structured.resolve("agent-leases.json"), checkpoint.agentLeases());
     writeJsonAtomically(
         structured.resolve("concurrency-telemetry.json"), checkpoint.concurrencyTelemetry());
@@ -13548,7 +13894,9 @@ final class DesktopSolveCoordinator {
   }
 
   private synchronized void persistUnchecked(String stage, boolean terminal) {
-    if (activeResearchWorker.get() != null || activeClaimCourtWorker.get() != null) {
+    if (activeResearchWorker.get() != null
+        || activeClaimCourtWorker.get() != null
+        || activeEpochAuthorityCommit.get() != null) {
       return;
     }
     try {
@@ -15613,7 +15961,11 @@ final class DesktopSolveCoordinator {
 
   enum AuthoritativeConcurrencyFailurePoint {
     NONE,
-    AFTER_RESULTS_DURABLE_BEFORE_COMMIT
+    AFTER_RESULTS_DURABLE_BEFORE_COMMIT,
+    AFTER_FIRST_AUTHORITY_RESULT_APPLIED,
+    AFTER_ALL_AUTHORITY_RESULTS_APPLIED_BEFORE_EPOCH_COMMIT,
+    AFTER_EPOCH_MARKED_COMMITTED_BEFORE_CHECKPOINT,
+    AFTER_ATOMIC_CHECKPOINT_MOVE
   }
 
   record AuthoritativeConcurrencyDiagnostics(
@@ -15847,6 +16199,77 @@ final class DesktopSolveCoordinator {
       Objects.requireNonNull(revisions, "revisions");
       Objects.requireNonNull(executions, "executions");
       Objects.requireNonNull(negativeKnowledge, "negativeKnowledge");
+    }
+  }
+
+  private record EpochAuthorityCommitContext(String epochId) {
+    private EpochAuthorityCommitContext {
+      epochId = requireNonBlank(epochId, "epochId");
+    }
+  }
+
+  private record ResearchEpochAuthorityMutationSnapshot(
+      ResearchAuthorityAnchor authority,
+      AttemptArtifactSnapshot attemptArtifacts,
+      LemmaMemorySnapshot lemmaMemory,
+      ClaimLifecycleSnapshot claimLifecycle,
+      ClaimProofRevisionSnapshot claimProofRevisions,
+      ClaimCourtSnapshot claimCourt,
+      ClaimCourtStageExecutionSnapshot claimCourtExecutions,
+      TypedMemorySnapshot typedMemory,
+      ProofGraphSnapshot proofGraph,
+      ContinuationFunctions.CheckpointLedgerSnapshot checkpoints,
+      List<DesktopSolveCheckpoint.ScheduledProofTask> pendingProofTasks,
+      ResearchCheckpointSnapshot researchCheckpoints,
+      ResearchEpochSnapshot researchEpochs,
+      ResearchTaskSnapshot researchTasks,
+      ResearchResultSnapshot researchResults,
+      ResearchAuthorityMutationSnapshot researchAuthorityMutations,
+      List<RouteState> routes,
+      List<ComputationTrace> computationTraces,
+      List<ComputationAudit> computationAudits,
+      ComputationExecutionState computation,
+      MessageStoreSnapshot messageStore,
+      BrokerArtifactRegistrySnapshot brokerArtifactRegistry,
+      BrokerArtifactPublicationSnapshot brokerArtifactPublications,
+      BrokerArtifactDeliverySnapshot brokerArtifactDeliveries,
+      BrokerArtifactReceiptSnapshot brokerArtifactReceipts,
+      BrokerArtifactUseSnapshot brokerArtifactUses,
+      BrokerArtifactUtilitySnapshot brokerArtifactUtilities,
+      BrokerArtifactInvalidationSnapshot brokerArtifactInvalidations,
+      Set<String> restorablePreparedEpochIds) {
+    private ResearchEpochAuthorityMutationSnapshot {
+      Objects.requireNonNull(authority, "authority");
+      pendingProofTasks = List.copyOf(pendingProofTasks);
+      routes = List.copyOf(routes);
+      computationTraces = List.copyOf(computationTraces);
+      computationAudits = List.copyOf(computationAudits);
+      restorablePreparedEpochIds = Set.copyOf(restorablePreparedEpochIds);
+    }
+
+    @Override
+    public List<DesktopSolveCheckpoint.ScheduledProofTask> pendingProofTasks() {
+      return List.copyOf(pendingProofTasks);
+    }
+
+    @Override
+    public List<RouteState> routes() {
+      return List.copyOf(routes);
+    }
+
+    @Override
+    public List<ComputationTrace> computationTraces() {
+      return List.copyOf(computationTraces);
+    }
+
+    @Override
+    public List<ComputationAudit> computationAudits() {
+      return List.copyOf(computationAudits);
+    }
+
+    @Override
+    public Set<String> restorablePreparedEpochIds() {
+      return Set.copyOf(restorablePreparedEpochIds);
     }
   }
 

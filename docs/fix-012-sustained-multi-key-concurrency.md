@@ -9,7 +9,8 @@
 - Commit B: `687be5d` (`fix(concurrency): parallelize research stages with deterministic merge`)
 - Documentation commit: `2173a31` (`docs(concurrency): record issue 012 verification`)
 - Final production-chain patch: `fix(concurrency): wire frozen epochs into authoritative desktop stages`
-- Desktop checkpoint schema: `19 -> 20`
+- Final crash-atomic patch: `fix(concurrency): make epoch authority commits crash-atomic`
+- Desktop checkpoint schema: `19 -> 20 -> 21`
 - PostgreSQL migration: `V6__research_concurrency_epochs.sql`
 
 Issue 012 is limited to deciding which already-admitted work can overlap, reserving credentials,
@@ -41,7 +42,7 @@ instructions.
 | Other executors | `DesktopRunManager`, Docker/Python I/O pools | These are run-management or computation-I/O executors, not Provider research schedulers, and were not reinterpreted as mathematical concurrency. |
 | Future waits | completion queues in desktop batches and `DesktopResearchEpochExecutor` | Waits are completion ordered, never `Future` index ordered. Results are re-sorted by stable mathematical identity before merge. |
 | Temporal children | `MathProofMeshSolveWorkflowImpl` | Child route workflows are created with stable IDs and started using `Async.function`; `Promise.allOf` supplies the barrier; results are sorted by `routeId` before parent-state mutation. |
-| Durable desktop frontier | `DesktopSolveCheckpoint`, `DesktopSolveCoordinator.persist/restore` | Schema 20 carries epoch, task, result, lease, and telemetry snapshots. Restore reconciles old leases and uncertain tasks without blindly replaying Provider calls. |
+| Durable desktop frontier | `DesktopSolveCheckpoint`, `DesktopSolveCoordinator.persist/restore` | Schema 21 carries epoch, task, result, authority-mutation receipt, lease, and telemetry snapshots. Restore reconciles old leases and uncertain tasks without blindly replaying Provider calls. |
 | Mathematical mutations | route integration, Claim Court projection, proof graph/memory/broker/pivot/final gates | Workers only produce immutable result artifacts. Existing Issues 001-011 gates execute on the stable single-writer thread; failed Claim projections restore only their own mutation snapshot and cannot roll back successful siblings. |
 
 The active `executeLive` path is covered by production Coordinator tests. Compatibility selection
@@ -66,6 +67,7 @@ if they alone proved runtime behavior.
 | Temporal route children | `child.explore(...)` was invoked synchronously in the parent loop, so the next child was not started before the prior child completed. |
 | Completion order | There was no canonical result-envelope/merge-plan boundary proving that reversed completion order produced the same merge hash. |
 | Crash replay | There was no task/result/lease frontier capable of distinguishing a durable result from an uncertain in-flight call. |
+| Epoch authority crash | With the production-chain patch but before the final atomicity patch, a test killed the process after the first Claim Court projection. The persisted checkpoint still had `MERGE_PREPARED` while `crash-claim-0` was already `EXTERNALLY_ADMITTED_FACT`; the assertion requiring an empty authority projection failed. This is behavioral pre-fix evidence, not a missing-API compilation failure. |
 | Telemetry | The state exposed call totals but not Provider call intervals, per-key busy time, lease count, queue wait, barrier wait, or ready-work utilization. |
 | Straggler handling | Submission-order waits and selection before reservation could leave ready work behind a slow call while another credential remained idle. |
 
@@ -231,13 +233,20 @@ to nondeterministic Provider latency or rate limiting.
 
 ## 10. Checkpoint, restore, and persistence
 
-Desktop schema 20 adds:
+Desktop schema 20 added:
 
 - `ResearchEpochSnapshot`
 - `ResearchTaskSnapshot`
 - `ResearchResultSnapshot`
 - `AgentLeaseSnapshot`
 - `ConcurrencyTelemetrySnapshot`
+
+Desktop schema 21 adds `ResearchAuthorityMutationSnapshot`, containing the server-generated
+`ResearchAuthorityMutationReceipt` and its matching `ResearchMergeReceipt`. A receipt binds the
+Epoch ID, merge-plan hash, authority hashes before and after the batch, accepted result hashes,
+projected Claim IDs, Fact message IDs, and refuted obligation IDs. Its content hash and snapshot
+hash are checked during deserialization. A v20 checkpoint without this field migrates to an empty
+receipt ledger without a Provider call; all new committed Epochs require both receipts.
 
 The v19 migration supplies empty snapshots and rebuilds only the concurrency projection. It makes
 no model call and does not copy or reinterpret mathematical authority. Existing durable attempts
@@ -273,14 +282,33 @@ excluded from the frozen mathematical-authority hash until stable projection. A 
 then reuses both durable result artifacts, commits one merge, and performs each Claim/Graph
 mutation exactly once.
 
-Authority application remains single-writer. `ResearchEpochCommitter` recomputes the frozen anchor
-before mutation; an anchor change rejects the batch. Existing Issues 001-011 gates still decide
-whether individual mathematical effects are admissible.
+Authority application remains single-writer. `ResearchEpochCommitter` now accepts an explicit
+rollback-capable `ResearchAuthorityMutationTransaction`, snapshots the full production projection
+before the stable writer, validates the mutation receipt, and restores the batch on an ordinary
+runtime failure. Existing Issues 001-011 gates still decide whether individual mathematical
+effects are admissible.
+
+During an authoritative Epoch commit, `activeEpochAuthorityCommit` suppresses nested formal
+checkpoint writes from Claim Court, Exploration, Route Review, computation, Broker, and other
+existing projection helpers. All accepted results, the mutation receipt, merge receipt, task
+terminal states, and `Epoch=COMMITTED` are staged in memory and written once through
+`research_epoch_committed`. The authoritative `desktop-solve-state.json` therefore exposes only
+the whole pre-commit frontier or the whole committed frontier. Non-Epoch Claim Court calls retain
+their historical per-case persistence behavior.
+
+Restore distinguishes four frontiers: an unchanged `MERGE_PREPARED` Epoch without receipts is
+replayed once; a complete committed receipt is a no-op; a fully receipted prepared frontier can
+roll forward without reprojecting mathematics; and an advanced or internally inconsistent
+frontier without a complete receipt is quarantined as
+`QUARANTINED_PARTIAL_AUTHORITY_COMMIT`. Dangling merge receipts and receipts bound to another
+Epoch are also quarantined. The compatibility `executeFrozenResearchEpoch` path now records a
+no-authority-change receipt and commits its Epoch instead of leaving a permanent prepared
+frontier.
 
 ## 12. Twenty-round diagnostic
 
 The 20-round fixture uses five fake agents, four Research slots, one reserved Coordination slot,
-80 Provider work items, a real schema-20 JSON checkpoint round trip at round 10, and the
+80 Provider work items, a real schema-21 JSON checkpoint round trip at round 10, and the
 coordinator-owned epoch/task/result/lease/telemetry ledgers. Assertions, rather than console text,
 decide the result.
 
@@ -407,6 +435,37 @@ DIRECT_WORKER_AUTHORITY_MUTATIONS=0
 RESULT=PASS
 ```
 
+The final crash-atomic test uses three real Claim Court cases (`VERIFIED`, `REFUTED`, and
+`PROOF_INVALID_BUT_CLAIM_OPEN`) and creates a fresh Coordinator from the real persisted state at
+each of four `Error`-based process-termination windows. Every number below is derived from the
+checkpoint, Claim Lifecycle, Typed Memory, receipt ledger, Epoch ledger, and Provider-call store.
+
+```text
+AUTHORITATIVE EPOCH COMMIT CRASH DIAGNOSTIC
+HARD_CRASH_POINTS=4
+CLAIM_CASES=3
+EXPECTED_AUTHORITY_MUTATIONS=3
+PARTIAL_AUTHORITY_CHECKPOINTS=0
+MERGE_PREPARED_WITH_ADVANCED_AUTHORITY=0
+STALE_RESTORED_EPOCH_AUTHORITY_ERRORS=0
+AUTHORITY_MUTATION_RECEIPTS=1
+MERGE_RECEIPTS=1
+COMMITTED_EPOCHS=1
+DUPLICATE_PROVIDER_CALLS=0
+DUPLICATE_AUTHORITY_MUTATIONS=0
+DUPLICATE_FACTS=0
+DUPLICATE_REFUTATIONS=0
+DUPLICATE_CLAIM_PROJECTIONS=0
+LOST_FACTS=0
+LOST_REFUTATIONS=0
+LOST_OPEN_CLAIMS=0
+POST_SECOND_RESTORE_STATE_CHANGES=0
+POST_SECOND_RESTORE_PROVIDER_CALLS=0
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+RESULT=PASS
+```
+
 ## 13. Modified files and purpose
 
 Commit A adds the generic concurrency domain under
@@ -435,11 +494,18 @@ Claim Court workers now use local ledgers, process-crash recovery reuses durable
 results, and obsolete pre-epoch private exploration/Court bypasses were removed rather than
 silenced. Five production black-box tests and three existing harness updates cover the bridge.
 
+The final crash-atomic patch adds the Core authority transaction, receipt ledger/snapshot, restore
+state machine, Desktop schema-21 projection, one-write Epoch commit context, and full production
+rollback snapshot. It adds Core receipt/rollback/state-machine tests, a v20-to-v21 migration test,
+the four-window production hard-crash test, and an architecture test that forbids formal
+per-result persistence inside stable Epoch commit methods.
+
 Code-and-test diff by functional commit:
 
 - Commit A: `88 files changed, 3066 insertions(+), 12 deletions(-)`.
 - Commit B: `53 files changed, 3792 insertions(+), 122 deletions(-)`.
 - Baseline through Commit B: `132 files changed, 6842 insertions(+), 118 deletions(-)`.
+- Final crash-atomic patch: `20 files changed, 1884 insertions(+), 74 deletions(-)`.
 
 No target directory, logs, checkpoints, databases, caches, or generated verification reports are
 included.
@@ -453,41 +519,50 @@ network call.
 | Suite | Tests | Failures | Errors | Skipped | Result |
 | --- | ---: | ---: | ---: | ---: | --- |
 | Core exact Issue 012 suite | 16 | 0 | 0 | 0 | PASS |
+| Core authority receipt/rollback/recovery focus | 18 | 0 | 0 | 0 | PASS |
 | Server/Provider/Temporal exact Issue 012 suite | 19 | 0 | 0 | 0 | PASS |
 | Desktop exact Issue 012 suite, including final five tests | 29 | 0 | 0 | 0 | PASS |
 | Final production and legacy Claim Court compatibility focus | 10 | 0 | 0 | 0 | PASS |
+| Desktop authority hard-crash/migration/architecture focus | 7 | 0 | 0 | 0 | PASS |
 
 Coverage includes configuration, frozen identity, work conflicts, state transitions, monotonic
 snapshots, atomic leases, fairness, role isolation, cooldown/failure isolation, actual global and
 per-agent limits, lease-bound structured calls, ready-queue refill, all-settled behavior,
 completion-order invariance, PostgreSQL contracts/fencing, Temporal children/replay, desktop stage
-batches, atomicity, crash restore, v19 migration, protected authority, and 20 rounds.
+batches, atomicity, four in-commit hard-crash windows, v19/v20 migration, protected authority, and
+20 rounds.
 
 ## 15. Module and full verification
 
-The module regression command completed with `2680` tests, zero failures, zero errors, and four
+The module regression command completed with `2693` tests, zero failures, zero errors, and four
 intentional skips across Contracts, Core, Server, and Desktop.
 
-The final `./scripts/verify-all.ps1 -Offline` completed in `664.8 s` with:
+The final `./scripts/verify-all.ps1 -Offline` completed in `769 s` with:
 
 | Module/suite | Tests | Failures | Errors | Skipped |
 | --- | ---: | ---: | ---: | ---: |
 | Contracts unit | 65 | 0 | 0 | 0 |
-| Core unit | 1377 | 0 | 0 | 0 |
+| Core unit | 1386 | 0 | 0 | 0 |
 | Server unit | 917 | 0 | 0 | 3 |
-| Desktop unit | 321 | 0 | 0 | 1 |
+| Desktop unit | 325 | 0 | 0 | 1 |
 | Compatibility | 149 | 0 | 0 | 0 |
 | PostgreSQL/Sandbox failsafe IT | 26 | 0 | 0 | 0 |
-| **Total** | **2855** | **0** | **0** | **4** |
+| **Total** | **2868** | **0** | **0** | **4** |
 
 The Docker-backed integration run included `MathProofMeshApplicationIT`,
 `JdbcMessageRepositoryIT`, `MemoryProofGraphPostgresIT`, `PersistencePostgresIT`,
 `Phase17CheckpointOutboxPerformanceIT`, `ProviderCallPostgresIT`, and `SandboxSecurityIT`.
 PostgreSQL applied Flyway V6 successfully. Temporal concurrency tests passed in the Server suite.
 
+The first release-gate pass exposed five new, local SpotBugs findings: immutable receipt lists and
+the two deliberate transaction exception rethrows. They were fixed with narrowly justified
+annotations after immutable copying and rollback behavior were verified; no SpotBugs rule was
+disabled. A sandboxed retry could not reach the Windows Docker named pipe. The final run used the
+local Docker Engine `29.6.2` outside that sandbox and passed all PostgreSQL/Testcontainers gates.
+
 All unchanged release gates passed:
 
-- Core branch coverage: `75.558028%` against the unchanged `75%` gate.
+- Core branch coverage: `75.491888%` against the unchanged `75%` gate.
 - Core SpotBugs: zero findings.
 - Server/Desktop SpotBugs and FindSecBugs: PASS.
 - OWASP dependency scan: PASS.
@@ -534,9 +609,10 @@ ISSUE_013_AUTHORITY_FILES_NO_DIFF=PASS
 - All-settled deterministic batch merge: PASS.
 - Completion-order invariance and straggler handling: PASS.
 - Crash-safe task/result/lease restore: PASS.
-- Real Coordinator hard-crash restore with zero Provider replay or duplicate authority: PASS.
+- Crash-atomic Epoch authority commit with four real `Error` windows, durable receipts, and zero
+  Provider replay or duplicate authority: PASS.
 - Desktop/Temporal deterministic parity: PASS.
-- Schema 20 and Flyway V6 migration: PASS.
+- Schema 20 and schema 21 compatibility migrations plus Flyway V6: PASS.
 - Issues 001-011 regression and protected-file isolation: PASS.
 - Full offline verification including Docker PostgreSQL: PASS.
 - Issue 013 budget/token/stop-policy work: not started.

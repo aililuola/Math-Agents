@@ -2,6 +2,7 @@ package io.github.aililuola.mathproofmesh.desktop;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.aililuola.mathproofmesh.concurrency.ResearchEpochStatus;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchWorkKind;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchWorkResultEnvelope;
 import io.github.aililuola.mathproofmesh.concurrency.ResearchWorkResultStatus;
@@ -61,8 +62,12 @@ final class DesktopResearchEpochProductionTest {
 
       assertThat(settled).hasSize(1);
       assertThat(checkpoint.researchEpochs().epochs()).hasSize(1);
+      assertThat(checkpoint.researchEpochs().epochs().getFirst().status())
+          .isEqualTo(ResearchEpochStatus.COMMITTED);
       assertThat(checkpoint.researchTasks().tasks()).hasSize(1);
       assertThat(checkpoint.researchResults().artifacts()).hasSize(1);
+      assertThat(checkpoint.researchAuthorityMutations().authorityMutations()).hasSize(1);
+      assertThat(checkpoint.researchAuthorityMutations().mergeReceipts()).hasSize(1);
     }
   }
 }

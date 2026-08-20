@@ -219,6 +219,41 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
     }
   }
 
+  void prepareMixedClaimCourtBatch() throws Exception {
+    freezeAndCreateRoute();
+    @SuppressWarnings("unchecked")
+    Map<String, Object> blueprints =
+        (Map<String, Object>) rawField(coordinator, "strategyBlueprints");
+    Object baseBlueprint = blueprints.get(validStrategy().strategyId());
+    while (routes(coordinator).size() < 3) {
+      StrategyCard strategy = validStrategy("claim-court-crash-" + routes(coordinator).size());
+      blueprints.put(strategy.strategyId(), baseBlueprint);
+      invoke(
+          "addRoute",
+          new Class<?>[] {StrategyCard.class, int.class},
+          new Object[] {strategy, 0});
+    }
+    setRound(1);
+    List<String> statements =
+        List.of(
+            "PARALLEL_VALID_LOCAL: every even square is divisible by four.",
+            "REFUTED_LOCAL: every integer is even.",
+            "BAD_PROOF_LOCAL: the statement remains open although this proof is invalid.");
+    List<Object> activeRoutes = routes(coordinator);
+    for (int index = 0; index < statements.size(); index++) {
+      installFailedAttempt(
+          activeRoutes.get(index),
+          200 + index,
+          List.of(
+              claim(
+                  "crash-claim-" + index,
+                  statements.get(index),
+                  List.of("local_lemma"))),
+          List.of(),
+          null);
+    }
+  }
+
   int maximumConcurrentClaimCourtCalls() {
     return responder.maximumConcurrentCourtCalls();
   }

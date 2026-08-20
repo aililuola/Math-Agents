@@ -512,7 +512,34 @@ final class ConcurrencyDurabilityBoundaryTest {
 
     ResearchEpochCommitter committer = new ResearchEpochCommitter();
     ResearchMergeReceipt receipt =
-        committer.commit(frozen, plan, frozen::authority, accepted -> "authority-after");
+        committer
+            .commit(
+                frozen,
+                plan,
+                frozen::authority,
+                new ResearchAuthorityMutationTransaction<ResearchEpochMutationSnapshot>() {
+                  @Override
+                  public ResearchEpochMutationSnapshot snapshot() {
+                    return ResearchEpochMutationSnapshot.empty();
+                  }
+
+                  @Override
+                  public ResearchAuthorityMutationReceipt apply(List<String> accepted) {
+                    return ResearchAuthorityMutationReceipt.create(
+                        frozen.epochId(),
+                        plan.mergePlanHash(),
+                        frozen.authority().stableHash(),
+                        "authority-after",
+                        accepted,
+                        List.of(),
+                        List.of(),
+                        List.of());
+                  }
+
+                  @Override
+                  public void restore(ResearchEpochMutationSnapshot snapshot) {}
+                })
+            .mergeReceipt();
     assertThat(receipt.acceptedResultHashes()).containsExactly(succeeded.resultHash());
     assertThat(receipt.rejectedResultHashes())
         .containsExactly(failed.resultHash(), stale.resultHash());
@@ -538,7 +565,20 @@ final class ConcurrencyDurabilityBoundaryTest {
                             "",
                             "",
                             ""),
-                    accepted -> "never"))
+                    new ResearchAuthorityMutationTransaction<ResearchEpochMutationSnapshot>() {
+                      @Override
+                      public ResearchEpochMutationSnapshot snapshot() {
+                        return ResearchEpochMutationSnapshot.empty();
+                      }
+
+                      @Override
+                      public ResearchAuthorityMutationReceipt apply(List<String> accepted) {
+                        throw new AssertionError("stale authority must fail before mutation");
+                      }
+
+                      @Override
+                      public void restore(ResearchEpochMutationSnapshot snapshot) {}
+                    }))
         .isInstanceOf(IllegalStateException.class)
         .hasMessage("STALE_SNAPSHOT");
   }

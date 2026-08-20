@@ -12,7 +12,7 @@ final class DesktopV19ConcurrencyMigrationTest {
   @TempDir Path temporaryDirectory;
 
   @Test
-  void missingConcurrencyLedgersDefaultEmptyAndNextCheckpointUsesSchema20() throws Exception {
+  void missingConcurrencyLedgersDefaultEmptyAndNextCheckpointUsesCurrentSchema() throws Exception {
     Path runDirectory = temporaryDirectory.resolve("v19-run");
     DesktopSolveCheckpoint base;
     try (var harness = DesktopComputationIssue010CoordinatorHarness.open(runDirectory, "v19-run")) {
@@ -23,6 +23,7 @@ final class DesktopV19ConcurrencyMigrationTest {
     json.remove("researchEpochs");
     json.remove("researchTasks");
     json.remove("researchResults");
+    json.remove("researchAuthorityMutations");
     json.remove("agentLeases");
     json.remove("concurrencyTelemetry");
 
@@ -31,18 +32,20 @@ final class DesktopV19ConcurrencyMigrationTest {
     assertThat(version19.researchEpochs().epochs()).isEmpty();
     assertThat(version19.researchTasks().tasks()).isEmpty();
     assertThat(version19.researchResults().artifacts()).isEmpty();
+    assertThat(version19.researchAuthorityMutations().authorityMutations()).isEmpty();
     assertThat(version19.agentLeases().leases()).isEmpty();
     assertThat(version19.concurrencyTelemetry().events()).isEmpty();
 
     try (var restored = DesktopComputationIssue010CoordinatorHarness.open(runDirectory, "v19-run")) {
       restored.restore(version19);
-      DesktopSolveCheckpoint version20 = restored.checkpointRoundTrip();
-      assertThat(version20.schemaVersion()).isEqualTo(20);
-      assertThat(version20.researchEpochs()).isNotNull();
-      assertThat(version20.researchTasks()).isNotNull();
-      assertThat(version20.researchResults()).isNotNull();
-      assertThat(version20.agentLeases()).isNotNull();
-      assertThat(version20.concurrencyTelemetry()).isNotNull();
+      DesktopSolveCheckpoint current = restored.checkpointRoundTrip();
+      assertThat(current.schemaVersion()).isEqualTo(DesktopSolveCheckpoint.CURRENT_SCHEMA_VERSION);
+      assertThat(current.researchEpochs()).isNotNull();
+      assertThat(current.researchTasks()).isNotNull();
+      assertThat(current.researchResults()).isNotNull();
+      assertThat(current.researchAuthorityMutations()).isNotNull();
+      assertThat(current.agentLeases()).isNotNull();
+      assertThat(current.concurrencyTelemetry()).isNotNull();
     }
   }
 }
