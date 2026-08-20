@@ -38,6 +38,7 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
   private final AgentPool pool;
   private final int maximumInFlight;
   private final Worker worker;
+  private final ManagedWorker managedWorker;
   private final ResearchEpochLedger epochs;
   private final ResearchTaskLedger tasks;
   private final ResearchResultLedger results;
@@ -53,7 +54,23 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
       ResearchEpochLedger epochs,
       ResearchTaskLedger tasks,
       ResearchResultLedger results) {
-    this(runId, pool, maximumInFlight, worker, epochs, tasks, results, ignored -> {});
+    this(runId, pool, maximumInFlight, worker, null, epochs, tasks, results, ignored -> {});
+  }
+
+  /**
+   * Creates an epoch executor for orchestration work that acquires one or more provider leases at
+   * the exact call sites inside the worker. The ready queue still bounds task concurrency, while
+   * the worker never holds an idle outer credential reservation.
+   */
+  public DesktopResearchEpochExecutor(
+      String runId,
+      AgentPool pool,
+      int maximumInFlight,
+      ManagedWorker worker,
+      ResearchEpochLedger epochs,
+      ResearchTaskLedger tasks,
+      ResearchResultLedger results) {
+    this(runId, pool, maximumInFlight, null, worker, epochs, tasks, results, ignored -> {});
   }
 
   DesktopResearchEpochExecutor(
@@ -65,13 +82,60 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
       ResearchTaskLedger tasks,
       ResearchResultLedger results,
       FailureInjector failureInjector) {
+    this(
+        runId,
+        pool,
+        maximumInFlight,
+        worker,
+        null,
+        epochs,
+        tasks,
+        results,
+        failureInjector);
+  }
+
+  DesktopResearchEpochExecutor(
+      String runId,
+      AgentPool pool,
+      int maximumInFlight,
+      ManagedWorker worker,
+      ResearchEpochLedger epochs,
+      ResearchTaskLedger tasks,
+      ResearchResultLedger results,
+      FailureInjector failureInjector) {
+    this(
+        runId,
+        pool,
+        maximumInFlight,
+        null,
+        worker,
+        epochs,
+        tasks,
+        results,
+        failureInjector);
+  }
+
+  private DesktopResearchEpochExecutor(
+      String runId,
+      AgentPool pool,
+      int maximumInFlight,
+      Worker worker,
+      ManagedWorker managedWorker,
+      ResearchEpochLedger epochs,
+      ResearchTaskLedger tasks,
+      ResearchResultLedger results,
+      FailureInjector failureInjector) {
     this.runId = requireText(runId, "runId");
     this.pool = Objects.requireNonNull(pool, "pool");
     if (maximumInFlight < 1) {
       throw new IllegalArgumentException("maximumInFlight must be positive");
     }
     this.maximumInFlight = maximumInFlight;
-    this.worker = Objects.requireNonNull(worker, "worker");
+    if ((worker == null) == (managedWorker == null)) {
+      throw new IllegalArgumentException("exactly one research worker mode is required");
+    }
+    this.worker = worker;
+    this.managedWorker = managedWorker;
     this.epochs = Objects.requireNonNull(epochs, "epochs");
     this.tasks = Objects.requireNonNull(tasks, "tasks");
     this.results = Objects.requireNonNull(results, "results");
@@ -139,6 +203,15 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
             break;
           }
           ResearchWorkItem item = next.orElseThrow();
+          if (managedWorker != null) {
+            tasks.transition(
+                item.workItemId(), ResearchWorkStatus.RUNNING, "managed-worker", "", "", "");
+            inFlightItems.add(item);
+            completions.submit(() -> executeManaged(snapshot, item, ready));
+            inFlight++;
+            submitted = true;
+            continue;
+          }
           Optional<AgentLease> acquired = pool.tryAcquireLease(leaseRequest(item));
           if (acquired.isEmpty()) {
             ready.addAll(List.of(item));
@@ -261,6 +334,40 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
     }
   }
 
+  private Completed executeManaged(
+      FrozenResearchSnapshot snapshot, ResearchWorkItem item, ResearchReadyQueue ready) {
+    ResearchWorkResultEnvelope result;
+    try {
+      result = managedWorker.execute(snapshot, item);
+      validateManagedResultBinding(snapshot, item, result);
+      failAt(ResearchConcurrencyFailurePoint.AFTER_PROVIDER_RESPONSE_DURABLE);
+    } catch (RuntimeException failure) {
+      result = failedManagedResult(snapshot, item, failure);
+    }
+    var artifact = results.store(result);
+    failAt(ResearchConcurrencyFailurePoint.AFTER_TASK_RESULT_DURABLE);
+    pool.recordConcurrencyEvent(
+        ConcurrencyEventType.RESULT_DURABLE,
+        snapshot.epochId(),
+        item.workItemId(),
+        result.agentId(),
+        ready.size());
+    ResearchWorkStatus terminal =
+        result.status() == ResearchWorkResultStatus.SUCCEEDED
+            ? ResearchWorkStatus.RESULT_DURABLE
+            : result.status() == ResearchWorkResultStatus.QUARANTINED
+                ? ResearchWorkStatus.QUARANTINED_UNCERTAIN_CALL
+                : ResearchWorkStatus.FAILED_DURABLE;
+    tasks.transition(
+        item.workItemId(),
+        terminal,
+        result.agentId(),
+        result.providerRequestId(),
+        artifact.artifactRef(),
+        result.resultHash());
+    return new Completed(item, result);
+  }
+
   private ResearchWorkResultEnvelope restoredResult(
       FrozenResearchSnapshot snapshot, ResearchWorkItem item) {
     try {
@@ -338,6 +445,17 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
     }
   }
 
+  private static void validateManagedResultBinding(
+      FrozenResearchSnapshot snapshot,
+      ResearchWorkItem item,
+      ResearchWorkResultEnvelope result) {
+    if (!result.workItemId().equals(item.workItemId())
+        || !result.epochId().equals(snapshot.epochId())
+        || !result.snapshotHash().equals(snapshot.snapshotHash())) {
+      throw new IllegalArgumentException("managed worker result is not bound to its frozen task");
+    }
+  }
+
   private static ResearchWorkResultEnvelope failedResult(
       FrozenResearchSnapshot snapshot,
       ResearchWorkItem item,
@@ -356,12 +474,40 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
         List.of());
   }
 
+  private static ResearchWorkResultEnvelope failedManagedResult(
+      FrozenResearchSnapshot snapshot,
+      ResearchWorkItem item,
+      RuntimeException failure) {
+    return new ResearchWorkResultEnvelope(
+        item.workItemId(),
+        snapshot.epochId(),
+        snapshot.snapshotHash(),
+        "managed-worker",
+        "failed-" + item.workItemId(),
+        ResearchWorkResultStatus.FAILED,
+        Map.of(
+            "failure_code", failure.getClass().getSimpleName(),
+            "failure_detail", safeFailureDetail(failure)),
+        List.of(),
+        List.of(),
+        List.of());
+  }
+
+  private static String safeFailureDetail(RuntimeException failure) {
+    String message = failure.getMessage();
+    if (message == null || message.isBlank()) {
+      return failure.getClass().getSimpleName();
+    }
+    String normalized = message.strip();
+    return normalized.length() <= 256 ? normalized : normalized.substring(0, 256);
+  }
+
   @SuppressFBWarnings(
       value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
       justification =
           "The completion boundary must propagate the worker's original runtime failure so the "
               + "epoch can restore its atomic snapshot and preserve failure classification.")
-  private static Completed take(CompletionService<Completed> completions) {
+  private Completed take(CompletionService<Completed> completions) {
     try {
       return completions.take().get();
     } catch (InterruptedException exception) {
@@ -372,6 +518,9 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
       if (cause instanceof RuntimeException runtime) {
         throw runtime;
       }
+      if (cause instanceof Error error && managedWorker != null) {
+        throw error;
+      }
       throw new IllegalStateException("research epoch worker failed", cause);
     }
   }
@@ -380,6 +529,11 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
   public interface Worker {
     ResearchWorkResultEnvelope execute(
         FrozenResearchSnapshot snapshot, ResearchWorkItem item, AgentLease lease);
+  }
+
+  @FunctionalInterface
+  public interface ManagedWorker {
+    ResearchWorkResultEnvelope execute(FrozenResearchSnapshot snapshot, ResearchWorkItem item);
   }
 
   @FunctionalInterface

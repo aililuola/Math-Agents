@@ -38,6 +38,7 @@ import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.FrozenClaimSnapshot;
 import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
 import io.github.aililuola.mathproofmesh.provider.AgentPool;
+import io.github.aililuola.mathproofmesh.provider.AgentRuntime;
 import io.github.aililuola.mathproofmesh.provider.InMemoryProviderCallRepository;
 import io.github.aililuola.mathproofmesh.provider.ProviderClientRegistry;
 import java.lang.reflect.InvocationTargetException;
@@ -418,6 +419,69 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
     return coordinator;
   }
 
+  AtomicStageRun runAtomicOrdinaryStageCalls(int callCount) throws Exception {
+    if (!concurrencyProviderEnabled) {
+      throw new IllegalStateException("atomic stage calls require the concurrency provider fixture");
+    }
+    if (callCount < 1) {
+      throw new IllegalArgumentException("callCount must be positive");
+    }
+    AgentRuntime preferred = pool.agents().getFirst();
+    var ready = new java.util.concurrent.CountDownLatch(callCount);
+    var start = new java.util.concurrent.CountDownLatch(1);
+    List<String> agents = new java.util.ArrayList<>();
+    try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      List<java.util.concurrent.Future<String>> futures = new java.util.ArrayList<>();
+      for (int ordinal = 0; ordinal < callCount; ordinal++) {
+        int stableOrdinal = ordinal;
+        futures.add(
+            executor.submit(
+                () -> {
+                  ready.countDown();
+                  start.await();
+                  @SuppressWarnings("unchecked")
+                  io.github.aililuola.mathproofmesh.agent.StructuredCallResult<Map<String, Object>>
+                      result =
+                          (io.github.aililuola.mathproofmesh.agent.StructuredCallResult<
+                                  Map<String, Object>>)
+                              invoke(
+                                  coordinator,
+                                  "callStage",
+                                  new Class<?>[] {
+                                    String.class,
+                                    String.class,
+                                    Class.class,
+                                    Map.class,
+                                    AgentRuntime.class,
+                                    String.class,
+                                    String.class
+                                  },
+                                  new Object[] {
+                                    "atomic-stage-" + stableOrdinal,
+                                    "triage",
+                                    Map.class,
+                                    Map.of("ordinal", stableOrdinal),
+                                    preferred,
+                                    "breadth",
+                                    "Atomic credential selection " + stableOrdinal
+                                  });
+                  return result.agentId();
+                }));
+      }
+      if (!ready.await(5L, java.util.concurrent.TimeUnit.SECONDS)) {
+        throw new IllegalStateException("concurrent stage calls did not reach the start barrier");
+      }
+      start.countDown();
+      for (var future : futures) {
+        agents.add(future.get());
+      }
+    }
+    return new AtomicStageRun(
+        agents,
+        pool.concurrencyMetrics().maxActiveProviderCalls(),
+        pool.leaseSnapshot());
+  }
+
   DesktopSolveCheckpoint readCheckpoint() throws Exception {
     Path state = runDirectory.resolve("structured/desktop-solve-state.json");
     DesktopSolveCheckpoint checkpoint =
@@ -693,6 +757,20 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
           checkpoint.claimLifecycle().entries().size(),
           permanent,
           mainClosures);
+    }
+  }
+
+  record AtomicStageRun(
+      List<String> agentIds,
+      int maximumActiveProviderCalls,
+      io.github.aililuola.mathproofmesh.concurrency.AgentLeaseSnapshot leases) {
+    AtomicStageRun {
+      agentIds = List.copyOf(agentIds);
+    }
+
+    @Override
+    public List<String> agentIds() {
+      return List.copyOf(agentIds);
     }
   }
 }

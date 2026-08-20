@@ -10,6 +10,7 @@ public record ResearchEpochRecord(
     List<String> workItemIds,
     List<String> durableResultIds,
     String mergePlanHash,
+    ResearchAuthorityAnchor authority,
     long version) {
   public ResearchEpochRecord {
     epochId = text(epochId, "epochId");
@@ -22,6 +23,26 @@ public record ResearchEpochRecord(
     if (version < 1L) {
       throw new IllegalArgumentException("version must be positive");
     }
+  }
+
+  /** Backward-compatible constructor for schema-20 snapshots without the frozen authority body. */
+  public ResearchEpochRecord(
+      String epochId,
+      String snapshotHash,
+      ResearchEpochStatus status,
+      List<String> workItemIds,
+      List<String> durableResultIds,
+      String mergePlanHash,
+      long version) {
+    this(
+        epochId,
+        snapshotHash,
+        status,
+        workItemIds,
+        durableResultIds,
+        mergePlanHash,
+        null,
+        version);
   }
 
   public ResearchEpochRecord transition(
@@ -37,6 +58,7 @@ public record ResearchEpochRecord(
         workItemIds,
         resultIds == null ? durableResultIds : resultIds,
         nextMergePlanHash == null ? mergePlanHash : nextMergePlanHash,
+        authority,
         version + 1L);
   }
 

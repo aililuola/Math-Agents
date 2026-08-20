@@ -433,6 +433,10 @@ public final class AgentPool implements AutoCloseable {
             .thenComparing(AgentRuntime::id);
     Optional<AgentRuntime> selected =
         agents().stream()
+            .filter(
+                agent ->
+                    request.requiredAgentId().isEmpty()
+                        || request.requiredAgentId().equals(agent.id()))
             .filter(agent -> !request.excludedAgentIds().contains(agent.id()))
             .filter(agent -> agent.supportsRole(request.requiredRole()))
             .filter(agent -> !agent.inCooldown())

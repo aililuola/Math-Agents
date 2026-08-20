@@ -96,6 +96,7 @@ import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -108,17 +109,23 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
   private final DesktopSolveCoordinator coordinator;
   private final AgentPool pool;
   private final Path runDirectory;
+  private final String runId;
   private final ClaimReviewResponder responder;
+  private final InMemoryProviderCallRepository providerCalls;
 
   private DesktopClaimSalvageTestHarness(
       DesktopSolveCoordinator coordinator,
       AgentPool pool,
       Path runDirectory,
-      ClaimReviewResponder responder) {
+      String runId,
+      ClaimReviewResponder responder,
+      InMemoryProviderCallRepository providerCalls) {
     this.coordinator = coordinator;
     this.pool = pool;
     this.runDirectory = runDirectory;
+    this.runId = runId;
     this.responder = responder;
+    this.providerCalls = providerCalls;
   }
 
   static DesktopClaimSalvageTestHarness open(Path runDirectory, String runId) {
@@ -139,11 +146,12 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
             ignored -> null);
     AgentPool pool = new AgentPool(config, providers);
     CallLedger ledger = new CallLedger(20_000L, null, null);
+    InMemoryProviderCallRepository providerCalls = new InMemoryProviderCallRepository();
     StructuredAgentRunner runner =
         new StructuredAgentRunner(
             pool,
             new ArtifactStore(runDirectory.resolve("runtime-artifacts"), runId),
-            new InMemoryProviderCallRepository(),
+            providerCalls,
             ledger,
             new PromptRedactor(List.of()),
             new BoundedJsonRepairer(1_500_000));
@@ -170,7 +178,8 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
             false,
             noOpProgress(),
             PROBLEM_HASH);
-    return new DesktopClaimSalvageTestHarness(coordinator, pool, runDirectory, responder);
+    return new DesktopClaimSalvageTestHarness(
+        coordinator, pool, runDirectory, runId, responder, providerCalls);
   }
 
   void freezeAndCreateRoute() throws Exception {
@@ -212,6 +221,46 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
 
   int maximumConcurrentClaimCourtCalls() {
     return responder.maximumConcurrentCourtCalls();
+  }
+
+  void prepareFocusedExploration() throws Exception {
+    freezeAndCreateRoute();
+    Object focusedRoute = route();
+    setField(focusedRoute, "focusObligationId", "main-goal");
+    setField(focusedRoute, "focusedCanonicalTargetId", "canonical-focused-test");
+  }
+
+  void runFocusedExploration(long delayMillis) throws Exception {
+    responder.setExplorationDelayMillis(delayMillis);
+    invoke(
+        "exploreUnstartedRoutes",
+        new Class<?>[] {boolean.class},
+        new Object[] {false});
+  }
+
+  int maximumConcurrentExplorationCalls() {
+    return responder.maximumConcurrentExplorationCalls();
+  }
+
+  void setClaimCourtDelays(Map<String, Long> delaysMillis) {
+    responder.setClaimCourtDelays(delaysMillis);
+  }
+
+  List<String> claimCourtCompletionOrder() {
+    return responder.claimCourtCompletionOrder();
+  }
+
+  int providerCallCount() {
+    return providerCalls.findByRun(runId).size();
+  }
+
+  void setAuthoritativeConcurrencyFailurePoint(
+      DesktopSolveCoordinator.AuthoritativeConcurrencyFailurePoint point) {
+    coordinator.setAuthoritativeConcurrencyFailurePointForTest(point);
+  }
+
+  DesktopSolveCoordinator.AuthoritativeConcurrencyDiagnostics concurrencyDiagnostics() {
+    return coordinator.authoritativeConcurrencyDiagnosticsForTest();
   }
 
   void freezeAndCreateRoute(StrategyCard strategy) throws Exception {
@@ -495,6 +544,93 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
         ContractObjectMapper.write(checkpoint), DesktopSolveCheckpoint.class);
   }
 
+  DesktopSolveCheckpoint readPersistedCheckpoint() throws Exception {
+    Path state = runDirectory.resolve("structured").resolve("desktop-solve-state.json");
+    DesktopSolveCheckpoint checkpoint =
+        ContractObjectMapper.read(Files.readString(state), DesktopSolveCheckpoint.class);
+    return ContractObjectMapper.read(
+        ContractObjectMapper.write(checkpoint), DesktopSolveCheckpoint.class);
+  }
+
+  DesktopClaimSalvageTestHarness restored(DesktopSolveCheckpoint checkpoint) throws Exception {
+    DesktopClaimSalvageTestHarness restored = open(runDirectory, runId);
+    restored.restore(checkpoint);
+    return restored;
+  }
+
+  ConcurrencyAuthorityHashes concurrencyAuthorityHashes() {
+    ProofControlFacade facade =
+        uncheckedField(coordinator, "proofControl", ProofControlFacade.class);
+    return new ConcurrencyAuthorityHashes(
+        CanonicalJson.stableHash(facade.claims().snapshot()),
+        coordinator.typedMemoryAuthorityHash(),
+        coordinator.proofGraphAuthorityHash(),
+        attemptArtifacts().ledgerHash(),
+        epochCommitAuthorityHash());
+  }
+
+  private String epochCommitAuthorityHash() {
+    var epochs =
+        uncheckedField(
+                coordinator,
+                "researchEpochs",
+                io.github.aililuola.mathproofmesh.concurrency.ResearchEpochLedger.class)
+            .snapshot();
+    var results =
+        uncheckedField(
+                coordinator,
+                "researchResults",
+                io.github.aililuola.mathproofmesh.concurrency.ResearchResultLedger.class)
+            .snapshot();
+    Map<String, String> statusByWorkItem = new java.util.TreeMap<>();
+    results
+        .artifacts()
+        .forEach(
+            artifact ->
+                statusByWorkItem.put(
+                    artifact.envelope().workItemId(), artifact.envelope().status().name()));
+    return CanonicalJson.stableHash(
+        epochs.epochs().stream()
+            .map(
+                epoch ->
+                    Map.of(
+                        "epoch_id", epoch.epochId(),
+                        "snapshot_hash", epoch.snapshotHash(),
+                        "status", epoch.status().name(),
+                        "work_item_ids", epoch.workItemIds(),
+                        "work_result_statuses",
+                            epoch.workItemIds().stream()
+                                .collect(
+                                    java.util.stream.Collectors.toMap(
+                                        java.util.function.Function.identity(),
+                                        statusByWorkItem::get,
+                                        (left, right) -> left,
+                                        java.util.TreeMap::new)),
+                        "authority", Objects.requireNonNullElse(epoch.authority(), ""),
+                        "version", epoch.version()))
+            .toList());
+  }
+
+  Set<String> factMessageIds() {
+    return typedMemory().facts().stream()
+        .map(MessageEnvelope::messageId)
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+  }
+
+  Set<String> graphClaimMessageIds() {
+    return proofGraph().claimNodes().stream()
+        .map(MessageEnvelope::messageId)
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+  }
+
+  Set<String> lifecycleClaimIds() {
+    ProofControlFacade facade =
+        uncheckedField(coordinator, "proofControl", ProofControlFacade.class);
+    return facade.claims().entries().stream()
+        .map(entry -> entry.claimId())
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+  }
+
   void restore(DesktopSolveCheckpoint checkpoint) throws Exception {
     invoke("restore", DesktopSolveCheckpoint.class, checkpoint);
   }
@@ -584,11 +720,6 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
   double schedulerBrokerUtility(String routeId) throws Exception {
     Map<String, Double> utility = (Map<String, Double>) invoke("brokerUtility");
     return utility.getOrDefault(routeId, 0.0d);
-  }
-
-  DesktopSolveCheckpoint readPersistedCheckpoint() throws Exception {
-    Path state = runDirectory.resolve("structured").resolve("desktop-solve-state.json");
-    return ContractObjectMapper.read(Files.readString(state), DesktopSolveCheckpoint.class);
   }
 
   TypedMemory typedMemory() {
@@ -1017,6 +1148,13 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
       String portfolio,
       String court) {}
 
+  record ConcurrencyAuthorityHashes(
+      String claimLifecycle,
+      String typedMemory,
+      String proofGraph,
+      String attemptArtifacts,
+      String epochCommit) {}
+
   private static final class ClaimReviewResponder implements MockResponder {
     private final List<ProviderRequest> requests = new CopyOnWriteArrayList<>();
     private final Map<String, Integer> reviewCalls = new ConcurrentHashMap<>();
@@ -1024,113 +1162,169 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
     private final List<List<String>> explorationBrokerArtifactIds = new ArrayList<>();
     private final AtomicInteger activeCourtCalls = new AtomicInteger();
     private final AtomicInteger maximumCourtCalls = new AtomicInteger();
+    private final AtomicInteger activeExplorationCalls = new AtomicInteger();
+    private final AtomicInteger maximumExplorationCalls = new AtomicInteger();
+    private final List<String> completedCourtCalls = new CopyOnWriteArrayList<>();
+    private volatile Map<String, Long> courtDelaysMillis = Map.of();
+    private volatile long explorationDelayMillis;
 
     @Override
     public LLMResponse respond(ProviderRequest request) {
       boolean courtCall = request.schemaName().startsWith("Claim");
+      boolean explorationCall = "InitialExplorationTurn".equals(request.schemaName());
+      String courtClaim = courtCall ? claimKey(request) : "";
       if (courtCall) {
         int active = activeCourtCalls.incrementAndGet();
         maximumCourtCalls.accumulateAndGet(active, Math::max);
-        try {
-          Thread.sleep(500L);
-        } catch (InterruptedException exception) {
-          Thread.currentThread().interrupt();
-          throw new IllegalStateException("claim court test call interrupted", exception);
-        }
+      }
+      if (explorationCall) {
+        int active = activeExplorationCalls.incrementAndGet();
+        maximumExplorationCalls.accumulateAndGet(active, Math::max);
       }
       try {
-      if ("InitialExplorationTurn".equals(request.schemaName())) {
-        JsonNode context = sanitizedContext(request);
-        List<String> facts = new ArrayList<>();
-        context.path("verified_facts").forEach(fact -> facts.add(fact.path("statement").asText()));
-        explorationVerifiedFacts.add(List.copyOf(facts));
-        List<String> brokerArtifactIds = new ArrayList<>();
-        context
-            .path("broker_artifacts")
-            .forEach(
-                artifact ->
-                    brokerArtifactIds.add(
-                        text(artifact, "artifactId", "artifact_id")));
-        explorationBrokerArtifactIds.add(List.copyOf(brokerArtifactIds));
-        InitialExplorationTurn turn =
-            new InitialExplorationTurn(
-                InitialExplorationAction.ABANDON,
-                null,
-                null,
-                null,
-                "verified facts captured for the next route");
-        return response(request, ContractObjectMapper.write(turn));
-      }
-      if ("ClaimStatementFalsificationBatch".equals(request.schemaName())) {
-        return statementFalsification(request);
-      }
-      if ("ClaimCounterexampleWitnessReviewBatch".equals(request.schemaName())) {
-        return counterexampleWitnessReview(request);
-      }
-      if ("ClaimProofAuditBatch".equals(request.schemaName())) {
-        return proofAudit(request);
-      }
-      if ("ClaimMinimalRepairBatch".equals(request.schemaName())) {
-        return minimalRepair(request);
-      }
-      if ("ClaimBlindAdjudicationBatch".equals(request.schemaName())) {
-        return blindAdjudication(request);
-      }
-      if (!"ClaimReviewBatch".equals(request.schemaName())) {
-        throw new AssertionError("unexpected claim-salvage schema: " + request.schemaName());
-      }
-      requests.add(request);
-      JsonNode context = sanitizedContext(request);
-      String routeId = context.path("route_id").asText();
-      String attemptId = context.path("attempt_id").asText();
-      reviewCalls.merge(attemptId, 1, Integer::sum);
-      List<ClaimReviewDecision> decisions = new ArrayList<>();
-      for (JsonNode artifact : context.path("candidate_artifacts")) {
-        String claimId = artifact.path("claimId").asText();
-        String statement = artifact.path("statement").asText();
-        String kind = artifact.path("kind").asText();
-        if (statement.contains("UNSUPPORTED_LOCAL")) {
-          continue;
+        try {
+          if (courtCall) {
+            Thread.sleep(courtDelaysMillis.getOrDefault(courtClaim, 500L));
+          }
+          if (explorationCall) {
+            Thread.sleep(explorationDelayMillis);
+          }
+        } catch (InterruptedException exception) {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException("concurrency test call interrupted", exception);
         }
-        VerificationVerdict verdict =
-            statement.contains("FALSE_LOCAL")
-                ? VerificationVerdict.FAIL
-                : VerificationVerdict.PASS;
-        decisions.add(
-            new ClaimReviewDecision(
-                claimId,
-                verdict,
-                verdict == VerificationVerdict.PASS ? 0.99d : 0.95d,
-                List.of(),
-                true,
-                true,
-                true,
-                true,
-                "COUNTEREXAMPLE".equals(kind),
-                List.of(),
-                verdict == VerificationVerdict.PASS
-                    ? "claim independently checked"
-                    : "explicit countermodel found"));
-      }
-      ClaimReviewBatch batch =
-          new ClaimReviewBatch(
-              "claim-review-" + attemptId,
-              "model-reviewer",
-              routeId,
-              attemptId,
-              decisions,
-              "artifact://claim-review/" + attemptId,
-              new UsageRecord());
-      return response(request, ContractObjectMapper.write(batch));
+        if ("InitialExplorationTurn".equals(request.schemaName())) {
+          JsonNode context = sanitizedContext(request);
+          List<String> facts = new ArrayList<>();
+          context
+              .path("verified_facts")
+              .forEach(fact -> facts.add(fact.path("statement").asText()));
+          explorationVerifiedFacts.add(List.copyOf(facts));
+          List<String> brokerArtifactIds = new ArrayList<>();
+          context
+              .path("broker_artifacts")
+              .forEach(
+                  artifact ->
+                      brokerArtifactIds.add(text(artifact, "artifactId", "artifact_id")));
+          explorationBrokerArtifactIds.add(List.copyOf(brokerArtifactIds));
+          InitialExplorationTurn turn =
+              new InitialExplorationTurn(
+                  InitialExplorationAction.ABANDON,
+                  null,
+                  null,
+                  null,
+                  "verified facts captured for the next route");
+          return response(request, ContractObjectMapper.write(turn));
+        }
+        if ("ClaimStatementFalsificationBatch".equals(request.schemaName())) {
+          return statementFalsification(request);
+        }
+        if ("ClaimCounterexampleWitnessReviewBatch".equals(request.schemaName())) {
+          return counterexampleWitnessReview(request);
+        }
+        if ("ClaimProofAuditBatch".equals(request.schemaName())) {
+          return proofAudit(request);
+        }
+        if ("ClaimMinimalRepairBatch".equals(request.schemaName())) {
+          return minimalRepair(request);
+        }
+        if ("ClaimBlindAdjudicationBatch".equals(request.schemaName())) {
+          return blindAdjudication(request);
+        }
+        if (!"ClaimReviewBatch".equals(request.schemaName())) {
+          throw new AssertionError("unexpected claim-salvage schema: " + request.schemaName());
+        }
+        requests.add(request);
+        JsonNode context = sanitizedContext(request);
+        String routeId = context.path("route_id").asText();
+        String attemptId = context.path("attempt_id").asText();
+        reviewCalls.merge(attemptId, 1, Integer::sum);
+        List<ClaimReviewDecision> decisions = new ArrayList<>();
+        for (JsonNode artifact : context.path("candidate_artifacts")) {
+          String claimId = artifact.path("claimId").asText();
+          String statement = artifact.path("statement").asText();
+          String kind = artifact.path("kind").asText();
+          if (statement.contains("UNSUPPORTED_LOCAL")) {
+            continue;
+          }
+          VerificationVerdict verdict =
+              statement.contains("FALSE_LOCAL")
+                  ? VerificationVerdict.FAIL
+                  : VerificationVerdict.PASS;
+          decisions.add(
+              new ClaimReviewDecision(
+                  claimId,
+                  verdict,
+                  verdict == VerificationVerdict.PASS ? 0.99d : 0.95d,
+                  List.of(),
+                  true,
+                  true,
+                  true,
+                  true,
+                  "COUNTEREXAMPLE".equals(kind),
+                  List.of(),
+                  verdict == VerificationVerdict.PASS
+                      ? "claim independently checked"
+                      : "explicit countermodel found"));
+        }
+        ClaimReviewBatch batch =
+            new ClaimReviewBatch(
+                "claim-review-" + attemptId,
+                "model-reviewer",
+                routeId,
+                attemptId,
+                decisions,
+                "artifact://claim-review/" + attemptId,
+                new UsageRecord());
+        return response(request, ContractObjectMapper.write(batch));
       } finally {
         if (courtCall) {
+          completedCourtCalls.add(request.schemaName() + ":" + courtClaim);
           activeCourtCalls.decrementAndGet();
+        }
+        if (explorationCall) {
+          activeExplorationCalls.decrementAndGet();
         }
       }
     }
 
     int maximumConcurrentCourtCalls() {
       return maximumCourtCalls.get();
+    }
+
+    int maximumConcurrentExplorationCalls() {
+      return maximumExplorationCalls.get();
+    }
+
+    void setExplorationDelayMillis(long delayMillis) {
+      if (delayMillis < 0L) {
+        throw new IllegalArgumentException("delayMillis must be nonnegative");
+      }
+      explorationDelayMillis = delayMillis;
+    }
+
+    void setClaimCourtDelays(Map<String, Long> delaysMillis) {
+      Map<String, Long> checked = new LinkedHashMap<>();
+      Objects.requireNonNull(delaysMillis, "delaysMillis")
+          .forEach(
+              (claim, delay) -> {
+                if (claim == null || claim.isBlank() || delay == null || delay < 0L) {
+                  throw new IllegalArgumentException("claim delays must be named and nonnegative");
+                }
+                checked.put(claim.strip(), delay);
+              });
+      courtDelaysMillis = Map.copyOf(checked);
+    }
+
+    List<String> claimCourtCompletionOrder() {
+      return List.copyOf(completedCourtCalls);
+    }
+
+    private static String claimKey(ProviderRequest request) {
+      String prompt = request.messages().getLast().content();
+      java.util.regex.Matcher matcher =
+          java.util.regex.Pattern.compile("parallel-claim-\\d+").matcher(prompt);
+      return matcher.find() ? matcher.group() : "unbound-claim";
     }
 
     private LLMResponse statementFalsification(ProviderRequest request) {

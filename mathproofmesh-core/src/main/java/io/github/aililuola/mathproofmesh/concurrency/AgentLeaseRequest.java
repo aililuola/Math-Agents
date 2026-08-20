@@ -14,7 +14,8 @@ public record AgentLeaseRequest(
     List<String> specialtyHints,
     String authorAgentId,
     String preferredDifferentProvider,
-    int requiredPermits) {
+    int requiredPermits,
+    String requiredAgentId) {
   public AgentLeaseRequest {
     runId = text(runId, "runId");
     epochId = text(epochId, "epochId");
@@ -26,12 +27,42 @@ public record AgentLeaseRequest(
     authorAgentId = authorAgentId == null ? "" : authorAgentId.strip();
     preferredDifferentProvider =
         preferredDifferentProvider == null ? "" : preferredDifferentProvider.strip();
+    requiredAgentId = requiredAgentId == null ? "" : requiredAgentId.strip();
     if (requiredPermits < 1) {
       throw new IllegalArgumentException("requiredPermits must be positive");
     }
     if (!authorAgentId.isEmpty() && !excludedAgentIds.contains(authorAgentId)) {
       throw new IllegalArgumentException("authorAgentId must be excluded for independent work");
     }
+    if (!requiredAgentId.isEmpty() && excludedAgentIds.contains(requiredAgentId)) {
+      throw new IllegalArgumentException("requiredAgentId cannot also be excluded");
+    }
+  }
+
+  /** Backward-compatible request for atomic selection from every eligible credential. */
+  public AgentLeaseRequest(
+      String runId,
+      String epochId,
+      String workItemId,
+      AgentLeaseClass leaseClass,
+      String requiredRole,
+      Set<String> excludedAgentIds,
+      List<String> specialtyHints,
+      String authorAgentId,
+      String preferredDifferentProvider,
+      int requiredPermits) {
+    this(
+        runId,
+        epochId,
+        workItemId,
+        leaseClass,
+        requiredRole,
+        excludedAgentIds,
+        specialtyHints,
+        authorAgentId,
+        preferredDifferentProvider,
+        requiredPermits,
+        "");
   }
 
   private static String text(String value, String label) {

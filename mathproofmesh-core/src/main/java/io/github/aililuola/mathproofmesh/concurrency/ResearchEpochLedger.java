@@ -28,6 +28,7 @@ public final class ResearchEpochLedger {
             workItemIds,
             List.of(),
             "",
+            snapshot.authority(),
             1L);
     epochs.put(record.epochId(), record);
     version++;
