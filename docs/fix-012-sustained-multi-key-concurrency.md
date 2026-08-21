@@ -728,6 +728,15 @@ The latest `./scripts/verify-all.ps1 -Offline` Maven reactor completed in `11 mi
 | PostgreSQL/Sandbox failsafe IT | 26 | 0 | 0 | 0 |
 | **Total** | **2881** | **0** | **0** | **4** |
 
+An additional Linux/JDK 25 reproduction ran the release workflow command
+`./mvnw -B -ntp -Djavafx.platform=linux clean verify` in an isolated Docker workspace with the
+complete Git history mounted read-only. It passed with the pinned Maven Wrapper 3.9.16, the
+Linux JavaFX classifier, the Python sidecar environment, Testcontainers, PostgreSQL, SpotBugs,
+coverage, and the protected-authority `git diff` tests enabled. An earlier isolation attempt that
+omitted `.git` failed only the two authority-history tests with exit code 129; repeating those
+tests and the full reactor with the repository history present passed. No test, threshold,
+baseline, or analysis rule was changed to obtain the Linux pass.
+
 The Docker-backed integration run included `MathProofMeshApplicationIT`,
 `JdbcMessageRepositoryIT`, `MemoryProofGraphPostgresIT`, `PersistencePostgresIT`,
 `Phase17CheckpointOutboxPerformanceIT`, `ProviderCallPostgresIT`, and `SandboxSecurityIT`.
