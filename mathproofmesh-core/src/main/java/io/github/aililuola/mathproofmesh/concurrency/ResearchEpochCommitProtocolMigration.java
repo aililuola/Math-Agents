@@ -38,18 +38,23 @@ public final class ResearchEpochCommitProtocolMigration {
       ResearchEpochRecord epoch,
       Map<String, ResearchAuthorityMutationReceipt> mutationByEpoch,
       Map<String, ResearchMergeReceipt> mergeByEpoch) {
-    if (epoch.authorityCommitProtocol() != null) {
+    if (epoch.authorityCommitProtocol() == ResearchAuthorityCommitProtocol.RECEIPT_V1) {
       return epoch;
     }
     ResearchAuthorityMutationReceipt mutation = mutationByEpoch.get(epoch.epochId());
     ResearchMergeReceipt merge = mergeByEpoch.get(epoch.epochId());
-    boolean historicalCommittedWithoutReceipts =
-        schemaVersion <= 20
-            && epoch.status() == ResearchEpochStatus.COMMITTED
-            && mutation == null
-            && merge == null;
+    boolean noReceipts = mutation == null && merge == null;
+    boolean legacyProtocolWasDeclared =
+        epoch.authorityCommitProtocol() == ResearchAuthorityCommitProtocol.LEGACY_NO_RECEIPT;
+    boolean historicalProtocolWasAbsent =
+        epoch.authorityCommitProtocol() == null && schemaVersion <= 20;
+    boolean historicalCommittedWithoutReceiptEraEvidence =
+        epoch.status() == ResearchEpochStatus.COMMITTED
+            && noReceipts
+            && epoch.authorityHashAfterCommit().isBlank()
+            && (legacyProtocolWasDeclared || historicalProtocolWasAbsent);
     ResearchAuthorityCommitProtocol protocol =
-        historicalCommittedWithoutReceipts
+        historicalCommittedWithoutReceiptEraEvidence
             ? ResearchAuthorityCommitProtocol.LEGACY_NO_RECEIPT
             : ResearchAuthorityCommitProtocol.RECEIPT_V1;
     ResearchEpochRecord classified = epoch.withAuthorityCommitProtocol(protocol);

@@ -14,6 +14,8 @@
 - Legacy commit-protocol closure: `fix(concurrency): preserve legacy epoch commit protocol across upgrades`
 - Prepared-Epoch protocol closure baseline: `0d2d67a5ebb3789de41137d1323eed33aebc95ff`
 - Prepared-Epoch protocol closure: `fix(concurrency): upgrade replayed legacy epochs to receipt protocol`
+- Preexisting poisoned-checkpoint closure baseline: `60b5fe65d5beeab9770fd82bf63e8eb5fec12cad`
+- Preexisting poisoned-checkpoint closure: `fix(concurrency): migrate poisoned legacy epoch checkpoints`
 - Desktop checkpoint schema: `19 -> 20 -> 21`
 - PostgreSQL migration: `V6__research_concurrency_epochs.sql`
 
@@ -118,6 +120,33 @@ LEGACY_FAIL_OPEN_ACCEPTS=1
 The Core regression independently failed both state classification and commit-time upgrade:
 `MERGE_PREPARED` schema-20 records migrated to `LEGACY_NO_RECEIPT`, and a modern commit preserved
 that legacy marker. These are runtime protocol failures, not missing-API compilation evidence.
+
+### 3.5 Preexisting poisoned-checkpoint behavioral evidence
+
+The follow-up audit reproduced a checkpoint that had already been written by the faulty writer:
+the Epoch was `COMMITTED`, carried `LEGACY_NO_RECEIPT`, and also carried the modern nonblank
+after-authority hash plus both durable receipts. Before this closure, migration returned early for
+every non-null protocol marker. The first restore therefore preserved the contradictory marker,
+and deleting both receipts later caused the state machine to accept the Epoch through the legacy
+no-receipt path.
+
+The test-first Core run executed six migration cases and failed three. Every failed case expected
+`RECEIPT_V1` but received `LEGACY_NO_RECEIPT`: full modern receipt evidence, a modern after-hash
+with missing receipts, and partial receipt evidence. The real Desktop checkpoint test failed with:
+
+```text
+POISONED_COMMITTED_EPOCHS=1
+FULL_RECEIPT_PROTOCOL_UPGRADES=0
+ROUND_TRIP_PROTOCOL_LOSSES=1
+MISSING_BOTH_RECEIPT_QUARANTINES=0
+MUTATION_ONLY_QUARANTINES=1
+MERGE_ONLY_QUARANTINES=1
+LEGACY_FAIL_OPEN_ACCEPTS=1
+PROVIDER_CALL_REPLAYS=0
+```
+
+This is direct restore-path behavior from a persisted production checkpoint, not architecture-
+absence or missing-API evidence.
 
 ## 4. Concurrency configuration
 
@@ -291,14 +320,17 @@ Receipt requirements are now an Epoch property rather than an inference from the
 schema. `ResearchEpochRecord.authorityCommitProtocol` is either `LEGACY_NO_RECEIPT` or
 `RECEIPT_V1`, and `authorityHashAfterCommit` durably binds a modern committed receipt to its Epoch
 without incorrectly comparing an old Epoch with a later Campaign authority frontier. New Epochs
-are always `RECEIPT_V1`. A v19/v20 Epoch without protocol metadata migrates to
-`LEGACY_NO_RECEIPT` only when it was already `COMMITTED` and both receipts are absent. An
-uncommitted legacy Epoch migrates to `RECEIPT_V1`, because its authority commit will run under the
-current receipt protocol. `ResearchEpochLedger.commit` also forces `RECEIPT_V1` as a second
-defense whenever the modern writer completes a commit. A committed legacy marker survives every
-subsequent schema-21 save and restore. When old metadata already includes both receipts, migration
-derives its durable after-hash once and preserves the modern protocol. No receipt is synthesized
-and no Provider call is made during migration.
+are always `RECEIPT_V1`. A committed Epoch is classified as genuine historical legacy only when
+both receipts are absent, the after-authority hash is blank, and either its protocol was absent in
+schema 20 or an earlier migration already declared `LEGACY_NO_RECEIPT`. Any declared legacy Epoch
+with a nonblank after-hash or either modern receipt is reclassified as `RECEIPT_V1`; complete
+receipts validate normally, while missing or partial receipts quarantine fail closed. An
+uncommitted legacy Epoch also migrates to `RECEIPT_V1`, because its authority commit will run under
+the current receipt protocol. `ResearchEpochLedger.commit` forces `RECEIPT_V1` as a second defense
+whenever the modern writer completes a commit. A genuine committed legacy marker survives every
+subsequent schema-21 save and restore. When old metadata includes both receipts but lacks the
+after-hash, migration derives that hash once. No receipt is synthesized and no Provider call is
+made during migration.
 
 The v19 migration supplies empty snapshots and rebuilds only the concurrency projection. It makes
 no model call and does not copy or reinterpret mathematical authority. Existing durable attempts
@@ -565,6 +597,23 @@ NEGATIVE_REGISTRY_HASH_CHANGES=0
 RESULT=PASS
 ```
 
+The preexisting poisoned-checkpoint test starts from a real Coordinator-produced committed Epoch,
+changes only its persisted protocol marker to the contradictory legacy value, and then exercises
+real restore, two schema-21 round trips, and all missing/partial receipt variants.
+
+```text
+PREEXISTING POISONED EPOCH CHECKPOINT DIAGNOSTIC
+POISONED_COMMITTED_EPOCHS=1
+FULL_RECEIPT_PROTOCOL_UPGRADES=1
+ROUND_TRIP_PROTOCOL_LOSSES=0
+MISSING_BOTH_RECEIPT_QUARANTINES=1
+MUTATION_ONLY_QUARANTINES=1
+MERGE_ONLY_QUARANTINES=1
+LEGACY_FAIL_OPEN_ACCEPTS=0
+PROVIDER_CALL_REPLAYS=0
+RESULT=PASS
+```
+
 ## 13. Modified files and purpose
 
 Commit A adds the generic concurrency domain under
@@ -616,6 +665,14 @@ schema-20 JSON downgrade, durable-result replay, current Coordinator commit, sch
 and receipt-deletion quarantine. It proves that checkpoint origin does not permanently label the
 protocol used by a later commit.
 
+The preexisting poisoned-checkpoint closure changes only the pure Core migration classifier and
+its tests. It no longer trusts a non-null legacy marker ahead of contradictory receipt-era
+evidence. `DesktopPreexistingPoisonedEpochCheckpointMigrationTest` drives the actual checkpoint
+serialization and Coordinator restore path, proves permanent protocol repair across two saves,
+and proves that missing, mutation-only, and merge-only receipt states all quarantine without a
+Provider replay. Genuine historical v20 legacy records remain accepted and receive no synthetic
+receipt.
+
 Code-and-test diff by functional commit:
 
 - Commit A: `88 files changed, 3066 insertions(+), 12 deletions(-)`.
@@ -623,6 +680,7 @@ Code-and-test diff by functional commit:
 - Baseline through Commit B: `132 files changed, 6842 insertions(+), 118 deletions(-)`.
 - Final crash-atomic patch: `20 files changed, 1884 insertions(+), 74 deletions(-)`.
 - Prepared-Epoch protocol closure: `5 files changed, 287 insertions(+), 14 deletions(-)`.
+- Preexisting poisoned-checkpoint closure: `4 files changed, 367 insertions(+), 22 deletions(-)`.
 
 No target directory, logs, checkpoints, databases, caches, or generated verification reports are
 included.
@@ -643,6 +701,7 @@ network call.
 | Desktop authority hard-crash/migration/architecture focus | 7 | 0 | 0 | 0 | PASS |
 | Legacy protocol and committed-receipt closure focus | 11 | 0 | 0 | 0 | PASS |
 | Prepared-Epoch protocol-upgrade closure focus | 8 | 0 | 0 | 0 | PASS |
+| Preexisting poisoned-checkpoint closure focus | 13 | 0 | 0 | 0 | PASS |
 
 Coverage includes configuration, frozen identity, work conflicts, state transitions, monotonic
 snapshots, atomic leases, fairness, role isolation, cooldown/failure isolation, actual global and
@@ -653,21 +712,21 @@ batches, atomicity, four in-commit hard-crash windows, v19/v20 migration, protec
 
 ## 15. Module and full verification
 
-The module regression command completed with `2701` tests, zero failures, zero errors, and four
-intentional skips across Contracts, Core, Server, and Desktop. The direct
-Core/Server/Desktop aggregate was `2636` tests with zero failures and zero errors.
+The latest module regression command completed with `2706` tests, zero failures, zero errors, and
+four intentional skips across Contracts, Core, Server, and Desktop. The direct
+Core/Server/Desktop aggregate was `2641` tests with zero failures and zero errors.
 
-The final `./scripts/verify-all.ps1 -Offline` completed in `16 min 05 s` with:
+The latest `./scripts/verify-all.ps1 -Offline` Maven reactor completed in `11 min 25 s` with:
 
 | Module/suite | Tests | Failures | Errors | Skipped |
 | --- | ---: | ---: | ---: | ---: |
 | Contracts unit | 65 | 0 | 0 | 0 |
-| Core unit | 1389 | 0 | 0 | 0 |
+| Core unit | 1393 | 0 | 0 | 0 |
 | Server unit | 917 | 0 | 0 | 3 |
-| Desktop unit | 330 | 0 | 0 | 1 |
+| Desktop unit | 331 | 0 | 0 | 1 |
 | Compatibility | 149 | 0 | 0 | 0 |
 | PostgreSQL/Sandbox failsafe IT | 26 | 0 | 0 | 0 |
-| **Total** | **2876** | **0** | **0** | **4** |
+| **Total** | **2881** | **0** | **0** | **4** |
 
 The Docker-backed integration run included `MathProofMeshApplicationIT`,
 `JdbcMessageRepositoryIT`, `MemoryProofGraphPostgresIT`, `PersistencePostgresIT`,
@@ -742,6 +801,11 @@ ISSUE_013_AUTHORITY_FILES_NO_DIFF=PASS
 - Per-Epoch legacy/modern commit protocol survives schema upgrade and repeated restore: PASS.
 - A schema-20 prepared Epoch committed by the modern writer upgrades to `RECEIPT_V1`: PASS.
 - Removing both receipts from that replayed modern commit fails closed: PASS.
+- A preexisting `COMMITTED + LEGACY_NO_RECEIPT` checkpoint with modern receipt-era evidence is
+  permanently upgraded to `RECEIPT_V1`: PASS.
+- Removing either or both receipts from that preexisting poisoned checkpoint fails closed: PASS.
+- Genuine historical committed v20 Epochs remain legacy across three restores without receipt
+  synthesis or Provider replay: PASS.
 - Modern committed receipt binding and missing-receipt fail-closed behavior: PASS.
 - Issues 001-011 regression and protected-file isolation: PASS.
 - Full offline verification including Docker PostgreSQL: PASS.

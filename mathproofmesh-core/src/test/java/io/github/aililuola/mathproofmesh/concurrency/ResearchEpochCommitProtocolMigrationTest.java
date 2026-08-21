@@ -53,6 +53,127 @@ final class ResearchEpochCommitProtocolMigrationTest {
     assertThat(committed.authorityHashAfterCommit()).isEqualTo("authority-after");
   }
 
+  @Test
+  void explicitLegacyProtocolWithReceiptEraEvidenceIsReclassifiedAsReceiptVersionOne() {
+    ResearchEpochRecord poisoned =
+        record(
+                "poisoned",
+                ResearchEpochStatus.COMMITTED,
+                ResearchAuthorityCommitProtocol.LEGACY_NO_RECEIPT)
+            .withAuthorityHashAfterCommit("authority-after");
+
+    ResearchEpochSnapshot migrated =
+        ResearchEpochCommitProtocolMigration.migrate(
+            21,
+            new ResearchEpochSnapshot(List.of(poisoned), 1L),
+            receiptsFor(poisoned, true, true));
+
+    assertThat(migrated.epochs())
+        .singleElement()
+        .satisfies(
+            epoch -> {
+              assertThat(epoch.authorityCommitProtocol())
+                  .isEqualTo(ResearchAuthorityCommitProtocol.RECEIPT_V1);
+              assertThat(epoch.authorityHashAfterCommit()).isEqualTo("authority-after");
+            });
+  }
+
+  @Test
+  void explicitLegacyProtocolWithModernAfterHashButMissingReceiptsFailsClosed() {
+    ResearchEpochRecord poisonedWithoutReceipts =
+        record(
+                "poisoned-missing",
+                ResearchEpochStatus.COMMITTED,
+                ResearchAuthorityCommitProtocol.LEGACY_NO_RECEIPT)
+            .withAuthorityHashAfterCommit("authority-after");
+
+    ResearchEpochSnapshot migrated =
+        ResearchEpochCommitProtocolMigration.migrate(
+            21,
+            new ResearchEpochSnapshot(List.of(poisonedWithoutReceipts), 1L),
+            ResearchAuthorityMutationSnapshot.empty());
+
+    assertThat(migrated.epochs())
+        .singleElement()
+        .extracting(ResearchEpochRecord::authorityCommitProtocol)
+        .isEqualTo(ResearchAuthorityCommitProtocol.RECEIPT_V1);
+  }
+
+  @Test
+  void explicitLegacyProtocolWithOnlyOneModernReceiptFailsClosed() {
+    ResearchEpochRecord poisoned =
+        record(
+            "poisoned-partial",
+            ResearchEpochStatus.COMMITTED,
+            ResearchAuthorityCommitProtocol.LEGACY_NO_RECEIPT);
+
+    ResearchEpochSnapshot mutationOnly =
+        ResearchEpochCommitProtocolMigration.migrate(
+            21,
+            new ResearchEpochSnapshot(List.of(poisoned), 1L),
+            receiptsFor(poisoned, true, false));
+    ResearchEpochSnapshot mergeOnly =
+        ResearchEpochCommitProtocolMigration.migrate(
+            21,
+            new ResearchEpochSnapshot(List.of(poisoned), 1L),
+            receiptsFor(poisoned, false, true));
+
+    assertThat(mutationOnly.epochs().getFirst().authorityCommitProtocol())
+        .isEqualTo(ResearchAuthorityCommitProtocol.RECEIPT_V1);
+    assertThat(mergeOnly.epochs().getFirst().authorityCommitProtocol())
+        .isEqualTo(ResearchAuthorityCommitProtocol.RECEIPT_V1);
+  }
+
+  @Test
+  void explicitLegacyProtocolWithoutReceiptEraEvidenceRemainsHistoricalLegacy() {
+    ResearchEpochRecord historical =
+        record(
+            "historical",
+            ResearchEpochStatus.COMMITTED,
+            ResearchAuthorityCommitProtocol.LEGACY_NO_RECEIPT);
+
+    ResearchEpochSnapshot migrated =
+        ResearchEpochCommitProtocolMigration.migrate(
+            21,
+            new ResearchEpochSnapshot(List.of(historical), 1L),
+            ResearchAuthorityMutationSnapshot.empty());
+
+    assertThat(migrated.epochs())
+        .singleElement()
+        .satisfies(
+            epoch -> {
+              assertThat(epoch.authorityCommitProtocol())
+                  .isEqualTo(ResearchAuthorityCommitProtocol.LEGACY_NO_RECEIPT);
+              assertThat(epoch.authorityHashAfterCommit()).isBlank();
+            });
+  }
+
+  private static ResearchAuthorityMutationSnapshot receiptsFor(
+      ResearchEpochRecord epoch, boolean includeMutation, boolean includeMerge) {
+    ResearchAuthorityMutationReceipt mutation =
+        ResearchAuthorityMutationReceipt.create(
+            epoch.epochId(),
+            epoch.mergePlanHash(),
+            epoch.authority().stableHash(),
+            "authority-after",
+            epoch.durableResultIds(),
+            List.of(),
+            List.of(),
+            List.of());
+    ResearchMergeReceipt merge =
+        new ResearchMergeReceipt(
+            epoch.epochId(),
+            epoch.mergePlanHash(),
+            epoch.durableResultIds(),
+            List.of(),
+            "authority-after");
+    return new ResearchAuthorityMutationSnapshot(
+        includeMutation ? List.of(mutation) : List.of(),
+        includeMerge ? List.of(merge) : List.of(),
+        1L,
+        null);
+  }
+
   private static ResearchEpochRecord record(
       String epochId,
       ResearchEpochStatus status,
