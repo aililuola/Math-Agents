@@ -141,6 +141,8 @@ zero skipped classes and zero findings without adding suppressions or weakening 
 | `1d04da6` | Physical provider reservation, strict pricing, stage token enforcement, ambiguous-result retention, and Provider tests |
 | `e2050d8` | Flyway V7 persistence, fencing, exactly-once usage events, and Temporal deterministic replay |
 | `794890d` | Desktop production admission, checkpoint schema 22, restore, architecture guard, and black-box tests |
+| `47e453f` | Local verification record and acceptance diagnostics |
+| `f731c43` | Deterministic interrupt-boundary test synchronization required by Linux CI |
 
 ### Focused verification
 
@@ -256,10 +258,18 @@ dependency and security checks, secret and license policy, source immutability, 
 checkpoint/restore, Temporal replay, and Python Sidecar performance. No threshold was changed.
 
 The workstation has only the Docker Desktop WSL2 distribution and no general Linux distribution,
-so a separate local `./mvnw ... -Djavafx.platform=linux clean verify` cannot run there. The Linux
-JDK 25 requirement is therefore assigned to the repository's GitHub `verify` job; this record must
-not be marked closed until that job and `package-windows` both pass on the final documentation
-commit.
+so Linux JDK 25 verification ran in GitHub Actions. The first remote run, `32594014620`, exposed an
+existing race in `ComputationResourceGuardBoundaryTest`: its worker could return before the caller
+observed a pre-existing interrupt. The test still required `COMPUTATION_INTERRUPTED`, but the
+fixture did not keep the worker pending long enough to exercise that branch deterministically.
+Commit `f731c43` replaced the immediate-return fixture with a cancellation-released latch without
+changing production code or weakening any assertion. The test then passed 20/20 repeated local
+runs and the complete 1,408-test Core regression.
+
+GitHub Actions run
+[`32594464848`](https://github.com/aililuola/Math-Agents/actions/runs/32594464848) passed both
+`verify` on `ubuntu-latest` and `package-windows` on `windows-latest` for `f731c43`. The Linux job
+therefore exercised the JDK 25 full verification gate that was unavailable in the local WSL setup.
 
 ### Protected authority audit
 
@@ -273,8 +283,7 @@ authority was weakened.
 
 ### Current acceptance state
 
-Local acceptance is complete. Final remote Linux and Windows packaging checks are pending the
-branch push.
+Local acceptance and the remote Linux/Windows release gates are complete.
 
 ```text
 CANONICAL_BUDGET_STATE=PASS
@@ -299,6 +308,6 @@ POSTGRESQL_FENCING=PASS
 ISSUES_001_012_REGRESSION=PASS
 PROTECTED_AUTHORITY=PASS
 FULL_VERIFICATION=PASS
-GITHUB_ACTIONS=PENDING
-ISSUE_013_STATUS=OPEN
+GITHUB_ACTIONS=PASS
+ISSUE_013_STATUS=CLOSED
 ```
