@@ -247,6 +247,23 @@ final class ConfigInvariants {
     if (config.concurrency().enabled() && configuredSlots > enabledCapacity) {
       throw invalid("concurrency slots cannot exceed enabled agent capacity");
     }
+    if (config.budget().maxCostUsd() != null) {
+      agents.stream()
+          .filter(AgentConfig::enabled)
+          .filter(agent -> !"mock".equals(agent.provider()))
+          .filter(
+              agent ->
+                  agent.pricing().inputPerMillion() <= 0.0d
+                      || agent.pricing().outputPerMillion() <= 0.0d)
+          .findFirst()
+          .ifPresent(
+              agent -> {
+                throw invalid(
+                    "agent "
+                        + agent.id()
+                        + ": UNPRICED_PROVIDER while budget.max_cost_usd is active");
+              });
+    }
 
     TopologyConfig topology = config.topology();
     boolean activeHierarchical =

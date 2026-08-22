@@ -46,6 +46,17 @@ public final class CallLedger {
       String bucket,
       long expectedTokens,
       BigDecimal expectedCostUsd) {
+    return reserveWithId(
+        UUID.randomUUID().toString(), stage, bucket, expectedTokens, expectedCostUsd);
+  }
+
+  public synchronized Reservation reserveWithId(
+      String reservationId,
+      String stage,
+      String bucket,
+      long expectedTokens,
+      BigDecimal expectedCostUsd) {
+    String safeReservationId = requireText(reservationId, "reservationId");
     String safeStage = requireText(stage, "stage");
     String safeBucket = requireText(bucket, "bucket");
     if (expectedTokens < 0) {
@@ -55,6 +66,16 @@ public final class CallLedger {
         Objects.requireNonNull(expectedCostUsd, "expectedCostUsd");
     if (expectedCost.signum() < 0) {
       throw new IllegalArgumentException("expectedCostUsd must not be negative");
+    }
+    Reservation prior = reservations.get(safeReservationId);
+    if (prior != null) {
+      if (!prior.stage().equals(safeStage)
+          || !prior.bucket().equals(safeBucket)
+          || prior.expectedTokens() != expectedTokens
+          || prior.expectedCostUsd().compareTo(expectedCost) != 0) {
+        throw new IllegalStateException("stable budget reservation changed resources");
+      }
+      return prior;
     }
     if (committedCalls + reservedCalls + 1 > maxCalls) {
       throw new BudgetExhaustedError("provider call budget exhausted");
@@ -74,11 +95,7 @@ public final class CallLedger {
     }
     Reservation reservation =
         new Reservation(
-            UUID.randomUUID().toString(),
-            safeStage,
-            safeBucket,
-            expectedTokens,
-            expectedCost);
+            safeReservationId, safeStage, safeBucket, expectedTokens, expectedCost);
     reservations.put(reservation.id(), reservation);
     reservedCalls++;
     reservedTokens = Math.addExact(reservedTokens, expectedTokens);
@@ -128,6 +145,10 @@ public final class CallLedger {
       throw new IllegalArgumentException("possibleCostUsd must not be negative");
     }
     committedCalls++;
+    // The remote side may have consumed the full reservation. Keep that exposure until durable
+    // provider evidence proves a smaller usage or proves that dispatch never happened.
+    committedOutputTokens =
+        Math.addExact(committedOutputTokens, reservation.expectedTokens());
     committedCost = committedCost.add(cost);
     return totals();
   }
@@ -161,6 +182,23 @@ public final class CallLedger {
 
   public synchronized long remainingCalls() {
     return Math.max(0L, maxCalls - committedCalls - reservedCalls);
+  }
+
+  public synchronized long remainingTokens() {
+    return maxTokens == null
+        ? Long.MAX_VALUE
+        : Math.max(
+            0L,
+            maxTokens
+                - committedInputTokens
+                - committedOutputTokens
+                - reservedTokens);
+  }
+
+  public synchronized BigDecimal remainingCost() {
+    return maxCostUsd == null
+        ? new BigDecimal("1E+100")
+        : maxCostUsd.subtract(committedCost).subtract(reservedCost).max(BigDecimal.ZERO);
   }
 
   public synchronized Reconciliation reconcile(UsageTotals persisted) {

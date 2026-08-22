@@ -11,6 +11,13 @@ import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
 import io.github.aililuola.mathproofmesh.contract.ResearchFindingUpdateBatch;
 import io.github.aililuola.mathproofmesh.contract.StructuredPayloadNormalizer;
 import io.github.aililuola.mathproofmesh.contract.UsageRecord;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetBucket;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetEnvelope;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetEnvelopeId;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetEnvelopeLedger;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetResourceVector;
+import io.github.aililuola.mathproofmesh.orchestration.PricingSnapshot;
+import io.github.aililuola.mathproofmesh.orchestration.StageTokenEnvelopeResolver;
 import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
 import io.github.aililuola.mathproofmesh.provider.AgentCallFailure;
 import io.github.aililuola.mathproofmesh.provider.AgentFailoverExhausted;
@@ -41,7 +48,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 /**
  * Audited structured-call pipeline. The external call and downstream result
@@ -57,6 +66,11 @@ public final class StructuredAgentRunner {
   private final ReasoningTraceStore reasoningTraces;
   private final int parseRetries;
   private final int jsonRepairMaxOutputTokens;
+  private final ThreadLocal<EnvelopeExecution> activeBudgetEnvelope = new ThreadLocal<>();
+  private final Map<String, AtomicInteger> providerCallOrdinals = new ConcurrentHashMap<>();
+  private volatile Supplier<BudgetEnvelopeLedger> budgetEnvelopeLedger;
+  private volatile PricingSnapshot budgetPricing;
+  private volatile EnvelopeExecution runBudgetEnvelope;
 
   public StructuredAgentRunner(
       AgentPool pool,
@@ -109,6 +123,51 @@ public final class StructuredAgentRunner {
     }
     this.parseRetries = parseRetries;
     this.jsonRepairMaxOutputTokens = jsonRepairMaxOutputTokens;
+  }
+
+  /** Binds the run-scoped action-envelope authority used before every live provider dispatch. */
+  public void configureBudgetEnvelopeLedger(Supplier<BudgetEnvelopeLedger> ledger) {
+    this.budgetEnvelopeLedger = Objects.requireNonNull(ledger, "ledger");
+  }
+
+  /** Binds the immutable pricing snapshot used by the action-envelope accounting sidecar. */
+  public void configureBudgetPricing(PricingSnapshot pricing) {
+    this.budgetPricing = Objects.requireNonNull(pricing, "pricing");
+  }
+
+  /** Runs one scheduler action inside its already-admitted action envelope. */
+  public <T> T withinBudgetEnvelope(BudgetEnvelope envelope, Supplier<T> action) {
+    Objects.requireNonNull(envelope, "envelope");
+    Objects.requireNonNull(action, "action");
+    if (activeBudgetEnvelope.get() != null) {
+      throw new IllegalStateException("nested action budget envelopes are not supported");
+    }
+    activeBudgetEnvelope.set(new EnvelopeExecution(envelope.envelopeId()));
+    try {
+      return action.get();
+    } finally {
+      activeBudgetEnvelope.remove();
+    }
+  }
+
+  /** Keeps one admitted action envelope bound across the scheduler's decision/explore/integrate cursors. */
+  public void activateRunBudgetEnvelope(BudgetEnvelopeId envelopeId) {
+    Objects.requireNonNull(envelopeId, "envelopeId");
+    EnvelopeExecution current = runBudgetEnvelope;
+    if (current != null && !current.envelopeId().equals(envelopeId)) {
+      throw new IllegalStateException("another run budget envelope is already active");
+    }
+    if (current == null) {
+      runBudgetEnvelope = new EnvelopeExecution(envelopeId);
+    }
+  }
+
+  public void clearRunBudgetEnvelope(BudgetEnvelopeId envelopeId) {
+    Objects.requireNonNull(envelopeId, "envelopeId");
+    EnvelopeExecution current = runBudgetEnvelope;
+    if (current != null && current.envelopeId().equals(envelopeId)) {
+      runBudgetEnvelope = null;
+    }
   }
 
   public <T> StructuredCallResult<T> call(
@@ -463,6 +522,152 @@ public final class StructuredAgentRunner {
     return lease == null ? agent.call(request) : lease.call(request);
   }
 
+  private String nextProviderCallId(
+      String runId, String idempotencyKey, String agentId, String stage, String requestHash) {
+    String identity =
+        sha256(
+            ContractObjectMapper.write(
+                List.of(runId, idempotencyKey, agentId, stage, requestHash)));
+    int ordinal =
+        providerCallOrdinals
+            .computeIfAbsent(identity, ignored -> new AtomicInteger())
+            .incrementAndGet();
+    String callId = providerCallId(identity, ordinal);
+    while (budgetReservationExists(callId)) {
+      ordinal = providerCallOrdinals.get(identity).incrementAndGet();
+      callId = providerCallId(identity, ordinal);
+    }
+    return callId;
+  }
+
+  private static String providerCallId(String identity, int ordinal) {
+    return "provider-call-"
+        + sha256(ContractObjectMapper.write(List.of(identity, ordinal))).substring(0, 32);
+  }
+
+  private boolean budgetReservationExists(String providerCallId) {
+    Supplier<BudgetEnvelopeLedger> supplier = budgetEnvelopeLedger;
+    return supplier != null
+        && Objects.requireNonNull(supplier.get(), "budget envelope ledger")
+            .reservationSnapshot()
+            .reservations()
+            .stream()
+            .anyMatch(reservation -> reservation.providerCallId().equals(providerCallId));
+  }
+
+  private static BigDecimal providerCost(
+      long inputTokens, long outputTokens, AgentRuntime agent) {
+    return CallLedger.tokenCost(
+        inputTokens,
+        outputTokens,
+        agent.config().pricing().inputPerMillion(),
+        agent.config().pricing().outputPerMillion());
+  }
+
+  private BigDecimal envelopeCost(BigDecimal providerCost) {
+    PricingSnapshot configured = budgetPricing;
+    return configured != null
+            && configured.billingMode() == PricingSnapshot.BillingMode.BILLING_EXEMPT
+        ? BigDecimal.ZERO
+        : providerCost;
+  }
+
+  private PhysicalBudgetBinding reservePhysicalBudget(
+      String runId,
+      String idempotencyKey,
+      String requestHash,
+      String providerCallId,
+      String stage,
+      String bucket,
+      AgentRuntime agent,
+      BudgetResourceVector resources) {
+    Supplier<BudgetEnvelopeLedger> supplier = budgetEnvelopeLedger;
+    if (supplier == null) {
+      return null;
+    }
+    BudgetEnvelopeLedger ledger = Objects.requireNonNull(supplier.get(), "budget envelope ledger");
+    EnvelopeExecution execution = activeBudgetEnvelope.get();
+    if (execution == null) {
+      execution = runBudgetEnvelope;
+    }
+    BudgetEnvelopeId envelopeId;
+    boolean implicit;
+    int ordinal;
+    if (execution == null) {
+      BudgetEnvelope envelope =
+          ledger.reserve(
+              runId,
+              "provider-stage-" + stage,
+              idempotencyKey + ":" + providerCallId,
+              "provider-request-" + requestHash,
+              budgetBucket(bucket),
+              resources);
+      ledger.activate(envelope.envelopeId());
+      envelopeId = envelope.envelopeId();
+      implicit = true;
+      ordinal = 0;
+    } else {
+      envelopeId = execution.envelopeId();
+      implicit = false;
+      ordinal = execution.ordinalFor(providerCallId);
+    }
+    String pricingHash =
+        io.github.aililuola.mathproofmesh.contract.CanonicalJson.stableHash(
+            Map.of(
+                "agent_id", agent.id(),
+                "provider", agent.provider(),
+                "model", agent.model(),
+                "input_per_million", agent.config().pricing().inputPerMillion(),
+                "output_per_million", agent.config().pricing().outputPerMillion()));
+    String reservationId =
+        ledger
+            .reservePhysical(
+                envelopeId,
+                providerCallId,
+                idempotencyKey,
+                stage,
+                ordinal,
+                pricingHash,
+                resources)
+            .reservationId();
+    return new PhysicalBudgetBinding(ledger, envelopeId, reservationId, implicit);
+  }
+
+  private BudgetResourceVector currentActionEnvelopeRemaining() {
+    Supplier<BudgetEnvelopeLedger> supplier = budgetEnvelopeLedger;
+    if (supplier == null) {
+      return null;
+    }
+    EnvelopeExecution execution = activeBudgetEnvelope.get();
+    if (execution == null) {
+      execution = runBudgetEnvelope;
+    }
+    return execution == null
+        ? null
+        : Objects.requireNonNull(supplier.get(), "budget envelope ledger")
+            .remaining(execution.envelopeId());
+  }
+
+  private static BudgetBucket budgetBucket(String value) {
+    String normalized = value == null ? "" : value.strip().toLowerCase(java.util.Locale.ROOT);
+    if (normalized.contains("synth") || normalized.contains("final")) {
+      return BudgetBucket.SYNTHESIS;
+    }
+    if (normalized.contains("verif") || normalized.contains("review") || normalized.contains("audit")) {
+      return BudgetBucket.VERIFICATION;
+    }
+    if (normalized.contains("revis") || normalized.contains("repair")) {
+      return BudgetBucket.REVISION;
+    }
+    if (normalized.contains("strateg") || normalized.contains("widen") || normalized.contains("breadth")) {
+      return BudgetBucket.BREADTH;
+    }
+    if (normalized.contains("continu") || normalized.contains("depth") || normalized.contains("proof")) {
+      return BudgetBucket.DEPTH;
+    }
+    return BudgetBucket.LEGACY_UNCLASSIFIED;
+  }
+
   public boolean apply(
       String runId, StructuredCallResult<?> result, String applicationKey) {
     Objects.requireNonNull(result, "result");
@@ -524,6 +729,49 @@ public final class StructuredAgentRunner {
     String promptRef =
         artifacts.savePrompt(bundle.stage(), agent.id(), safeSystem, safeUser);
     String requestArtifactHash = artifactHash(promptRef);
+    long estimatedInputTokens =
+        Math.max(1L, (safeSystem.length() + safeUser.length() + 3L) / 4L);
+    BudgetResourceVector actionRemaining = currentActionEnvelopeRemaining();
+    if (actionRemaining != null && actionRemaining.calls() < 1L) {
+      throw new BudgetExhaustedError("ACTION_ENVELOPE_CALLS_EXHAUSTED");
+    }
+    long actionOutputLimit =
+        actionRemaining == null
+            ? ledgerTokenLimit(budget.remainingTokens())
+            : actionRemaining.maxOutputTokens();
+    long actionTotalLimit =
+        actionRemaining == null
+            ? ledgerTokenLimit(budget.remainingTokens())
+            : actionRemaining.maxTotalTokens();
+    StageTokenEnvelopeResolver.Resolution tokenEnvelope =
+        new StageTokenEnvelopeResolver()
+            .resolve(
+                new StageTokenEnvelopeResolver.Request(
+                    estimatedInputTokens,
+                    agent.config().maxOutputTokens(),
+                    agent.config().providerMaxOutputTokens(),
+                    bundle.maxOutputTokens(),
+                    bundle.maxOutputTokens(),
+                    actionOutputLimit,
+                    actionTotalLimit,
+                    ledgerTokenLimit(budget.remainingTokens()),
+                    0L));
+    if (!tokenEnvelope.allowed()) {
+      throw new BudgetExhaustedError(tokenEnvelope.code());
+    }
+    int resolvedMaxOutputTokens = tokenEnvelope.maxOutputTokens();
+    if (resolvedMaxOutputTokens != bundle.maxOutputTokens()) {
+      bundle =
+          new PromptBundle<>(
+              bundle.stage(),
+              bundle.system(),
+              bundle.user(),
+              bundle.responseType(),
+              bundle.temperature(),
+              resolvedMaxOutputTokens,
+              bundle.streaming(),
+              bundle.responseSchema());
+    }
     String requestHash =
         sha256(
             ContractObjectMapper.write(
@@ -534,23 +782,19 @@ public final class StructuredAgentRunner {
                     "stage", bundle.stage(),
                     "system", safeSystem,
                     "user", safeUser,
-                    "max_output_tokens", bundle.maxOutputTokens(),
+                    "max_output_tokens", resolvedMaxOutputTokens,
                     "streaming", bundle.streaming())));
-    long estimatedInputTokens =
-        Math.max(1L, (safeSystem.length() + safeUser.length() + 3L) / 4L);
     BigDecimal expectedCost =
-        CallLedger.tokenCost(
-            estimatedInputTokens,
-            bundle.maxOutputTokens(),
-            agent.config().pricing().inputPerMillion(),
-            agent.config().pricing().outputPerMillion());
+        providerCost(estimatedInputTokens, resolvedMaxOutputTokens, agent);
+    String generatedCallId =
+        nextProviderCallId(runId, idempotencyKey, agent.id(), bundle.stage(), requestHash);
     CallLedger.Reservation reservation =
-        budget.reserve(
+        budget.reserveWithId(
+            "budget-reservation-" + generatedCallId.substring("provider-call-".length()),
             bundle.stage(),
             budgetBucket,
-            Math.addExact(estimatedInputTokens, bundle.maxOutputTokens()),
+            Math.addExact(estimatedInputTokens, resolvedMaxOutputTokens),
             expectedCost);
-    String generatedCallId = UUID.randomUUID().toString();
     ProviderCallRecord planned =
         calls.plan(
             new ProviderCallPlan(
@@ -563,7 +807,8 @@ public final class StructuredAgentRunner {
                 bundle.stage(),
                 requestHash,
                 requestArtifactHash));
-    if (!planned.callId().equals(generatedCallId)) {
+    if (!planned.callId().equals(generatedCallId)
+        || planned.state() != ProviderCallState.PLANNED) {
       budget.release(reservation.id());
       if (checkpointContext != null) {
         checkpointContext.bindPrimaryProviderCallId(planned.callId());
@@ -580,6 +825,29 @@ public final class StructuredAgentRunner {
           checkpointContext,
           lease);
     }
+    BudgetResourceVector estimatedResources =
+        new BudgetResourceVector(
+            1L,
+            estimatedInputTokens,
+            resolvedMaxOutputTokens,
+            Math.addExact(estimatedInputTokens, resolvedMaxOutputTokens),
+            envelopeCost(expectedCost));
+    PhysicalBudgetBinding physicalBudget;
+    try {
+      physicalBudget =
+          reservePhysicalBudget(
+              runId,
+              planned.idempotencyKey(),
+              requestHash,
+              generatedCallId,
+              bundle.stage(),
+              budgetBucket,
+              agent,
+              estimatedResources);
+    } catch (RuntimeException failure) {
+      budget.release(reservation.id());
+      throw failure;
+    }
 
     if (checkpointContext != null) {
       checkpointContext.bindPrimaryProviderCallId(generatedCallId);
@@ -592,6 +860,9 @@ public final class StructuredAgentRunner {
             generatedCallId,
             ProviderCallState.PLANNED,
             ProviderCallState.DISPATCHED));
+    if (physicalBudget != null) {
+      physicalBudget.markDispatched();
+    }
     if (bundle.streaming()) {
       calls.transition(
           ProviderCallTransition.state(
@@ -608,7 +879,7 @@ public final class StructuredAgentRunner {
                   new ChatMessage("system", safeSystem),
                   new ChatMessage("user", safeUser)),
               bundle.temperature(),
-              bundle.maxOutputTokens(),
+              resolvedMaxOutputTokens,
               true,
               checkpointContext == null
                   ? bundle.responseType().getSimpleName()
@@ -638,12 +909,7 @@ public final class StructuredAgentRunner {
         }
       }
       String safeResponseText = redactor.redact(response.text());
-      BigDecimal cost =
-          CallLedger.tokenCost(
-              response.inputTokens(),
-              response.outputTokens(),
-              agent.config().pricing().inputPerMillion(),
-              agent.config().pricing().outputPerMillion());
+      BigDecimal cost = providerCost(response.inputTokens(), response.outputTokens(), agent);
       String responseRef =
           artifacts.writeText(
               ContractObjectMapper.write(
@@ -683,6 +949,15 @@ public final class StructuredAgentRunner {
               BigDecimal.ZERO,
               null));
       budget.commit(reservation.id(), response, agent.config().pricing());
+      if (physicalBudget != null) {
+        physicalBudget.settle(
+            new BudgetResourceVector(
+                1L,
+                response.inputTokens(),
+                response.outputTokens(),
+                response.totalTokens(),
+                envelopeCost(cost)));
+      }
       return parseOrRepair(
           runId,
           generatedCallId,
@@ -707,7 +982,8 @@ public final class StructuredAgentRunner {
           reservation,
           expectedCost,
           failure.providerFailure(),
-          failure.retries());
+          failure.retries(),
+          physicalBudget);
       throw failure;
     } catch (ProviderException failure) {
       completeFailure(
@@ -717,7 +993,8 @@ public final class StructuredAgentRunner {
           reservation,
           expectedCost,
           failure,
-          agent.lastCallRetries());
+          agent.lastCallRetries(),
+          physicalBudget);
       throw failure;
     } catch (ProviderCircuitOpenError failure) {
       calls.transition(
@@ -736,6 +1013,9 @@ public final class StructuredAgentRunner {
               BigDecimal.ZERO,
               null));
       budget.release(reservation.id());
+      if (physicalBudget != null) {
+        physicalBudget.releaseConfirmedFailure();
+      }
       throw failure;
     } catch (RuntimeException failure) {
       // A provider success may still fail strict structured parsing. The
@@ -743,6 +1023,9 @@ public final class StructuredAgentRunner {
       if (!(failure instanceof StructuredOutputError)
           && !(failure instanceof AgentProgressError)) {
         budget.release(reservation.id());
+      }
+      if (physicalBudget != null) {
+        physicalBudget.quarantine();
       }
       throw failure;
     }
@@ -755,7 +1038,8 @@ public final class StructuredAgentRunner {
       CallLedger.Reservation reservation,
       BigDecimal expectedCost,
       ProviderException failure,
-      int retries) {
+      int retries,
+      PhysicalBudgetBinding physicalBudget) {
     boolean ambiguous = failure.remoteResultUnknown();
     ProviderCallState terminal;
     if (failure.kind() == ProviderErrorKind.CANCELLED) {
@@ -768,6 +1052,7 @@ public final class StructuredAgentRunner {
     ambiguity.put("remote_result_unknown", ambiguous);
     ambiguity.put("error_kind", failure.kind().name());
     ambiguity.put("potential_duplicate_charge", ambiguous);
+    ambiguity.put("possible_total_tokens", ambiguous ? reservation.expectedTokens() : 0L);
     calls.transition(
         new ProviderCallTransition(
             runId,
@@ -775,7 +1060,7 @@ public final class StructuredAgentRunner {
             activeState,
             terminal,
             0L,
-            0L,
+            ambiguous ? reservation.expectedTokens() : 0L,
             BigDecimal.ZERO,
             0.0d,
             null,
@@ -785,8 +1070,14 @@ public final class StructuredAgentRunner {
             ambiguity));
     if (ambiguous) {
       budget.commitAmbiguous(reservation.id(), expectedCost);
+      if (physicalBudget != null) {
+        physicalBudget.quarantine();
+      }
     } else {
       budget.release(reservation.id());
+      if (physicalBudget != null) {
+        physicalBudget.releaseConfirmedFailure();
+      }
     }
   }
 
@@ -1102,6 +1393,10 @@ public final class StructuredAgentRunner {
         || response.outputTokens() >= requestedOutputTokens;
   }
 
+  private static long ledgerTokenLimit(long remainingTokens) {
+    return remainingTokens == Long.MAX_VALUE ? Integer.MAX_VALUE : remainingTokens;
+  }
+
   private static ReasoningBudgetExhaustedError reasoningBudgetExhaustedError(
       String agentId,
       LLMResponse response,
@@ -1310,6 +1605,88 @@ public final class StructuredAgentRunner {
               frames,
               envelope,
               updates));
+    }
+  }
+
+  private static final class EnvelopeExecution {
+    private final BudgetEnvelopeId envelopeId;
+
+    private EnvelopeExecution(BudgetEnvelopeId envelopeId) {
+      this.envelopeId = Objects.requireNonNull(envelopeId, "envelopeId");
+    }
+
+    private BudgetEnvelopeId envelopeId() {
+      return envelopeId;
+    }
+
+    private int ordinalFor(String providerCallId) {
+      String hash = sha256(providerCallId);
+      return (int) (Long.parseUnsignedLong(hash.substring(0, 8), 16) & Integer.MAX_VALUE);
+    }
+  }
+
+  private static final class PhysicalBudgetBinding {
+    private final BudgetEnvelopeLedger ledger;
+    private final BudgetEnvelopeId envelopeId;
+    private final String reservationId;
+    private final boolean implicitEnvelope;
+    private boolean dispatched;
+    private boolean terminal;
+
+    private PhysicalBudgetBinding(
+        BudgetEnvelopeLedger ledger,
+        BudgetEnvelopeId envelopeId,
+        String reservationId,
+        boolean implicitEnvelope) {
+      this.ledger = Objects.requireNonNull(ledger, "ledger");
+      this.envelopeId = Objects.requireNonNull(envelopeId, "envelopeId");
+      this.reservationId = Objects.requireNonNull(reservationId, "reservationId");
+      this.implicitEnvelope = implicitEnvelope;
+    }
+
+    private void markDispatched() {
+      if (!dispatched) {
+        ledger.markDispatched(reservationId);
+        dispatched = true;
+      }
+    }
+
+    private void settle(BudgetResourceVector actual) {
+      if (!terminal) {
+        ledger.settle(reservationId, actual);
+        terminal = true;
+        finishImplicit();
+      }
+    }
+
+    private void quarantine() {
+      if (!terminal) {
+        if (dispatched) {
+          ledger.quarantineUncertain(reservationId);
+        } else {
+          ledger.releaseBeforeDispatch(reservationId);
+        }
+        terminal = true;
+        finishImplicit();
+      }
+    }
+
+    private void releaseConfirmedFailure() {
+      if (!terminal) {
+        if (dispatched) {
+          ledger.settle(reservationId, BudgetResourceVector.zero());
+        } else {
+          ledger.releaseBeforeDispatch(reservationId);
+        }
+        terminal = true;
+        finishImplicit();
+      }
+    }
+
+    private void finishImplicit() {
+      if (implicitEnvelope) {
+        ledger.finish(envelopeId);
+      }
     }
   }
 

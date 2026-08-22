@@ -7,6 +7,11 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import io.github.aililuola.mathproofmesh.config.StrictYamlConfigLoader;
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
 import io.github.aililuola.mathproofmesh.contract.InitialExplorationTurn;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetBucket;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetEnvelopeLedger;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetEnvelopeStatus;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetPhysicalReservation;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetResourceVector;
 import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
 import io.github.aililuola.mathproofmesh.provider.AgentPool;
 import io.github.aililuola.mathproofmesh.provider.InMemoryProviderCallRepository;
@@ -438,6 +443,132 @@ class StructuredAgentRunnerTest {
   }
 
   @Test
+  void actionEnvelopeTransfersToOnePhysicalReservationAndReplayDoesNotSettleTwice() {
+    CallLedger callLedger = new CallLedger(4, 10_000L, BigDecimal.TEN);
+    BudgetEnvelopeLedger envelopes =
+        new BudgetEnvelopeLedger(resource(4, 10_000, 10_000, 20_000, "10"),
+            BudgetResourceVector.zero());
+    var envelope =
+        envelopes.reserve(
+            "run-envelope",
+            "epoch-1",
+            "work-1",
+            "decision-1",
+            BudgetBucket.DEPTH,
+            resource(2, 1_000, 512, 1_512, "1"));
+    envelopes.activate(envelope.envelopeId());
+    AtomicInteger providerCalls = new AtomicInteger();
+    try (Fixture fixture =
+        fixture(
+            "run-envelope",
+            request -> {
+              providerCalls.incrementAndGet();
+              return response("{\"answer\":\"proved\"}");
+            },
+            callLedger,
+            List.of())) {
+      fixture.runner().configureBudgetEnvelopeLedger(() -> envelopes);
+      fixture.runner().activateRunBudgetEnvelope(envelope.envelopeId());
+
+      StructuredCallResult<Answer> first =
+          fixture.runner().call(
+              "run-envelope",
+              "stable-envelope-key",
+              "general",
+              bundle("public prompt"),
+              fixture.pool().get("agent-a"),
+              "depth");
+      StructuredCallResult<Answer> replay =
+          fixture.runner().call(
+              "run-envelope",
+              "stable-envelope-key",
+              "general",
+              bundle("public prompt"),
+              fixture.pool().get("agent-a"),
+              "depth");
+
+      assertThat(replay.callId()).isEqualTo(first.callId());
+      assertThat(providerCalls).hasValue(1);
+      assertThat(callLedger.totals().calls()).isEqualTo(1L);
+      assertThat(envelopes.reservationSnapshot().reservations())
+          .singleElement()
+          .extracting(BudgetPhysicalReservation::status)
+          .isEqualTo(BudgetPhysicalReservation.Status.SETTLED);
+      assertThat(envelopes.usageSnapshot().committed().calls()).isEqualTo(1L);
+      assertThat(envelopes.reservedResources().calls()).isEqualTo(1L);
+
+      fixture.runner().clearRunBudgetEnvelope(envelope.envelopeId());
+      assertThat(envelopes.finish(envelope.envelopeId()).status())
+          .isEqualTo(BudgetEnvelopeStatus.SETTLED);
+    }
+  }
+
+  @Test
+  void unknownRemoteResultQuarantinesWorstCaseEnvelopeAndCannotReplay() {
+    CallLedger callLedger = new CallLedger(4, 10_000L, BigDecimal.TEN);
+    BudgetEnvelopeLedger envelopes =
+        new BudgetEnvelopeLedger(resource(4, 10_000, 10_000, 20_000, "10"),
+            BudgetResourceVector.zero());
+    var envelope =
+        envelopes.reserve(
+            "run-quarantine",
+            "epoch-1",
+            "work-1",
+            "decision-1",
+            BudgetBucket.DEPTH,
+            resource(1, 1_000, 512, 1_512, "1"));
+    envelopes.activate(envelope.envelopeId());
+    AtomicInteger providerCalls = new AtomicInteger();
+    try (Fixture fixture =
+        fixture(
+            "run-quarantine",
+            request -> {
+              providerCalls.incrementAndGet();
+              throw ProviderException.network(new java.io.IOException("remote result unknown"));
+            },
+            callLedger,
+            List.of())) {
+      fixture.runner().configureBudgetEnvelopeLedger(() -> envelopes);
+      fixture.runner().activateRunBudgetEnvelope(envelope.envelopeId());
+
+      assertThatThrownBy(
+              () ->
+                  fixture.runner().call(
+                      "run-quarantine",
+                      "stable-quarantine-key",
+                      "general",
+                      bundle("public prompt"),
+                      fixture.pool().get("agent-a"),
+                      "depth"))
+          .isInstanceOf(io.github.aililuola.mathproofmesh.provider.AgentCallFailure.class);
+      assertThatThrownBy(
+              () ->
+                  fixture.runner().call(
+                      "run-quarantine",
+                      "stable-quarantine-key",
+                      "general",
+                      bundle("public prompt"),
+                      fixture.pool().get("agent-a"),
+                      "depth"))
+          .isInstanceOf(BudgetExhaustedError.class);
+
+      assertThat(providerCalls).hasValue(1);
+      assertThat(callLedger.totals().calls()).isEqualTo(1L);
+      assertThat(callLedger.totals().totalTokens()).isPositive();
+      assertThat(envelopes.envelopeSnapshot().envelopes())
+          .singleElement()
+          .extracting(value -> value.status())
+          .isEqualTo(BudgetEnvelopeStatus.QUARANTINED_UNCERTAIN);
+      assertThat(envelopes.reservationSnapshot().reservations())
+          .singleElement()
+          .extracting(BudgetPhysicalReservation::status)
+          .isEqualTo(BudgetPhysicalReservation.Status.QUARANTINED_UNCERTAIN);
+      assertThat(envelopes.reservedResources()).isEqualTo(BudgetResourceVector.zero());
+      assertThat(envelopes.available().calls()).isEqualTo(3L);
+    }
+  }
+
+  @Test
   void promptCatalogCoversEveryLegacyStageAndRejectsBlindMetadata() {
     assertThat(PromptCatalog.stages())
         .containsKeys(
@@ -559,6 +690,11 @@ class StructuredAgentRunnerTest {
         "stop",
         false,
         JsonNodeFactory.instance.objectNode());
+  }
+
+  private static BudgetResourceVector resource(
+      long calls, long input, long output, long total, String cost) {
+    return new BudgetResourceVector(calls, input, output, total, new BigDecimal(cost));
   }
 
   public record Answer(String answer) {}
