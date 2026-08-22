@@ -8,6 +8,7 @@ import io.github.aililuola.mathproofmesh.contract.ComputationMethod;
 import io.github.aililuola.mathproofmesh.contract.EvidenceStrength;
 import io.github.aililuola.mathproofmesh.contract.ExperimentOutcome;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import org.junit.jupiter.api.Test;
 
 class ComputationResourceGuardBoundaryTest {
@@ -153,13 +154,26 @@ class ComputationResourceGuardBoundaryTest {
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("COMPUTATION_EXECUTION_FAILED");
 
+    CountDownLatch workerRelease = new CountDownLatch(1);
     try {
       Thread.currentThread().interrupt();
-      assertThatThrownBy(() -> ComputationResourceGuard.callWithin(() -> "unused", envelope))
+      assertThatThrownBy(
+              () ->
+                  ComputationResourceGuard.callWithin(
+                      () -> {
+                        try {
+                          workerRelease.await();
+                        } catch (InterruptedException exception) {
+                          Thread.currentThread().interrupt();
+                        }
+                        return "unused";
+                      },
+                      envelope))
           .isInstanceOf(IllegalStateException.class)
           .hasMessageContaining("COMPUTATION_INTERRUPTED");
       assertThat(Thread.currentThread().isInterrupted()).isTrue();
     } finally {
+      workerRelease.countDown();
       Thread.interrupted();
     }
   }
