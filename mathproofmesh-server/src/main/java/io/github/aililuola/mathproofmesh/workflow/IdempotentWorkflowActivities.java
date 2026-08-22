@@ -3,7 +3,9 @@ package io.github.aililuola.mathproofmesh.workflow;
 import io.github.aililuola.mathproofmesh.workflow.WorkflowContracts.ActivityCommand;
 import io.github.aililuola.mathproofmesh.workflow.WorkflowContracts.ActivityResult;
 import io.github.aililuola.mathproofmesh.workflow.WorkflowContracts.SafeProgress;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetUsageTotals;
 import io.temporal.activity.Activity;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -113,7 +115,10 @@ public final class IdempotentWorkflowActivities implements WorkflowActivities {
               "artifact://" + command.runId() + "/" + kind,
               checkpoint,
               claims,
-              true);
+              true,
+              providerCall
+                  ? new BudgetUsageTotals(1L, 64L, 64L, 128L, BigDecimal.ZERO)
+                  : BudgetUsageTotals.zero());
         });
   }
 

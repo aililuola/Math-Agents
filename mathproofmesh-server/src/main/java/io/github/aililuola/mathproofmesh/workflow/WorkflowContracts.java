@@ -1,6 +1,14 @@
 package io.github.aililuola.mathproofmesh.workflow;
 
+import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetUsageTotals;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 /** Stable, bounded payloads carried in Temporal history. */
 public final class WorkflowContracts {
@@ -14,7 +22,8 @@ public final class WorkflowContracts {
       int routeCount,
       int budget,
       int generation,
-      int maximumGenerations) {
+      int maximumGenerations,
+      WorkflowBudgetCheckpoint budgetCheckpoint) {
     public SolveRequest {
       runId = required(runId, "runId");
       profile = required(profile, "profile");
@@ -25,11 +34,30 @@ public final class WorkflowContracts {
           || maximumGenerations < 0) {
         throw new IllegalArgumentException("invalid bounded workflow request");
       }
+      budgetCheckpoint =
+          budgetCheckpoint == null ? WorkflowBudgetCheckpoint.empty() : budgetCheckpoint;
     }
 
-    public SolveRequest nextGeneration() {
+    public SolveRequest(
+        String runId,
+        String profile,
+        int routeCount,
+        int budget,
+        int generation,
+        int maximumGenerations) {
+      this(
+          runId,
+          profile,
+          routeCount,
+          budget,
+          generation,
+          maximumGenerations,
+          WorkflowBudgetCheckpoint.empty());
+    }
+
+    public SolveRequest nextGeneration(WorkflowBudgetCheckpoint checkpoint) {
       return new SolveRequest(
-          runId, profile, routeCount, budget, generation + 1, maximumGenerations);
+          runId, profile, routeCount, budget, generation + 1, maximumGenerations, checkpoint);
     }
   }
 
@@ -49,17 +77,35 @@ public final class WorkflowContracts {
   }
 
   public record RouteResult(
-      String routeId, String checkpointId, List<String> verifiedClaimIds, boolean accepted) {
+      String routeId,
+      String checkpointId,
+      List<String> verifiedClaimIds,
+      boolean accepted,
+      Map<String, BudgetUsageTotals> settledUsage) {
     public RouteResult {
       routeId = required(routeId, "routeId");
       checkpointId = required(checkpointId, "checkpointId");
       verifiedClaimIds =
           verifiedClaimIds == null ? List.of() : List.copyOf(verifiedClaimIds);
+      settledUsage = immutableUsage(settledUsage);
+    }
+
+    public RouteResult(
+        String routeId,
+        String checkpointId,
+        List<String> verifiedClaimIds,
+        boolean accepted) {
+      this(routeId, checkpointId, verifiedClaimIds, accepted, Map.of());
     }
 
     @Override
     public List<String> verifiedClaimIds() {
       return List.copyOf(verifiedClaimIds);
+    }
+
+    @Override
+    public Map<String, BudgetUsageTotals> settledUsage() {
+      return Collections.unmodifiableMap(new LinkedHashMap<>(settledUsage));
     }
   }
 
@@ -110,7 +156,22 @@ public final class WorkflowContracts {
     }
   }
 
-  public record BudgetSummary(int availableCalls, int acceptedUpdates) {}
+  public record BudgetSummary(
+      int availableCalls,
+      int acceptedUpdates,
+      BudgetUsageTotals committedUsage,
+      String budgetStateHash,
+      String budgetDecisionHash) {
+    public BudgetSummary {
+      committedUsage = committedUsage == null ? BudgetUsageTotals.zero() : committedUsage;
+      budgetStateHash = clean(budgetStateHash);
+      budgetDecisionHash = clean(budgetDecisionHash);
+    }
+
+    public BudgetSummary(int availableCalls, int acceptedUpdates) {
+      this(availableCalls, acceptedUpdates, BudgetUsageTotals.zero(), "", "");
+    }
+  }
 
   public record ActivityCommand(
       String runId,
@@ -132,17 +193,59 @@ public final class WorkflowContracts {
       String outputRef,
       String checkpointId,
       List<String> claimIds,
-      boolean applied) {
+      boolean applied,
+      BudgetUsageTotals usage) {
     public ActivityResult {
       actionKey = required(actionKey, "actionKey");
       outputRef = required(outputRef, "outputRef");
       checkpointId = clean(checkpointId);
       claimIds = claimIds == null ? List.of() : List.copyOf(claimIds);
+      usage = usage == null ? BudgetUsageTotals.zero() : usage;
+    }
+
+    public ActivityResult(
+        String actionKey,
+        String outputRef,
+        String checkpointId,
+        List<String> claimIds,
+        boolean applied) {
+      this(actionKey, outputRef, checkpointId, claimIds, applied, BudgetUsageTotals.zero());
     }
 
     @Override
     public List<String> claimIds() {
       return List.copyOf(claimIds);
+    }
+  }
+
+  /** Continue-as-new-safe, exactly-once usage sidecar for deterministic workflow replay. */
+  public record WorkflowBudgetCheckpoint(
+      Map<String, BudgetUsageTotals> settledUsage,
+      int zeroGainRounds,
+      String stateHash) {
+    public WorkflowBudgetCheckpoint {
+      settledUsage = immutableUsage(settledUsage);
+      if (zeroGainRounds < 0) {
+        throw new IllegalArgumentException("zeroGainRounds must not be negative");
+      }
+      String expected =
+          CanonicalJson.stableHash(
+              Map.of("settled_usage", settledUsage, "zero_gain_rounds", zeroGainRounds));
+      stateHash = clean(stateHash);
+      if (stateHash.isEmpty()) {
+        stateHash = expected;
+      } else if (!sameHash(stateHash, expected)) {
+        throw new IllegalArgumentException("workflow budget checkpoint hash mismatch");
+      }
+    }
+
+    public static WorkflowBudgetCheckpoint empty() {
+      return new WorkflowBudgetCheckpoint(Map.of(), 0, "");
+    }
+
+    @Override
+    public Map<String, BudgetUsageTotals> settledUsage() {
+      return Collections.unmodifiableMap(new LinkedHashMap<>(settledUsage));
     }
   }
 
@@ -163,5 +266,26 @@ public final class WorkflowContracts {
 
   private static String clean(String value) {
     return value == null ? "" : value.strip();
+  }
+
+  private static boolean sameHash(String left, String right) {
+    return MessageDigest.isEqual(
+        left.getBytes(StandardCharsets.US_ASCII), right.getBytes(StandardCharsets.US_ASCII));
+  }
+
+  private static Map<String, BudgetUsageTotals> immutableUsage(
+      Map<String, BudgetUsageTotals> values) {
+    Map<String, BudgetUsageTotals> ordered = new TreeMap<>();
+    if (values != null) {
+      values.forEach(
+          (key, usage) -> {
+            String normalized = required(key, "usage action key");
+            if (usage == null) {
+              throw new IllegalArgumentException("usage total is required");
+            }
+            ordered.put(normalized, usage);
+          });
+    }
+    return Collections.unmodifiableMap(new LinkedHashMap<>(ordered));
   }
 }

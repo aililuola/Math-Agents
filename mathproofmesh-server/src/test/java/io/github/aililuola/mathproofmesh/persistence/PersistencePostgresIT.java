@@ -81,7 +81,13 @@ class PersistencePostgresIT {
           "research_epoch",
           "research_work_item",
           "agent_lease",
-          "concurrency_telemetry_event");
+          "concurrency_telemetry_event",
+          "pricing_snapshot",
+          "budget_decision",
+          "budget_envelope",
+          "budget_reservation",
+          "budget_usage_event",
+          "budget_zero_gain_state");
 
   @Container
   private static final PostgreSQLContainer POSTGRES =
@@ -134,7 +140,7 @@ class PersistencePostgresIT {
             .load();
     isolated.clean();
 
-    assertThat(isolated.migrate().migrationsExecuted).isEqualTo(6);
+    assertThat(isolated.migrate().migrationsExecuted).isEqualTo(7);
     Flyway restarted =
         Flyway.configure()
             .dataSource(dataSource)
@@ -163,7 +169,7 @@ class PersistencePostgresIT {
                 .list());
 
     assertThat(tables).containsExactlyInAnyOrderElementsOf(EXPECTED_TABLES);
-    assertThat(tables).hasSize(50);
+    assertThat(tables).hasSize(56);
   }
 
   @Test
