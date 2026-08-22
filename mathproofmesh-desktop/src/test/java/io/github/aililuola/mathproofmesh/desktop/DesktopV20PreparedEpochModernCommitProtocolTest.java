@@ -50,7 +50,8 @@ final class DesktopV20PreparedEpochModernCommitProtocolTest {
       providerCallReplays = replayed.providerCallCount();
       modernCommitted = replayed.readPersistedCheckpoint();
     }
-    assertThat(modernCommitted.schemaVersion()).isEqualTo(21);
+    assertThat(modernCommitted.schemaVersion())
+        .isEqualTo(DesktopSolveCheckpoint.CURRENT_SCHEMA_VERSION);
 
     long modernReplayedCommits =
         modernCommitted.researchEpochs().epochs().stream()

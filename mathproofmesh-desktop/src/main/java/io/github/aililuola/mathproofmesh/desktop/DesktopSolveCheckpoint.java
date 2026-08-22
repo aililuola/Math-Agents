@@ -47,6 +47,13 @@ import io.github.aililuola.mathproofmesh.memory.LemmaMemorySnapshot;
 import io.github.aililuola.mathproofmesh.memory.TypedMemorySnapshot;
 import io.github.aililuola.mathproofmesh.orchestration.ContinuationFunctions.Checkpoint;
 import io.github.aililuola.mathproofmesh.orchestration.ContinuationFunctions.Delta;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetDecisionSnapshot;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetEnvelopeSnapshot;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetReservationSnapshot;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetUsageSnapshot;
+import io.github.aililuola.mathproofmesh.orchestration.CertifiedGainSnapshot;
+import io.github.aililuola.mathproofmesh.orchestration.PricingSnapshot;
+import io.github.aililuola.mathproofmesh.orchestration.ZeroGainSnapshot;
 import io.github.aililuola.mathproofmesh.orchestration.teams.RouteTeamResult;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactSnapshot;
 import io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleSnapshot;
@@ -151,9 +158,16 @@ record DesktopSolveCheckpoint(
     ProofGraphConvergenceSnapshot proofGraphConvergence,
     DeferredExpansionSnapshot deferredExpansions,
     RunStateAnchor runStateAnchor,
+    BudgetDecisionSnapshot budgetDecisions,
+    BudgetEnvelopeSnapshot budgetEnvelopes,
+    BudgetReservationSnapshot budgetReservations,
+    BudgetUsageSnapshot budgetUsage,
+    PricingSnapshot pricingSnapshot,
+    ZeroGainSnapshot zeroGain,
+    CertifiedGainSnapshot certifiedGains,
     boolean terminal) {
 
-  static final int CURRENT_SCHEMA_VERSION = 21;
+  static final int CURRENT_SCHEMA_VERSION = 22;
 
   DesktopSolveCheckpoint {
     if (schemaVersion >= 2) {
@@ -268,6 +282,16 @@ record DesktopSolveCheckpoint(
     deferredExpansions =
         deferredExpansions == null ? DeferredExpansionSnapshot.empty() : deferredExpansions;
     runStateAnchor = runStateAnchor == null ? RunStateAnchor.empty() : runStateAnchor;
+    budgetDecisions =
+        budgetDecisions == null ? BudgetDecisionSnapshot.empty() : budgetDecisions;
+    budgetEnvelopes =
+        budgetEnvelopes == null ? BudgetEnvelopeSnapshot.empty() : budgetEnvelopes;
+    budgetReservations =
+        budgetReservations == null ? BudgetReservationSnapshot.empty() : budgetReservations;
+    budgetUsage = budgetUsage == null ? BudgetUsageSnapshot.empty() : budgetUsage;
+    zeroGain = zeroGain == null ? ZeroGainSnapshot.empty() : zeroGain;
+    certifiedGains =
+        certifiedGains == null ? CertifiedGainSnapshot.empty() : certifiedGains;
   }
 
   @Override

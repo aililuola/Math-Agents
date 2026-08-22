@@ -17,6 +17,8 @@ import io.github.aililuola.mathproofmesh.computation.ComputationExecutionRecord;
 import io.github.aililuola.mathproofmesh.computation.HandlerEvidence;
 import io.github.aililuola.mathproofmesh.computation.InMemoryComputationCache;
 import io.github.aililuola.mathproofmesh.config.AgentConfig;
+import io.github.aililuola.mathproofmesh.config.BudgetConfig;
+import io.github.aililuola.mathproofmesh.config.PricingConfig;
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
 import io.github.aililuola.mathproofmesh.contract.ClaimEvidenceSemanticBinding;
@@ -33,6 +35,8 @@ import io.github.aililuola.mathproofmesh.contract.QuantifierSpec;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
 import io.github.aililuola.mathproofmesh.contract.StrategySet;
 import io.github.aililuola.mathproofmesh.contract.VariableBinding;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetStateSnapshot;
+import io.github.aililuola.mathproofmesh.orchestration.EvidenceAwareBudgetDecision;
 import io.github.aililuola.mathproofmesh.proofgraph.CanonicalObligationRecord;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.FrozenClaimSnapshot;
@@ -84,6 +88,30 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
     return open(runDirectory, runId, ComputationHandlerRegistry.javaOnly(), true);
   }
 
+  static DesktopComputationIssue010CoordinatorHarness openWithBudgetLimits(
+      Path runDirectory, String runId, int maximumCalls, Integer maximumTokens) {
+    SystemConfig source =
+        new DesktopRuntimeLocator(projectRoot(), null).loadProfile("proof-control-active.yaml");
+    return open(
+        runDirectory,
+        runId,
+        ComputationHandlerRegistry.javaOnly(),
+        false,
+        withBudget(source, maximumCalls, maximumTokens));
+  }
+
+  static DesktopComputationIssue010CoordinatorHarness openForBudgetProduction(
+      Path runDirectory, String runId) {
+    SystemConfig source =
+        new DesktopRuntimeLocator(projectRoot(), null).loadProfile("proof-control-active.yaml");
+    return open(
+        runDirectory,
+        runId,
+        ComputationHandlerRegistry.javaOnly(),
+        true,
+        source);
+  }
+
   static DesktopComputationIssue010CoordinatorHarness openWithFakeFormalKernel(
       Path runDirectory, String runId) {
     return open(
@@ -126,10 +154,24 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
       String runId,
       ComputationHandlerRegistry handlers,
       boolean concurrencyProviderEnabled) {
+    return open(runDirectory, runId, handlers, concurrencyProviderEnabled, null);
+  }
+
+  private static DesktopComputationIssue010CoordinatorHarness open(
+      Path runDirectory,
+      String runId,
+      ComputationHandlerRegistry handlers,
+      boolean concurrencyProviderEnabled,
+      SystemConfig overrideConfig) {
     SystemConfig source =
-        new DesktopRuntimeLocator(projectRoot(), null).loadProfile("proof-control-active.yaml");
+        overrideConfig == null
+            ? new DesktopRuntimeLocator(projectRoot(), null)
+                .loadProfile("proof-control-active.yaml")
+            : overrideConfig;
     SystemConfig config =
-        concurrencyProviderEnabled ? concurrencyConfig(source) : mockConfig(source);
+        concurrencyProviderEnabled
+            ? overrideConfig == null ? concurrencyConfig(source) : mockConfig(source)
+            : mockConfig(source);
     Map<String, io.github.aililuola.mathproofmesh.provider.MockResponder> responders =
         new java.util.LinkedHashMap<>();
     config
@@ -419,6 +461,50 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
     return coordinator;
   }
 
+  boolean reserveInitialExplorationBudget() throws Exception {
+    return (boolean)
+        invoke(
+            coordinator,
+            "reserveInitialExplorationBudget",
+            new Class<?>[0],
+            new Object[0]);
+  }
+
+  void finishBudgetEnvelope() throws Exception {
+    invoke(
+        coordinator,
+        "finishActiveSchedulerBudgetEnvelope",
+        new Class<?>[0],
+        new Object[0]);
+  }
+
+  void persistTerminalCheckpoint() throws Exception {
+    setField("workflowCursor", "terminal");
+    invoke(
+        coordinator,
+        "persist",
+        new Class<?>[] {String.class, boolean.class},
+        new Object[] {"issue_013_terminal", true});
+  }
+
+  RunExecutionBackend.RunExecutionResult resumeExecution() throws Exception {
+    return coordinator.execute(true);
+  }
+
+  long providerCallCount() throws ReflectiveOperationException {
+    return ((CallLedger) field("ledger")).totals().calls();
+  }
+
+  BudgetStateSnapshot budgetState() throws Exception {
+    return (BudgetStateSnapshot)
+        invoke(coordinator, "schedulerBudgetState", new Class<?>[0], new Object[0]);
+  }
+
+  EvidenceAwareBudgetDecision decideBudget() throws Exception {
+    DesktopBudgetRuntime runtime = (DesktopBudgetRuntime) field("budgetRuntime");
+    return runtime.manager().decide(budgetState());
+  }
+
   AtomicStageRun runAtomicOrdinaryStageCalls(int callCount) throws Exception {
     if (!concurrencyProviderEnabled) {
       throw new IllegalStateException("atomic stage calls require the concurrency provider fixture");
@@ -628,6 +714,46 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
         source.runtime());
   }
 
+  private static SystemConfig withBudget(
+      SystemConfig source, int maximumCalls, Integer maximumTokens) {
+    BudgetConfig budget = source.budget();
+    BudgetConfig replacement =
+        new BudgetConfig(
+            maximumCalls,
+            budget.maxRounds(),
+            budget.initialPaths(),
+            budget.maxPaths(),
+            budget.strategiesToGenerate(),
+            budget.candidatesToVerify(),
+            budget.maxRevisions(),
+            budget.baseVerifierReplicas(),
+            budget.highRiskVerifierReplicas(),
+            budget.highRiskThreshold(),
+            budget.verificationPassThreshold(),
+            budget.synthesisThreshold(),
+            maximumTokens,
+            budget.maxCostUsd(),
+            budget.breadthShare(),
+            budget.depthShare(),
+            budget.verificationShare(),
+            budget.synthesisShare(),
+            budget.scaleBudgetWithDifficulty(),
+            budget.hardProblemCallMultiplier(),
+            budget.hardProblemExtraRounds());
+    return new SystemConfig(
+        source.systemName(),
+        source.agents(),
+        replacement,
+        source.scheduler(),
+        source.topology(),
+        source.verification(),
+        source.continuation(),
+        source.deepExplorationPolicy(),
+        source.computation().withSandboxedPythonEnabled(false),
+        source.concurrency(),
+        source.runtime());
+  }
+
   private static SystemConfig concurrencyConfig(SystemConfig source) {
     SystemConfig concurrency = DesktopResearchConcurrencyTestSupport.config();
     return new SystemConfig(
@@ -685,7 +811,7 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
         source.timeoutSeconds(),
         source.trustPrior(),
         source.enabled(),
-        source.pricing(),
+        PricingConfig.defaults(),
         Map.of(),
         null,
         source.thinkingEnabled(),

@@ -70,7 +70,6 @@ import io.github.aililuola.mathproofmesh.contract.ReviewedObstructionPayload;
 import io.github.aililuola.mathproofmesh.contract.VerifiedClaimPayload;
 import io.github.aililuola.mathproofmesh.contract.VerifiedCounterexamplePayload;
 import io.github.aililuola.mathproofmesh.contract.BudgetAction;
-import io.github.aililuola.mathproofmesh.contract.BudgetDecision;
 import io.github.aililuola.mathproofmesh.contract.CanonicalJson;
 import io.github.aililuola.mathproofmesh.contract.CandidateAssessment;
 import io.github.aililuola.mathproofmesh.contract.ClaimCard;
@@ -227,6 +226,10 @@ import io.github.aililuola.mathproofmesh.memory.TypedMemory;
 import io.github.aililuola.mathproofmesh.memory.TypedMemorySnapshot;
 import io.github.aililuola.mathproofmesh.orchestration.AdaptiveBudgetManager;
 import io.github.aililuola.mathproofmesh.orchestration.AttemptEvidence;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetActionCandidate;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetBucket;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetEnvelope;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetStateSnapshot;
 import io.github.aililuola.mathproofmesh.orchestration.ContinuationFunctions;
 import io.github.aililuola.mathproofmesh.orchestration.DeepExplorationRegistry;
 import io.github.aililuola.mathproofmesh.orchestration.ExplorationAdmission;
@@ -234,8 +237,11 @@ import io.github.aililuola.mathproofmesh.orchestration.ExplorationEvidence;
 import io.github.aililuola.mathproofmesh.orchestration.ExplorationModel;
 import io.github.aililuola.mathproofmesh.orchestration.ExplorationOutcome;
 import io.github.aililuola.mathproofmesh.orchestration.ExplorationSignature;
+import io.github.aililuola.mathproofmesh.orchestration.EvidenceAwareBudgetDecision;
+import io.github.aililuola.mathproofmesh.orchestration.PathBudgetStats;
 import io.github.aililuola.mathproofmesh.orchestration.RoutePipelineFunctions;
 import io.github.aililuola.mathproofmesh.orchestration.SynthesisPhaseService;
+import io.github.aililuola.mathproofmesh.orchestration.TargetMechanismKey;
 import io.github.aililuola.mathproofmesh.orchestration.teams.RiskAssessment;
 import io.github.aililuola.mathproofmesh.orchestration.teams.RoleAssignment;
 import io.github.aililuola.mathproofmesh.orchestration.teams.RoleRunner;
@@ -401,6 +407,7 @@ import io.github.aililuola.mathproofmesh.verification.ValidationLevel;
 import io.github.aililuola.mathproofmesh.verification.ValidationStepResult;
 import io.github.aililuola.mathproofmesh.verification.VerificationPipeline;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -609,6 +616,9 @@ final class DesktopSolveCoordinator {
   private final MathematicalArtifactBroker mathematicalArtifactBroker =
       new MathematicalArtifactBroker();
   private final BrokerArtifactCompiler brokerArtifactCompiler = new BrokerArtifactCompiler();
+  private final DesktopBudgetRuntime budgetRuntime;
+  private final BudgetHost budgetHost = new BudgetHost();
+  private final DesktopBudgetScheduler budgetScheduler;
   private final AdaptiveBudgetManager adaptiveBudget;
   private final InspirationPolicy inspirationPolicy;
   private final InspirationMechanismRegistry inspirationRegistry;
@@ -665,9 +675,11 @@ final class DesktopSolveCoordinator {
     this.routeTeam = new RouteTeam(config.topology().routeTeams().skepticRiskThreshold());
     this.roleRunner = new RoleRunner(roleCandidates(pool.agents()));
     this.teamFactory = new RouteTeamFactory(roleRunner);
-    this.adaptiveBudget =
-        new AdaptiveBudgetManager(
-            config.budget().maxPaths(), config.scheduler().finishTransitionBufferCalls());
+    this.budgetRuntime = new DesktopBudgetRuntime(runId, config);
+    this.budgetScheduler = new DesktopBudgetScheduler(runId, budgetRuntime, runner, budgetHost);
+    this.adaptiveBudget = budgetRuntime.manager();
+    this.runner.configureBudgetEnvelopeLedger(budgetRuntime::envelopes);
+    this.runner.configureBudgetPricing(budgetRuntime.pricing());
 
     this.inspirationPolicy = inspirationPolicy(config);
     this.inspirationRegistry =
@@ -1499,12 +1511,21 @@ final class DesktopSolveCoordinator {
           persist("initial_routes", false);
         }
         case CURSOR_EXPLORE -> {
+          if (!reserveInitialExplorationBudget()) {
+            String stopCode = "STOP_BUDGET_EXHAUSTED";
+            recordSchedulerStop(normalizedLowerCaseCode(stopCode),
+                "initial route exploration is not affordable before ready-queue admission");
+            workflowCursor = CURSOR_TERMINAL;
+            persist("initial_exploration_budget_rejected", true);
+            return resultFromCurrentState();
+          }
           exploreUnstartedRoutes(true);
           workflowCursor = CURSOR_INTEGRATE;
           persist("isolated_exploration", false);
         }
         case CURSOR_INTEGRATE -> {
           integrateCommittedRoutes();
+          finishActiveSchedulerBudgetEnvelope();
           workflowCursor = CURSOR_BROKER;
           persist("claim_memory_graph", false);
         }
@@ -2967,8 +2988,13 @@ final class DesktopSolveCoordinator {
   }
 
   private void runFrozenExplorationEpochs(List<RouteState> pending) {
-    int maximumSegments =
+    int maximumPathSegments =
         config.continuation().enabled() ? config.continuation().maxSegmentsPerPath() : 1;
+    int maximumSegments =
+        config.continuation().enabled()
+            ? Math.min(
+                config.continuation().segmentsPerExploreCall(), maximumPathSegments)
+            : 1;
     Map<String, InitialExplorationTurn> previousByRoute = new LinkedHashMap<>();
     Map<String, ComputationTrace> computationByRoute = new LinkedHashMap<>();
     Map<String, ExplorationAdmission> admissionByRoute = new LinkedHashMap<>();
@@ -3017,6 +3043,7 @@ final class DesktopSolveCoordinator {
           pending.stream()
               .filter(route -> admissionByRoute.containsKey(route.routeId))
               .filter(route -> route.attempt == null)
+              .filter(route -> route.segmentCount < maximumPathSegments)
               .filter(route -> !Set.of("abandoned", "partial", "failed").contains(route.status))
               .sorted(java.util.Comparator.comparing(route -> route.routeId))
               .toList();
@@ -3354,9 +3381,10 @@ final class DesktopSolveCoordinator {
                     Math.max(1, maximumSegments - 1))
                 .verdict();
         route.noProgressSegments = verifiedGain ? 0 : route.noProgressSegments + 1;
-        if (verdict == ProofControlModels.GateVerdict.BLOCK) {
+        if (!verifiedGain || verdict == ProofControlModels.GateVerdict.BLOCK) {
           route.status = "partial";
-          route.failureReason = "continuation stopped after repeated no-progress segments";
+          route.failureReason =
+              "continuation stopped because the preceding segment had no certified gain";
         }
         continue;
       }
@@ -8870,47 +8898,16 @@ final class DesktopSolveCoordinator {
               "VERIFY completed through independent route-team, replay, escalation, and checkpoint gates",
               "scheduler://round-" + roundIndex.get() + "/verify");
         }
-        boolean scheduled = schedulePendingProofTasksBatch();
+        boolean scheduled = budgetHost.schedulePendingProofTasksBatch();
         if (!scheduled) {
           enqueueDebtRepairTaskIfStalled();
-          scheduled = schedulePendingProofTasksBatch();
+          scheduled = budgetHost.schedulePendingProofTasksBatch();
         }
-        BudgetDecision decision = null;
+        EvidenceAwareBudgetDecision decision = null;
         if (!scheduled) {
-          decision =
-              adaptiveBudget.decide(
-                  "round-" + roundIndex.get(),
-                  attemptEvidence(),
-                  routes.size(),
-                  safeInt(ledger.remainingCalls()),
-                  routes.isEmpty() ? 0.0d : verifiedRoutes().size() / (double) routes.size(),
-                  routes.isEmpty()
-                      ? 1.0d
-                      : 1.0d - verifiedRoutes().size() / (double) routes.size());
-          scheduled = applyCompatibleSchedulerActions(decision);
-        }
-        if (!scheduled && verifiedRoutes().isEmpty() && ledger.remainingCalls() > 0) {
-          RouteState partial = routes.stream().filter(this::canDeepenRoute).findFirst().orElse(null);
-          RouteState failed = routes.stream().filter(this::canReviseRoute).findFirst().orElse(null);
-          if (partial != null) {
-            scheduled = deepenRoute(partial.routeId);
-            eventSchedulerAction(
-                "DEEPEN",
-                scheduled,
-                "No verified candidate exists, so unused finish-reserve calls remain available for proof progress");
-          } else if (failed != null) {
-            scheduled = reviseFailedRoute(failed.routeId);
-            eventSchedulerAction(
-                "REVISE",
-                scheduled,
-                "No verified candidate exists, so unused finish-reserve calls remain available for structural repair");
-          } else if (routes.size() < config.budget().maxPaths()) {
-            scheduled = widenRoutes();
-            eventSchedulerAction(
-                "WIDEN",
-                scheduled,
-                "No verified candidate exists, so unused finish-reserve calls remain available for a new independent route");
-          }
+          BudgetStateSnapshot budgetState = schedulerBudgetState();
+          decision = adaptiveBudget.decide(budgetState);
+          scheduled = budgetScheduler.apply(decision);
         }
         complete(RoutePipelineFunctions.RunStage.SCHEDULER_DECISION);
         if (!scheduled) {
@@ -8920,7 +8917,10 @@ final class DesktopSolveCoordinator {
             persistUnchecked("scheduler_decision", false);
             return SchedulerExit.READY_TO_SYNTHESIZE;
           }
-          String stopCode = schedulerStopCode();
+          String stopCode =
+              decision == null || decision.stopReason().isBlank()
+                  ? schedulerStopCode()
+                  : normalizedLowerCaseCode(decision.stopReason());
           String stopDetail = schedulerStopDetail(stopCode);
           recordSchedulerStop(stopCode, stopDetail);
           eventSchedulerAction("STOP", true, stopCode + ": " + stopDetail);
@@ -8941,6 +8941,7 @@ final class DesktopSolveCoordinator {
       }
       if (CURSOR_SCHEDULER_INTEGRATE.equals(workflowCursor)) {
         integrateCommittedRoutes();
+        finishActiveSchedulerBudgetEnvelope();
         workflowCursor = CURSOR_SCHEDULER_BROKER;
         persistUnchecked("scheduler_integration", false);
         continue;
@@ -9014,6 +9015,18 @@ final class DesktopSolveCoordinator {
     return passed;
   }
 
+  private boolean reserveInitialExplorationBudget() {
+    return budgetHost.reserveInitial();
+  }
+
+  private void finishActiveSchedulerBudgetEnvelope() {
+    budgetScheduler.finish();
+  }
+
+  private BudgetStateSnapshot schedulerBudgetState() {
+    return budgetHost.state();
+  }
+
   private void eventSchedulerAction(String action, boolean applied, String reason) {
     event(
         "scheduler_action",
@@ -9025,23 +9038,6 @@ final class DesktopSolveCoordinator {
             + roundIndex.get()
             + "/"
             + action.toLowerCase(Locale.ROOT));
-  }
-
-  private boolean applyCompatibleSchedulerActions(BudgetDecision decision) {
-    boolean scheduled = false;
-    for (BudgetAction action :
-        compatibleSchedulerActions(decision.actions(), config.scheduler().maxActionsPerRound())) {
-      boolean applied =
-          switch (action.action()) {
-            case DEEPEN -> deepenRoute(action.targetId());
-            case REVISE -> reviseFailedRoute(action.targetId());
-            case WIDEN -> widenRoutes();
-            default -> false;
-          };
-      eventSchedulerAction(action.action().name(), applied, decision.rationale());
-      scheduled |= applied;
-    }
-    return scheduled;
   }
 
   static List<BudgetAction> compatibleSchedulerActions(
@@ -9666,20 +9662,6 @@ final class DesktopSolveCoordinator {
     return false;
   }
 
-  private boolean schedulePendingProofTasksBatch() {
-    int scheduled = 0;
-    while (scheduled < config.scheduler().maxActionsPerRound() && !pendingProofTasks.isEmpty()) {
-      int pendingBefore = pendingProofTasks.size();
-      if (schedulePendingProofTask()) {
-        scheduled++;
-      }
-      if (pendingProofTasks.size() >= pendingBefore) {
-        break;
-      }
-    }
-    return scheduled > 0;
-  }
-
   private void enqueueDebtRepairTaskIfStalled() {
     if (proofDebtHistory.size() < 3 || !pendingProofTasks.isEmpty()) {
       return;
@@ -9814,25 +9796,6 @@ final class DesktopSolveCoordinator {
         proofGraph.obligations().stream()
             .filter(obligation -> "closed".equals(obligation.status()))
             .count();
-  }
-
-  private List<AttemptEvidence> attemptEvidence() {
-    return routes.stream()
-        .map(
-            route ->
-                new AttemptEvidence(
-                    route.routeId,
-                    "verified".equals(route.status),
-                    attemptFailureClass(route),
-                    proofGraph.canonicalProofDebt(route.routeId),
-                    route.plan.risk().score(),
-                    Math.max(0, route.segmentCount),
-                    "abandoned".equals(route.status)
-                        || route.metaAbandoned
-                        || "verified".equals(route.status)
-                            && !hasUnresolvedRouteObligation(route)
-                        || route.revisionCount >= config.budget().maxRevisions()))
-        .toList();
   }
 
   private AttemptEvidence.FailureClass attemptFailureClass(RouteState route) {
@@ -12856,6 +12819,16 @@ final class DesktopSolveCoordinator {
           "durable provider usage conflicts with the semantic checkpoint aggregate");
     }
     ledger.restoreCommittedUsage(collectedUsage.totals());
+    budgetRuntime.restore(
+        checkpoint.schemaVersion(),
+        collectedUsage.totals(),
+        checkpoint.budgetDecisions(),
+        checkpoint.budgetEnvelopes(),
+        checkpoint.budgetReservations(),
+        checkpoint.budgetUsage(),
+        checkpoint.pricingSnapshot(),
+        checkpoint.zeroGain(),
+        checkpoint.certifiedGains());
     currentStage = checkpoint.currentStage();
     runStateAnchor = checkpoint.runStateAnchor();
     roundIndex.set(checkpoint.roundIndex());
@@ -13201,6 +13174,7 @@ final class DesktopSolveCoordinator {
           roundIndex.get());
     }
     reconsiderDeferredExpansions();
+    budgetScheduler.restore(checkpoint);
     var resumeDecision =
         proofControl
             .resume()
@@ -13757,6 +13731,13 @@ final class DesktopSolveCoordinator {
             proofGraphConvergence.snapshot(),
             deferredExpansions.snapshot(),
             runStateAnchor,
+            budgetRuntime.decisionSnapshot(),
+            budgetRuntime.envelopeSnapshot(),
+            budgetRuntime.reservationSnapshot(),
+            budgetRuntime.usageSnapshot(),
+            budgetRuntime.pricing(),
+            budgetRuntime.zeroGainSnapshot(),
+            budgetRuntime.certifiedGainSnapshot(),
             terminal);
     Path structured = runDirectory.resolve("structured");
     Files.createDirectories(structured);
@@ -15656,6 +15637,13 @@ final class DesktopSolveCoordinator {
     return config.continuation().postFailureBottleneckMaxOutputTokens();
   }
 
+  private static String normalizedLowerCaseCode(String value) {
+    if (!value.matches("[A-Za-z0-9_]+")) {
+      throw new IllegalArgumentException("status code must contain ASCII letters, digits, or '_'");
+    }
+    return value.toLowerCase(Locale.ROOT);
+  }
+
   private static int safeInt(long value) {
     return (int) Math.min(Integer.MAX_VALUE, Math.max(0L, value));
   }
@@ -16354,6 +16342,259 @@ final class DesktopSolveCoordinator {
 
     private ClaimCourtStageQuarantinedException(String message) {
       super(message);
+    }
+  }
+
+  private final class BudgetHost implements DesktopBudgetScheduler.Host {
+    private boolean reserveInitial() {
+      int pendingRoutes =
+          (int)
+              routes.stream()
+                  .filter(route -> route.attempt == null)
+                  .filter(route -> !"abandoned".equals(route.status))
+                  .filter(DesktopSolveCoordinator.this::routeEligibleForWork)
+                  .count();
+      return budgetScheduler.reserveInitial(pendingRoutes, state());
+    }
+
+    private boolean reserveProofTaskBatch(
+        List<DesktopSolveCheckpoint.ScheduledProofTask> batch) {
+      List<DesktopBudgetScheduler.ProofTaskBudgetInput> tasks =
+          batch.stream()
+              .map(
+                  task ->
+                      new DesktopBudgetScheduler.ProofTaskBudgetInput(
+                          task.taskId(), task.requestedAction()))
+              .toList();
+      return budgetScheduler.reserveProofTaskBatch(
+          tasks, currentResearchAuthorityAnchor().stableHash());
+    }
+
+    private boolean schedulableProofTask(DesktopSolveCheckpoint.ScheduledProofTask task) {
+      RouteState route = findRouteTarget(task.routeId()).orElse(null);
+      ProofObligation obligation = findObligation(task.obligationId()).orElse(null);
+      return route != null
+          && obligation != null
+          && Set.of("open", "tentative", "blocked").contains(obligation.status())
+          && routeEligibleForWork(route);
+    }
+
+    private boolean schedulePendingProofTasksBatch() {
+      List<DesktopSolveCheckpoint.ScheduledProofTask> batch =
+          pendingProofTasks.stream()
+              .filter(this::schedulableProofTask)
+              .limit(config.scheduler().maxActionsPerRound())
+              .toList();
+      if (batch.isEmpty() || !reserveProofTaskBatch(batch)) {
+        return false;
+      }
+      int scheduled = 0;
+      while (scheduled < batch.size() && !pendingProofTasks.isEmpty()) {
+        int pendingBefore = pendingProofTasks.size();
+        if (schedulePendingProofTask()) {
+          scheduled++;
+        }
+        if (pendingProofTasks.size() >= pendingBefore) {
+          break;
+        }
+      }
+      if (scheduled == 0) {
+        budgetScheduler.finish();
+      }
+      return scheduled > 0;
+    }
+
+    private BudgetStateSnapshot state() {
+      String authorityHash = currentResearchAuthorityAnchor().stableHash();
+      String epochId =
+          "scheduler-epoch-"
+              + roundIndex.get()
+              + "-"
+              + authorityHash.substring(0, Math.min(16, authorityHash.length()));
+      return budgetRuntime.snapshot(
+          authorityHash,
+          epochId,
+          roundIndex.get(),
+          routes.size(),
+          ledger.totals(),
+          pathBudgetStats());
+    }
+
+    @Override
+    public TargetMechanismKey restoredBudgetTarget(
+        DesktopSolveCheckpoint checkpoint, BudgetEnvelope envelope) {
+      BudgetActionCandidate selected =
+          checkpoint.budgetDecisions().decisions().stream()
+              .filter(
+                  decision ->
+                      decision.identity().decisionHash().equals(envelope.actionDecisionId()))
+              .flatMap(decision -> decision.selectedActions().stream())
+              .findFirst()
+              .orElse(null);
+      if (selected != null) {
+        return budgetTarget(selected);
+      }
+      DesktopSolveCheckpoint.ScheduledProofTask task =
+          pendingProofTasks.stream()
+              .filter(value -> value.taskId().equals(envelope.workItemId()))
+              .findFirst()
+              .orElse(null);
+      ActionKind action =
+          envelope.bucket() == BudgetBucket.REVISION ? ActionKind.REVISE : ActionKind.DEEPEN;
+      RouteState route = task == null ? null : findRouteTarget(task.routeId()).orElse(null);
+      return new TargetMechanismKey(
+          task == null ? envelope.workItemId() : task.obligationId(),
+          route == null ? envelope.workItemId() : route.strategy.strategyId(),
+          action,
+          route == null ? envelope.workItemId() : mechanismSignature(route));
+    }
+
+    @Override
+    public TargetMechanismKey budgetTarget(BudgetActionCandidate action) {
+      RouteState route = findRouteTarget(action.targetId()).orElse(null);
+      String target = action.targetId().isBlank() ? "scheduler-global" : action.targetId();
+      String strategy =
+          action.strategyId().isBlank()
+              ? route == null ? "scheduler-global" : route.strategy.strategyId()
+              : action.strategyId();
+      String mechanism = route == null ? strategy : mechanismSignature(route);
+      return new TargetMechanismKey(target, strategy, action.action(), mechanism);
+    }
+
+    @Override
+    public DesktopBudgetRuntime.GainBaseline gainBaseline() {
+      return new DesktopBudgetRuntime.GainBaseline(
+          "scheduler-epoch-" + roundIndex.get(),
+          currentResearchAuthorityAnchor().stableHash(),
+          lemmaMemory.verified().size(),
+          factMessageIds(typedMemory.snapshot()).size(),
+          refutedObligationIds(proofGraph.snapshot()).size(),
+          closedObligationCount(),
+          totalProofDebt(),
+          (int) routes.stream().filter(route -> route.checkpointProcessed).count(),
+          admittedStrategies.size());
+    }
+
+    @Override
+    public int currentRound() {
+      return roundIndex.get();
+    }
+
+    @Override
+    public int noGainExhaustionThreshold() {
+      return Math.max(1, config.scheduler().maxNormalAttemptsPerSignature());
+    }
+
+    @Override
+    public boolean execute(BudgetActionCandidate action) {
+      return switch (action.action()) {
+        case DEEPEN -> deepenRoute(action.targetId());
+        case REVISE -> reviseFailedRoute(action.targetId());
+        case WIDEN -> widenRoutes();
+        case VERIFY -> scheduleVerification(action.targetId());
+        default -> false;
+      };
+    }
+
+    private boolean scheduleVerification(String targetRouteId) {
+      RouteState route =
+          routes.stream()
+              .filter(candidate -> candidate.routeId.equals(targetRouteId))
+              .filter(candidate -> candidate.attempt != null)
+              .filter(candidate -> !candidate.integrated || !candidate.reviewComplete)
+              .findFirst()
+              .orElse(null);
+      if (route == null) {
+        return false;
+      }
+      route.integrated = false;
+      route.reviewComplete = false;
+      return true;
+    }
+
+    @Override
+    public void persistReservation() {
+      persistUnchecked("budget_envelope_reserved", false);
+    }
+
+    @Override
+    public void event(String action, boolean applied, String detail) {
+      eventSchedulerAction(action, applied, detail);
+    }
+
+    private List<PathBudgetStats> pathBudgetStats() {
+      Map<String, Long> mechanismCounts =
+          routes.stream()
+              .map(this::mechanismSignature)
+              .collect(
+                  java.util.stream.Collectors.groupingBy(
+                      java.util.function.Function.identity(),
+                      LinkedHashMap::new,
+                      java.util.stream.Collectors.counting()));
+      return routes.stream()
+          .map(route -> pathBudgetStats(route, mechanismCounts.get(mechanismSignature(route))))
+          .toList();
+    }
+
+    private PathBudgetStats pathBudgetStats(RouteState route, long mechanismCount) {
+      VerificationReport review =
+          route.detailedReview != null
+              ? route.detailedReview
+              : route.structuralReview != null ? route.structuralReview : route.skepticReview;
+      String verdict =
+          review == null
+              ? "verified".equals(route.status) ? "pass" : "unknown"
+              : review.verdict().value();
+      double verificationScore = review == null ? 0.0d : review.confidence();
+      double debt = proofGraph.canonicalProofDebt(route.routeId);
+      int unresolved =
+          (int)
+              proofGraph.obligations().stream()
+                  .filter(obligation -> obligation.routeIds().contains(route.routeId))
+                  .filter(
+                      obligation ->
+                          Set.of("open", "tentative", "blocked").contains(obligation.status()))
+                  .count();
+      boolean verified = "verified".equals(route.status) || "pass".equals(verdict);
+      boolean complete = verified && unresolved == 0;
+      double marginalProgress =
+          verified
+              ? 1.0d
+              : route.attempt != null ? 0.5d : route.checkpoint != null ? 0.25d : 0.0d;
+      boolean structurallyValid =
+          route.structuralReview == null
+              ? route.failure == null
+                  || route.failure.failureClass() != ProofControlModels.FailureClass.FRAMING
+              : route.structuralReview.verdict() != VerificationVerdict.FAIL;
+      return new PathBudgetStats(
+          route.strategy.strategyId(),
+          route.routeId,
+          route.attempt == null ? "" : route.attempt.attemptId(),
+          complete,
+          verified,
+          marginalProgress,
+          debt <= 0.0d ? 1.0d : Math.min(1.0d, 1.0d / (1.0d + debt)),
+          Math.min(1.0d, 1.0d / Math.max(1L, mechanismCount)),
+          1.0d - verificationScore,
+          verificationScore,
+          verdict,
+          attemptFailureClass(route),
+          route.failure == null ? 0.0d : route.failure.confidence(),
+          route.failure == null ? 0 : Math.max(1, route.noProgressSegments),
+          route.revisionCount,
+          unresolved,
+          route.noProgressSegments,
+          0L,
+          BigDecimal.ZERO,
+          structurallyValid,
+          mechanismSignature(route));
+    }
+
+    private String mechanismSignature(RouteState route) {
+      return strategyMechanisms
+          .signature(route.strategy.strategyId())
+          .map(signature -> signature.structuralSignatureHash())
+          .orElse(route.strategy.strategyId());
     }
   }
 
