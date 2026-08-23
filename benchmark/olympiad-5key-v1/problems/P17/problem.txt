@@ -1,0 +1,1 @@
+Consider a 2025 by 2025 grid of unit squares. Place pairwise nonoverlapping rectangular tiles whose sides lie on grid lines. Determine the minimum number of tiles needed so that every row and every column contains exactly one uncovered unit square.

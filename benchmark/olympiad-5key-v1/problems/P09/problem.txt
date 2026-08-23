@@ -1,0 +1,1 @@
+Let P be a point on the circumcircle of a nondegenerate triangle ABC, with P distinct from A,B,C. Let X,Y,Z be the perpendicular feet from P to BC, CA, AB, respectively. Prove that X,Y,Z are collinear.

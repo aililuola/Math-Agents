@@ -1,0 +1,1 @@
+Let a1,a2,a3,... be an infinite sequence of positive integers, and let N be a positive integer. Suppose that for every n>N, an equals the number of occurrences of a(n-1) in the list a1,a2,...,a(n-1). Prove that at least one of the subsequences a1,a3,a5,... and a2,a4,a6,... is eventually periodic.

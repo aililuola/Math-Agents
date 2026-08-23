@@ -1,0 +1,1 @@
+Find all functions f: Z -> Z such that f(m+f(n)) = f(m)+n for all integers m and n.

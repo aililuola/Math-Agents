@@ -1,0 +1,1 @@
+Let F be a family of subsets of {1,2,...,n} such that no member of F contains another member of F. Prove that |F| <= binom(n, floor(n/2)).

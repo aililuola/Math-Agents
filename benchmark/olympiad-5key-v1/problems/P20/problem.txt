@@ -1,0 +1,1 @@
+Let Q be the set of rational numbers. A function f:Q->Q is called aquaesulian if for every x,y in Q, at least one of the following holds: f(x+f(y))=f(x)+y, or f(f(x)+y)=x+f(y). Prove that there is an integer c such that for every aquaesulian f, the set {f(r)+f(-r): r in Q} has at most c elements, and determine the smallest possible c.

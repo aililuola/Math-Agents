@@ -1,0 +1,1 @@
+Among any six people, prove that there are either three people who know one another pairwise or three people no two of whom know one another. Assume acquaintance is symmetric.

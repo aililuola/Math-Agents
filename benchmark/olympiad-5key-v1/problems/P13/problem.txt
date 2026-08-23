@@ -1,0 +1,1 @@
+Let a,b,c be positive real numbers. Prove that a/sqrt(a^2+8bc) + b/sqrt(b^2+8ca) + c/sqrt(c^2+8ab) >= 1.
