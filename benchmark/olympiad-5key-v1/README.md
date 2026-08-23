@@ -18,6 +18,28 @@ bundles.
 Generated run evidence lives below `results/` and is intentionally ignored by
 Git. The final sanitized ZIP is also local-only.
 
+## Budget headroom revision
+
+The first real P01/T1 campaign remains preserved as stopped evidence. It found
+that the former `characters / 4` input estimate allocated 1,096 input tokens
+for a provider-reported use of 1,151. New campaigns use a UTF-8-aware estimate
+with tokenizer and message-framing headroom. Scheduler action envelopes reserve
+16,000 input tokens per physical call on average; unused reservations are still
+released when the provider reports actual usage.
+
+| Tier | Calls | Rounds | Run tokens | Output tokens per call |
+| --- | ---: | ---: | ---: | ---: |
+| SMOKE | 24 | 6 | 624,000 | 10,000 |
+| CORE | 40 | 8 | 1,200,000 | 14,000 |
+| ADVANCED | 64 | 12 | 2,176,000 | 18,000 |
+| STRESS | 96 | 16 | 3,648,000 | 22,000 |
+
+Across all 34 isolated runs the immutable ceiling is 2,128 calls and
+74,112,000 tokens. At the frozen worst-case output price this is USD 64.47744,
+leaving more than USD 35 below the separately enforced USD 100 user cap. The
+hard overrun, settlement, authority, secret, and checkpoint gates remain
+unchanged.
+
 The real run is deliberately excluded from ordinary test execution. After the
 seven required environment variables have been injected into the launching
 process, invoke it explicitly from the repository root:

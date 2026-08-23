@@ -395,7 +395,7 @@ final class DesktopBudgetRuntime {
         config.budget().baseVerifierReplicas(),
         config.scheduler().reserveRevisionCycles(),
         1,
-        2_000L,
+        config.budget().effectiveEstimatedInputTokensPerCall(),
         stageLimit(config, "strategy_generation", 16_000),
         Math.max(
             stageLimit(config, "proof_continuation", 16_000),

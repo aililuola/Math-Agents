@@ -2,6 +2,7 @@ package io.github.aililuola.mathproofmesh.config;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.github.aililuola.mathproofmesh.contract.ComputationPurpose;
 import java.util.List;
@@ -29,11 +30,15 @@ public record BudgetConfig(
     @JsonProperty(value = "synthesis_share") Double synthesisShare,
     @JsonProperty(value = "scale_budget_with_difficulty") Boolean scaleBudgetWithDifficulty,
     @JsonProperty(value = "hard_problem_call_multiplier") Double hardProblemCallMultiplier,
-    @JsonProperty(value = "hard_problem_extra_rounds") Integer hardProblemExtraRounds
+    @JsonProperty(value = "hard_problem_extra_rounds") Integer hardProblemExtraRounds,
+    @JsonProperty(value = "estimated_input_tokens_per_call")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        @ConfigNullable
+        Integer estimatedInputTokensPerCall
 ) implements ConfigModel {
 
   @JsonCreator
-  public BudgetConfig(Integer maxTotalCalls, Integer maxRounds, Integer initialPaths, Integer maxPaths, Integer strategiesToGenerate, Integer candidatesToVerify, Integer maxRevisions, Integer baseVerifierReplicas, Integer highRiskVerifierReplicas, Double highRiskThreshold, Double verificationPassThreshold, Double synthesisThreshold, Integer maxTotalTokens, Double maxCostUsd, Double breadthShare, Double depthShare, Double verificationShare, Double synthesisShare, Boolean scaleBudgetWithDifficulty, Double hardProblemCallMultiplier, Integer hardProblemExtraRounds) {
+  public BudgetConfig(Integer maxTotalCalls, Integer maxRounds, Integer initialPaths, Integer maxPaths, Integer strategiesToGenerate, Integer candidatesToVerify, Integer maxRevisions, Integer baseVerifierReplicas, Integer highRiskVerifierReplicas, Double highRiskThreshold, Double verificationPassThreshold, Double synthesisThreshold, Integer maxTotalTokens, Double maxCostUsd, Double breadthShare, Double depthShare, Double verificationShare, Double synthesisShare, Boolean scaleBudgetWithDifficulty, Double hardProblemCallMultiplier, Integer hardProblemExtraRounds, Integer estimatedInputTokensPerCall) {
     if (maxTotalCalls == null) {
       maxTotalCalls = 48;
     }
@@ -129,6 +134,10 @@ public record BudgetConfig(
     }
     ConfigValidation.minimum("hard_problem_extra_rounds", hardProblemExtraRounds, 0);
     ConfigValidation.maximum("hard_problem_extra_rounds", hardProblemExtraRounds, 16);
+    ConfigValidation.minimum(
+        "estimated_input_tokens_per_call", estimatedInputTokensPerCall, 128);
+    ConfigValidation.maximum(
+        "estimated_input_tokens_per_call", estimatedInputTokensPerCall, 1_000_000);
     this.maxTotalCalls = maxTotalCalls;
     this.maxRounds = maxRounds;
     this.initialPaths = initialPaths;
@@ -150,7 +159,16 @@ public record BudgetConfig(
     this.scaleBudgetWithDifficulty = scaleBudgetWithDifficulty;
     this.hardProblemCallMultiplier = hardProblemCallMultiplier;
     this.hardProblemExtraRounds = hardProblemExtraRounds;
+    this.estimatedInputTokensPerCall = estimatedInputTokensPerCall;
     ConfigInvariants.validate(this);
+  }
+
+  public BudgetConfig(Integer maxTotalCalls, Integer maxRounds, Integer initialPaths, Integer maxPaths, Integer strategiesToGenerate, Integer candidatesToVerify, Integer maxRevisions, Integer baseVerifierReplicas, Integer highRiskVerifierReplicas, Double highRiskThreshold, Double verificationPassThreshold, Double synthesisThreshold, Integer maxTotalTokens, Double maxCostUsd, Double breadthShare, Double depthShare, Double verificationShare, Double synthesisShare, Boolean scaleBudgetWithDifficulty, Double hardProblemCallMultiplier, Integer hardProblemExtraRounds) {
+    this(maxTotalCalls, maxRounds, initialPaths, maxPaths, strategiesToGenerate, candidatesToVerify, maxRevisions, baseVerifierReplicas, highRiskVerifierReplicas, highRiskThreshold, verificationPassThreshold, synthesisThreshold, maxTotalTokens, maxCostUsd, breadthShare, depthShare, verificationShare, synthesisShare, scaleBudgetWithDifficulty, hardProblemCallMultiplier, hardProblemExtraRounds, null);
+  }
+
+  public int effectiveEstimatedInputTokensPerCall() {
+    return estimatedInputTokensPerCall == null ? 2_000 : estimatedInputTokensPerCall;
   }
 
   public static BudgetConfig defaults() {

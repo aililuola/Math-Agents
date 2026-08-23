@@ -48,13 +48,16 @@ final class DesktopOlympiadProductionExecutorTest {
       BudgetResourceVector firstTriageRequest =
           new BudgetResourceVector(
               1L,
-              2_000L,
+              configured.budget().estimatedInputTokensPerCall(),
               triageOutputLimit,
-              Math.addExact(2_000L, triageOutputLimit),
+              Math.addExact(
+                  configured.budget().estimatedInputTokensPerCall(), triageOutputLimit),
               BigDecimal.ZERO);
 
       assertEquals(spec.tier().maximumCalls(), configured.budget().maxTotalCalls());
+      assertEquals(spec.tier().maximumRounds(), configured.budget().maxRounds());
       assertEquals(spec.tier().maximumTokens(), configured.budget().maxTotalTokens());
+      assertEquals(16_000, configured.budget().estimatedInputTokensPerCall());
       assertTrue(
           configured.topology().inspiration().surpriseBudgetMinCalls() <= exploratoryCalls,
           () -> spec.identity() + " consumes the protected finalization reserve");
@@ -99,9 +102,14 @@ final class DesktopOlympiadProductionExecutorTest {
     SystemConfig configured =
         DesktopOlympiadProductionExecutor.benchmarkConfig(base, p09, pricing);
 
-    assertEquals(32, configured.budget().maxTotalCalls());
-    assertEquals(450_000, configured.budget().maxTotalTokens());
-    assertEquals(0, new BigDecimal("0.3915").compareTo(BigDecimal.valueOf(configured.budget().maxCostUsd())));
+    assertEquals(40, configured.budget().maxTotalCalls());
+    assertEquals(8, configured.budget().maxRounds());
+    assertEquals(1_200_000, configured.budget().maxTotalTokens());
+    assertEquals(16_000, configured.budget().estimatedInputTokensPerCall());
+    assertEquals(
+        0,
+        new BigDecimal("1.044")
+            .compareTo(BigDecimal.valueOf(configured.budget().maxCostUsd())));
     assertFalse(configured.budget().scaleBudgetWithDifficulty());
     assertFalse(configured.runtime().saveRawProviderResponses());
     assertEquals(5, configured.runtime().maxParallelCalls());

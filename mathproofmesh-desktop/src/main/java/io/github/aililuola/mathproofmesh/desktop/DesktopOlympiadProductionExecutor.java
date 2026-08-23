@@ -39,7 +39,7 @@ import java.util.Set;
 /** Executes one benchmark Run through the production desktop coordinator and provider stack. */
 final class DesktopOlympiadProductionExecutor implements OlympiadBenchmarkHarness.RunExecutor {
   private static final BigDecimal ONE_MILLION = BigDecimal.valueOf(1_000_000L);
-  private static final int ESTIMATED_INPUT_TOKENS_PER_CALL = 2_000;
+  private static final int ESTIMATED_INPUT_TOKENS_PER_CALL = 16_000;
   private static final int MINIMUM_OUTPUT_TOKENS = 512;
 
   private final Path projectRoot;
@@ -171,7 +171,9 @@ final class DesktopOlympiadProductionExecutor implements OlympiadBenchmarkHarnes
     ObjectNode root = (ObjectNode) ContractObjectMapper.toTree(base);
     ObjectNode budget = (ObjectNode) root.path("budget");
     budget.put("max_total_calls", spec.tier().maximumCalls());
+    budget.put("max_rounds", spec.tier().maximumRounds());
     budget.put("max_total_tokens", spec.tier().maximumTokens());
+    budget.put("estimated_input_tokens_per_call", ESTIMATED_INPUT_TOKENS_PER_CALL);
     budget.put("max_cost_usd", maximumTierCost(spec, pricing).doubleValue());
     budget.put("scale_budget_with_difficulty", false);
     capSurpriseBudgetToExploratoryCapacity(root, base, spec.tier().maximumCalls());

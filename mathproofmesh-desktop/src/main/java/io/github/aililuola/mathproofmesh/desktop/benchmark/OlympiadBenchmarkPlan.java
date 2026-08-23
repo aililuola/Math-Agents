@@ -163,21 +163,27 @@ public final class OlympiadBenchmarkPlan {
   }
 
   public enum Tier {
-    SMOKE(18, 200_000),
-    CORE(32, 450_000),
-    ADVANCED(56, 900_000),
-    STRESS(88, 1_500_000);
+    SMOKE(24, 6, 624_000),
+    CORE(40, 8, 1_200_000),
+    ADVANCED(64, 12, 2_176_000),
+    STRESS(96, 16, 3_648_000);
 
     private final int maximumCalls;
+    private final int maximumRounds;
     private final int maximumTokens;
 
-    Tier(int maximumCalls, int maximumTokens) {
+    Tier(int maximumCalls, int maximumRounds, int maximumTokens) {
       this.maximumCalls = maximumCalls;
+      this.maximumRounds = maximumRounds;
       this.maximumTokens = maximumTokens;
     }
 
     public int maximumCalls() {
       return maximumCalls;
+    }
+
+    public int maximumRounds() {
+      return maximumRounds;
     }
 
     public int maximumTokens() {

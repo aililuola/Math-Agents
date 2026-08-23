@@ -56,4 +56,43 @@ final class StrictPricingBudgetConfigTest {
     assertThat(mock.agents().getFirst().provider()).isEqualTo("mock");
     assertThat(priced.agents().getFirst().pricing().outputPerMillion()).isEqualTo(1.25d);
   }
+
+  @Test
+  void inputTokenPlanningHeadroomIsExplicitBoundedAndBackwardCompatible() {
+    SystemConfig defaults =
+        LOADER.read(
+            """
+            agents:
+              - id: local-fixture
+                provider: mock
+                model: deterministic
+            """);
+    SystemConfig configured =
+        LOADER.read(
+            """
+            agents:
+              - id: local-fixture
+                provider: mock
+                model: deterministic
+            budget:
+              estimated_input_tokens_per_call: 16000
+            """);
+
+    assertThat(defaults.budget().estimatedInputTokensPerCall()).isNull();
+    assertThat(defaults.budget().effectiveEstimatedInputTokensPerCall()).isEqualTo(2_000);
+    assertThat(configured.budget().estimatedInputTokensPerCall()).isEqualTo(16_000);
+    assertThatThrownBy(
+            () ->
+                LOADER.read(
+                    """
+                    agents:
+                      - id: local-fixture
+                        provider: mock
+                        model: deterministic
+                    budget:
+                      estimated_input_tokens_per_call: 127
+                    """))
+        .isInstanceOf(ConfigValidationException.class)
+        .hasMessageContaining("estimated_input_tokens_per_call");
+  }
 }

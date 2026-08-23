@@ -504,6 +504,53 @@ class StructuredAgentRunnerTest {
   }
 
   @Test
+  void conservativeInputEstimateAbsorbsObservedProviderTokenizerDrift() {
+    CallLedger callLedger = new CallLedger(4, 10_000L, BigDecimal.TEN);
+    BudgetEnvelopeLedger envelopes =
+        new BudgetEnvelopeLedger(
+            resource(4, 10_000, 10_000, 20_000, "10"), BudgetResourceVector.zero());
+    try (Fixture fixture =
+        fixture(
+            "run-input-headroom",
+            request ->
+                new LLMResponse(
+                    "{\"answer\":\"proved\"}",
+                    "mock-model",
+                    "mock",
+                    1_151,
+                    5,
+                    12.5d,
+                    "fixture-request",
+                    "stop",
+                    false,
+                    JsonNodeFactory.instance.objectNode()),
+            callLedger,
+            List.of())) {
+      fixture.runner().configureBudgetEnvelopeLedger(() -> envelopes);
+
+      fixture
+          .runner()
+          .call(
+              "run-input-headroom",
+              "input-headroom-key",
+              "general",
+              bundle("a".repeat(4_356)),
+              fixture.pool().get("agent-a"),
+              "proof");
+
+      assertThat(envelopes.envelopeSnapshot().envelopes())
+          .singleElement()
+          .satisfies(
+              envelope -> {
+                assertThat(envelope.allocated().estimatedInputTokens()).isGreaterThan(1_151L);
+                assertThat(envelope.consumed().estimatedInputTokens()).isEqualTo(1_151L);
+                assertThat(envelope.status()).isEqualTo(BudgetEnvelopeStatus.SETTLED);
+              });
+      assertThat(envelopes.usageSnapshot().committed().inputTokens()).isEqualTo(1_151L);
+    }
+  }
+
+  @Test
   void unknownRemoteResultQuarantinesWorstCaseEnvelopeAndCannotReplay() {
     CallLedger callLedger = new CallLedger(4, 10_000L, BigDecimal.TEN);
     BudgetEnvelopeLedger envelopes =

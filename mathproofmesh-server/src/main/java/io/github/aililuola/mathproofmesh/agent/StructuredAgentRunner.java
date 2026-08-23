@@ -729,8 +729,7 @@ public final class StructuredAgentRunner {
     String promptRef =
         artifacts.savePrompt(bundle.stage(), agent.id(), safeSystem, safeUser);
     String requestArtifactHash = artifactHash(promptRef);
-    long estimatedInputTokens =
-        Math.max(1L, (safeSystem.length() + safeUser.length() + 3L) / 4L);
+    long estimatedInputTokens = InputTokenBudgetEstimator.estimate(safeSystem, safeUser);
     BudgetResourceVector actionRemaining = currentActionEnvelopeRemaining();
     if (actionRemaining != null && actionRemaining.calls() < 1L) {
       throw new BudgetExhaustedError("ACTION_ENVELOPE_CALLS_EXHAUSTED");
