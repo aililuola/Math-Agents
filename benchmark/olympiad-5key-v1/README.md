@@ -29,3 +29,15 @@ process, invoke it explicitly from the repository root:
   "-Dsurefire.failIfNoSpecifiedTests=false" `
   test
 ```
+
+If a hard invariant stops a real campaign, do not resume provider execution.
+After writing `aggregate/HARD-GATE-STOP-REPORT.md`, package the partial evidence
+without network access:
+
+```powershell
+.\mvnw.cmd -pl mathproofmesh-desktop -am `
+  "-Dtest=OlympiadStoppedCampaignPackagerTest" `
+  "-Dbenchmark.package.stopped=<absolute-campaign-path>" `
+  "-Dsurefire.failIfNoSpecifiedTests=false" `
+  test
+```

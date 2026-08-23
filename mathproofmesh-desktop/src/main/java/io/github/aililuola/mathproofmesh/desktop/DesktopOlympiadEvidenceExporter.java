@@ -90,8 +90,7 @@ final class DesktopOlympiadEvidenceExporter {
     int negativeViolations = permanentNegativeLifetimeViolations(state.path("typedMemory"));
     int checkpointViolations = Files.isRegularFile(root.resolve(STATE_FILE)) ? 0 : 1;
     int graphViolations = state.path("proofGraph").isObject() ? 0 : 1;
-    int budgetViolations =
-        state.path("budgetUsage").isObject() && state.path("pricingSnapshot").isObject() ? 0 : 1;
+    int budgetViolations = budgetViolations(state);
     int recoveryViolations =
         recovery.providerCallReplays() + recovery.taskLosses() + recovery.stateDrifts();
 
@@ -357,6 +356,27 @@ final class DesktopOlympiadEvidenceExporter {
       }
     }
     return duplicates;
+  }
+
+  static int budgetViolations(JsonNode state) {
+    JsonNode checkpoint = Objects.requireNonNull(state, "state");
+    int violations = 0;
+    if (!checkpoint.path("budgetUsage").isObject()) {
+      violations++;
+    }
+    if (!checkpoint.path("pricingSnapshot").isObject()) {
+      violations++;
+    }
+    JsonNode envelopes = checkpoint.path("budgetEnvelopes").path("envelopes");
+    if (!envelopes.isArray()) {
+      return violations + 1;
+    }
+    for (JsonNode envelope : envelopes) {
+      if ("OVERRUN".equals(envelope.path("status").asText())) {
+        violations++;
+      }
+    }
+    return violations;
   }
 
   private static String timestamp(Instant value) {

@@ -10,6 +10,7 @@ import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadBenchmarkHarn
 import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadBenchmarkPlan;
 import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadBenchmarkPackager;
 import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadBenchmarkPreflight;
+import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadProtocolDocumentLocator;
 import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadSecretRedactor;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -90,11 +91,7 @@ final class OlympiadFiveKeyRealBenchmarkTest {
       assertTrue(leakReport.passed());
       assertEquals(34, completed.size());
       assertEquals(34L, completed.stream().map(run -> run.spec().identity()).distinct().count());
-      Path protocolDocument =
-          projectRoot
-              .getParent()
-              .getParent()
-              .resolve("MathProofMesh_五Key数学竞赛Benchmark_Codex执行说明书_v1.0.md");
+      Path protocolDocument = OlympiadProtocolDocumentLocator.locate(projectRoot);
       OlympiadBenchmarkPackager.PackageResult packaged =
           OlympiadBenchmarkPackager.create(
               projectRoot,
