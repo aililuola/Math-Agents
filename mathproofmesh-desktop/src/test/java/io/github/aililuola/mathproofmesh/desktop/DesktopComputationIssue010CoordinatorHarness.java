@@ -53,6 +53,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Minimal production coordinator harness for computation persistence and authority boundaries. */
 final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseable {
@@ -62,6 +65,7 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
   private final Path runDirectory;
   private final String runId;
   private final boolean concurrencyProviderEnabled;
+  private final AtomicReference<CountDownLatch> concurrencyProviderBarrier;
 
   private DesktopComputationIssue010CoordinatorHarness(
       DesktopSolveCoordinator coordinator,
@@ -69,13 +73,15 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
       AgentPool pool,
       Path runDirectory,
       String runId,
-      boolean concurrencyProviderEnabled) {
+      boolean concurrencyProviderEnabled,
+      AtomicReference<CountDownLatch> concurrencyProviderBarrier) {
     this.coordinator = coordinator;
     this.computation = computation;
     this.pool = pool;
     this.runDirectory = runDirectory;
     this.runId = runId;
     this.concurrencyProviderEnabled = concurrencyProviderEnabled;
+    this.concurrencyProviderBarrier = concurrencyProviderBarrier;
   }
 
   static DesktopComputationIssue010CoordinatorHarness open(
@@ -174,6 +180,7 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
             : mockConfig(source);
     Map<String, io.github.aililuola.mathproofmesh.provider.MockResponder> responders =
         new java.util.LinkedHashMap<>();
+    AtomicReference<CountDownLatch> concurrencyProviderBarrier = new AtomicReference<>();
     config
         .agents()
         .forEach(
@@ -182,7 +189,7 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
                     agent.id(),
                     request ->
                         concurrencyProviderEnabled
-                            ? concurrencyResponse(request)
+                            ? concurrencyResponse(request, concurrencyProviderBarrier)
                             : rejectedProviderCall(request.schemaName())));
     ProviderClientRegistry providers =
         new ProviderClientRegistry(
@@ -242,7 +249,8 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
             pool,
             runDirectory,
             runId,
-            concurrencyProviderEnabled);
+            concurrencyProviderEnabled,
+            concurrencyProviderBarrier);
     computation.setStatePersister(
         (reason, state) -> {
           try {
@@ -515,52 +523,60 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
     AgentRuntime preferred = pool.agents().getFirst();
     var ready = new java.util.concurrent.CountDownLatch(callCount);
     var start = new java.util.concurrent.CountDownLatch(1);
+    CountDownLatch providerBarrier = new CountDownLatch(callCount);
+    if (!concurrencyProviderBarrier.compareAndSet(null, providerBarrier)) {
+      throw new IllegalStateException("a concurrency provider barrier is already active");
+    }
     List<String> agents = new java.util.ArrayList<>();
-    try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
-      List<java.util.concurrent.Future<String>> futures = new java.util.ArrayList<>();
-      for (int ordinal = 0; ordinal < callCount; ordinal++) {
-        int stableOrdinal = ordinal;
-        futures.add(
-            executor.submit(
-                () -> {
-                  ready.countDown();
-                  start.await();
-                  @SuppressWarnings("unchecked")
-                  io.github.aililuola.mathproofmesh.agent.StructuredCallResult<Map<String, Object>>
-                      result =
-                          (io.github.aililuola.mathproofmesh.agent.StructuredCallResult<
-                                  Map<String, Object>>)
-                              invoke(
-                                  coordinator,
-                                  "callStage",
-                                  new Class<?>[] {
-                                    String.class,
-                                    String.class,
-                                    Class.class,
-                                    Map.class,
-                                    AgentRuntime.class,
-                                    String.class,
-                                    String.class
-                                  },
-                                  new Object[] {
-                                    "atomic-stage-" + stableOrdinal,
-                                    "triage",
-                                    Map.class,
-                                    Map.of("ordinal", stableOrdinal),
-                                    preferred,
-                                    "breadth",
-                                    "Atomic credential selection " + stableOrdinal
-                                  });
-                  return result.agentId();
-                }));
+    try {
+      try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+        List<java.util.concurrent.Future<String>> futures = new java.util.ArrayList<>();
+        for (int ordinal = 0; ordinal < callCount; ordinal++) {
+          int stableOrdinal = ordinal;
+          futures.add(
+              executor.submit(
+                  () -> {
+                    ready.countDown();
+                    start.await();
+                    @SuppressWarnings("unchecked")
+                    io.github.aililuola.mathproofmesh.agent.StructuredCallResult<Map<String, Object>>
+                        result =
+                            (io.github.aililuola.mathproofmesh.agent.StructuredCallResult<
+                                    Map<String, Object>>)
+                                invoke(
+                                    coordinator,
+                                    "callStage",
+                                    new Class<?>[] {
+                                      String.class,
+                                      String.class,
+                                      Class.class,
+                                      Map.class,
+                                      AgentRuntime.class,
+                                      String.class,
+                                      String.class
+                                    },
+                                    new Object[] {
+                                      "atomic-stage-" + stableOrdinal,
+                                      "triage",
+                                      Map.class,
+                                      Map.of("ordinal", stableOrdinal),
+                                      preferred,
+                                      "breadth",
+                                      "Atomic credential selection " + stableOrdinal
+                                    });
+                    return result.agentId();
+                  }));
+        }
+        if (!ready.await(5L, TimeUnit.SECONDS)) {
+          throw new IllegalStateException("concurrent stage calls did not reach the start barrier");
+        }
+        start.countDown();
+        for (var future : futures) {
+          agents.add(future.get());
+        }
       }
-      if (!ready.await(5L, java.util.concurrent.TimeUnit.SECONDS)) {
-        throw new IllegalStateException("concurrent stage calls did not reach the start barrier");
-      }
-      start.countDown();
-      for (var future : futures) {
-        agents.add(future.get());
-      }
+    } finally {
+      concurrencyProviderBarrier.compareAndSet(providerBarrier, null);
     }
     return new AtomicStageRun(
         agents,
@@ -771,9 +787,22 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
   }
 
   private static io.github.aililuola.mathproofmesh.provider.LLMResponse concurrencyResponse(
-      io.github.aililuola.mathproofmesh.provider.ProviderRequest request) {
+      io.github.aililuola.mathproofmesh.provider.ProviderRequest request,
+      AtomicReference<CountDownLatch> concurrencyProviderBarrier) {
+    CountDownLatch providerBarrier = concurrencyProviderBarrier.get();
+    if (providerBarrier != null) {
+      providerBarrier.countDown();
+      try {
+        if (!providerBarrier.await(5L, TimeUnit.SECONDS)) {
+          throw new IllegalStateException("provider calls did not enter the concurrency barrier");
+        }
+      } catch (InterruptedException exception) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException("provider concurrency barrier was interrupted", exception);
+      }
+    }
     java.util.concurrent.locks.LockSupport.parkNanos(
-        java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(20L));
+        TimeUnit.MILLISECONDS.toNanos(20L));
     return new io.github.aililuola.mathproofmesh.provider.LLMResponse(
         "{}",
         "mock",

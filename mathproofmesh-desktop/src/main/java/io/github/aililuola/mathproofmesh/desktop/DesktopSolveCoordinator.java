@@ -480,7 +480,6 @@ final class DesktopSolveCoordinator {
   private final boolean sandboxEnabled;
   private final RunExecutionBackend.ProgressSink progress;
   private final String problemHash;
-  private final DesktopDurableBoundaryObserver durableBoundaryObserver;
 
   private final List<ComputationTrace> computationTraces =
       Collections.synchronizedList(new ArrayList<>());
@@ -643,36 +642,6 @@ final class DesktopSolveCoordinator {
       boolean sandboxEnabled,
       RunExecutionBackend.ProgressSink progress,
       String problemHash) {
-    this(
-        request,
-        runId,
-        runDirectory,
-        runtime,
-        runner,
-        prompts,
-        pool,
-        ledger,
-        computation,
-        sandboxEnabled,
-        progress,
-        problemHash,
-        DesktopDurableBoundaryObserver.none());
-  }
-
-  DesktopSolveCoordinator(
-      SolveRequest request,
-      String runId,
-      Path runDirectory,
-      DesktopLiveRuntimeFactory.PreparedRuntime runtime,
-      StructuredAgentRunner runner,
-      PromptFactory prompts,
-      AgentPool pool,
-      CallLedger ledger,
-      ComputationBroker computation,
-      boolean sandboxEnabled,
-      RunExecutionBackend.ProgressSink progress,
-      String problemHash,
-      DesktopDurableBoundaryObserver durableBoundaryObserver) {
     this.request = Objects.requireNonNull(request, "request");
     this.runId = Objects.requireNonNull(runId, "runId");
     this.runDirectory = Objects.requireNonNull(runDirectory, "runDirectory");
@@ -686,8 +655,6 @@ final class DesktopSolveCoordinator {
     this.sandboxEnabled = sandboxEnabled;
     this.progress = Objects.requireNonNull(progress, "progress");
     this.problemHash = Objects.requireNonNull(problemHash, "problemHash");
-    this.durableBoundaryObserver =
-        Objects.requireNonNull(durableBoundaryObserver, "durableBoundaryObserver");
 
     double factThreshold = config.topology().typedMemory().factPassThreshold();
     this.typedMemory =
@@ -749,7 +716,7 @@ final class DesktopSolveCoordinator {
         new DesktopResearchEpochExecutor(
             runId,
             pool,
-            durableBoundaryObserver.maximumResearchInFlight(
+            DesktopDurableBoundaryObserver.from(progress).maximumResearchInFlight(
                 config.concurrency().maxInFlightTasks()),
             worker,
             researchEpochs,
@@ -869,7 +836,7 @@ final class DesktopSolveCoordinator {
         new DesktopResearchEpochExecutor(
             runId,
             pool,
-            durableBoundaryObserver.maximumResearchInFlight(
+            DesktopDurableBoundaryObserver.from(progress).maximumResearchInFlight(
                 config.concurrency().maxInFlightTasks()),
             worker,
             researchEpochs,
@@ -981,15 +948,8 @@ final class DesktopSolveCoordinator {
   }
 
   private void persistResearchBoundary(DesktopDurableBoundary boundary) {
-    String stage =
-        switch (boundary) {
-          case FIRST_RESULT_DURABLE -> "research_epoch_first_result_durable";
-          case ALL_SETTLED -> "research_epoch_all_settled";
-          case MERGE_PREPARED -> "research_epoch_merge_prepared";
-          case CHECKPOINT_V22 -> throw new IllegalArgumentException("checkpoint boundary is internal");
-        };
-    persistUnchecked(stage, false);
-    durableBoundaryObserver.afterDurableBoundary(boundary, statePath());
+    persistUnchecked(boundary.researchCheckpointStage(), false);
+    DesktopDurableBoundaryObserver.from(progress).afterDurableBoundary(boundary, statePath());
   }
 
   private List<ResearchWorkItem> compileResearchWorkItems(
@@ -12894,7 +12854,7 @@ final class DesktopSolveCoordinator {
     nextStrategyIndex.set(checkpoint.nextStrategyIndex());
     workflowCursor =
         checkpoint.workflowCursor().isBlank()
-            ? inferWorkflowCursor(checkpoint)
+            ? DesktopWorkflowCursorInference.infer(checkpoint)
             : checkpoint.workflowCursor();
     pendingMetaReview = checkpoint.pendingMetaReview();
     pendingProofTasks.clear();
@@ -13595,40 +13555,6 @@ final class DesktopSolveCoordinator {
         && fact.contentHash().equals(graphClaim.contentHash());
   }
 
-  private static String inferWorkflowCursor(DesktopSolveCheckpoint checkpoint) {
-    if (checkpoint.terminal()) {
-      return CURSOR_TERMINAL;
-    }
-    if (checkpoint.problem() == null) {
-      return CURSOR_FREEZE;
-    }
-    if (checkpoint.triage() == null) {
-      return CURSOR_TRIAGE;
-    }
-    if (checkpoint.strategySet() == null) {
-      return CURSOR_STRATEGY;
-    }
-    if (checkpoint.routes().isEmpty()) {
-      return CURSOR_INITIAL_ROUTES;
-    }
-    if (checkpoint.finalProof() != null) {
-      return CURSOR_FINAL_REVIEW;
-    }
-    String stage = checkpoint.currentStage() == null ? "" : checkpoint.currentStage();
-    if (stage.contains("synthesis")) {
-      return CURSOR_SYNTHESIS;
-    }
-    if (stage.contains("scheduler") || stage.contains("meta") || stage.contains("inspiration")) {
-      return CURSOR_SCHEDULER_INSPIRATION;
-    }
-    if (stage.contains("broker")) {
-      return CURSOR_SCHEDULER_INSPIRATION;
-    }
-    boolean hasUnintegratedAttempt =
-        checkpoint.routes().stream().anyMatch(route -> route.attempt() != null && !route.integrated());
-    return hasUnintegratedAttempt ? CURSOR_INTEGRATE : CURSOR_EXPLORE;
-  }
-
   private void persist(String stage, boolean terminal) throws IOException {
     currentStage = stage;
     List<DesktopSolveCheckpoint.RouteCheckpoint> routeState =
@@ -13792,7 +13718,7 @@ final class DesktopSolveCoordinator {
     Path structured = runDirectory.resolve("structured");
     Files.createDirectories(structured);
     writeJsonAtomically(statePath(), checkpoint);
-    durableBoundaryObserver.afterDurableBoundary(
+    DesktopDurableBoundaryObserver.from(progress).afterDurableBoundary(
         DesktopDurableBoundary.CHECKPOINT_V22, statePath());
     if ("research_epoch_committed".equals(stage)) {
       failAuthoritativeConcurrencyAt(

@@ -308,9 +308,8 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
               ledger,
               computation.broker(),
               computation.sandboxEnabled(),
-              progress,
-              problemHash,
-              durableBoundaryObserver)
+              new DesktopDurableProgressSink(progress, durableBoundaryObserver),
+              problemHash)
           .execute(resumeRequested);
     }
   }
