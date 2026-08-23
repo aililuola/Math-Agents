@@ -1,6 +1,5 @@
 package io.github.aililuola.mathproofmesh.desktop.benchmark;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -67,11 +66,6 @@ public final class OlympiadBundleChecksums {
     }
   }
 
-  @SuppressFBWarnings(
-      value = "PATH_TRAVERSAL_IN",
-      justification =
-          "Only regular files beneath the normalized benchmark bundle root are hashed, without "
-              + "following links; the checksum path itself is excluded.")
   private static List<Entry> entries(Path root) {
     List<Entry> entries = new ArrayList<>();
     try (Stream<Path> paths = Files.walk(root)) {
@@ -79,7 +73,11 @@ public final class OlympiadBundleChecksums {
           .map(Path::toAbsolutePath)
           .map(Path::normalize)
           .filter(path -> path.startsWith(root))
-          .filter(path -> !CHECKSUM_FILE.equals(path.getFileName().toString()))
+          .filter(
+              path -> {
+                Path fileName = path.getFileName();
+                return fileName != null && !CHECKSUM_FILE.equals(fileName.toString());
+              })
           .sorted()
           .forEach(
               path ->
@@ -109,11 +107,6 @@ public final class OlympiadBundleChecksums {
     return normalized;
   }
 
-  @SuppressFBWarnings(
-      value = "PATH_TRAVERSAL_OUT",
-      justification =
-          "The destination is the fixed checksums.sha256 child of a caller-owned normalized "
-              + "benchmark bundle directory and is atomically replaced.")
   private static void writeAtomically(Path destination, String content) {
     Path parent = Objects.requireNonNull(destination.getParent(), "checksum parent");
     try {

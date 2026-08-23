@@ -1,6 +1,5 @@
 package io.github.aililuola.mathproofmesh.desktop.benchmark;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -36,11 +35,6 @@ public final class OlympiadSecretRedactor {
     return CREDENTIAL.matcher(result).replaceAll("[REDACTED]");
   }
 
-  @SuppressFBWarnings(
-      value = "PATH_TRAVERSAL_IN",
-      justification =
-          "The caller supplies a normalized benchmark evidence root; every walked file is "
-              + "verified to remain below that root and is read without following links.")
   public LeakReport scan(Path root) {
     Path normalized = Objects.requireNonNull(root, "root").toAbsolutePath().normalize();
     AtomicInteger files = new AtomicInteger();

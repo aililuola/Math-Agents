@@ -3,16 +3,17 @@ package io.github.aililuola.mathproofmesh.desktop;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.api.RunExecutionBackend;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
 import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadBenchmarkHarness;
+import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadPromptTransportGuard;
 import io.github.aililuola.mathproofmesh.provider.ProviderCallRecord;
 import io.github.aililuola.mathproofmesh.provider.ProviderCallRepository;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -27,11 +28,6 @@ final class DesktopOlympiadEvidenceExporter {
 
   private DesktopOlympiadEvidenceExporter() {}
 
-  @SuppressFBWarnings(
-      value = "PATH_TRAVERSAL_IN",
-      justification =
-          "The run directory is a harness-created cold-start namespace and the exporter reads "
-              + "only a fixed checkpoint filename below it.")
   static OlympiadBenchmarkHarness.RunOutcome export(
       Path runDirectory,
       String runId,
@@ -40,6 +36,30 @@ final class DesktopOlympiadEvidenceExporter {
       ProviderCallRepository providerCalls,
       OlympiadBenchmarkHarness.RecoveryEvidence recovery,
       Instant endedAt) {
+    return export(
+        runDirectory,
+        runId,
+        expectedProblemPromptHash,
+        result,
+        providerCalls,
+        recovery,
+        endedAt,
+        Map.of(),
+        null,
+        null);
+  }
+
+  static OlympiadBenchmarkHarness.RunOutcome export(
+      Path runDirectory,
+      String runId,
+      String expectedProblemPromptHash,
+      RunExecutionBackend.RunExecutionResult result,
+      ProviderCallRepository providerCalls,
+      OlympiadBenchmarkHarness.RecoveryEvidence recovery,
+      Instant endedAt,
+      Map<String, String> providerKeyLabels,
+      OlympiadPromptTransportGuard.Audit promptAudit,
+      String redactedConfigSnapshot) {
     Path root = Objects.requireNonNull(runDirectory, "runDirectory").toAbsolutePath().normalize();
     Objects.requireNonNull(result, "result");
     Objects.requireNonNull(providerCalls, "providerCalls");
@@ -54,10 +74,18 @@ final class DesktopOlympiadEvidenceExporter {
 
     List<ProviderCallRecord> calls = providerCalls.findByRun(runId);
     int rootViolations =
-        expectedProblemPromptHash.equals(state.path("problemHash").asText())
+        sameHash(expectedProblemPromptHash, state.path("problemHash").asText())
                 && exactGoalContractIntact(state.path("problem"))
             ? 0
             : 1;
+    if (promptAudit != null
+        && (!promptAudit.canonicalRequestBound()
+            || promptAudit.requests().stream()
+                .anyMatch(
+                    request ->
+                        !sameHash(expectedProblemPromptHash, request.actualProblemHash())))) {
+      rootViolations++;
+    }
     int duplicateProviderCalls = duplicateProviderCalls(calls);
     int negativeViolations = permanentNegativeLifetimeViolations(state.path("typedMemory"));
     int checkpointViolations = Files.isRegularFile(root.resolve(STATE_FILE)) ? 0 : 1;
@@ -67,9 +95,22 @@ final class DesktopOlympiadEvidenceExporter {
     int recoveryViolations =
         recovery.providerCallReplays() + recovery.taskLosses() + recovery.stateDrifts();
 
-    Map<String, Object> evidence = evidenceDocuments(state, calls, result);
+    Map<String, Object> evidence =
+        evidenceDocuments(
+            state,
+            calls,
+            result,
+            Objects.requireNonNull(providerKeyLabels, "providerKeyLabels"),
+            promptAudit,
+            redactedConfigSnapshot);
     Map<String, OlympiadBenchmarkHarness.IssueObservation> issues = new LinkedHashMap<>();
-    issues.put("issue_001", observation(rootViolations, "run-manifest.json", STATE_FILE));
+    issues.put(
+        "issue_001",
+        observation(
+            rootViolations,
+            "run-manifest.json",
+            STATE_FILE,
+            "prompt-transport-audit.json"));
     issues.put("issue_002", observation(negativeViolations, "negative-knowledge.json"));
     issues.put("issue_003", observation(0, "attempts.json", "claims.json", "claim-court.json"));
     issues.put("issue_004", observation(checkpointViolations, "checkpoints.json"));
@@ -79,7 +120,9 @@ final class DesktopOlympiadEvidenceExporter {
     issues.put("issue_008", observation(0, "claim-court.json", "final-verification.json"));
     issues.put("issue_009", observation(0, "artifacts.json", "receipts.json"));
     issues.put("issue_010", observation(0, "computations.json"));
-    issues.put("issue_011", observation(0, "failure-attribution.json"));
+    issues.put(
+        "issue_011",
+        observation("failed".equals(result.status()) ? 1 : 0, "failure-attribution.json"));
     issues.put(
         "issue_012",
         observation(
@@ -120,9 +163,12 @@ final class DesktopOlympiadEvidenceExporter {
   private static Map<String, Object> evidenceDocuments(
       JsonNode state,
       List<ProviderCallRecord> calls,
-      RunExecutionBackend.RunExecutionResult result) {
+      RunExecutionBackend.RunExecutionResult result,
+      Map<String, String> providerKeyLabels,
+      OlympiadPromptTransportGuard.Audit promptAudit,
+      String redactedConfigSnapshot) {
     Map<String, Object> documents = new LinkedHashMap<>();
-    documents.put("provider-usage.ndjson", providerUsage(calls));
+    documents.put("provider-usage.ndjson", providerUsage(calls, providerKeyLabels));
     documents.put("concurrency-metrics.json", select(state, "agentLeases", "concurrencyTelemetry"));
     documents.put(
         "strategies.json",
@@ -219,6 +265,17 @@ final class DesktopOlympiadEvidenceExporter {
             "scheduler_stop", copy(state.path("schedulerStop")),
             "run_state", copy(state.path("runStateAnchor"))));
     documents.put("proof-debt-series.csv", proofDebtSeries(state.path("proofDebtHistory")));
+    documents.put(
+        "prompt-transport-audit.json",
+        promptAudit == null
+            ? missingNode("benchmark transport audit unavailable")
+            : Map.of(
+                "canonical_request_bound", promptAudit.canonicalRequestBound(),
+                "expected_problem_hash", promptAudit.expectedProblemHash(),
+                "requests", promptAudit.requests()));
+    if (redactedConfigSnapshot != null && !redactedConfigSnapshot.isBlank()) {
+      documents.put("config-snapshot.redacted.yaml", redactedConfigSnapshot);
+    }
     return Map.copyOf(documents);
   }
 
@@ -242,7 +299,14 @@ final class DesktopOlympiadEvidenceExporter {
     return value == null || value.isMissingNode() ? missingNode("production projection unavailable") : value.deepCopy();
   }
 
-  private static String providerUsage(List<ProviderCallRecord> calls) {
+  private static boolean sameHash(String left, String right) {
+    return MessageDigest.isEqual(
+        left.getBytes(StandardCharsets.US_ASCII),
+        right.getBytes(StandardCharsets.US_ASCII));
+  }
+
+  private static String providerUsage(
+      List<ProviderCallRecord> calls, Map<String, String> providerKeyLabels) {
     StringBuilder lines = new StringBuilder();
     for (ProviderCallRecord call : calls) {
       Map<String, Object> record = new LinkedHashMap<>();
@@ -250,6 +314,7 @@ final class DesktopOlympiadEvidenceExporter {
       record.put("call_id", call.callId());
       record.put("idempotency_key", call.idempotencyKey());
       record.put("agent_id", call.agentId());
+      record.put("key_label", providerKeyLabels.getOrDefault(call.agentId(), "UNAVAILABLE"));
       record.put("provider", call.provider());
       record.put("model", call.model());
       record.put("stage", call.stage());

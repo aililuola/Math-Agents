@@ -1,6 +1,5 @@
 package io.github.aililuola.mathproofmesh.desktop.benchmark;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -30,11 +29,6 @@ public final class OlympiadProblemCatalog {
     return Map.copyOf(prompts);
   }
 
-  @SuppressFBWarnings(
-      value = "PATH_TRAVERSAL_IN",
-      justification =
-          "The problem identifier is validated to P01-P20 and the normalized path is checked "
-              + "beneath the immutable benchmark root before reading.")
   public ProblemPrompt load(String problemId) {
     OlympiadBenchmarkPlan.problemNumber(problemId);
     Path path =

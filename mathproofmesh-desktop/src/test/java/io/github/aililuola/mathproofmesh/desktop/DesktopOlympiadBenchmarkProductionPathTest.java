@@ -2,6 +2,7 @@ package io.github.aililuola.mathproofmesh.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -11,10 +12,12 @@ import static org.mockito.Mockito.when;
 
 import io.github.aililuola.mathproofmesh.api.RunExecutionBackend;
 import io.github.aililuola.mathproofmesh.api.SolveRequest;
+import io.github.aililuola.mathproofmesh.api.ReasoningTraceStore;
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
 import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadBenchmarkHarness;
 import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadProblemCatalog;
+import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadPromptPolicy;
 import io.github.aililuola.mathproofmesh.provider.HttpTransport;
 import io.github.aililuola.mathproofmesh.provider.InMemoryProviderCallRepository;
 import io.github.aililuola.mathproofmesh.provider.LLMResponse;
@@ -38,6 +41,9 @@ import org.junit.jupiter.params.provider.EnumSource;
 final class DesktopOlympiadBenchmarkProductionPathTest {
   private static final String RUN_ID = "benchmark-production-path";
   private static final String PROBLEM = "Prove that 1 + 1 = 2.";
+  private static final OlympiadProblemCatalog.ProblemPrompt EXPECTED_PROBLEM =
+      new OlympiadProblemCatalog.ProblemPrompt(
+          "P01", PROBLEM, OlympiadProblemCatalog.sha256(PROBLEM));
 
   @TempDir Path temporaryDirectory;
 
@@ -111,6 +117,24 @@ final class DesktopOlympiadBenchmarkProductionPathTest {
             .asInt());
   }
 
+  @Test
+  void validationRuntimeDoesNotPersistHiddenReasoningTraces() {
+    InMemoryProviderCallRepository calls = new InMemoryProviderCallRepository();
+    Path runDirectory = temporaryDirectory.resolve("no-hidden-reasoning-run");
+
+    RunExecutionBackend.RunExecutionResult result =
+        fixture(calls, DesktopDurableBoundaryObserver.none(), new ProviderProbe(), false)
+            .backend()
+            .execute(request(), RUN_ID, "trace-no-hidden-reasoning", runDirectory, sink());
+
+    assertEquals("completed", result.status());
+    assertFalse(
+        Files.exists(runDirectory.resolve("reports").resolve(ReasoningTraceStore.FILE_NAME)));
+    assertFalse(
+        Files.exists(
+            runDirectory.resolve("reports").resolve(ReasoningTraceStore.LIVE_DIRECTORY_NAME)));
+  }
+
   @ParameterizedTest(name = "restores from production durable boundary {0}")
   @EnumSource(RecoveryBoundary.class)
   void restoresEveryControlledBenchmarkBoundaryWithoutProviderReplay(RecoveryBoundary recovery)
@@ -165,13 +189,22 @@ final class DesktopOlympiadBenchmarkProductionPathTest {
       InMemoryProviderCallRepository calls,
       DesktopDurableBoundaryObserver observer,
       ProviderProbe probe) {
+    return fixture(calls, observer, probe, true);
+  }
+
+  private Fixture fixture(
+      InMemoryProviderCallRepository calls,
+      DesktopDurableBoundaryObserver observer,
+      ProviderProbe probe,
+      boolean reasoningTracePersistenceEnabled) {
     Path project = DesktopLiveRunExecutionBackendTest.projectRoot();
     DesktopRuntimeLocator locator = new DesktopRuntimeLocator(project, null);
     SystemConfig config =
         DesktopLiveRunExecutionBackendTest.mockConfig(
             locator.loadProfile("proof-control-active.yaml"));
     DesktopLiveRuntimeFactory.PreparedRuntime prepared =
-        new DesktopLiveRuntimeFactory.PreparedRuntime("scripted", config, Map.of(), false);
+        new DesktopLiveRuntimeFactory.PreparedRuntime(
+            "scripted", config, Map.of(), false, reasoningTracePersistenceEnabled);
     DesktopLiveRuntimeFactory runtimes = mock(DesktopLiveRuntimeFactory.class);
     when(runtimes.prepare(eq("proof_control_active"), any(DesktopSettings.class)))
         .thenReturn(prepared);
@@ -193,6 +226,16 @@ final class DesktopOlympiadBenchmarkProductionPathTest {
   private static ProviderClientRegistry providers(SystemConfig config, ProviderProbe probe) {
     MockResponder responder =
         request -> {
+          String providerPayload =
+              request.messages().stream()
+                  .map(message -> message.content())
+                  .collect(java.util.stream.Collectors.joining("\n"));
+          if (providerPayload.contains("_json_repair]")) {
+            OlympiadPromptPolicy.validateNoForbiddenMetadata(providerPayload);
+          } else {
+            OlympiadPromptPolicy.validateProviderPayload(
+                providerPayload, EXPECTED_PROBLEM, false);
+          }
           long requestId = probe.recordPhysicalCall();
           LLMResponse source =
               DesktopLiveRunExecutionBackendTest.response(

@@ -17,3 +17,15 @@ bundles.
 
 Generated run evidence lives below `results/` and is intentionally ignored by
 Git. The final sanitized ZIP is also local-only.
+
+The real run is deliberately excluded from ordinary test execution. After the
+seven required environment variables have been injected into the launching
+process, invoke it explicitly from the repository root:
+
+```powershell
+.\mvnw.cmd -pl mathproofmesh-desktop -am `
+  "-Dtest=OlympiadFiveKeyRealBenchmarkTest" `
+  "-Dbenchmark.execute.real=true" `
+  "-Dsurefire.failIfNoSpecifiedTests=false" `
+  test
+```

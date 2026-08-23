@@ -7,16 +7,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.aililuola.mathproofmesh.orchestration.PricingSnapshot;
 import java.io.IOException;
+import java.io.ByteArrayInputStream;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.Clock;
+import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.zip.ZipFile;
+import io.github.aililuola.mathproofmesh.provider.HttpTransportResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -161,6 +166,35 @@ final class OlympiadBenchmarkHarnessTest {
     assertEquals(4, result.completedRuns().stream().filter(run -> run.spec().kind() == OlympiadBenchmarkPlan.RunKind.CONTROLLED_RECOVERY).count());
     assertTrue(result.completedRuns().stream().allMatch(run -> run.validation().passed()));
     assertTrue(Files.isRegularFile(output.resolve("aggregate").resolve("benchmark-summary.md")));
+    assertTrue(Files.isRegularFile(output.resolve("aggregate").resolve("issue-001-013-matrix.csv")));
+    assertTrue(Files.isRegularFile(output.resolve("aggregate").resolve("provider-key-usage.csv")));
+    assertTrue(Files.isRegularFile(output.resolve("aggregate").resolve("failure-attribution.csv")));
+    assertTrue(Files.isRegularFile(output.resolve("aggregate").resolve("historical-P16-comparison.md")));
+
+    Path protocol = temporaryDirectory.resolve("benchmark-protocol.md");
+    Files.writeString(protocol, "# Test benchmark protocol\n", StandardCharsets.UTF_8);
+    Path projectRoot = benchmarkRoot().getParent().getParent();
+    OlympiadBenchmarkPackager.PackageResult packaged =
+        OlympiadBenchmarkPackager.create(
+            projectRoot,
+            benchmarkRoot(),
+            output,
+            protocol,
+            temporaryDirectory.resolve("packages"),
+            redactor,
+            Clock.fixed(Instant.parse("2026-08-23T01:02:03Z"), ZoneOffset.UTC));
+    assertTrue(Files.isRegularFile(packaged.zip()));
+    assertTrue(OlympiadBundleChecksums.verify(packaged.stagingDirectory()).passed());
+    try (ZipFile zip = new ZipFile(packaged.zip().toFile(), StandardCharsets.UTF_8)) {
+      List<String> names = zip.stream().map(entry -> entry.getName()).toList();
+      assertTrue(names.contains("MANIFEST.json"));
+      assertTrue(names.contains("checksums.sha256"));
+      assertTrue(names.contains("benchmark-protocol-v1.0.md"));
+      assertEquals(
+          34L, names.stream().filter(name -> name.endsWith("/run-manifest.json")).count());
+      assertFalse(names.stream().anyMatch(name -> name.contains("/work/")));
+      assertFalse(names.stream().anyMatch(name -> name.contains("reasoning_traces")));
+    }
 
     long uniqueNamespaces =
         result.completedRuns().stream().map(run -> run.bundleDirectory().toString()).distinct().count();
@@ -207,6 +241,34 @@ final class OlympiadBenchmarkHarnessTest {
     assertFalse(Files.readString(root.resolve("evidence.txt")).contains(second));
     assertEquals(1, OlympiadBundleChecksums.write(root));
     assertTrue(OlympiadBundleChecksums.verify(root).passed());
+  }
+
+  @Test
+  void fiveKeyPreflightWritesOnlyRedactedConnectionStatuses() throws Exception {
+    Map<String, String> environment = fakeEnvironment();
+    try (BenchmarkSecretSet secrets = BenchmarkSecretSet.load(environment::get)) {
+      Path output = temporaryDirectory.resolve("preflight");
+      OlympiadBenchmarkPreflight.Result result =
+          OlympiadBenchmarkPreflight.execute(
+              output,
+              secrets,
+              ignored ->
+                  request ->
+                      new HttpTransportResponse(
+                          200, Map.of(), new ByteArrayInputStream(new byte[0])),
+              Clock.fixed(Instant.parse("2026-08-23T00:00:00Z"), ZoneOffset.UTC));
+
+      assertTrue(result.passed());
+      assertEquals(5, result.checks().size());
+      String written = Files.readString(output.resolve("five-key-connectivity.json"));
+      assertTrue(written.contains("api.deepseek.com"));
+      assertFalse(written.toLowerCase(java.util.Locale.ROOT).contains("authorization"));
+      environment
+          .entrySet()
+          .stream()
+          .filter(entry -> entry.getKey().startsWith("DEEPSEEK_API_KEY_"))
+          .forEach(entry -> assertFalse(written.contains(entry.getValue())));
+    }
   }
 
   private static OlympiadBenchmarkHarness.RunOutcome fakeOutcome(

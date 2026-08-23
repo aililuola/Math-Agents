@@ -87,7 +87,7 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
   private static final int MAX_REPORT_BYTES = 700_000;
 
   private final SettingsStore settings;
-  private final DesktopLiveRuntimeFactory runtimes;
+  private final DesktopLiveRuntimeAccess runtimes;
   private final DesktopRuntimeLocator locator;
   private final DockerSandboxPreflight dockerPreflight;
   private final Supplier<ProviderCallRepository> callRepositories;
@@ -96,7 +96,7 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
   DesktopLiveRunExecutionBackend(
       DesktopPaths paths,
       SettingsStore settings,
-      DesktopLiveRuntimeFactory runtimes,
+      DesktopLiveRuntimeAccess runtimes,
       DesktopRuntimeLocator locator,
       DockerSandboxPreflight dockerPreflight) {
     this(
@@ -112,7 +112,7 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
   DesktopLiveRunExecutionBackend(
       DesktopPaths paths,
       SettingsStore settings,
-      DesktopLiveRuntimeFactory runtimes,
+      DesktopLiveRuntimeAccess runtimes,
       DesktopRuntimeLocator locator,
       DockerSandboxPreflight dockerPreflight,
       Supplier<ProviderCallRepository> callRepositories) {
@@ -129,7 +129,7 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
   DesktopLiveRunExecutionBackend(
       DesktopPaths paths,
       SettingsStore settings,
-      DesktopLiveRuntimeFactory runtimes,
+      DesktopLiveRuntimeAccess runtimes,
       DesktopRuntimeLocator locator,
       DockerSandboxPreflight dockerPreflight,
       Supplier<ProviderCallRepository> callRepositories,
@@ -265,7 +265,9 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
     PromptRedactor redactor = new PromptRedactor(new ArrayList<>(runtime.credentials().values()));
     PromptFactory prompts = new PromptFactory(config.runtime().outputLanguage());
     ReasoningTraceStore reasoningTraces =
-        new ReasoningTraceStore(runDirectory, runId, runtime.credentials().values());
+        runtime.reasoningTracePersistenceEnabled()
+            ? new ReasoningTraceStore(runDirectory, runId, runtime.credentials().values())
+            : null;
     ProviderCallRepository providerCalls =
         Objects.requireNonNull(callRepositories.get(), "provider call repository");
     liveContext.set(new LiveExecutionContext(ledger, providerCalls, config));
@@ -351,7 +353,9 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
     PromptRedactor redactor = new PromptRedactor(new ArrayList<>(runtime.credentials().values()));
     PromptFactory prompts = new PromptFactory(config.runtime().outputLanguage());
     ReasoningTraceStore reasoningTraces =
-        new ReasoningTraceStore(runDirectory, runId, runtime.credentials().values());
+        runtime.reasoningTracePersistenceEnabled()
+            ? new ReasoningTraceStore(runDirectory, runId, runtime.credentials().values())
+            : null;
     List<ComputationTrace> computationTraces = new ArrayList<>();
 
     try (AgentPool pool = new AgentPool(config, runtimes.openProviders(runtime))) {

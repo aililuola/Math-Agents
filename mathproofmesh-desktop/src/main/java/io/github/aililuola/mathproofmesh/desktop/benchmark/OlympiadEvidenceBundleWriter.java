@@ -1,6 +1,5 @@
 package io.github.aililuola.mathproofmesh.desktop.benchmark;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -37,7 +36,8 @@ public final class OlympiadEvidenceBundleWriter {
           "budget-usage.json",
           "zero-gain.json",
           "final-verification.json",
-          "failure-attribution.json");
+          "failure-attribution.json",
+          "prompt-transport-audit.json");
 
   private OlympiadEvidenceBundleWriter() {}
 
@@ -80,19 +80,22 @@ public final class OlympiadEvidenceBundleWriter {
     manifest.put("bundle_complete", evidenceComplete(outcome));
     writeJson(root.resolve("run-manifest.json"), manifest, redactor);
 
-    writeText(
+    Object configSnapshot = outcome.evidenceDocuments().get("config-snapshot.redacted.yaml");
+    writeDocument(
         root.resolve("config-snapshot.redacted.yaml"),
-        "benchmark_id: "
-            + OlympiadBenchmarkPlan.BENCHMARK_ID
-            + "\nprovider: "
-            + outcome.providerId()
-            + "\nmodel: "
-            + outcome.modelId()
-            + "\ncoordination_key: "
-            + request.spec().coordinationKeyLabel()
-            + "\nresearch_keys: "
-            + request.spec().researchKeyLabels()
-            + "\nreal_credentials: redacted-in-memory-only\n",
+        configSnapshot == null
+            ? "benchmark_id: "
+                + OlympiadBenchmarkPlan.BENCHMARK_ID
+                + "\nprovider: "
+                + outcome.providerId()
+                + "\nmodel: "
+                + outcome.modelId()
+                + "\ncoordination_key: "
+                + request.spec().coordinationKeyLabel()
+                + "\nresearch_keys: "
+                + request.spec().researchKeyLabels()
+                + "\nreal_credentials: redacted-in-memory-only\n"
+            : configSnapshot,
         redactor);
     writeText(
         root.resolve("git-state.txt"),
@@ -188,11 +191,6 @@ public final class OlympiadEvidenceBundleWriter {
     writeText(path, ContractObjectMapper.write(value) + "\n", redactor);
   }
 
-  @SuppressFBWarnings(
-      value = "PATH_TRAVERSAL_OUT",
-      justification =
-          "Every destination is a fixed filename below the harness-created run bundle directory; "
-              + "writes use a sibling temporary file and atomic replacement.")
   private static void writeText(Path path, String value, OlympiadSecretRedactor redactor) {
     String sanitized = redactor.sanitize(Objects.requireNonNull(value, "value"));
     Path parent = Objects.requireNonNull(path.getParent(), "bundle file parent");

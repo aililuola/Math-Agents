@@ -32,6 +32,10 @@ public final class OlympiadPromptPolicy {
     }
   }
 
+  public static void validateNoForbiddenMetadata(String payload) {
+    rejectForbidden(require(payload, "payload"));
+  }
+
   public static void validateProviderPayload(
       String payload, OlympiadProblemCatalog.ProblemPrompt expected, boolean firstRequest) {
     String normalized = require(payload, "payload");

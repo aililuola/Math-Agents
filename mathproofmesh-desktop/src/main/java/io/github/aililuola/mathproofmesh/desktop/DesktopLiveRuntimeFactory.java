@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /** Loads the immutable live profile and injects only DPAPI-backed credentials. */
-final class DesktopLiveRuntimeFactory {
+final class DesktopLiveRuntimeFactory implements DesktopLiveRuntimeAccess {
   private static final int REQUIRED_AGENT_COUNT = 5;
 
   private final DesktopConfigService configs;
@@ -19,7 +19,8 @@ final class DesktopLiveRuntimeFactory {
     this.locator = Objects.requireNonNull(locator, "locator");
   }
 
-  PreparedRuntime prepare(String requestedProfile, DesktopSettings settings) {
+  @Override
+  public PreparedRuntime prepare(String requestedProfile, DesktopSettings settings) {
     Objects.requireNonNull(settings, "settings");
     String profile =
         requestedProfile == null || requestedProfile.isBlank()
@@ -44,10 +45,11 @@ final class DesktopLiveRuntimeFactory {
             loaded.runtime());
     validateLiveProfile(effective, prepared.injectedCredentials());
     return new PreparedRuntime(
-        prepared.profile(), effective, prepared.injectedCredentials(), sandboxEnabled);
+        prepared.profile(), effective, prepared.injectedCredentials(), sandboxEnabled, true);
   }
 
-  ProviderClientRegistry openProviders(PreparedRuntime runtime) {
+  @Override
+  public ProviderClientRegistry openProviders(PreparedRuntime runtime) {
     Objects.requireNonNull(runtime, "runtime");
     return new ProviderClientRegistry(
         runtime.config(),
@@ -92,7 +94,16 @@ final class DesktopLiveRuntimeFactory {
       String profile,
       SystemConfig config,
       Map<String, String> credentials,
-      boolean sandboxEnabled) {
+      boolean sandboxEnabled,
+      boolean reasoningTracePersistenceEnabled) {
+    PreparedRuntime(
+        String profile,
+        SystemConfig config,
+        Map<String, String> credentials,
+        boolean sandboxEnabled) {
+      this(profile, config, credentials, sandboxEnabled, true);
+    }
+
     PreparedRuntime {
       profile = Objects.requireNonNull(profile, "profile");
       config = Objects.requireNonNull(config, "config");
