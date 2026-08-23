@@ -43,6 +43,7 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
   private final ResearchTaskLedger tasks;
   private final ResearchResultLedger results;
   private final FailureInjector failureInjector;
+  private final DurableBoundaryListener durableBoundaryListener;
   private final ResearchMergePlanner mergePlanner = new ResearchMergePlanner();
   private volatile ResearchMergePlan latestMergePlan;
 
@@ -54,7 +55,17 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
       ResearchEpochLedger epochs,
       ResearchTaskLedger tasks,
       ResearchResultLedger results) {
-    this(runId, pool, maximumInFlight, worker, null, epochs, tasks, results, ignored -> {});
+    this(
+        runId,
+        pool,
+        maximumInFlight,
+        worker,
+        null,
+        epochs,
+        tasks,
+        results,
+        ignored -> {},
+        ignored -> {});
   }
 
   /**
@@ -70,7 +81,39 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
       ResearchEpochLedger epochs,
       ResearchTaskLedger tasks,
       ResearchResultLedger results) {
-    this(runId, pool, maximumInFlight, null, worker, epochs, tasks, results, ignored -> {});
+    this(
+        runId,
+        pool,
+        maximumInFlight,
+        null,
+        worker,
+        epochs,
+        tasks,
+        results,
+        ignored -> {},
+        ignored -> {});
+  }
+
+  DesktopResearchEpochExecutor(
+      String runId,
+      AgentPool pool,
+      int maximumInFlight,
+      ManagedWorker worker,
+      ResearchEpochLedger epochs,
+      ResearchTaskLedger tasks,
+      ResearchResultLedger results,
+      DurableBoundaryListener durableBoundaryListener) {
+    this(
+        runId,
+        pool,
+        maximumInFlight,
+        null,
+        worker,
+        epochs,
+        tasks,
+        results,
+        ignored -> {},
+        durableBoundaryListener);
   }
 
   DesktopResearchEpochExecutor(
@@ -91,7 +134,31 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
         epochs,
         tasks,
         results,
-        failureInjector);
+        failureInjector,
+        ignored -> {});
+  }
+
+  DesktopResearchEpochExecutor(
+      String runId,
+      AgentPool pool,
+      int maximumInFlight,
+      Worker worker,
+      ResearchEpochLedger epochs,
+      ResearchTaskLedger tasks,
+      ResearchResultLedger results,
+      FailureInjector failureInjector,
+      DurableBoundaryListener durableBoundaryListener) {
+    this(
+        runId,
+        pool,
+        maximumInFlight,
+        worker,
+        null,
+        epochs,
+        tasks,
+        results,
+        failureInjector,
+        durableBoundaryListener);
   }
 
   DesktopResearchEpochExecutor(
@@ -112,7 +179,8 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
         epochs,
         tasks,
         results,
-        failureInjector);
+        failureInjector,
+        ignored -> {});
   }
 
   private DesktopResearchEpochExecutor(
@@ -124,7 +192,8 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
       ResearchEpochLedger epochs,
       ResearchTaskLedger tasks,
       ResearchResultLedger results,
-      FailureInjector failureInjector) {
+      FailureInjector failureInjector,
+      DurableBoundaryListener durableBoundaryListener) {
     this.runId = requireText(runId, "runId");
     this.pool = Objects.requireNonNull(pool, "pool");
     if (maximumInFlight < 1) {
@@ -140,6 +209,8 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
     this.tasks = Objects.requireNonNull(tasks, "tasks");
     this.results = Objects.requireNonNull(results, "results");
     this.failureInjector = Objects.requireNonNull(failureInjector, "failureInjector");
+    this.durableBoundaryListener =
+        Objects.requireNonNull(durableBoundaryListener, "durableBoundaryListener");
   }
 
   @Override
@@ -192,6 +263,7 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
                 "",
                 ready.size()));
     List<ResearchWorkItem> inFlightItems = new ArrayList<>();
+    boolean firstResultObserved = !settled.isEmpty();
     try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
       CompletionService<Completed> completions = new ExecutorCompletionService<>(executor);
       int inFlight = 0;
@@ -241,30 +313,46 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
         inFlight--;
         inFlightItems.removeIf(item -> item.workItemId().equals(completed.item().workItemId()));
         settled.add(completed.result());
+        if (!firstResultObserved) {
+          firstResultObserved = true;
+          durableBoundaryListener.afterDurableBoundary(
+              DesktopDurableBoundary.FIRST_RESULT_DURABLE);
+        }
       }
     }
     if (!tasks.allSettled(snapshot.epochId())) {
       throw new IllegalStateException("research epoch reached barrier before all tasks settled");
     }
-    failAt(ResearchConcurrencyFailurePoint.AFTER_ALL_SETTLED);
-    pool.recordConcurrencyEvent(
-        ConcurrencyEventType.BARRIER_ENTERED, snapshot.epochId(), "", "", 0);
-    epochs.transition(
-        snapshot.epochId(),
-        ResearchEpochStatus.ALL_SETTLED,
-        settled.stream().map(ResearchWorkResultEnvelope::resultHash).toList(),
-        null);
-    pool.recordConcurrencyEvent(
-        ConcurrencyEventType.BARRIER_RELEASED, snapshot.epochId(), "", "", 0);
+    if (epochs.require(snapshot.epochId()).status() != ResearchEpochStatus.ALL_SETTLED) {
+      failAt(ResearchConcurrencyFailurePoint.AFTER_ALL_SETTLED);
+      pool.recordConcurrencyEvent(
+          ConcurrencyEventType.BARRIER_ENTERED, snapshot.epochId(), "", "", 0);
+      epochs.transition(
+          snapshot.epochId(),
+          ResearchEpochStatus.ALL_SETTLED,
+          settled.stream().map(ResearchWorkResultEnvelope::resultHash).toList(),
+          null);
+      pool.recordConcurrencyEvent(
+          ConcurrencyEventType.BARRIER_RELEASED, snapshot.epochId(), "", "", 0);
+      durableBoundaryListener.afterDurableBoundary(DesktopDurableBoundary.ALL_SETTLED);
+    }
     pool.recordConcurrencyEvent(
         ConcurrencyEventType.MERGE_STARTED, snapshot.epochId(), "", "", 0);
     latestMergePlan = mergePlanner.plan(snapshot, ordered, settled);
-    failAt(ResearchConcurrencyFailurePoint.AFTER_MERGE_PLAN_DURABLE);
-    epochs.transition(
-        snapshot.epochId(),
-        ResearchEpochStatus.MERGE_PREPARED,
-        null,
-        latestMergePlan.mergePlanHash());
+    ResearchEpochStatus epochStatus = epochs.require(snapshot.epochId()).status();
+    if (epochStatus != ResearchEpochStatus.MERGE_PREPARED) {
+      failAt(ResearchConcurrencyFailurePoint.AFTER_MERGE_PLAN_DURABLE);
+      epochs.transition(
+          snapshot.epochId(),
+          ResearchEpochStatus.MERGE_PREPARED,
+          null,
+          latestMergePlan.mergePlanHash());
+      durableBoundaryListener.afterDurableBoundary(DesktopDurableBoundary.MERGE_PREPARED);
+    } else if (!latestMergePlan
+        .mergePlanHash()
+        .equals(epochs.require(snapshot.epochId()).mergePlanHash())) {
+      throw new IllegalStateException("restored research merge plan hash changed");
+    }
     pool.recordConcurrencyEvent(
         ConcurrencyEventType.MERGE_COMPLETED, snapshot.epochId(), "", "", 0);
     return orderedResults(settled);
@@ -539,6 +627,11 @@ public final class DesktopResearchEpochExecutor implements ResearchEpochExecutor
   @FunctionalInterface
   interface FailureInjector {
     void fail(ResearchConcurrencyFailurePoint point);
+  }
+
+  @FunctionalInterface
+  interface DurableBoundaryListener {
+    void afterDurableBoundary(DesktopDurableBoundary boundary);
   }
 
   private record Completed(ResearchWorkItem item, ResearchWorkResultEnvelope result) {}

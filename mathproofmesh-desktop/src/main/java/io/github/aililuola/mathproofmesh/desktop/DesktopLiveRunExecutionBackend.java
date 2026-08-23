@@ -91,6 +91,7 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
   private final DesktopRuntimeLocator locator;
   private final DockerSandboxPreflight dockerPreflight;
   private final Supplier<ProviderCallRepository> callRepositories;
+  private final DesktopDurableBoundaryObserver durableBoundaryObserver;
 
   DesktopLiveRunExecutionBackend(
       DesktopPaths paths,
@@ -104,7 +105,8 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
         runtimes,
         locator,
         dockerPreflight,
-        InMemoryProviderCallRepository::new);
+        InMemoryProviderCallRepository::new,
+        DesktopDurableBoundaryObserver.none());
   }
 
   DesktopLiveRunExecutionBackend(
@@ -114,12 +116,32 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
       DesktopRuntimeLocator locator,
       DockerSandboxPreflight dockerPreflight,
       Supplier<ProviderCallRepository> callRepositories) {
+    this(
+        paths,
+        settings,
+        runtimes,
+        locator,
+        dockerPreflight,
+        callRepositories,
+        DesktopDurableBoundaryObserver.none());
+  }
+
+  DesktopLiveRunExecutionBackend(
+      DesktopPaths paths,
+      SettingsStore settings,
+      DesktopLiveRuntimeFactory runtimes,
+      DesktopRuntimeLocator locator,
+      DockerSandboxPreflight dockerPreflight,
+      Supplier<ProviderCallRepository> callRepositories,
+      DesktopDurableBoundaryObserver durableBoundaryObserver) {
     Objects.requireNonNull(paths, "paths");
     this.settings = Objects.requireNonNull(settings, "settings");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.locator = Objects.requireNonNull(locator, "locator");
     this.dockerPreflight = Objects.requireNonNull(dockerPreflight, "dockerPreflight");
     this.callRepositories = Objects.requireNonNull(callRepositories, "callRepositories");
+    this.durableBoundaryObserver =
+        Objects.requireNonNull(durableBoundaryObserver, "durableBoundaryObserver");
   }
 
   @Override
@@ -285,7 +307,8 @@ final class DesktopLiveRunExecutionBackend implements RunExecutionBackend {
               computation.broker(),
               computation.sandboxEnabled(),
               progress,
-              problemHash)
+              problemHash,
+              durableBoundaryObserver)
           .execute(resumeRequested);
     }
   }

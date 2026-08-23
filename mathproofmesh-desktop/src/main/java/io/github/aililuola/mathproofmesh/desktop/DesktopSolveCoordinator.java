@@ -480,6 +480,7 @@ final class DesktopSolveCoordinator {
   private final boolean sandboxEnabled;
   private final RunExecutionBackend.ProgressSink progress;
   private final String problemHash;
+  private final DesktopDurableBoundaryObserver durableBoundaryObserver;
 
   private final List<ComputationTrace> computationTraces =
       Collections.synchronizedList(new ArrayList<>());
@@ -642,6 +643,36 @@ final class DesktopSolveCoordinator {
       boolean sandboxEnabled,
       RunExecutionBackend.ProgressSink progress,
       String problemHash) {
+    this(
+        request,
+        runId,
+        runDirectory,
+        runtime,
+        runner,
+        prompts,
+        pool,
+        ledger,
+        computation,
+        sandboxEnabled,
+        progress,
+        problemHash,
+        DesktopDurableBoundaryObserver.none());
+  }
+
+  DesktopSolveCoordinator(
+      SolveRequest request,
+      String runId,
+      Path runDirectory,
+      DesktopLiveRuntimeFactory.PreparedRuntime runtime,
+      StructuredAgentRunner runner,
+      PromptFactory prompts,
+      AgentPool pool,
+      CallLedger ledger,
+      ComputationBroker computation,
+      boolean sandboxEnabled,
+      RunExecutionBackend.ProgressSink progress,
+      String problemHash,
+      DesktopDurableBoundaryObserver durableBoundaryObserver) {
     this.request = Objects.requireNonNull(request, "request");
     this.runId = Objects.requireNonNull(runId, "runId");
     this.runDirectory = Objects.requireNonNull(runDirectory, "runDirectory");
@@ -655,6 +686,8 @@ final class DesktopSolveCoordinator {
     this.sandboxEnabled = sandboxEnabled;
     this.progress = Objects.requireNonNull(progress, "progress");
     this.problemHash = Objects.requireNonNull(problemHash, "problemHash");
+    this.durableBoundaryObserver =
+        Objects.requireNonNull(durableBoundaryObserver, "durableBoundaryObserver");
 
     double factThreshold = config.topology().typedMemory().factPassThreshold();
     this.typedMemory =
@@ -716,11 +749,14 @@ final class DesktopSolveCoordinator {
         new DesktopResearchEpochExecutor(
             runId,
             pool,
-            config.concurrency().maxInFlightTasks(),
+            durableBoundaryObserver.maximumResearchInFlight(
+                config.concurrency().maxInFlightTasks()),
             worker,
             researchEpochs,
             researchTasks,
-            researchResults);
+            researchResults,
+            ignored -> {},
+            this::persistResearchBoundary);
     List<ResearchWorkResultEnvelope> settled = executor.execute(snapshot, workItems);
     ResearchMergePlan plan = executor.latestMergePlan();
     String frozenAuthorityHash = snapshot.authority().stableHash();
@@ -833,11 +869,13 @@ final class DesktopSolveCoordinator {
         new DesktopResearchEpochExecutor(
             runId,
             pool,
-            config.concurrency().maxInFlightTasks(),
+            durableBoundaryObserver.maximumResearchInFlight(
+                config.concurrency().maxInFlightTasks()),
             worker,
             researchEpochs,
             researchTasks,
-            researchResults);
+            researchResults,
+            this::persistResearchBoundary);
     List<ResearchWorkResultEnvelope> settled = executor.execute(frozen, items);
     persistUnchecked("research_epoch_all_settled", false);
     if (stage.startsWith("claim-court-")
@@ -940,6 +978,18 @@ final class DesktopSolveCoordinator {
       persistUnchecked("research_epoch_committed", false);
     }
     return new AuthoritativeEpochRun(frozen, items, settled, executor.latestMergePlan());
+  }
+
+  private void persistResearchBoundary(DesktopDurableBoundary boundary) {
+    String stage =
+        switch (boundary) {
+          case FIRST_RESULT_DURABLE -> "research_epoch_first_result_durable";
+          case ALL_SETTLED -> "research_epoch_all_settled";
+          case MERGE_PREPARED -> "research_epoch_merge_prepared";
+          case CHECKPOINT_V22 -> throw new IllegalArgumentException("checkpoint boundary is internal");
+        };
+    persistUnchecked(stage, false);
+    durableBoundaryObserver.afterDurableBoundary(boundary, statePath());
   }
 
   private List<ResearchWorkItem> compileResearchWorkItems(
@@ -13742,6 +13792,8 @@ final class DesktopSolveCoordinator {
     Path structured = runDirectory.resolve("structured");
     Files.createDirectories(structured);
     writeJsonAtomically(statePath(), checkpoint);
+    durableBoundaryObserver.afterDurableBoundary(
+        DesktopDurableBoundary.CHECKPOINT_V22, statePath());
     if ("research_epoch_committed".equals(stage)) {
       failAuthoritativeConcurrencyAt(
           AuthoritativeConcurrencyFailurePoint.AFTER_ATOMIC_CHECKPOINT_MOVE);
