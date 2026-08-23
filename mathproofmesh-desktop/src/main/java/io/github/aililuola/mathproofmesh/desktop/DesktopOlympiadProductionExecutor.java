@@ -39,6 +39,8 @@ import java.util.Set;
 /** Executes one benchmark Run through the production desktop coordinator and provider stack. */
 final class DesktopOlympiadProductionExecutor implements OlympiadBenchmarkHarness.RunExecutor {
   private static final BigDecimal ONE_MILLION = BigDecimal.valueOf(1_000_000L);
+  private static final int ESTIMATED_INPUT_TOKENS_PER_CALL = 2_000;
+  private static final int MINIMUM_OUTPUT_TOKENS = 512;
 
   private final Path projectRoot;
   private final BenchmarkSecretSet secrets;
@@ -173,6 +175,7 @@ final class DesktopOlympiadProductionExecutor implements OlympiadBenchmarkHarnes
     budget.put("max_cost_usd", maximumTierCost(spec, pricing).doubleValue());
     budget.put("scale_budget_with_difficulty", false);
     capSurpriseBudgetToExploratoryCapacity(root, base, spec.tier().maximumCalls());
+    capOutputEnvelopesToFrozenTier(root, spec);
     ((ObjectNode) root.path("runtime")).put("save_raw_provider_responses", false);
 
     List<String> labels = new ArrayList<>();
@@ -188,6 +191,39 @@ final class DesktopOlympiadProductionExecutor implements OlympiadBenchmarkHarnes
       agent.remove("api_key");
     }
     return ContractObjectMapper.read(root, SystemConfig.class);
+  }
+
+  static int benchmarkOutputTokenLimit(OlympiadBenchmarkPlan.RunSpec spec) {
+    Objects.requireNonNull(spec, "spec");
+    return Math.max(
+        MINIMUM_OUTPUT_TOKENS,
+        spec.tier().maximumTokens() / spec.tier().maximumCalls()
+            - ESTIMATED_INPUT_TOKENS_PER_CALL);
+  }
+
+  private static void capOutputEnvelopesToFrozenTier(
+      ObjectNode root, OlympiadBenchmarkPlan.RunSpec spec) {
+    int outputLimit = benchmarkOutputTokenLimit(spec);
+    ArrayNode agents = (ArrayNode) root.path("agents");
+    for (JsonNode candidate : agents) {
+      ObjectNode agent = (ObjectNode) candidate;
+      agent.put(
+          "max_output_tokens",
+          Math.min(agent.path("max_output_tokens").asInt(), outputLimit));
+    }
+
+    ObjectNode stageLimits =
+        (ObjectNode) root.path("runtime").path("stage_output_token_limits");
+    List<String> stages = new ArrayList<>();
+    stageLimits.fieldNames().forEachRemaining(stages::add);
+    for (String stage : stages) {
+      stageLimits.put(stage, Math.min(stageLimits.path(stage).asInt(), outputLimit));
+    }
+
+    ObjectNode continuation = (ObjectNode) root.path("continuation");
+    continuation.put(
+        "max_output_tokens_per_segment",
+        Math.min(continuation.path("max_output_tokens_per_segment").asInt(), outputLimit));
   }
 
   private static void capSurpriseBudgetToExploratoryCapacity(

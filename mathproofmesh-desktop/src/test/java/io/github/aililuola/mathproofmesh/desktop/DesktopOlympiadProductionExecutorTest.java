@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
 import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadBenchmarkPlan;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetResourceVector;
 import io.github.aililuola.mathproofmesh.orchestration.PricingSnapshot;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,19 @@ final class DesktopOlympiadProductionExecutorTest {
       int finalizationReserve =
           Math.min(configured.budget().maxTotalCalls(), requestedReserve);
       int exploratoryCalls = configured.budget().maxTotalCalls() - finalizationReserve;
+      int perCallOutputLimit =
+          DesktopOlympiadProductionExecutor.benchmarkOutputTokenLimit(spec);
+      DesktopBudgetRuntime budgetRuntime =
+          new DesktopBudgetRuntime("benchmark-budget-test", configured);
+      int triageOutputLimit =
+          configured.runtime().stageOutputTokenLimits().get("triage");
+      BudgetResourceVector firstTriageRequest =
+          new BudgetResourceVector(
+              1L,
+              2_000L,
+              triageOutputLimit,
+              Math.addExact(2_000L, triageOutputLimit),
+              BigDecimal.ZERO);
 
       assertEquals(spec.tier().maximumCalls(), configured.budget().maxTotalCalls());
       assertEquals(spec.tier().maximumTokens(), configured.budget().maxTotalTokens());
@@ -47,6 +61,23 @@ final class DesktopOlympiadProductionExecutorTest {
       assertEquals(
           Math.min(base.topology().inspiration().surpriseBudgetMinCalls(), exploratoryCalls),
           configured.topology().inspiration().surpriseBudgetMinCalls());
+      assertTrue(
+          configured.agents().stream()
+              .allMatch(agent -> agent.maxOutputTokens() <= perCallOutputLimit),
+          () -> spec.identity() + " retains an oversized agent output envelope");
+      assertTrue(
+          configured.runtime().stageOutputTokenLimits().values().stream()
+              .allMatch(limit -> limit <= perCallOutputLimit),
+          () -> spec.identity() + " retains an oversized stage output envelope");
+      assertTrue(
+          configured.continuation().maxOutputTokensPerSegment() <= perCallOutputLimit,
+          () -> spec.identity() + " retains an oversized continuation output envelope");
+      assertTrue(
+          budgetRuntime
+              .finishReserve()
+              .plus(firstTriageRequest)
+              .fitsWithin(budgetRuntime.limit()),
+          () -> spec.identity() + " leaves no multidimensional budget for triage");
       checkedRuns++;
     }
 
