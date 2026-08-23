@@ -2,6 +2,7 @@ package io.github.aililuola.mathproofmesh.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
 import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadBenchmarkPlan;
@@ -10,6 +11,48 @@ import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
 
 final class DesktopOlympiadProductionExecutorTest {
+  @Test
+  void validatesEveryFrozenTierWithoutConsumingProtectedFinalizationReserve() {
+    DesktopRuntimeLocator locator =
+        new DesktopRuntimeLocator(DesktopLiveRunExecutionBackendTest.projectRoot(), null);
+    SystemConfig base = locator.loadProfile("deepseek-v4-pro.yaml");
+    PricingSnapshot pricing = new DesktopBudgetRuntime("benchmark-test", base).pricing();
+    int checkedRuns = 0;
+
+    for (OlympiadBenchmarkPlan.RunSpec spec : OlympiadBenchmarkPlan.fullSchedule()) {
+      SystemConfig configured =
+          DesktopOlympiadProductionExecutor.benchmarkConfig(base, spec, pricing);
+      int verificationCalls =
+          1
+              + configured.budget().highRiskVerifierReplicas()
+              + configured.scheduler().verificationCallSafetyMargin();
+      int revisionCycles =
+          Math.min(
+              configured.scheduler().reserveRevisionCycles(),
+              configured.budget().maxRevisions());
+      int requestedReserve =
+          1
+              + verificationCalls
+              + revisionCycles * (1 + verificationCalls)
+              + configured.scheduler().finishTransitionBufferCalls();
+      int finalizationReserve =
+          Math.min(configured.budget().maxTotalCalls(), requestedReserve);
+      int exploratoryCalls = configured.budget().maxTotalCalls() - finalizationReserve;
+
+      assertEquals(spec.tier().maximumCalls(), configured.budget().maxTotalCalls());
+      assertEquals(spec.tier().maximumTokens(), configured.budget().maxTotalTokens());
+      assertTrue(
+          configured.topology().inspiration().surpriseBudgetMinCalls() <= exploratoryCalls,
+          () -> spec.identity() + " consumes the protected finalization reserve");
+      assertEquals(
+          Math.min(base.topology().inspiration().surpriseBudgetMinCalls(), exploratoryCalls),
+          configured.topology().inspiration().surpriseBudgetMinCalls());
+      checkedRuns++;
+    }
+
+    assertEquals(34, checkedRuns);
+  }
+
   @Test
   void appliesOnlyFrozenTierBudgetCredentialRotationAndNoRawReasoningPersistence() {
     DesktopRuntimeLocator locator =

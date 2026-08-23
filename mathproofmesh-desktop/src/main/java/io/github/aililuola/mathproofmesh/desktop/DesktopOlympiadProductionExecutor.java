@@ -172,6 +172,7 @@ final class DesktopOlympiadProductionExecutor implements OlympiadBenchmarkHarnes
     budget.put("max_total_tokens", spec.tier().maximumTokens());
     budget.put("max_cost_usd", maximumTierCost(spec, pricing).doubleValue());
     budget.put("scale_budget_with_difficulty", false);
+    capSurpriseBudgetToExploratoryCapacity(root, base, spec.tier().maximumCalls());
     ((ObjectNode) root.path("runtime")).put("save_raw_provider_responses", false);
 
     List<String> labels = new ArrayList<>();
@@ -187,6 +188,26 @@ final class DesktopOlympiadProductionExecutor implements OlympiadBenchmarkHarnes
       agent.remove("api_key");
     }
     return ContractObjectMapper.read(root, SystemConfig.class);
+  }
+
+  private static void capSurpriseBudgetToExploratoryCapacity(
+      ObjectNode root, SystemConfig base, int maximumCalls) {
+    int verificationCalls =
+        1
+            + base.budget().highRiskVerifierReplicas()
+            + base.scheduler().verificationCallSafetyMargin();
+    int revisionCycles =
+        Math.min(base.scheduler().reserveRevisionCycles(), base.budget().maxRevisions());
+    int requestedReserve =
+        1
+            + verificationCalls
+            + revisionCycles * (1 + verificationCalls)
+            + base.scheduler().finishTransitionBufferCalls();
+    int exploratoryCalls = maximumCalls - Math.min(maximumCalls, requestedReserve);
+    int requestedSurpriseCalls = base.topology().inspiration().surpriseBudgetMinCalls();
+    ObjectNode inspiration = (ObjectNode) root.path("topology").path("inspiration");
+    inspiration.put(
+        "surprise_budget_min_calls", Math.min(requestedSurpriseCalls, exploratoryCalls));
   }
 
   private static BigDecimal maximumTierCost(
