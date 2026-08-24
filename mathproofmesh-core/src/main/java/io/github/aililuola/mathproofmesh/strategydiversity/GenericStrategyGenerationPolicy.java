@@ -33,7 +33,9 @@ public final class GenericStrategyGenerationPolicy {
                 "Never invent blueprint node IDs; server-owned node IDs are not visible at generation time.",
                 "Never use @all_intermediates in local_assumption_node_ids.",
                 "For every critical claim emit exactly one binding with claim_blueprint_node_id=@claim.",
-                "Do not repeat root assumptions, quantifiers, or variable bindings; emit only genuine claim-local additions.")),
+                "Do not repeat root assumptions, quantifiers, or variable bindings; emit only genuine claim-local additions.",
+                "Bind each intended calculation check through the critical claim evidence_refs using the exact request_id.",
+                "Unreferenced calculation checks cannot be bound later by the preflight model.")),
         "compact_output_contract",
         List.of(
             "Return exactly strategies_requested strategies and no extra variants.",

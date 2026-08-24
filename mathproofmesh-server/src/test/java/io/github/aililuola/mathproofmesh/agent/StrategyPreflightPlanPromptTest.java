@@ -19,13 +19,16 @@ class StrategyPreflightPlanPromptTest {
                     "problem_hash", "problem-hash",
                     "strategy_id", "strategy-a",
                     "critical_claims", List.of("claim-a"),
-                    "registered_computation_contracts", List.of("finite_graph_enumeration")));
+                    "registered_computation_contracts", List.of("finite_graph_enumeration"),
+                    "server_binding_candidates", Map.of("strategy_id", "strategy-a")));
 
     assertThat(prompt.user())
         .contains("already registered computation contract")
         .contains("Do not submit code")
         .contains("verified status")
         .contains("server scores")
-        .contains("un-testable".replace("-", ""));
+        .contains("un-testable".replace("-", ""))
+        .contains("Return server_binding_candidates exactly")
+        .contains("Never add, remove, or remap a claim binding");
   }
 }

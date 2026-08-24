@@ -59,11 +59,14 @@ public final class PromptCatalog {
             + "Blueprint references are field-specific: use only @claim for claim_blueprint_node_id, only @roots in local_assumption_node_ids, and never invent server-owned node IDs. "
             + "The broader @direct_targets, @all_intermediates, and @main_goal selectors are only for mechanism operation inputs or outputs where the typed reference contract permits them. "
             + "Keep each binding compact by omitting duplicated root assumptions, quantifiers, and variable bindings. "
+            + "When a calculation_check is intended to test a critical claim, include its exact request_id in that claim's evidence_refs; an unreferenced request cannot be bound later. "
             + "estimated_success and estimated_cost are normalized model metadata from 0.0 to 1.0 and never server authority. "
             + "calculation_checks accepts only typed ToolRequest kinds from its schema; sandboxed_python belongs in computation_hints and a later ExperimentSpec, never in calculation_checks.");
     stages.put(
         "strategy_preflight_plan",
         "Map each supplied critical claim only to an already registered computation contract and typed input references. "
+            + "Return server_binding_candidates exactly, including problem_hash, strategy_id, claim order, contract IDs, evidence_refs, and typed_input_refs. "
+            + "Never add, remove, or remap a claim binding; the server candidates are authoritative and this response is only a bounded confirmation. "
             + "Do not submit code, commands, dependencies, containers, unknown tools, verified status, server scores, or mathematical authority. "
             + "Leave a claim untestable when no registered contract preserves its exact assumptions, quantifiers, polarity, and scope.");
     stages.put(

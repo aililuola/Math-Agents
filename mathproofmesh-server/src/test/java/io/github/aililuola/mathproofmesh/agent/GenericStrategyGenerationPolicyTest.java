@@ -50,6 +50,8 @@ class GenericStrategyGenerationPolicyTest {
         .contains("claim_local_assumption_selectors")
         .contains("Never invent blueprint node IDs")
         .contains("Never use @all_intermediates in local_assumption_node_ids")
-        .contains("Do not repeat root assumptions, quantifiers, or variable bindings");
+        .contains("Do not repeat root assumptions, quantifiers, or variable bindings")
+        .contains("Bind each intended calculation check through the critical claim evidence_refs")
+        .contains("Unreferenced calculation checks cannot be bound later");
   }
 }

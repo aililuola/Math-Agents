@@ -1919,13 +1919,21 @@ final class DesktopSolveCoordinator {
       }
       StrategyPreflightReport report = strategyPreflights.find(strategy.strategyId()).orElse(null);
       if (report == null) {
-        StrategyPreflightPlan plan = prepareStrategyPreflightPlan(strategy, claimContexts);
-        Map<String, CriticalClaimPreflightEvidence> computationEvidence =
-            executeRegisteredStrategyPreflight(strategy, plan, claimContexts);
-        report =
-            strategyPreflights.record(
-                trustedStrategyPreflight(computationEvidence)
-                    .evaluate(problemHash, strategy, claimContexts, plan));
+        try {
+          StrategyPreflightPlan plan = prepareStrategyPreflightPlan(strategy, claimContexts);
+          Map<String, CriticalClaimPreflightEvidence> computationEvidence =
+              executeRegisteredStrategyPreflight(strategy, plan, claimContexts);
+          report =
+              strategyPreflights.record(
+                  trustedStrategyPreflight(computationEvidence)
+                      .evaluate(problemHash, strategy, claimContexts, plan));
+        } catch (IllegalArgumentException exception) {
+          rejectStrategyCandidate(
+              strategy,
+              StrategyCandidateStatus.REJECTED_INVALID,
+              "INVALID_STRATEGY_PREFLIGHT_CONTRACT:" + exception.getMessage());
+          continue;
+        }
       }
       StrategyPreflightReport resolvedReport = report;
       StrategyCandidateStatus preflightStatus = preflightStatus(resolvedReport);
@@ -2187,7 +2195,7 @@ final class DesktopSolveCoordinator {
     StrategyPreflightPlan serverBinding =
         strategyPreflightPlanCompiler.compile(problemHash, strategy);
     StrategyPreflightPlan plan = serverBinding;
-    if (!strategyPreflightPlanCompiler.registeredContractIds(strategy).isEmpty()) {
+    if (StrategyPreflightAuthorityGate.hasBoundClaim(serverBinding)) {
       AgentRuntime planner =
           pool.select("planner", Set.of(), List.of("problem_decomposition"), null, true);
       plan =
@@ -2206,7 +2214,7 @@ final class DesktopSolveCoordinator {
                   "verification",
                   "Binding load-bearing claims to registered computation contracts")
               .value();
-      requireServerAuthorizedPreflightBindings(serverBinding, plan);
+      StrategyPreflightAuthorityGate.requireExact(serverBinding, plan);
     }
     validateStrategyPreflightPlan(strategy, plan);
     return strategyPreflights.recordPlan(plan);
@@ -2224,14 +2232,6 @@ final class DesktopSolveCoordinator {
         strategy.strategyId(),
         claimIds,
         strategyPreflightPlanCompiler.registeredContractIds(strategy));
-  }
-
-  private static void requireServerAuthorizedPreflightBindings(
-      StrategyPreflightPlan expected, StrategyPreflightPlan candidate) {
-    if (!CanonicalJson.stableHash(expected).equals(CanonicalJson.stableHash(candidate))) {
-      throw new IllegalArgumentException(
-          "strategy preflight plan changed a server-authorized claim binding");
-    }
   }
 
   private Map<String, CriticalClaimContext> criticalClaimContexts(

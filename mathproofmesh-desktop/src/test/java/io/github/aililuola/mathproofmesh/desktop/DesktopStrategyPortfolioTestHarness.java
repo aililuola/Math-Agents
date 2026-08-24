@@ -106,17 +106,35 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
 
   static DesktopStrategyPortfolioTestHarness open(
       Path directory, String runId, List<StrategySet> providerStrategySets) {
-    return open(directory, runId, SOURCE, providerStrategySets);
+    return open(directory, runId, SOURCE, providerStrategySets, Map.of());
+  }
+
+  static DesktopStrategyPortfolioTestHarness open(
+      Path directory,
+      String runId,
+      List<StrategySet> providerStrategySets,
+      Map<String, StrategyPreflightPlan> preflightPlans) {
+    return open(directory, runId, SOURCE, providerStrategySets, preflightPlans);
   }
 
   static DesktopStrategyPortfolioTestHarness open(
       Path directory, String runId, String sourceStatement, List<StrategySet> providerStrategySets) {
+    return open(directory, runId, sourceStatement, providerStrategySets, Map.of());
+  }
+
+  private static DesktopStrategyPortfolioTestHarness open(
+      Path directory,
+      String runId,
+      String sourceStatement,
+      List<StrategySet> providerStrategySets,
+      Map<String, StrategyPreflightPlan> preflightPlans) {
     SystemConfig source =
         new DesktopRuntimeLocator(projectRoot(), null)
             .loadProfile("proof-control-active.yaml");
     SystemConfig config = mockConfig(source);
     RecordingResponder responder =
-        new RecordingResponder(providerStrategySets, sha256(sourceStatement));
+        new RecordingResponder(
+            providerStrategySets, sha256(sourceStatement), preflightPlans);
     Map<String, MockResponder> responders = new LinkedHashMap<>();
     config.agents().forEach(agent -> responders.put(agent.id(), responder));
     ProviderClientRegistry providers =
@@ -884,13 +902,18 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
   private static final class RecordingResponder implements MockResponder {
     private final List<StrategySet> strategySets;
     private final String problemHash;
+    private final Map<String, StrategyPreflightPlan> preflightPlans;
     private final Map<String, StrategyCard> strategies = new LinkedHashMap<>();
     private final List<ProviderRequest> requests = new ArrayList<>();
     private int cursor;
 
-    private RecordingResponder(List<StrategySet> strategySets, String problemHash) {
+    private RecordingResponder(
+        List<StrategySet> strategySets,
+        String problemHash,
+        Map<String, StrategyPreflightPlan> preflightPlans) {
       this.strategySets = List.copyOf(strategySets);
       this.problemHash = problemHash;
+      this.preflightPlans = Map.copyOf(preflightPlans);
       strategySets.forEach(value -> registerStrategies(value.strategies()));
     }
 
@@ -912,7 +935,9 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
                 .orElseThrow(
                     () -> new AssertionError("preflight request omitted its strategy id"));
         StrategyPreflightPlan payload =
-            new StrategyPreflightPlanCompiler().compile(problemHash, strategy);
+            preflightPlans.getOrDefault(
+                strategy.strategyId(),
+                new StrategyPreflightPlanCompiler().compile(problemHash, strategy));
         return response(payload, "strategy-preflight-plan-" + strategy.strategyId());
       }
       if (!"StrategySet".equals(request.schemaName()) || cursor >= strategySets.size()) {
