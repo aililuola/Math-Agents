@@ -36,6 +36,8 @@ public final class GenericStrategyGenerationPolicy {
                 "Do not repeat root assumptions, quantifiers, or variable bindings; emit only genuine claim-local additions.",
                 "Bind each intended calculation check through the critical claim evidence_refs using the exact request_id.",
                 "Unreferenced calculation checks cannot be bound later by the preflight model.")),
+        "mechanism_operation_topology_contract",
+        mechanismOperationTopologyContract(),
         "compact_output_contract",
         List.of(
             "Return exactly strategies_requested strategies and no extra variants.",
@@ -44,5 +46,37 @@ public final class GenericStrategyGenerationPolicy {
         List.of(
             "Give a bounded falsification plan for each load-bearing claim.",
             "Include a genuinely independent challenger mechanism when applicable."));
+  }
+
+  public Map<String, Object> mechanismOperationTopologyContract() {
+    return Map.of(
+        "selectors_expand_to_sets",
+        true,
+        "server_reachability_rule",
+        List.of(
+            "Every selected input node must reach at least one selected output node.",
+            "Every selected output node must be reachable from at least one selected input node."),
+        "safe_generation_templates",
+        List.of(
+            operationTemplate("@roots", "@direct_targets"),
+            operationTemplate("@direct_targets", "@main_goal"),
+            operationTemplate("@roots", "@main_goal")),
+        "forbidden_generation_edges",
+        List.of(
+            Map.of(
+                "code",
+                "DIRECT_TARGETS_TO_ALL_INTERMEDIATES_NOT_A_LAYER",
+                "input_blueprint_node_ids",
+                List.of("@direct_targets"),
+                "output_blueprint_node_ids",
+                List.of("@all_intermediates"),
+                "reason",
+                "@all_intermediates is the set of all lemma nodes, not a layer after @direct_targets.")));
+  }
+
+  private static Map<String, List<String>> operationTemplate(String input, String output) {
+    return Map.of(
+        "input_blueprint_node_ids", List.of(input),
+        "output_blueprint_node_ids", List.of(output));
   }
 }

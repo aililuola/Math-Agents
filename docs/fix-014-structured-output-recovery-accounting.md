@@ -848,6 +848,62 @@ secret leaks, and zero checksum failures as
 `MathProofMesh_olympiad-5key-v1_9ddb3a265793_20260824T162744Z.zip`; its SHA-256 is
 `96ae90926eb00ddad95219aee22724a4df4f8ba5d8a06aa19668242e1b5d6ed4`.
 
+### Mechanism-selector set semantics and topology-safe replenishment
+
+The next cold-start campaign from `1bc5d0b`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T165456Z`, completed P01 through P04 before the
+hard stop. P01, P02, and P03 completed as `INCOMPLETE` without an Issue 001-013 violation. P04
+completed after four calls and USD 0.068162325, but all six initial strategies and all six one-shot
+replacement strategies were deterministically rejected with `mechanism operation output is not
+reachable from an input`. Across the four complete Runs, the campaign used 98 calls and
+USD 0.861792855. P05 had only begun triage/strategy work when the campaign was deliberately
+stopped; its partial output is non-authoritative stop evidence and was not resumed.
+
+Every rejected strategy treated the selector chain
+`@roots -> @direct_targets -> @all_intermediates -> @main_goal` as ordered layers. Server semantics
+are intentionally stricter: each selector expands to a node set, `@direct_targets` identifies the
+final expected-lemma target set, and `@all_intermediates` contains all lemma nodes, including nodes
+that precede direct targets. A direct target therefore need not reach every member of the latter
+set. The strict reachability compiler behaved correctly and was not relaxed.
+
+The first test-first reactor stopped in `GenericStrategyGenerationPolicyTest` because the generated
+Prompt lacked `mechanism_operation_topology_contract`, `selectors_expand_to_sets`, safe templates,
+and the stable `DIRECT_TARGETS_TO_ALL_INTERMEDIATES_NOT_A_LAYER` warning. Because Maven stopped at
+that Server failure, the new Desktop production-chain regression was not executed in the same
+pre-fix reactor. After the production change, both tests and the adjacent nine-test matrix passed.
+
+The repair publishes one immutable, machine-readable topology contract in ordinary strategy
+guidance and reuses the same contract only when a replenishment batch contains a deterministic
+reachability failure. Such failures receive the stable code
+`MECHANISM_OPERATION_REACHABILITY_MISMATCH`, the exact deterministic error, and topology-safe
+generation templates. The stage Prompt also states explicitly that selectors are sets, prohibits
+the unsafe direct-target-to-all-intermediates edge, and recommends safe root/direct-target/main-goal
+paths. It does not rewrite a candidate, infer a graph, weaken reachability, admit an invalid
+strategy, or change Claim, Fact, Root Goal, Negative Knowledge, budget, or recovery authority.
+
+```text
+MECHANISM OPERATION TOPOLOGY RECOVERY DIAGNOSTIC
+REACHABILITY_REJECTIONS=4
+TOPOLOGY_FEEDBACK_PROMPTS=1
+VALID_REPLACEMENT_ADMISSIONS=4
+INVALID_ROUTE_LEAKS=0
+ROOT_HASH_CHANGES=0
+RESULT=PASS
+```
+
+The subsequent `scripts/verify-all.ps1 -Offline` run completed with
+`FULL VERIFICATION: PASS`: 2,982 tests (73 Contracts, 1,411 Core, 963 Server including PostgreSQL
+integration, 386 Desktop, and 149 Compatibility) ran with zero failures or errors and six
+intentional skips. Docker/Testcontainers, PostgreSQL 18.4, all seven Flyway migrations,
+SpotBugs/FindSecBugs, coverage, security, source immutability, dependency, Temporal, and the
+unchanged Python Sidecar performance gate all passed. Adjusted Contracts branch coverage remained
+85.545194 percent.
+
+The stopped campaign was packaged offline with zero provider calls during packaging, zero source-
+secret leaks, and zero checksum failures as
+`MathProofMesh_olympiad-5key-v1_1bc5d0b313ad_20260824T190201Z.zip`; its SHA-256 is
+`2ba5370e7d8cd354b949c928e77fb9e31e5ba3ee6a2de49d250084cdda1d3fff`.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

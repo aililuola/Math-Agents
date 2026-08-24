@@ -52,6 +52,10 @@ class GenericStrategyGenerationPolicyTest {
         .contains("Never use @all_intermediates in local_assumption_node_ids")
         .contains("Do not repeat root assumptions, quantifiers, or variable bindings")
         .contains("Bind each intended calculation check through the critical claim evidence_refs")
-        .contains("Unreferenced calculation checks cannot be bound later");
+        .contains("Unreferenced calculation checks cannot be bound later")
+        .contains("mechanism_operation_topology_contract")
+        .contains("selectors_expand_to_sets")
+        .contains("safe_generation_templates")
+        .contains("DIRECT_TARGETS_TO_ALL_INTERMEDIATES_NOT_A_LAYER");
   }
 }

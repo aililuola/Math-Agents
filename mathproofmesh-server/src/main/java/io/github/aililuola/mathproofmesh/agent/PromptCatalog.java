@@ -58,6 +58,8 @@ public final class PromptCatalog {
             + "When generation_mode is portfolio_gap_replenishment, fill only the supplied structural gaps and never repeat a forbidden signature or rejected claim key. "
             + "Blueprint references are field-specific: use only @claim for claim_blueprint_node_id, only @roots in local_assumption_node_ids, and never invent server-owned node IDs. "
             + "The broader @direct_targets, @all_intermediates, and @main_goal selectors are only for mechanism operation inputs or outputs where the typed reference contract permits them. "
+            + "Mechanism operation selectors expand to node sets, not ordered stages: never declare @direct_targets as an input to @all_intermediates. "
+            + "Prefer topology-safe operation paths such as @roots to @direct_targets to @main_goal, or a direct @roots to @main_goal operation. "
             + "Keep each binding compact by omitting duplicated root assumptions, quantifiers, and variable bindings. "
             + "When a calculation_check is intended to test a critical claim, include its exact request_id in that claim's evidence_refs; an unreferenced request cannot be bound later. "
             + "estimated_success and estimated_cost are normalized model metadata from 0.0 to 1.0 and never server authority. "
