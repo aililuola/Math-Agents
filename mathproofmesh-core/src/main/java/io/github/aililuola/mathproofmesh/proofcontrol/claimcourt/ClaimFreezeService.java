@@ -41,7 +41,12 @@ public final class ClaimFreezeService {
                 "polarity", semanticContext.polarity(),
                 "dependencies", dependencies));
     String proofHash = CanonicalJson.stableHash(claim.proofSteps());
-    String initialRevisionId = "claim-proof-original-" + proofHash.substring(0, 24);
+    String initialRevisionId =
+        ClaimProofRevisionIdentity.originalId(
+            problem,
+            root,
+            semanticHash,
+            proofHash);
     String statementCaseId =
         "claim-statement-"
             + CanonicalJson.stableHash(List.of(problem, root, semanticHash)).substring(0, 24);

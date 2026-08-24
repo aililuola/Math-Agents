@@ -71,10 +71,14 @@ import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleController;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlFacade;
 import io.github.aililuola.mathproofmesh.proofcontrol.RootGoalContract;
-import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionRecord;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtLedger;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtRecord;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtSnapshot;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtStageExecutionLedger;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtStageExecutionSnapshot;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionLedger;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionRecord;
+import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionSnapshot;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.FrozenClaimSnapshot;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphConvergenceMonitor;
@@ -215,6 +219,35 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
                   "parallel-claim-" + index,
                   "PARALLEL_VALID_LOCAL_" + index + ": every even square is divisible by four.",
                   List.of("local_lemma"))),
+          List.of(),
+          null);
+    }
+  }
+
+  void prepareEmptyProofClaimCourtBatch(int routeCount) throws Exception {
+    if (routeCount < 2) {
+      throw new IllegalArgumentException("routeCount must be at least two");
+    }
+    freezeAndCreateRoute();
+    @SuppressWarnings("unchecked")
+    Map<String, Object> blueprints =
+        (Map<String, Object>) rawField(coordinator, "strategyBlueprints");
+    Object baseBlueprint = blueprints.get(validStrategy().strategyId());
+    while (routes(coordinator).size() < routeCount) {
+      StrategyCard strategy = validStrategy("empty-proof-batch-" + routes(coordinator).size());
+      blueprints.put(strategy.strategyId(), baseBlueprint);
+      invoke(
+          "addRoute",
+          new Class<?>[] {StrategyCard.class, int.class},
+          new Object[] {strategy, 0});
+    }
+    setRound(1);
+    List<Object> activeRoutes = routes(coordinator);
+    for (int index = 0; index < routeCount; index++) {
+      installFailedAttempt(
+          activeRoutes.get(index),
+          300 + index,
+          List.of(emptyProofClaim(index)),
           List.of(),
           null);
     }
@@ -547,6 +580,16 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
         List.of(), 0.9d, null, null, null, statement, ClaimStatus.PROPOSED, tags, null);
   }
 
+  private static ClaimCard emptyProofClaim(int index) {
+    String id = "empty-proof-claim-" + index;
+    String statement =
+        "EMPTY_PROOF_LOCAL_" + index + ": every multiple of " + (index + 2) + " is integral.";
+    return new ClaimCard(
+        List.of(), id, statement, "", "bounded", List.of(), List.of(), List.of(), List.of(),
+        List.of(), 0.4d, null, null, null, statement, ClaimStatus.PROPOSED,
+        List.of("local_lemma"), null);
+  }
+
   private static ProofStep proofStep(String claimId, String statement) {
     return proofStep(
         claimId,
@@ -829,6 +872,47 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
   ClaimCourtStageExecutionLedger claimCourtExecutions() {
     return uncheckedField(
         coordinator, "claimCourtExecutions", ClaimCourtStageExecutionLedger.class);
+  }
+
+  void mergeClaimCourtWorkerDraft(
+      ClaimCourtRecord record,
+      ClaimProofRevisionRecord revision,
+      ClaimCourtSnapshot court,
+      ClaimProofRevisionSnapshot revisions,
+      ClaimCourtStageExecutionSnapshot executions)
+      throws Exception {
+    Class<?> draftType =
+        java.util.Arrays.stream(DesktopSolveCoordinator.class.getDeclaredClasses())
+            .filter(type -> type.getSimpleName().equals("ClaimCourtCaseDraft"))
+            .findFirst()
+            .orElseThrow();
+    var constructor =
+        draftType.getDeclaredConstructor(
+            ClaimCourtRecord.class,
+            ClaimProofRevisionRecord.class,
+            String.class,
+            double.class,
+            ClaimCourtSnapshot.class,
+            ClaimProofRevisionSnapshot.class,
+            ClaimCourtStageExecutionSnapshot.class);
+    constructor.setAccessible(true);
+    Object draft =
+        constructor.newInstance(
+            record, revision, "merge-authority", 0.5d, court, revisions, executions);
+    Method method =
+        DesktopSolveCoordinator.class.getDeclaredMethod("mergeClaimCourtWorkerDraft", draftType);
+    method.setAccessible(true);
+    try {
+      method.invoke(coordinator, draft);
+    } catch (InvocationTargetException exception) {
+      if (exception.getCause() instanceof Exception cause) {
+        throw cause;
+      }
+      if (exception.getCause() instanceof Error cause) {
+        throw cause;
+      }
+      throw exception;
+    }
   }
 
   void setFailurePoint(ClaimCourtFailurePoint point) {
@@ -1456,7 +1540,9 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
           revision.path("proofSteps").findValuesAsText("justification").stream()
               .collect(java.util.stream.Collectors.joining(" "));
       ClaimProofAuditVerdict verdict =
-          proofText.contains("UNREPAIRABLE_PROOF")
+          revision.path("proofSteps").isEmpty()
+              ? ClaimProofAuditVerdict.INVALID_UNREPAIRABLE
+              : proofText.contains("UNREPAIRABLE_PROOF")
                   || statement.contains("BAD_PROOF")
                   || statement.contains("UNREPAIRABLE")
               ? ClaimProofAuditVerdict.INVALID_UNREPAIRABLE
@@ -1472,7 +1558,9 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
                   new ProofAuditIssue(
                       "issue-" + frozen.claimId(),
                       frozen.claimId(),
-                      text(revision.path("proofSteps").get(0), "stepId", "step_id"),
+                      revision.path("proofSteps").isEmpty()
+                          ? "PROOF_LEVEL"
+                          : text(revision.path("proofSteps").get(0), "stepId", "step_id"),
                       "The supplied premise.",
                       "The asserted local conclusion.",
                       ProofIssueKind.MISSING_JUSTIFICATION,

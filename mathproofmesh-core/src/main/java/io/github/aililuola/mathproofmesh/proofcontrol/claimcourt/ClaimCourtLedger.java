@@ -505,6 +505,7 @@ public final class ClaimCourtLedger {
         && left.rootGoalHash().equals(right.rootGoalHash())
         && left.problemHash().equals(right.problemHash())
         && left.statementCaseId().equals(right.statementCaseId())
-        && left.initialProofRevisionId().equals(right.initialProofRevisionId());
+        && ClaimProofRevisionIdentity.compatible(
+            left.initialProofRevisionId(), right.initialProofRevisionId());
   }
 }

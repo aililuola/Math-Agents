@@ -370,6 +370,68 @@ source-secret leaks, and zero checksum failures as
 `MathProofMesh_olympiad-5key-v1_fbefcd211e48_20260824T042605Z.zip`; its SHA-256 is
 `4e75a54783912dc48873c2df47f3d395e8c099697917d255af49abc92899d8c4`.
 
+### Claim Court proof-revision identity under concurrent empty proofs
+
+The next cold-start campaign from `197e8fc`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T044504Z`, admitted three P01 routes and reached
+concurrent Claim Court processing. Several independent local claims carried empty `proofSteps`.
+The previous revision identity used only the proof hash, so every empty proof received the same
+`claim-proof-original-4f53cda18c2baa0c0354bb5f` identity. Worker-frontier merge then rejected
+the distinct claims as a conflicting revision. P01 stopped `INVALID` after 23 physical calls and
+USD 0.155214525; no later problem was started and the campaign was never resumed.
+
+The regression was written against the production freeze and worker-merge paths. Before repair,
+distinct empty-proof claims received the same revision ID, concurrent merge raised
+`Claim Court worker produced a conflicting revision`, and the failed merge had already changed
+the Claim Court hash. The original revision identity now binds the proof hash to the immutable
+problem, root-goal, and claim-semantic scope. It deliberately excludes route, attempt, and author
+provenance, so an identical mathematical claim and proof remains exactly-once across later
+attempts. Legacy proof-only revision IDs remain resolvable only when their proof component matches
+the scoped ID.
+
+`conductClaimCourt` now resolves an existing exact proof case before creating an original
+revision. Concurrent worker merge validates a combined Claim Court, proof-revision, and stage-
+execution frontier before mutating any ledger; on failure all three snapshots are restored. The
+frontier validator is a dedicated production class so the coordinator stays within SpotBugs'
+analysis limit rather than silently becoming an unanalyzed oversized class.
+
+The focused post-fix matrix ran seven tests with zero failures or errors. It verified three
+concurrent empty-proof claims produced three distinct cases and revisions with zero collisions,
+legacy lookup remained compatible, repeated attempt provenance created no duplicate case,
+revision, provider call, or Fact promotion, and adversarial merge failure changed none of the
+three ledger hashes:
+
+```text
+CLAIM COURT EMPTY-PROOF CONCURRENCY DIAGNOSTIC
+CONCURRENT_EMPTY_PROOF_CLAIMS=3
+COURT_CASES=3
+PROOF_REVISIONS=3
+DISTINCT_REVISION_IDS=3
+REVISION_ID_COLLISIONS=0
+RESULT=PASS
+
+DUPLICATE_V2_COURT_CASES=0
+DUPLICATE_V2_PROOF_REVISIONS=0
+DUPLICATE_V2_PROVIDER_CALLS=0
+DUPLICATE_V2_FACT_PROMOTIONS=0
+RESULT=PASS
+```
+
+The first full gate exposed an exactly-once regression because the initial scope also included
+ephemeral attempt provenance; that binding was removed and covered by a new regression. The next
+full gate passed every test but SpotBugs reported that `DesktopSolveCoordinator` had crossed its
+class-analysis limit. Extracting the frontier merger restored complete analysis. The final
+`scripts/verify-all.ps1 -Offline` run completed with `FULL VERIFICATION: PASS`: 2,958 tests
+(65 Contracts, 1,411 Core, 956 Server including PostgreSQL integration, 377 Desktop, and 149
+Compatibility) ran with zero failures or errors and six intentional skips. SpotBugs/FindSecBugs,
+Docker/Testcontainers, all Flyway migrations, coverage, security, source immutability, dependency,
+Temporal, and the unchanged Python Sidecar performance gate all passed.
+
+The stopped campaign was packaged offline with zero provider calls during packaging, zero source-
+secret leaks, and zero checksum failures as
+`MathProofMesh_olympiad-5key-v1_197e8fc7d4b1_20260824T050313Z.zip`; its SHA-256 is
+`603ba80a9c0bd6ba8dac43f1eb460bbda46278f125ba041e691b8f3fab029cb3`.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

@@ -5607,100 +5607,40 @@ final class DesktopSolveCoordinator {
         claimCourtSemanticContext(route, claim));
   }
 
+  @SuppressFBWarnings(
+      value = "THROWS_METHOD_THROWS_RUNTIMEEXCEPTION",
+      justification =
+          "The authoritative three-ledger merge restores its complete frontier before preserving the original conflict.")
   private void mergeClaimCourtWorkerDraft(ClaimCourtCaseDraft draft) {
     ClaimCourtSnapshot currentCourt = claimCourt.snapshot();
-    Map<String, ClaimCourtRecord> courtRecords = new LinkedHashMap<>(currentCourt.records());
-    Set<String> changedCases = new LinkedHashSet<>();
-    draft.court().records().forEach(
-        (id, candidate) -> {
-          ClaimCourtRecord prior = courtRecords.get(id);
-          if (prior == null || prior.version() < candidate.version()) {
-            courtRecords.put(id, candidate);
-            changedCases.add(id);
-          } else if (prior.version() == candidate.version() && !prior.equals(candidate)) {
-            throw new IllegalStateException("claim court worker produced a conflicting case");
-          }
-        });
-    List<io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtAuditEvent>
-        courtAudit = new ArrayList<>(currentCourt.audit());
-    Set<String> courtAuditHashes =
-        courtAudit.stream().map(CanonicalJson::stableHash).collect(java.util.stream.Collectors.toSet());
-    draft.court().audit().stream()
-        .filter(event -> changedCases.contains(event.courtCaseId()))
-        .filter(event -> !courtAuditHashes.contains(CanonicalJson.stableHash(event)))
-        .forEach(
-            event ->
-                courtAudit.add(
-                    new io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimCourtAuditEvent(
-                        courtAudit.size(),
-                        event.courtCaseId(),
-                        event.fromStatus(),
-                        event.toStatus(),
-                        event.detail(),
-                        event.version())));
-    claimCourt.restore(
-        new ClaimCourtSnapshot(
-            ClaimCourtSnapshot.CURRENT_SCHEMA_VERSION, courtRecords, courtAudit));
-
     ClaimProofRevisionSnapshot currentRevisions = claimProofRevisions.snapshot();
-    Map<String, ClaimProofRevisionRecord> revisionRecords =
-        new LinkedHashMap<>(currentRevisions.records());
-    Set<String> changedRevisions = new LinkedHashSet<>();
-    draft.revisions().records().forEach(
-        (id, candidate) -> {
-          ClaimProofRevisionRecord prior = revisionRecords.get(id);
-          if (prior == null || prior.version() < candidate.version()) {
-            revisionRecords.put(id, candidate);
-            changedRevisions.add(id);
-          } else if (prior.version() == candidate.version() && !prior.equals(candidate)) {
-            throw new IllegalStateException("Claim Court worker produced a conflicting revision");
-          }
-        });
-    List<io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionAuditEvent>
-        revisionAudit = new ArrayList<>(currentRevisions.audit());
-    Set<String> revisionAuditHashes =
-        revisionAudit.stream()
-            .map(CanonicalJson::stableHash)
-            .collect(java.util.stream.Collectors.toSet());
-    draft.revisions().audit().stream()
-        .filter(event -> changedRevisions.contains(event.revisionId()))
-        .filter(event -> !revisionAuditHashes.contains(CanonicalJson.stableHash(event)))
-        .forEach(
-            event ->
-                revisionAudit.add(
-                    new io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.ClaimProofRevisionAuditEvent(
-                        revisionAudit.size(),
-                        event.revisionId(),
-                        event.fromStatus(),
-                        event.toStatus(),
-                        event.detail(),
-                        event.version())));
-    claimProofRevisions.restore(
-        new ClaimProofRevisionSnapshot(
-            ClaimProofRevisionSnapshot.CURRENT_SCHEMA_VERSION,
-            revisionRecords,
-            revisionAudit));
-
-    mergeClaimCourtExecutionFrontier(draft.executions());
+    ClaimCourtStageExecutionSnapshot currentExecutions = claimCourtExecutions.snapshot();
+    ClaimCourtWorkerFrontierMerger.MergedFrontier merged =
+        ClaimCourtWorkerFrontierMerger.merge(
+            currentCourt,
+            currentRevisions,
+            currentExecutions,
+            draft.court(),
+            draft.revisions(),
+            draft.executions());
+    try {
+      claimCourt.restore(merged.court());
+      claimProofRevisions.restore(merged.revisions());
+      claimCourtExecutions.restore(merged.executions());
+    } catch (RuntimeException exception) {
+      claimCourt.restore(currentCourt);
+      claimProofRevisions.restore(currentRevisions);
+      claimCourtExecutions.restore(currentExecutions);
+      throw exception;
+    }
   }
 
   private void mergeClaimCourtExecutionFrontier(
       ClaimCourtStageExecutionSnapshot candidateExecutions) {
     ClaimCourtStageExecutionSnapshot currentExecutions = claimCourtExecutions.snapshot();
-    Map<String, ClaimCourtStageExecutionRecord> executionRecords =
-        new LinkedHashMap<>(currentExecutions.records());
-    candidateExecutions.records().forEach(
-        (id, candidate) -> {
-          ClaimCourtStageExecutionRecord prior = executionRecords.get(id);
-          if (prior == null || prior.version() < candidate.version()) {
-            executionRecords.put(id, candidate);
-          } else if (prior.version() == candidate.version() && !prior.equals(candidate)) {
-            throw new IllegalStateException("Claim Court worker produced a conflicting execution");
-          }
-        });
     claimCourtExecutions.restore(
-        new ClaimCourtStageExecutionSnapshot(
-            ClaimCourtStageExecutionSnapshot.CURRENT_SCHEMA_VERSION, executionRecords));
+        ClaimCourtWorkerFrontierMerger.mergeExecutions(
+            currentExecutions, candidateExecutions));
   }
 
   private static String claimCourtCaseKey(String routeId, String claimId) {
@@ -6496,11 +6436,14 @@ final class DesktopSolveCoordinator {
             route.routeId,
             claim,
             claimCourtSemanticContext(route, claim));
+    ClaimCourtRecord existing = activeClaimCourt().findProofCase(frozen).orElse(null);
     ClaimProofRevisionRecord original =
-        activeClaimProofRevisions().createOriginal(frozen, claim.proofSteps(), claim.evidenceRefs());
+        existing == null
+            ? activeClaimProofRevisions()
+                .createOriginal(frozen, claim.proofSteps(), claim.evidenceRefs())
+            : activeClaimProofRevisions().get(existing.frozenClaim().initialProofRevisionId());
     failClaimCourtAt(ClaimCourtFailurePoint.AFTER_CLAIM_FREEZE);
 
-    ClaimCourtRecord existing = activeClaimCourt().findProofCase(frozen).orElse(null);
     route.courtCaseIds.add(existing == null ? frozen.courtCaseId() : existing.courtCaseId());
     ClaimCourtRolePolicy.Assignment assignment =
         existing == null
