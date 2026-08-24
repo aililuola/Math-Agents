@@ -119,6 +119,7 @@ public final class StructuredPayloadNormalizer {
   private static void normalizeQuantifierKinds(
       JsonNode value, String path, List<String> actions) {
     if (value instanceof ObjectNode object) {
+      normalizeRedundantLocalLetDeclarations(object, path, actions);
       JsonNode rawQuantifiers = object.get("quantifiers");
       if (rawQuantifiers instanceof ArrayNode quantifiers) {
         for (int index = 0; index < quantifiers.size(); index++) {
@@ -157,6 +158,86 @@ public final class StructuredPayloadNormalizer {
         normalizeQuantifierKinds(array.get(index), path + "[" + index + "]", actions);
       }
     }
+  }
+
+  private static void normalizeRedundantLocalLetDeclarations(
+      ObjectNode object, String path, List<String> actions) {
+    if (textOrNull(object.get("claim_id")) == null
+        || !(object.get("quantifiers") instanceof ArrayNode quantifiers)
+        || !(object.get("variable_bindings") instanceof ArrayNode bindings)
+        || !(object.get("local_assumptions") instanceof ArrayNode assumptions)) {
+      return;
+    }
+    Set<String> existingAssumptions = new HashSet<>();
+    assumptions.forEach(
+        assumption -> {
+          String text = textOrNull(assumption);
+          if (text != null) {
+            existingAssumptions.add(text.strip());
+          }
+        });
+    for (int index = quantifiers.size() - 1; index >= 0; index--) {
+      if (!(quantifiers.get(index) instanceof ObjectNode quantifier)
+          || !"let".equals(textOrNull(quantifier.get("kind")))
+          || !hasUniqueMatchingLocalBinding(quantifier, bindings)
+          || !(quantifier.get("restrictions") instanceof ArrayNode restrictions)
+          || restrictions.isEmpty()
+          || !allNonBlankText(restrictions)) {
+        continue;
+      }
+      for (JsonNode restriction : restrictions) {
+        String text = restriction.textValue().strip();
+        if (existingAssumptions.add(text)) {
+          assumptions.add(text);
+        }
+      }
+      String variableId = textOrNull(quantifier.get("variable_id"));
+      quantifiers.remove(index);
+      actions.add(
+          "removed redundant "
+              + path
+              + ".quantifiers["
+              + index
+              + "] local let declaration for "
+              + variableId);
+    }
+  }
+
+  private static boolean hasUniqueMatchingLocalBinding(
+      ObjectNode quantifier, ArrayNode bindings) {
+    String variableId = textOrNull(quantifier.get("variable_id"));
+    String displayName = textOrNull(quantifier.get("display_name"));
+    String domain = textOrNull(quantifier.get("domain"));
+    if (variableId == null || displayName == null || domain == null) {
+      return false;
+    }
+    int matches = 0;
+    for (JsonNode rawBinding : bindings) {
+      if (!(rawBinding instanceof ObjectNode binding)
+          || !sameText(variableId, textOrNull(binding.get("variable_id")))) {
+        continue;
+      }
+      if (!"claim_local".equals(textOrNull(binding.get("owner_scope")))
+          || !sameText(displayName, textOrNull(binding.get("display_name")))
+          || !sameText(domain, textOrNull(binding.get("domain")))) {
+        return false;
+      }
+      matches++;
+    }
+    return matches == 1;
+  }
+
+  private static boolean allNonBlankText(ArrayNode values) {
+    for (JsonNode value : values) {
+      if (!value.isTextual() || value.textValue().isBlank()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static boolean sameText(String left, String right) {
+    return left != null && right != null && left.strip().equals(right.strip());
   }
 
   private static void normalizeTurnEnvelopeMetadata(

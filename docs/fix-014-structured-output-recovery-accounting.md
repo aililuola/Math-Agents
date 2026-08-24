@@ -707,6 +707,47 @@ secret leaks, and zero checksum failures as
 `MathProofMesh_olympiad-5key-v1_f617b962be31_20260824T105815Z.zip`; its SHA-256 is
 `578aef0dcff38ae83734c7bd6bf881c0adbd3c7fe128d89985ffb23e86f163a7`.
 
+### Redundant local declaration normalization in strategy recovery
+
+The next cold-start campaign from `5636639`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T115003Z`, stopped on P01 run
+`p01-t1-20260824T115011Z-9cec617d`. The initial strategy response reached the 32,000-token output
+limit and ended with unterminated JSON. Bounded JSON repair recovered a syntactically valid
+payload, but its critical-Claim contexts encoded local definitions as quantifiers with the
+unsupported literal `kind=let`. Nested result repair repeated the same representation, and strict
+contract validation correctly ended with `kind has an unsupported literal: let`. The run stopped
+`INVALID` after four billed calls, 28,238 input tokens, 51,755 output tokens, and USD 0.057310380.
+Its immutable root hash remained
+`422cfd9130270941afe5978658df9217534cc98b4569939ada880d97818a1a7a`.
+
+`StructuredPayloadNormalizer` now removes a `let` pseudo-quantifier only when it is a redundant,
+fully bound local declaration: the containing object is an identified Claim context, the matching
+variable binding is unique, identity fields agree after whitespace normalization, the owner scope
+is exactly `claim_local`, and every restriction is nonblank text. Every restriction is preserved
+as a local assumption before removal. The normalizer never maps `let` to `forall`, `exists`, or
+`exists_unique`; ambiguous, missing, duplicated, mismatched, nonlocal, empty, blank, or nontext
+forms remain untouched and therefore fail strict validation. The downstream semantic-context
+compiler and Claim authority gates are unchanged.
+
+The runner regression failed before the production change with `StructuredOutputError`, caused by
+the same unsupported `let` literal. After the repair, the adjacent cross-module matrix ran 47
+tests with zero failures, errors, or skips: 17 Contracts normalization tests, 19 Server structured-
+runner tests, and 11 Desktop recovery, root-prompt, and Claim-isolation tests. The first full gate
+then correctly detected insufficient Contracts branch coverage. An additional ambiguity matrix
+exercised every fail-closed boundary without weakening the threshold; adjusted Contracts branch
+coverage finished at 85.585260 percent.
+
+The final `scripts/verify-all.ps1 -Offline` run completed with `FULL VERIFICATION: PASS`: 2,976
+tests (71 Contracts, 1,411 Core, 961 Server including PostgreSQL integration, 384 Desktop, and 149
+Compatibility) ran with zero failures or errors and six intentional skips. Docker/Testcontainers,
+all Flyway migrations, SpotBugs/FindSecBugs, coverage, security, source immutability, dependency,
+Temporal, and the unchanged Python Sidecar performance gate all passed.
+
+The stopped campaign was packaged offline with zero provider calls during packaging, zero source-
+secret leaks, and zero checksum failures as
+`MathProofMesh_olympiad-5key-v1_563663959e79_20260824T120823Z.zip`; its SHA-256 is
+`8eb2d196ee77bfe00fbf3dec1fe52da27ded1b781e9b3487fbde2df965bc8055`.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

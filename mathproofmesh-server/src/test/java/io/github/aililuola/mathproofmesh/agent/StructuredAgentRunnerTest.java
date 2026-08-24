@@ -203,6 +203,126 @@ class StructuredAgentRunnerTest {
   }
 
   @Test
+  void redundantLocalLetDeclarationNormalizesWithoutInventingAQuantifier() {
+    AtomicInteger providerCalls = new AtomicInteger();
+    String responseText =
+        """
+        {
+          "claim_id":"claim-local-definition",
+          "claim_blueprint_node_id":"@claim",
+          "local_assumption_node_ids":[],
+          "local_assumptions":["m=a+b"],
+          "quantifiers":[
+            {
+              "display_name":"m",
+              "domain":"positive integer",
+              "kind":"let",
+              "order":0,
+              "restrictions":["m=a+b","m>0"],
+              "variable_id":"m"
+            }
+          ],
+          "variable_bindings":[
+            {
+              "aliases":["m"],
+              "display_name":"m",
+              "domain":"positive integer",
+              "owner_scope":"claim_local",
+              "variable_id":"m"
+            }
+          ],
+          "scope_limitations":[],
+          "polarity":"positive"
+        }
+        """;
+    try (Fixture fixture =
+        fixture(
+            "run-local-let",
+            request -> {
+              providerCalls.incrementAndGet();
+              return response(responseText);
+            },
+            new CallLedger(2, null, BigDecimal.TEN),
+            List.of(),
+            0)) {
+      StructuredCallResult<CriticalClaimContextBinding> result =
+          fixture
+              .runner()
+              .call(
+                  "run-local-let",
+                  "claim-context",
+                  "general",
+                  claimContextBundle(),
+                  fixture.pool().get("agent-a"),
+                  "proof");
+
+      assertThat(providerCalls).hasValue(1);
+      assertThat(result.repaired()).isTrue();
+      assertThat(result.value().quantifiers()).isEmpty();
+      assertThat(result.value().variableBindings())
+          .singleElement()
+          .satisfies(
+              binding -> {
+                assertThat(binding.variableId()).isEqualTo("m");
+                assertThat(binding.ownerScope()).isEqualTo("claim_local");
+              });
+      assertThat(result.value().localAssumptions()).containsExactly("m=a+b", "m>0");
+    }
+  }
+
+  @Test
+  void unboundLocalLetDeclarationStillFailsClosed() {
+    AtomicInteger providerCalls = new AtomicInteger();
+    String responseText =
+        """
+        {
+          "claim_id":"claim-unbound-definition",
+          "claim_blueprint_node_id":"@claim",
+          "local_assumption_node_ids":[],
+          "local_assumptions":["m=a+b"],
+          "quantifiers":[
+            {
+              "display_name":"m",
+              "domain":"positive integer",
+              "kind":"let",
+              "order":0,
+              "restrictions":["m=a+b"],
+              "variable_id":"m"
+            }
+          ],
+          "variable_bindings":[],
+          "scope_limitations":[],
+          "polarity":"positive"
+        }
+        """;
+    try (Fixture fixture =
+        fixture(
+            "run-unbound-let",
+            request -> {
+              providerCalls.incrementAndGet();
+              return response(responseText);
+            },
+            new CallLedger(2, null, BigDecimal.TEN),
+            List.of(),
+            0)) {
+      assertThatThrownBy(
+              () ->
+                  fixture
+                      .runner()
+                      .call(
+                          "run-unbound-let",
+                          "claim-context",
+                          "general",
+                          claimContextBundle(),
+                          fixture.pool().get("agent-a"),
+                          "proof"))
+          .isInstanceOf(StructuredOutputError.class)
+          .hasMessageContaining("strict contract");
+      assertThat(providerCalls).hasValue(1);
+    }
+  }
+
+  @Test
   void strictContractFailureDoesNotRewriteMathematicsOrUnbillSuccess() {
     CallLedger budget = new CallLedger(2, null, BigDecimal.TEN);
     try (Fixture fixture =
@@ -845,6 +965,18 @@ class StructuredAgentRunnerTest {
         Answer.class,
         0.0d,
         256,
+        false,
+        null);
+  }
+
+  private static PromptBundle<CriticalClaimContextBinding> claimContextBundle() {
+    return new PromptBundle<>(
+        "claim_context",
+        "Return one strict claim context.",
+        "public claim",
+        CriticalClaimContextBinding.class,
+        0.0d,
+        4096,
         false,
         null);
   }

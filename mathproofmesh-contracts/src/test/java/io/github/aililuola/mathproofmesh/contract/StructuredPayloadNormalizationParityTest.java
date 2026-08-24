@@ -7,7 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -98,6 +100,183 @@ class StructuredPayloadNormalizationParityTest {
     assertThrows(
         ContractValidationException.class,
         () -> ContractObjectMapper.read(payload, CriticalClaimContextBinding.class));
+  }
+
+  @Test
+  void removesOnlyBoundLocalLetDeclarationsFromNestedStrategyContexts() {
+    ObjectNode payload =
+        object(
+            """
+            {
+              "coverage_notes":"One auditable mechanism is represented.",
+              "strategies":[
+                {
+                  "strategy_id":"S-let",
+                  "title":"Local-definition route",
+                  "core_idea":"Introduce m=a+b before reducing the target.",
+                  "bottleneck":"Justify the reduction after defining m.",
+                  "estimated_success":0.7,
+                  "falsification_test":"Search for a bounded counterexample.",
+                  "independence_basis":"Uses a local algebraic definition.",
+                  "critical_claim_context_bindings":[
+                    {
+                      "claim_id":"claim-local-definition",
+                      "claim_blueprint_node_id":"@claim",
+                      "local_assumption_node_ids":[],
+                      "local_assumptions":["m=a+b"],
+                      "quantifiers":[
+                        {
+                          "display_name":"m",
+                          "domain":"positive integer",
+                          "kind":"let",
+                          "order":0,
+                          "restrictions":["m=a+b","m>0"],
+                          "variable_id":"m"
+                        }
+                      ],
+                      "variable_bindings":[
+                        {
+                          "aliases":["m"],
+                          "display_name":"m",
+                          "domain":"positive integer",
+                          "owner_scope":"claim_local",
+                          "variable_id":"m"
+                        }
+                      ],
+                      "scope_limitations":[],
+                      "polarity":"positive"
+                    }
+                  ]
+                }
+              ]
+            }
+            """);
+
+    List<String> actions = StructuredPayloadNormalizer.normalize(payload, StrategySet.class);
+    CriticalClaimContextBinding binding =
+        ContractObjectMapper.read(payload, StrategySet.class)
+            .strategies()
+            .getFirst()
+            .criticalClaimContextBindings()
+            .getFirst();
+
+    assertTrue(binding.quantifiers().isEmpty());
+    assertEquals(List.of("m=a+b", "m>0"), binding.localAssumptions());
+    assertTrue(
+        actions.stream()
+            .anyMatch(
+                action ->
+                    action.contains("critical_claim_context_bindings[0]")
+                        && action.contains("local let declaration for m")));
+  }
+
+  @Test
+  void leavesUnboundLocalLetDeclarationsForStrictValidationToReject() {
+    ObjectNode payload =
+        object(
+            """
+            {
+              "claim_id":"claim-unbound-let",
+              "local_assumption_node_ids":[],
+              "local_assumptions":["m=a+b"],
+              "quantifiers":[
+                {
+                  "display_name":"m",
+                  "domain":"positive integer",
+                  "kind":"let",
+                  "order":0,
+                  "restrictions":["m=a+b"],
+                  "variable_id":"m"
+                }
+              ],
+              "variable_bindings":[],
+              "scope_limitations":[],
+              "polarity":"positive"
+            }
+            """);
+
+    List<String> actions =
+        StructuredPayloadNormalizer.normalize(payload, CriticalClaimContextBinding.class);
+
+    assertTrue(actions.stream().noneMatch(action -> action.contains("local let declaration")));
+    assertThrows(
+        ContractValidationException.class,
+        () -> ContractObjectMapper.read(payload, CriticalClaimContextBinding.class));
+  }
+
+  @Test
+  void leavesEveryAmbiguousLocalLetShapeUntouched() {
+    List<ObjectNode> ambiguous = new ArrayList<>();
+
+    ObjectNode missingBindings = localLetBindingPayload();
+    missingBindings.remove("variable_bindings");
+    ambiguous.add(missingBindings);
+
+    ObjectNode missingAssumptions = localLetBindingPayload();
+    missingAssumptions.remove("local_assumptions");
+    ambiguous.add(missingAssumptions);
+
+    ObjectNode nonObjectQuantifier = localLetBindingPayload();
+    nonObjectQuantifier.putArray("quantifiers").add("let m=a+b");
+    ambiguous.add(nonObjectQuantifier);
+
+    ObjectNode missingRestrictions = localLetBindingPayload();
+    quantifier(missingRestrictions).remove("restrictions");
+    ambiguous.add(missingRestrictions);
+
+    ObjectNode emptyRestrictions = localLetBindingPayload();
+    quantifier(emptyRestrictions).putArray("restrictions");
+    ambiguous.add(emptyRestrictions);
+
+    ObjectNode blankRestriction = localLetBindingPayload();
+    quantifier(blankRestriction).putArray("restrictions").add(" ");
+    ambiguous.add(blankRestriction);
+
+    ObjectNode nonTextRestriction = localLetBindingPayload();
+    quantifier(nonTextRestriction).putArray("restrictions").add(1);
+    ambiguous.add(nonTextRestriction);
+
+    for (String missingIdentityField : List.of("variable_id", "display_name", "domain")) {
+      ObjectNode missingIdentity = localLetBindingPayload();
+      quantifier(missingIdentity).remove(missingIdentityField);
+      ambiguous.add(missingIdentity);
+    }
+
+    ObjectNode nonObjectBinding = localLetBindingPayload();
+    nonObjectBinding.putArray("variable_bindings").add("m");
+    ambiguous.add(nonObjectBinding);
+
+    ObjectNode missingBindingVariableId = localLetBindingPayload();
+    binding(missingBindingVariableId).remove("variable_id");
+    ambiguous.add(missingBindingVariableId);
+
+    for (Map.Entry<String, String> mismatch :
+        Map.of(
+                "variable_id", "other",
+                "owner_scope", "root",
+                "display_name", "other",
+                "domain", "real")
+            .entrySet()) {
+      ObjectNode mismatchedBinding = localLetBindingPayload();
+      binding(mismatchedBinding).put(mismatch.getKey(), mismatch.getValue());
+      ambiguous.add(mismatchedBinding);
+    }
+
+    ObjectNode duplicateBinding = localLetBindingPayload();
+    ((ArrayNode) duplicateBinding.get("variable_bindings"))
+        .add(binding(duplicateBinding).deepCopy());
+    ambiguous.add(duplicateBinding);
+
+    for (ObjectNode candidate : ambiguous) {
+      List<String> actions =
+          StructuredPayloadNormalizer.normalize(
+              candidate, CriticalClaimContextBinding.class);
+
+      assertTrue(
+          actions.stream().noneMatch(action -> action.contains("local let declaration")),
+          candidate.toString());
+      assertFalse(candidate.path("quantifiers").isEmpty(), candidate.toString());
+    }
   }
 
   @Test
@@ -510,6 +689,46 @@ class StructuredPayloadNormalizationParityTest {
           "reason":"Use a bounded exploratory sample."
         }
         """);
+  }
+
+  private static ObjectNode localLetBindingPayload() {
+    return object(
+        """
+        {
+          "claim_id":"claim-local-let",
+          "local_assumption_node_ids":[],
+          "local_assumptions":["m=a+b"],
+          "quantifiers":[
+            {
+              "display_name":"m",
+              "domain":"positive integer",
+              "kind":"let",
+              "order":0,
+              "restrictions":["m=a+b"],
+              "variable_id":"m"
+            }
+          ],
+          "variable_bindings":[
+            {
+              "aliases":["m"],
+              "display_name":"m",
+              "domain":"positive integer",
+              "owner_scope":"claim_local",
+              "variable_id":"m"
+            }
+          ],
+          "scope_limitations":[],
+          "polarity":"positive"
+        }
+        """);
+  }
+
+  private static ObjectNode quantifier(ObjectNode payload) {
+    return (ObjectNode) payload.path("quantifiers").get(0);
+  }
+
+  private static ObjectNode binding(ObjectNode payload) {
+    return (ObjectNode) payload.path("variable_bindings").get(0);
   }
 
   private static ObjectNode object(String json) {
