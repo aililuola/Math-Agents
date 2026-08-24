@@ -34,9 +34,11 @@ public final class OlympiadEvidenceBundleValidator {
   public static Validation validate(
       Path bundleDirectory,
       OlympiadBenchmarkHarness.RunRequest request,
+      OlympiadGitExecutionState gitExecutionState,
       OlympiadSecretRedactor redactor) {
     Path root = Objects.requireNonNull(bundleDirectory, "bundleDirectory").toAbsolutePath().normalize();
     Objects.requireNonNull(request, "request");
+    Objects.requireNonNull(gitExecutionState, "gitExecutionState");
     Objects.requireNonNull(redactor, "redactor");
     List<String> codes = new ArrayList<>();
     for (String file : REQUIRED_FILES) {
@@ -45,7 +47,8 @@ public final class OlympiadEvidenceBundleValidator {
       }
     }
     if (codes.isEmpty()) {
-      validateManifest(root.resolve("run-manifest.json"), request, codes);
+      validateManifest(root.resolve("run-manifest.json"), request, gitExecutionState, codes);
+      validateGitState(root.resolve("git-state.txt"), gitExecutionState, codes);
       validateIssueMatrix(root.resolve("issue-matrix.json"), codes);
       validateRedaction(root.resolve("redaction-report.json"), codes);
       OlympiadSecretRedactor.LeakReport leaks = redactor.scan(root);
@@ -60,7 +63,10 @@ public final class OlympiadEvidenceBundleValidator {
   }
 
   private static void validateManifest(
-      Path path, OlympiadBenchmarkHarness.RunRequest request, List<String> codes) {
+      Path path,
+      OlympiadBenchmarkHarness.RunRequest request,
+      OlympiadGitExecutionState gitExecutionState,
+      List<String> codes) {
     JsonNode manifest = parse(path, codes);
     if (manifest == null) {
       return;
@@ -70,6 +76,9 @@ public final class OlympiadEvidenceBundleValidator {
         || !request.spec().trialId().equals(manifest.path("trial_id").asText())
         || !request.runId().equals(manifest.path("run_id").asText())
         || !OlympiadBenchmarkPlan.BASELINE_COMMIT.equals(manifest.path("baseline_commit").asText())
+        || !gitExecutionState.branch().equals(manifest.path("execution_branch").asText())
+        || !gitExecutionState.head().equals(manifest.path("execution_commit").asText())
+        || gitExecutionState.dirty() != manifest.path("execution_dirty").asBoolean(!gitExecutionState.dirty())
         || !request.problem().sha256().equals(manifest.path("problem_prompt_sha256").asText())
         || !manifest.path("cold_start").asBoolean(false)
         || !manifest.path("external_score").isNull()) {
@@ -78,6 +87,22 @@ public final class OlympiadEvidenceBundleValidator {
     if (!manifest.path("root_goal_hash_initial").asText()
         .equals(manifest.path("root_goal_hash_final").asText())) {
       codes.add("ROOT_GOAL_DRIFT");
+    }
+  }
+
+  private static void validateGitState(
+      Path path, OlympiadGitExecutionState gitExecutionState, List<String> codes) {
+    try {
+      String state = Files.readString(path, StandardCharsets.UTF_8);
+      if (!state.contains("branch=" + gitExecutionState.branch() + "\n")
+          || !state.contains("head=" + gitExecutionState.head() + "\n")
+          || !state.contains("dirty=" + gitExecutionState.dirty() + "\n")
+          || !state.contains(
+              "benchmark_origin_commit=" + OlympiadBenchmarkPlan.BASELINE_COMMIT + "\n")) {
+        codes.add("GIT_EXECUTION_STATE_MISMATCH");
+      }
+    } catch (IOException exception) {
+      codes.add("GIT_EXECUTION_STATE_MISMATCH");
     }
   }
 

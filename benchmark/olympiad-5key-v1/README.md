@@ -3,6 +3,9 @@
 This directory contains the validation-only harness for benchmark
 `olympiad-5key-v1`. It is pinned to baseline commit
 `ea94a34041fd32a4f94ecb1a3532ddc314430a47`.
+That commit remains the immutable Benchmark origin. Each Run separately records
+the actual execution branch, commit, and dirty status captured before the
+campaign starts, so a repair campaign never masquerades as the origin commit.
 
 Only the text in `problems/Pxx/problem.txt` may enter provider prompts. Problem
 metadata, difficulty labels, evaluation checklists, historical results, and
@@ -12,6 +15,10 @@ The default test suite is offline and uses a fake provider. Real provider runs
 are default-deny and additionally require all five named environment secrets,
 `BENCHMARK_ALLOW_REAL_PROVIDER=true`, and an explicit positive
 `BENCHMARK_GLOBAL_COST_CAP_USD` that covers the immutable worst-case estimate.
+The launcher must also set `BENCHMARK_EXECUTION_GIT_DIRTY` to the exact
+pre-launch `git status --porcelain=v1` result (`true` when non-empty, otherwise
+`false`); branch and HEAD are read directly from `.git` and cannot be supplied
+by the provider environment.
 Secrets are never written to this directory, logs, reports, checksums, or run
 bundles.
 

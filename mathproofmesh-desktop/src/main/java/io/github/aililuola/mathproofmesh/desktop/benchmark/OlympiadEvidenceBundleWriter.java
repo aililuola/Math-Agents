@@ -46,11 +46,13 @@ public final class OlympiadEvidenceBundleWriter {
       Path bundleDirectory,
       OlympiadBenchmarkHarness.RunRequest request,
       OlympiadBenchmarkHarness.RunOutcome outcome,
+      OlympiadGitExecutionState gitExecutionState,
       OlympiadSecretRedactor redactor) {
     Objects.requireNonNull(benchmarkRoot, "benchmarkRoot");
     Path root = Objects.requireNonNull(bundleDirectory, "bundleDirectory").toAbsolutePath().normalize();
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(outcome, "outcome");
+    Objects.requireNonNull(gitExecutionState, "gitExecutionState");
     Objects.requireNonNull(redactor, "redactor");
 
     Map<String, Object> manifest = new LinkedHashMap<>();
@@ -59,6 +61,9 @@ public final class OlympiadEvidenceBundleWriter {
     manifest.put("trial_id", request.spec().trialId());
     manifest.put("run_id", request.runId());
     manifest.put("baseline_commit", OlympiadBenchmarkPlan.BASELINE_COMMIT);
+    manifest.put("execution_branch", gitExecutionState.branch());
+    manifest.put("execution_commit", gitExecutionState.head());
+    manifest.put("execution_dirty", gitExecutionState.dirty());
     manifest.put("problem_prompt_sha256", request.problem().sha256());
     manifest.put("root_goal_hash_initial", outcome.rootGoalHashInitial());
     manifest.put("root_goal_hash_final", outcome.rootGoalHashFinal());
@@ -100,10 +105,16 @@ public final class OlympiadEvidenceBundleWriter {
     writeText(
         root.resolve("git-state.txt"),
         "branch="
-            + OlympiadBenchmarkPlan.BRANCH
+            + gitExecutionState.branch()
             + "\nhead="
+            + gitExecutionState.head()
+            + "\ndirty="
+            + gitExecutionState.dirty()
+            + "\nbenchmark_origin_branch="
+            + OlympiadBenchmarkPlan.BRANCH
+            + "\nbenchmark_origin_commit="
             + OlympiadBenchmarkPlan.BASELINE_COMMIT
-            + "\nbaseline_dirty=false\n",
+            + "\n",
         redactor);
 
     writeDocument(

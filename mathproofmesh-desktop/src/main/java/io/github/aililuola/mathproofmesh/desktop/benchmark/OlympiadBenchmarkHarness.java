@@ -26,6 +26,7 @@ public final class OlympiadBenchmarkHarness {
   private final OlympiadProblemCatalog problems;
   private final OlympiadSecretRedactor redactor;
   private final Clock clock;
+  private final OlympiadGitExecutionState gitExecutionState;
 
   public OlympiadBenchmarkHarness(
       Path benchmarkRoot, Path outputRoot, OlympiadSecretRedactor redactor) {
@@ -34,11 +35,26 @@ public final class OlympiadBenchmarkHarness {
 
   OlympiadBenchmarkHarness(
       Path benchmarkRoot, Path outputRoot, OlympiadSecretRedactor redactor, Clock clock) {
+    this(
+        benchmarkRoot,
+        outputRoot,
+        redactor,
+        clock,
+        OlympiadGitExecutionState.capture(projectRoot(benchmarkRoot)));
+  }
+
+  OlympiadBenchmarkHarness(
+      Path benchmarkRoot,
+      Path outputRoot,
+      OlympiadSecretRedactor redactor,
+      Clock clock,
+      OlympiadGitExecutionState gitExecutionState) {
     this.benchmarkRoot = normalize(benchmarkRoot, "benchmarkRoot");
     this.outputRoot = normalize(outputRoot, "outputRoot");
     this.problems = new OlympiadProblemCatalog(this.benchmarkRoot);
     this.redactor = Objects.requireNonNull(redactor, "redactor");
     this.clock = Objects.requireNonNull(clock, "clock");
+    this.gitExecutionState = Objects.requireNonNull(gitExecutionState, "gitExecutionState");
   }
 
   public HarnessResult execute(List<OlympiadBenchmarkPlan.RunSpec> schedule, RunExecutor executor) {
@@ -72,9 +88,10 @@ public final class OlympiadBenchmarkHarness {
       RunOutcome outcome = Objects.requireNonNull(executor.execute(request), "run outcome");
       validateOutcomeBinding(request, outcome);
       OlympiadEvidenceBundleWriter.write(
-          benchmarkRoot, bundleDirectory, request, outcome, redactor);
+          benchmarkRoot, bundleDirectory, request, outcome, gitExecutionState, redactor);
       OlympiadEvidenceBundleValidator.Validation validation =
-          OlympiadEvidenceBundleValidator.validate(bundleDirectory, request, redactor);
+          OlympiadEvidenceBundleValidator.validate(
+              bundleDirectory, request, gitExecutionState, redactor);
       if (!validation.passed()) {
         hardViolations = Math.addExact(hardViolations, validation.failures());
       }
@@ -131,6 +148,13 @@ public final class OlympiadBenchmarkHarness {
 
   private static Path normalize(Path path, String field) {
     return Objects.requireNonNull(path, field).toAbsolutePath().normalize();
+  }
+
+  private static Path projectRoot(Path benchmarkRoot) {
+    Path benchmarkDirectory =
+        Objects.requireNonNull(normalize(benchmarkRoot, "benchmarkRoot").getParent(),
+            "benchmarkRoot parent");
+    return Objects.requireNonNull(benchmarkDirectory.getParent(), "projectRoot");
   }
 
   @FunctionalInterface

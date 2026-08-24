@@ -60,7 +60,7 @@ public final class OlympiadBenchmarkPackager {
     Path packages = normalize(packageDirectory, "packageDirectory");
     Objects.requireNonNull(redactor, "redactor");
     Objects.requireNonNull(clock, "clock");
-    String head = gitHead(project);
+    String head = OlympiadGitExecutionState.readHead(project);
     String stamp = STAMP.format(clock.instant());
     String baseName =
         "MathProofMesh_olympiad-5key-v1_" + head.substring(0, 12) + '_' + stamp;
@@ -172,52 +172,6 @@ public final class OlympiadBenchmarkPackager {
     } catch (IOException exception) {
       throw new IllegalStateException("benchmark ZIP could not be created", exception);
     }
-  }
-
-  private static String gitHead(Path project) {
-    Path dotGit = project.resolve(".git");
-    Path gitDirectory = dotGit;
-    if (Files.isRegularFile(dotGit, LinkOption.NOFOLLOW_LINKS)) {
-      try {
-        String pointer = Files.readString(dotGit, StandardCharsets.UTF_8).strip();
-        if (!pointer.startsWith("gitdir:")) {
-          throw new IllegalStateException("unsupported Git worktree pointer");
-        }
-        gitDirectory = project.resolve(pointer.substring("gitdir:".length()).strip()).normalize();
-      } catch (IOException exception) {
-        throw new IllegalStateException("Git worktree pointer could not be read", exception);
-      }
-    }
-    try {
-      String head = Files.readString(gitDirectory.resolve("HEAD"), StandardCharsets.US_ASCII).strip();
-      if (!head.startsWith("ref:")) {
-        return requireCommit(head);
-      }
-      String reference = head.substring("ref:".length()).strip();
-      Path loose = gitDirectory.resolve(reference).normalize();
-      if (Files.isRegularFile(loose, LinkOption.NOFOLLOW_LINKS)) {
-        return requireCommit(Files.readString(loose, StandardCharsets.US_ASCII).strip());
-      }
-      Path packed = gitDirectory.resolve("packed-refs");
-      if (Files.isRegularFile(packed, LinkOption.NOFOLLOW_LINKS)) {
-        for (String line : Files.readAllLines(packed, StandardCharsets.US_ASCII)) {
-          if (!line.startsWith("#") && !line.startsWith("^") && line.endsWith(" " + reference)) {
-            return requireCommit(line.substring(0, line.indexOf(' ')));
-          }
-        }
-      }
-      throw new IllegalStateException("Git HEAD reference could not be resolved");
-    } catch (IOException exception) {
-      throw new IllegalStateException("Git HEAD could not be read", exception);
-    }
-  }
-
-  private static String requireCommit(String value) {
-    String commit = Objects.requireNonNull(value, "commit").strip();
-    if (!commit.matches("[0-9a-fA-F]{40}")) {
-      throw new IllegalStateException("Git HEAD is not a full commit id");
-    }
-    return commit.toLowerCase(java.util.Locale.ROOT);
   }
 
   private static Path directory(Path path, String field) {

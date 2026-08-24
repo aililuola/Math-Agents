@@ -173,6 +173,84 @@ Compatibility) with zero failures or errors and six intentional skips. PostgreSQ
 all Flyway migrations, SpotBugs/FindSecBugs, dependency and secret checks, coverage, source
 immutability, Temporal, and the unchanged Python Sidecar performance gate all passed.
 
+## Third cold-start finding: server-authorized preflight bindings
+
+The next cold-start campaign from `1d8554cb53335e2164ccf9975185e36f58751939` is preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T011233Z` and was not resumed. P01/T1 made five
+physical calls (29,081 input tokens, 54,274 output tokens, 83,355 total tokens,
+USD 0.059868615, and 674,947 ms) before stopping `INVALID`. Root Goal hashes were identical and no
+strategy, route, Claim, Fact, computation, or proof obligation was admitted.
+
+The generated strategy declared registered request `S1_CHK_1` but did not reference that request
+from critical Claim `S1_C1`. The deterministic compiler therefore produced no authorized Claim to
+contract binding. A later model response tried to invent `S1_C1 -> S1_CHK_1`; the stable-hash
+authority gate correctly rejected the remapping, but its `IllegalArgumentException` escaped the
+candidate loop and aborted the campaign. This was a candidate contract failure, not a budget or
+mathematical-authority failure.
+
+The repair keeps the exact authority gate and changes only failure containment and contract
+guidance:
+
+1. generation must put the exact computation `request_id` in the intended critical Claim's
+   `evidence_refs`;
+2. the provider preflight stage runs only when the server compiler has already produced at least
+   one bound Claim;
+3. the provider must echo the complete server binding candidate without adding, deleting, or
+   remapping a binding; and
+4. a non-identical preflight response rejects only that candidate, records the deterministic error,
+   and permits the existing one-shot portfolio replenishment path to continue.
+
+Before the production repair, the two new Desktop cases observed four unnecessary provider
+preflight calls for unbound requests and an uncaught remapping exception. The server prompt-policy
+tests also failed because neither exact generation-time binding nor exact preflight echoing was
+required. After repair, the focused server/Desktop matrix ran 19 tests with zero failures, errors,
+or skips. Its production diagnostic was:
+
+```text
+PREFLIGHT BINDING AUTHORITY RECOVERY DIAGNOSTIC
+UNAUTHORIZED_MODEL_REMAPPINGS=4
+CANDIDATE_CONTRACT_REJECTIONS=4
+CAMPAIGN_ABORTS=0
+REPLENISHMENT_REQUESTS=1
+VALID_REPLACEMENT_ADMISSIONS=4
+INVALID_ROUTE_LEAKS=0
+RESULT=PASS
+```
+
+The stopped campaign was packaged without another provider call as
+`MathProofMesh_olympiad-5key-v1_1d8554cb5333_20260824T012714Z.zip`; its SHA-256 is
+`fa04222c888d6a40d97c67ba69e83695813c2eea6130d60e0578e9f3ee5583f1`.
+
+### Execution identity in exported evidence
+
+Inspection of that stopped bundle found a separate auditability defect: `git-state.txt` used the
+frozen Benchmark origin branch and commit as if they were the actual execution branch and HEAD,
+and always claimed a clean baseline. The protocol intentionally keeps
+`ea94a34041fd32a4f94ecb1a3532ddc314430a47` as the immutable Benchmark origin, but it separately
+requires every Run to record its actual branch, HEAD, and dirty status.
+
+A black-box 34-run fake-provider test failed against the old writer because the recorded branch did
+not equal `git rev-parse --abbrev-ref HEAD`. The harness now captures one immutable Git execution
+snapshot before the campaign begins. Branch and HEAD are read without a shell directly from Git
+metadata; the launcher supplies the exact pre-launch dirty boolean from
+`git status --porcelain=v1`. Each Run records `execution_branch`, `execution_commit`, and
+`execution_dirty` in its manifest, while `git-state.txt` records the actual execution identity and
+separately labels the frozen `benchmark_origin_branch` and `benchmark_origin_commit`. The bundle
+validator checks both projections. The frozen origin field and schema constant were not changed.
+
+The first complete release retry exposed two new Desktop SpotBugs findings: a nullable parent-path
+projection and a command-injection warning for the initial Git subprocess implementation. Neither
+finding was filtered or suppressed. The final implementation uses checked parent paths and parses
+Git metadata through `java.nio.file`; no production subprocess remains. A no-test reactor `verify`
+then analyzed all 168 Desktop classes with zero findings.
+
+The final `scripts/verify-all.ps1 -Offline` run completed with `FULL VERIFICATION: PASS`. It ran
+2,951 tests (65 Contracts, 1,408 Core, 929 Server unit, 27 Server PostgreSQL/security integration,
+373 Desktop, and 149 Compatibility) with zero failures or errors and six intentional skips.
+PostgreSQL 18.4 Testcontainers, all Flyway migrations, SpotBugs/FindSecBugs, dependency and secret
+checks, coverage, source immutability, Temporal, and the unchanged Python Sidecar performance gate
+all passed.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

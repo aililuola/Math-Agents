@@ -9,6 +9,7 @@ import io.github.aililuola.mathproofmesh.orchestration.PricingSnapshot;
 import java.io.IOException;
 import java.io.ByteArrayInputStream;
 import java.io.UncheckedIOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -129,6 +130,29 @@ final class OlympiadBenchmarkHarnessTest {
   }
 
   @Test
+  void capturesActualGitIdentityAndRequiresExplicitPreLaunchDirtyState() {
+    Path projectRoot = benchmarkRoot().getParent().getParent();
+    String expectedBranch = git(projectRoot, "rev-parse", "--abbrev-ref", "HEAD");
+    String expectedHead = git(projectRoot, "rev-parse", "HEAD");
+    boolean expectedDirty = !git(projectRoot, "status", "--porcelain=v1").isBlank();
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> OlympiadGitExecutionState.capture(projectRoot, ignored -> null));
+    OlympiadGitExecutionState captured =
+        OlympiadGitExecutionState.capture(
+            projectRoot,
+            name ->
+                OlympiadGitExecutionState.DIRTY_ENV.equals(name)
+                    ? Boolean.toString(expectedDirty)
+                    : null);
+
+    assertEquals(expectedBranch, captured.branch());
+    assertEquals(expectedHead, captured.head());
+    assertEquals(expectedDirty, captured.dirty());
+  }
+
+  @Test
   void fakeProviderExecutesAllRunsWithColdStartResumeAndZeroNetworkCalls() throws Exception {
     AtomicInteger networkCalls = new AtomicInteger();
     AtomicInteger executions = new AtomicInteger();
@@ -136,7 +160,12 @@ final class OlympiadBenchmarkHarnessTest {
         new OlympiadSecretRedactor(List.of("unit-test-secret-alpha", "unit-test-secret-beta"));
     Path output = temporaryDirectory.resolve("results");
     OlympiadBenchmarkHarness harness =
-        new OlympiadBenchmarkHarness(benchmarkRoot(), output, redactor);
+        new OlympiadBenchmarkHarness(
+            benchmarkRoot(),
+            output,
+            redactor,
+            Clock.systemUTC(),
+            actualGitExecutionState());
 
     OlympiadBenchmarkHarness.HarnessResult result =
         harness.execute(
@@ -199,6 +228,18 @@ final class OlympiadBenchmarkHarnessTest {
     long uniqueNamespaces =
         result.completedRuns().stream().map(run -> run.bundleDirectory().toString()).distinct().count();
     assertEquals(34, uniqueNamespaces);
+    Path gitState =
+        result.completedRuns().getFirst().bundleDirectory().resolve("git-state.txt");
+    String recordedGitState = Files.readString(gitState, StandardCharsets.UTF_8);
+    String expectedBranch = git(projectRoot, "rev-parse", "--abbrev-ref", "HEAD");
+    String expectedHead = git(projectRoot, "rev-parse", "HEAD");
+    boolean expectedDirty = !git(projectRoot, "status", "--porcelain=v1").isBlank();
+    assertTrue(recordedGitState.contains("branch=" + expectedBranch + "\n"));
+    assertTrue(recordedGitState.contains("head=" + expectedHead + "\n"));
+    assertTrue(recordedGitState.contains("dirty=" + expectedDirty + "\n"));
+    assertTrue(
+        recordedGitState.contains(
+            "benchmark_origin_commit=" + OlympiadBenchmarkPlan.BASELINE_COMMIT + "\n"));
     System.out.println("OLYMPIAD FIVE-KEY FAKE-PROVIDER DIAGNOSTIC");
     System.out.println("CANONICAL_PROBLEMS=20");
     System.out.println("PLANNED_RUNS=34");
@@ -328,6 +369,38 @@ final class OlympiadBenchmarkHarnessTest {
     } catch (java.io.IOException exception) {
       throw new IllegalStateException(exception);
     }
+  }
+
+  private static String git(Path projectRoot, String... arguments) {
+    java.util.ArrayList<String> command = new java.util.ArrayList<>();
+    command.add("git");
+    command.add("-C");
+    command.add(projectRoot.toString());
+    command.addAll(List.of(arguments));
+    Process process;
+    try {
+      process = new ProcessBuilder(command).redirectErrorStream(true).start();
+      try (InputStream output = process.getInputStream()) {
+        String text = new String(output.readAllBytes(), StandardCharsets.UTF_8).strip();
+        if (process.waitFor() != 0) {
+          throw new AssertionError("Git command failed: " + text);
+        }
+        return text;
+      }
+    } catch (IOException exception) {
+      throw new UncheckedIOException(exception);
+    } catch (InterruptedException exception) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError("Git command was interrupted", exception);
+    }
+  }
+
+  private static OlympiadGitExecutionState actualGitExecutionState() {
+    Path projectRoot = benchmarkRoot().getParent().getParent();
+    return new OlympiadGitExecutionState(
+        git(projectRoot, "rev-parse", "--abbrev-ref", "HEAD"),
+        git(projectRoot, "rev-parse", "HEAD"),
+        !git(projectRoot, "status", "--porcelain=v1").isBlank());
   }
 
   private static Path benchmarkRoot() {
