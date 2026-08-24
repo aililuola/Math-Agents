@@ -589,6 +589,58 @@ secret leaks, and zero checksum failures as
 `MathProofMesh_olympiad-5key-v1_c8e6a84352cd_20260824T081856Z.zip`; its SHA-256 is
 `36649142e0aedc3195f2d7ec40a4e04e8beba4a66eef50d830369712e472a10b`.
 
+### Claim identity mismatch isolation before Claim Court
+
+The next cold-start campaign from `d4829d5`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T085619Z`, confirmed that campaign-finding
+ownership, attempt-binding normalization, and the enlarged provider-input reservation all passed
+their former boundaries. P01 completed five-key preflight, root freezing, triage, strategy
+generation, route admission, three concurrent explorations, independent review, and committed
+checkpoint processing. Its immutable root hash remained
+`422cfd9130270941afe5978658df9217534cc98b4569939ada880d97818a1a7a`.
+
+At `claim_memory_graph`, several attempt-local proposed lemmas reused pre-existing Strategy
+critical Claim IDs while carrying different statements. The existing Claim Court binding guard
+correctly refused to attach an altered statement to an authoritative Claim identity, but planning
+propagated `CLAIM_COURT_CONTEXT_STATEMENT_MISMATCH` as a campaign-wide exception. P01 therefore
+stopped `INVALID` after 14 calls, 96,533 input tokens, 96,907 output tokens, 193,440 total tokens,
+and USD 0.126300945. No altered Claim received Court, Fact, or permanent Negative Knowledge
+authority, and the campaign was frozen rather than resumed.
+
+Production now performs the same normalized statement-identity comparison before Claim Court work
+is scheduled. A mismatched artifact remains durable in the Attempt Artifact Ledger as
+`UNCERTAIN`, is excluded from Claim Court dispatch, and is not inserted into Lemma Memory. Its
+sibling claims and routes may continue. An exact normalized statement match still follows the
+ordinary Claim Court path. The original hard guard in `claimCourtSemanticContext` remains in place,
+so this is isolation of an invalid local artifact rather than a relaxation or statement rewrite.
+
+The new production-path regression failed before the repair with the same
+`CLAIM_COURT_CONTEXT_STATEMENT_MISMATCH:critical-claim` stack through
+`freezeClaimForCourt`. After the repair, the new test and its adjacent Claim Court, binding,
+batch-concurrency, and campaign-finding matrix ran eight tests with zero failures or errors:
+
+```text
+CLAIM COURT STATEMENT IDENTITY ISOLATION DIAGNOSTIC
+MISMATCH_QUARANTINES=1
+MISMATCH_COURT_CALLS=0
+MISMATCH_FACT_LEAKS=0
+ROOT_HASH_CHANGES=0
+PERMANENT_NEGATIVE_HASH_CHANGES=0
+RESULT=PASS
+```
+
+The subsequent `scripts/verify-all.ps1 -Offline` run completed with
+`FULL VERIFICATION: PASS`: 2,969 tests (68 Contracts, 1,411 Core, 959 Server including PostgreSQL
+integration, 382 Desktop, and 149 Compatibility) ran with zero failures or errors and six
+intentional skips. Docker/Testcontainers, all Flyway migrations, SpotBugs/FindSecBugs, coverage,
+security, source immutability, dependency, Temporal, and the unchanged Python Sidecar performance
+gate all passed.
+
+The stopped campaign was packaged offline with zero provider calls during packaging, zero source-
+secret leaks, and zero checksum failures as
+`MathProofMesh_olympiad-5key-v1_d4829d53ae2c_20260824T091823Z.zip`; its SHA-256 is
+`30cf19ef6001eeb27778d146295a396e2e85de3c0057648bbb625638e0aded5a`.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

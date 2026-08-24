@@ -5456,7 +5456,10 @@ final class DesktopSolveCoordinator {
   private List<AttemptArtifactRecord> prepareClaimCourtWorkItem(
       RouteState route, List<AttemptArtifactRecord> harvested) {
     List<AttemptArtifactRecord> checked =
-        harvested.stream().map(record -> rejectUnboundModernLocalClaim(route, record)).toList();
+        harvested.stream()
+            .map(record -> rejectUnboundModernLocalClaim(route, record))
+            .map(record -> rejectMismatchedBoundClaimStatement(route, record))
+            .toList();
     checked.stream()
         .filter(record -> record.status() == AttemptArtifactStatus.UNCERTAIN)
         .forEach(
@@ -5480,6 +5483,39 @@ final class DesktopSolveCoordinator {
     return reviewable.stream()
         .map(record -> attemptArtifacts.get(record.artifactId()))
         .toList();
+  }
+
+  private AttemptArtifactRecord rejectMismatchedBoundClaimStatement(
+      RouteState route, AttemptArtifactRecord record) {
+    if (record.status() != AttemptArtifactStatus.HARVESTED
+        && record.status() != AttemptArtifactStatus.REVIEW_PENDING) {
+      return record;
+    }
+    if (!mismatchesBoundCriticalClaim(route, record.claimId(), record.statement())) {
+      return record;
+    }
+    String reason = "CLAIM_COURT_CONTEXT_STATEMENT_MISMATCH:" + record.claimId();
+    event(
+        "claim_context_rejected",
+        "claim_court",
+        record.authorAgentId(),
+        "blocked",
+        reason,
+        record.claimId());
+    return attemptArtifacts.markUncertain(record.artifactId(), reason);
+  }
+
+  private boolean mismatchesBoundCriticalClaim(
+      RouteState route, String claimId, String statement) {
+    CriticalClaim boundClaim =
+        route.strategy.criticalClaims().stream()
+            .filter(claim -> claim.claimId().equals(claimId))
+            .findFirst()
+            .orElse(null);
+    return boundClaim != null
+        && !topology
+            .mathNormalize(boundClaim.statement())
+            .equals(topology.mathNormalize(statement));
   }
 
   private ResearchWorkResultEnvelope executeClaimCourtCaseAgainstFrozenSnapshot(
@@ -6361,7 +6397,13 @@ final class DesktopSolveCoordinator {
             .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
     List<ClaimCard> claims =
         route.attempt.proposedLemmas().stream().map(source -> bindClaim(source, route)).toList();
-    lemmaMemory.addMany(claims);
+    lemmaMemory.addMany(
+        claims.stream()
+            .filter(
+                claim ->
+                    !mismatchesBoundCriticalClaim(
+                        route, claim.claimId(), claim.statement()))
+            .toList());
     List<AttemptArtifactRecord> harvested =
         new ArrayList<>(
             attemptArtifactHarvester.harvest(
