@@ -5,7 +5,7 @@ import java.util.Objects;
 
 /** Conservative provider-input estimate with explicit tokenizer and message-framing headroom. */
 final class InputTokenBudgetEstimator {
-  private static final long MESSAGE_FRAMING_TOKENS = 128L;
+  private static final long MESSAGE_FRAMING_TOKENS = 512L;
   private static final long HEADROOM_NUMERATOR = 5L;
   private static final long HEADROOM_DENOMINATOR = 4L;
 

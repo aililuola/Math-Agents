@@ -208,6 +208,53 @@ class StructuredPayloadNormalizationParityTest {
   }
 
   @Test
+  void dropsAttemptBindingsThatTargetPreexistingStrategyClaims() {
+    ObjectNode payload =
+        object(
+            """
+            {
+              "action":"submit_attempt",
+              "reason":"complete route",
+              "attempt":{
+                "agent_id":"explorer",
+                "problem_hash":"problem-hash",
+                "round_index":1,
+                "status":"complete",
+                "strategy_id":"S3",
+                "final_answer":"The exact reduction proves the target.",
+                "proposed_lemmas":[],
+                "claim_semantic_context_manifest_version":1,
+                "claim_semantic_context_bindings":[
+                  {
+                    "claim_id":"existing-strategy-critical-claim",
+                    "claim_blueprint_node_id":"@claim",
+                    "local_assumptions":[],
+                    "quantifiers":[],
+                    "variable_bindings":[],
+                    "scope_limitations":[],
+                    "polarity":"positive"
+                  }
+                ]
+              }
+            }
+            """);
+
+    List<String> actions =
+        StructuredPayloadNormalizer.normalize(payload, InitialExplorationTurn.class);
+    InitialExplorationTurn turn =
+        ContractObjectMapper.read(payload, InitialExplorationTurn.class);
+
+    assertTrue(turn.attempt().proposedLemmas().isEmpty());
+    assertTrue(turn.attempt().claimSemanticContextBindings().isEmpty());
+    assertTrue(
+        actions.stream()
+            .anyMatch(
+                action ->
+                    action.contains("existing-strategy-critical-claim")
+                        && action.contains("not an attempt-local proposed lemma")));
+  }
+
+  @Test
   void requestComputationRepairsOnlyServerOwnedPolicyFields() {
     ObjectNode payload = computationTurnPayload();
     List<String> actions =

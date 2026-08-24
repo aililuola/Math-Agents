@@ -20,6 +20,8 @@ import io.github.aililuola.mathproofmesh.computation.ComputationLimits;
 import io.github.aililuola.mathproofmesh.computation.InMemoryComputationCache;
 import io.github.aililuola.mathproofmesh.config.AgentConfig;
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
+import io.github.aililuola.mathproofmesh.contract.AttemptStatus;
+import io.github.aililuola.mathproofmesh.contract.CheckpointedResearchEnvelope;
 import io.github.aililuola.mathproofmesh.contract.ComputationMethod;
 import io.github.aililuola.mathproofmesh.contract.ComputationPurpose;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
@@ -28,10 +30,15 @@ import io.github.aililuola.mathproofmesh.contract.ExperimentSpec;
 import io.github.aililuola.mathproofmesh.contract.InitialExplorationAction;
 import io.github.aililuola.mathproofmesh.contract.InitialExplorationTurn;
 import io.github.aililuola.mathproofmesh.contract.ProblemKind;
+import io.github.aililuola.mathproofmesh.contract.ProofAttempt;
+import io.github.aililuola.mathproofmesh.contract.ResearchFindingDisposition;
+import io.github.aililuola.mathproofmesh.contract.ResearchFindingDispositionAction;
+import io.github.aililuola.mathproofmesh.contract.ResearchFindingUpdateBatch;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
 import io.github.aililuola.mathproofmesh.contract.StrategySet;
 import io.github.aililuola.mathproofmesh.contract.TaskRequirement;
 import io.github.aililuola.mathproofmesh.contract.TriageResult;
+import io.github.aililuola.mathproofmesh.contract.UsageRecord;
 import io.github.aililuola.mathproofmesh.research.ResearchCheckpointLedger;
 import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
 import io.github.aililuola.mathproofmesh.provider.AgentPool;
@@ -57,6 +64,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
   enum Scenario {
     BUDGET_EXHAUSTION,
+    CAMPAIGN_DEFER,
+    CAMPAIGN_KEEP_ACTIVE,
     CAMPAIGN_PROPAGATION,
     FINAL_JSON_OMISSION,
     NORMAL,
@@ -183,7 +192,9 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
   }
 
   void generateCampaignStrategyAndAdmitRoute() throws Exception {
-    if (scenario != Scenario.CAMPAIGN_PROPAGATION) {
+    if (scenario != Scenario.CAMPAIGN_DEFER
+        && scenario != Scenario.CAMPAIGN_PROPAGATION
+        && scenario != Scenario.CAMPAIGN_KEEP_ACTIVE) {
       throw new IllegalStateException("campaign strategy generation requires CAMPAIGN_PROPAGATION");
     }
     setField(coordinator, "triage", triage());
@@ -260,6 +271,46 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
 
   int campaignFindingsEmitted() {
     return responder.campaignFindingsEmitted();
+  }
+
+  int submittedAttemptCount() {
+    try {
+      @SuppressWarnings("unchecked")
+      List<Object> routes = (List<Object>) rawField(coordinator, "routes");
+      return (int)
+          routes.stream()
+              .filter(
+                  route -> {
+                    try {
+                      return rawField(route, "attempt") != null;
+                    } catch (ReflectiveOperationException exception) {
+                      throw new IllegalStateException(exception);
+                    }
+                  })
+              .count();
+    } catch (ReflectiveOperationException exception) {
+      throw new IllegalStateException(exception);
+    }
+  }
+
+  int failedRouteCount() {
+    try {
+      @SuppressWarnings("unchecked")
+      List<Object> routes = (List<Object>) rawField(coordinator, "routes");
+      return (int)
+          routes.stream()
+              .filter(
+                  route -> {
+                    try {
+                      return "failed".equals(rawField(route, "status"));
+                    } catch (ReflectiveOperationException exception) {
+                      throw new IllegalStateException(exception);
+                    }
+                  })
+              .count();
+    } catch (ReflectiveOperationException exception) {
+      throw new IllegalStateException(exception);
+    }
   }
 
   ResearchCheckpointLedger researchLedger() {
@@ -573,7 +624,9 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
 
     @Override
     public synchronized LLMResponse respond(ProviderRequest request) {
-      if (scenario == Scenario.CAMPAIGN_PROPAGATION) {
+      if (scenario == Scenario.CAMPAIGN_DEFER
+          || scenario == Scenario.CAMPAIGN_PROPAGATION
+          || scenario == Scenario.CAMPAIGN_KEEP_ACTIVE) {
         return campaignPropagationResponse(request);
       }
       if (!"InitialExplorationTurn".equals(request.schemaName())) {
@@ -656,7 +709,26 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
       }
       if ("InitialExplorationTurn".equals(request.schemaName())) {
         explorationCalls.incrementAndGet();
-        prompts.add(request.messages().getLast().content());
+        String prompt = request.messages().getLast().content();
+        prompts.add(prompt);
+        if (scenario == Scenario.CAMPAIGN_KEEP_ACTIVE || scenario == Scenario.CAMPAIGN_DEFER) {
+          String findingId = campaignFindingId(prompt);
+          ResearchFindingDispositionAction action =
+              scenario == Scenario.CAMPAIGN_KEEP_ACTIVE
+                  ? ResearchFindingDispositionAction.KEEP_ACTIVE
+                  : ResearchFindingDispositionAction.DEFER;
+          return checkpointedResponse(
+              submitAttempt(),
+              new ResearchFindingUpdateBatch(
+                  List.of(
+                      new ResearchFindingDisposition(
+                          findingId,
+                          action,
+                          action == ResearchFindingDispositionAction.KEEP_ACTIVE
+                              ? "The route observed this campaign candidate without adopting it."
+                              : "The route tried to mutate a campaign-owned candidate.",
+                          null))));
+        }
         return response(
             new InitialExplorationTurn(
                 InitialExplorationAction.ABANDON,
@@ -667,6 +739,49 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
       }
       throw new AssertionError(
           "unexpected campaign propagation schema: " + request.schemaName());
+    }
+
+    private static String campaignFindingId(String prompt) {
+      java.util.regex.Matcher matcher =
+          java.util.regex.Pattern.compile("research_finding_[0-9a-f]{32}").matcher(prompt);
+      if (!matcher.find()) {
+        throw new AssertionError("campaign finding id is missing from exploration prompt");
+      }
+      return matcher.group();
+    }
+
+    private static InitialExplorationTurn submitAttempt() {
+      ProofAttempt attempt =
+          new ProofAttempt(
+              "model-explorer",
+              "model-attempt",
+              List.of(),
+              List.of(),
+              List.of(),
+              List.of(),
+              List.of("Checked the exact reduction."),
+              "The bounded route supplies a complete candidate proof.",
+              null,
+              null,
+              "model-problem-hash",
+              "Apply the exact reduction and discharge the remaining elementary step.",
+              List.of(),
+              List.of(),
+              null,
+              null,
+              0,
+              1,
+              0.9d,
+              AttemptStatus.COMPLETE,
+              "model-strategy",
+              List.of(),
+              new UsageRecord());
+      return new InitialExplorationTurn(
+          InitialExplorationAction.SUBMIT_ATTEMPT,
+          attempt,
+          null,
+          null,
+          "Submit the auditable candidate without adopting campaign findings.");
     }
 
     private LLMResponse multiRoundResponse(ProviderRequest request, String prompt) {
@@ -819,6 +934,23 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
           20,
           1.0d,
           "research-checkpoint-response",
+          "stop",
+          false,
+          JsonNodeFactory.instance.objectNode());
+    }
+
+    private static LLMResponse checkpointedResponse(
+        InitialExplorationTurn turn, ResearchFindingUpdateBatch findingUpdates) {
+      return new LLMResponse(
+          ContractObjectMapper.write(
+              new CheckpointedResearchEnvelope(
+                  null, findingUpdates, ContractObjectMapper.toTree(turn))),
+          "research-checkpoint-model",
+          "mock",
+          10,
+          20,
+          1.0d,
+          "research-checkpoint-envelope-response",
           "stop",
           false,
           JsonNodeFactory.instance.objectNode());

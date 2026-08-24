@@ -60,7 +60,9 @@ public final class ResearchCheckpointedPromptFactory {
                 + "or proved. The final response must be one CheckpointedResearchEnvelope JSON "
                 + "object with public_checkpoint, finding_updates, and result. The nested result "
                 + "must satisfy the original response contract exactly. An omitted finding remains "
-                + "active; do not silently discard it.")
+                + "active; do not silently discard it. ProofAttempt claim_semantic_context_bindings "
+                + "apply only to IDs declared in that attempt's proposed_lemmas; never repeat "
+                + "pre-existing Strategy critical Claim bindings there.")
             .strip();
     String user =
         (source.user()

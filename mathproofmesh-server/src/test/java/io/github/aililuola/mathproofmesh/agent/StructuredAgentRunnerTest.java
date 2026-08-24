@@ -626,6 +626,55 @@ class StructuredAgentRunnerTest {
   }
 
   @Test
+  void metaReviewSizedPromptCannotPoisonFutureBudgetEnvelopes() {
+    CallLedger callLedger = new CallLedger(4, 100_000L, BigDecimal.TEN);
+    BudgetEnvelopeLedger envelopes =
+        new BudgetEnvelopeLedger(
+            resource(4, 100_000, 10_000, 110_000, "10"), BudgetResourceVector.zero());
+    String user = "\u6570".repeat(19_305);
+    try (Fixture fixture =
+        fixture(
+            "run-meta-review-headroom",
+            request ->
+                new LLMResponse(
+                    "{\"answer\":\"proved\"}",
+                    "mock-model",
+                    "mock",
+                    24_348,
+                    5,
+                    12.5d,
+                    "fixture-request",
+                    "stop",
+                    false,
+                    JsonNodeFactory.instance.objectNode()),
+            callLedger,
+            List.of())) {
+      fixture.runner().configureBudgetEnvelopeLedger(() -> envelopes);
+
+      fixture
+          .runner()
+          .call(
+              "run-meta-review-headroom",
+              "meta-review-headroom-key",
+              "general",
+              bundle(user),
+              fixture.pool().get("agent-a"),
+              "verification");
+
+      assertThat(envelopes.envelopeSnapshot().envelopes())
+          .singleElement()
+          .satisfies(
+              envelope -> {
+                assertThat(envelope.allocated().estimatedInputTokens())
+                    .isGreaterThanOrEqualTo(24_348L);
+                assertThat(envelope.consumed().estimatedInputTokens()).isEqualTo(24_348L);
+                assertThat(envelope.status()).isEqualTo(BudgetEnvelopeStatus.SETTLED);
+              });
+      assertThat(envelopes.overrun()).isFalse();
+    }
+  }
+
+  @Test
   void unknownRemoteResultQuarantinesWorstCaseEnvelopeAndCannotReplay() {
     CallLedger callLedger = new CallLedger(4, 10_000L, BigDecimal.TEN);
     BudgetEnvelopeLedger envelopes =

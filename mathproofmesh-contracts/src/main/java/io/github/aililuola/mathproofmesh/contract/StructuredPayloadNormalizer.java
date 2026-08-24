@@ -56,6 +56,7 @@ public final class StructuredPayloadNormalizer {
     List<String> actions = normalizeDependencyRefKinds(payload);
     normalizeQuantifierKinds(payload, "$", actions);
     normalizeTurnEnvelopeMetadata(payload, modelName, actions);
+    normalizeAttemptClaimContextBindings(payload, "$", actions);
     normalizeOptionalCandidateConjectures(payload, modelName, actions);
     if ("StrategySet".equals(modelName)) {
       normalizeOptionalStrategyCalculationChecks(payload, actions);
@@ -167,6 +168,55 @@ public final class StructuredPayloadNormalizer {
     for (String field : TURN_ENVELOPE_METADATA) {
       if (payload.remove(field) != null) {
         actions.add("removed turn envelope metadata field " + field);
+      }
+    }
+  }
+
+  private static void normalizeAttemptClaimContextBindings(
+      JsonNode value, String path, List<String> actions) {
+    if (value instanceof ObjectNode object) {
+      JsonNode rawBindings = object.get("claim_semantic_context_bindings");
+      if (rawBindings instanceof ArrayNode bindings) {
+        Set<String> proposedClaimIds = new HashSet<>();
+        JsonNode rawProposed = object.get("proposed_lemmas");
+        if (rawProposed instanceof ArrayNode proposed) {
+          for (JsonNode claim : proposed) {
+            if (claim instanceof ObjectNode candidate) {
+              String claimId = textOrNull(candidate.get("claim_id"));
+              if (claimId != null) {
+                proposedClaimIds.add(claimId);
+              }
+            }
+          }
+        }
+        for (int index = bindings.size() - 1; index >= 0; index--) {
+          if (!(bindings.get(index) instanceof ObjectNode binding)) {
+            continue;
+          }
+          String claimId = textOrNull(binding.get("claim_id"));
+          if (claimId == null || proposedClaimIds.contains(claimId)) {
+            continue;
+          }
+          bindings.remove(index);
+          actions.add(
+              "dropped "
+                  + path
+                  + ".claim_semantic_context_bindings["
+                  + index
+                  + "] for "
+                  + claimId
+                  + " because it is not an attempt-local proposed lemma");
+        }
+      }
+      object.properties()
+          .forEach(
+              entry ->
+                  normalizeAttemptClaimContextBindings(
+                      entry.getValue(), path + "." + entry.getKey(), actions));
+    } else if (value instanceof ArrayNode array) {
+      for (int index = 0; index < array.size(); index++) {
+        normalizeAttemptClaimContextBindings(
+            array.get(index), path + "[" + index + "]", actions);
       }
     }
   }

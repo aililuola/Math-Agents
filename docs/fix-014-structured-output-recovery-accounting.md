@@ -507,6 +507,88 @@ secret leaks, and zero checksum failures as
 `MathProofMesh_olympiad-5key-v1_d3c298629f80_20260824T071357Z.zip`; its SHA-256 is
 `6ac16fe074d1a8652c2129fe0306e39e6c1d318d649ee8186141b7ab66ec73db`.
 
+### Campaign finding ownership and conservative input reservation
+
+The next cold-start campaign from `c8e6a84`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T074110Z`, exercised the stream-continuation
+repair successfully. P01 passed the five credential preflights, immutable-root validation,
+triage, initial strategy generation, the formerly failing structural-gap replenishment, strategy
+preflight, and three-route admission. Its immutable root hash remained
+`422cfd9130270941afe5978658df9217534cc98b4569939ada880d97818a1a7a`.
+
+All three concurrent exploration requests then returned complete public responses, but each
+worker failed while committing its research checkpoint. The responses included `KEEP_ACTIVE`
+dispositions for campaign-level findings. Those findings are owned by the synthetic
+`campaign-research` route, while the strict ledger correctly rejects ordinary cross-route
+mutation. The Coordinator had passed the unpartitioned batch directly into that ledger, causing
+an `IllegalArgumentException` before any ProofAttempt could be committed.
+
+The meta-review request exposed a separate physical-budget reservation boundary. The estimated
+input was 24,273 tokens and the provider reported 24,348, a 75-token transport/framing delta. The
+strict physical envelope correctly entered `ACTUAL_USAGE_OVERRUN`; because overrun is a global
+hard stop, subsequent proof work was rejected despite remaining campaign capacity. P01 therefore
+stopped `INCOMPLETE` after 14 physical calls, 125,856 input tokens, 119,003 output tokens, and USD
+0.158279970. The campaign was frozen and never resumed.
+
+Production now filters a route's finding-update batch before applying it. A route-local update is
+unchanged. A `KEEP_ACTIVE` observation of a campaign-owned finding is an explicit no-op because
+omission already means active. Every state-changing cross-route disposition still fails closed
+with `CROSS_ROUTE_FINDING_MUTATION_FORBIDDEN`; no Claim, Fact, Negative Knowledge, route attempt,
+or root-goal authority is created. Prompt policy now also tells agents not to place campaign IDs
+in route-local `finding_updates` and to use the existing explicit adoption plus Issue-003 review
+path instead.
+
+The real responses also revealed a representation-only mismatch: two attempts supplied semantic
+context bindings for pre-existing Strategy claims while declaring no attempt-local
+`proposed_lemmas`. Structured normalization now removes only bindings whose IDs are absent from
+the same attempt's proposed-lemma set. It does not invent a Claim, add a binding, verify a lemma,
+or relax strict validation for bindings that remain.
+
+Finally, the deterministic provider-input estimator retains its UTF-8 and 25-percent content
+headroom but increases fixed message/transport framing reservation from 128 to 512 tokens. The
+physical hard gate and global overrun behavior are unchanged. A production runner regression
+replays the observed 24,348-token boundary and proves that 24,657 tokens are reserved before
+dispatch, the envelope settles normally, and no global overrun is recorded.
+
+The pre-fix matrix produced four deterministic failures: unknown attempt-local binding rejection,
+zero submitted attempts after the campaign `KEEP_ACTIVE` response, an estimator result of 24,273
+below the observed 24,348 input, and an overrun physical envelope at the same boundary. After the
+repair, the focused Contracts, Server, and Desktop matrix ran 36 tests with zero failures or
+errors. The production-path diagnostics were:
+
+```text
+CAMPAIGN FINDING DISPOSITION ISOLATION DIAGNOSTIC
+CAMPAIGN_KEEP_ACTIVE_OBSERVATIONS=1
+SUBMITTED_ATTEMPTS=1
+ROUTE_WORKER_FAILURES=0
+CAMPAIGN_FINDING_MUTATIONS=0
+DIRECT_FACT_PROMOTIONS=0
+DIRECT_CLAIM_VERIFICATIONS=0
+DIRECT_NEGATIVE_REGISTRATIONS=0
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+RESULT=PASS
+
+CROSS_ROUTE_CAMPAIGN_MUTATION_DIAGNOSTIC
+CROSS_ROUTE_MUTATION_BLOCKS=1
+CAMPAIGN_FINDING_MUTATIONS=0
+SUBMITTED_ATTEMPT_LEAKS=0
+AUTHORITY_LEAKS=0
+RESULT=PASS
+```
+
+The subsequent `scripts/verify-all.ps1 -Offline` run completed with
+`FULL VERIFICATION: PASS`: 2,967 tests (68 Contracts, 1,411 Core, 959 Server including PostgreSQL
+integration, 380 Desktop, and 149 Compatibility) ran with zero failures or errors and six
+intentional skips. Docker/Testcontainers, all Flyway migrations, SpotBugs/FindSecBugs, coverage,
+security, source immutability, dependency, Temporal, and the unchanged Python Sidecar performance
+gate all passed.
+
+The stopped campaign was packaged offline with zero provider calls during packaging, zero source-
+secret leaks, and zero checksum failures as
+`MathProofMesh_olympiad-5key-v1_c8e6a84352cd_20260824T081856Z.zip`; its SHA-256 is
+`36649142e0aedc3195f2d7ec40a4e04e8beba4a66eef50d830369712e472a10b`.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint
