@@ -5,6 +5,7 @@ import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
 import io.github.aililuola.mathproofmesh.provider.HttpTransport;
 import io.github.aililuola.mathproofmesh.provider.HttpTransportRequest;
 import io.github.aililuola.mathproofmesh.provider.HttpTransportResponse;
+import io.github.aililuola.mathproofmesh.provider.PublicOutputContinuation;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -142,19 +143,28 @@ public final class OlympiadPromptTransportGuard implements HttpTransport {
       throw new IllegalStateException("benchmark provider request has no messages");
     }
     List<String> content = new ArrayList<>();
-    String user = "";
+    String canonicalUser = "";
+    boolean canonicalUserFound = false;
     for (JsonNode message : messages) {
       String role = message.path("role").asText("");
       String text = messageText(message.path("content"));
       content.add(text);
       if ("user".equals(role)) {
-        user = text;
+        if (!canonicalUserFound) {
+          if (text.isBlank()) {
+            throw new IllegalStateException("benchmark provider request has a blank user prompt");
+          }
+          canonicalUser = text;
+          canonicalUserFound = true;
+        } else {
+          PublicOutputContinuation.requireValid(text);
+        }
       }
     }
-    if (user.isBlank()) {
+    if (!canonicalUserFound) {
       throw new IllegalStateException("benchmark provider request has no user prompt");
     }
-    return new Payload(String.join("\n", content), user);
+    return new Payload(String.join("\n", content), canonicalUser);
   }
 
   private static String messageText(JsonNode value) {

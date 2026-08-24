@@ -466,6 +466,47 @@ secret leaks, and zero checksum failures as
 `MathProofMesh_olympiad-5key-v1_815ce9386c15_20260824T062208Z.zip`; its SHA-256 is
 `445d18d8ceb50ca6e90663d6c1952ea724522141648052be26fe109a10653406`.
 
+### Hash-bound stream continuation at the benchmark transport guard
+
+The next cold-start campaign from `d3c2986`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T064153Z`, confirmed that deterministic
+quantifier aliases no longer blocked initial strategy generation. P01 passed all five credential
+preflights, immutable-root validation, triage, a full initial strategy-generation response, and
+four strategy preflight plans. It then requested the one-shot structural-gap replenishment.
+
+The replenishment stream disconnected after producing a public output prefix. The production
+retry path retained the original canonical user prompt and appended a bounded continuation user
+message, but `OlympiadPromptTransportGuard` inspected only the last user message for the stage and
+root binding. It therefore rejected the retry locally with
+`benchmark provider prompt has no stage binding`. P01 stopped `INVALID` after eight billed calls
+and USD 0.057336045; no later problem was started and the campaign was never resumed. This was a
+transport validation defect, not a mathematical rejection or a budget failure.
+
+The regression was first run against the old guard and failed at
+`OlympiadPromptTransportGuard#stage:208` before any retry network call. Production now uses one
+canonical `PublicOutputContinuation` protocol in both `AgentRuntime` and the benchmark guard. Each
+continuation carries the exact public prefix plus its lowercase SHA-256; the guard selects the
+first nonblank user message as the authoritative canonical prompt, validates its original stage
+and immutable root, and accepts later user messages only when they match the exact continuation
+grammar and their prefix hash verifies in constant time. A forged hash or arbitrary extra user
+message still fails before network. Endpoint, forbidden-metadata, canonical-problem, repair-order,
+and root-goal checks were not relaxed.
+
+The focused Server/Desktop matrix ran 22 tests with zero failures, errors, or skips. It covered
+the real DeepSeek streaming adapter, the production retry constructor, the transport guard's
+canonical-root and forged-continuation boundaries, strategy replenishment exactly once, invalid
+strategy replacement, and the 20-round production root-goal propagation chain. The subsequent
+`scripts/verify-all.ps1 -Offline` run completed with `FULL VERIFICATION: PASS`: 2,962 tests
+(67 Contracts, 1,411 Core, 957 Server including PostgreSQL integration, 378 Desktop, and 149
+Compatibility) ran with zero failures or errors and six intentional skips. Docker/Testcontainers,
+all Flyway migrations, SpotBugs/FindSecBugs, coverage, security, source immutability, dependency,
+Temporal, and the unchanged Python Sidecar performance gate all passed.
+
+The stopped campaign was packaged offline with zero provider calls during packaging, zero source-
+secret leaks, and zero checksum failures as
+`MathProofMesh_olympiad-5key-v1_d3c298629f80_20260824T071357Z.zip`; its SHA-256 is
+`6ac16fe074d1a8652c2129fe0306e39e6c1d318d649ee8186141b7ab66ec73db`.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

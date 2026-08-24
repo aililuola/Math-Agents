@@ -264,14 +264,8 @@ public final class AgentRuntime {
     messages.add(
         new ChatMessage(
             "user",
-            ("The previous stream disconnected. Continue from the exact public prefix "
-                    + "below without repeating it.\n"
-                    + "PUBLIC_OUTPUT_PREFIX_SHA256: "
-                    + failure.partialPublicContentSha256()
-                    + "\nPUBLIC_OUTPUT_PREFIX:\n"
-                    + failure.partialPublicContent()
-                    + "\nDo not reconstruct hidden chain-of-thought.")
-                .strip()));
+            PublicOutputContinuation.create(
+                failure.partialPublicContentSha256(), failure.partialPublicContent())));
     return new ProviderRequest(
         messages,
         request.temperature(),
