@@ -119,6 +119,60 @@ The same run passed Docker/Testcontainers against PostgreSQL 18.4, all seven Fly
 SpotBugs/FindSecBugs, dependency/security checks, coverage, source immutability, compatibility,
 Temporal, and Python Sidecar performance. No threshold or gate was changed.
 
+## Second cold-start finding: field-specific strategy references
+
+The first cold-start campaign from `28082bca9750e2db359b7fe68436385b331ec493` is preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T001036Z` and was not resumed. P01 completed six
+provider calls (49,031 input tokens, 105,065 output tokens, USD 0.112735035) but admitted no route.
+All twelve strategy candidates failed deterministic compilation: the first six invented server-owned
+blueprint node IDs, and the six gap replacements placed `@all_intermediates` in claim-local
+assumption references. A partially started P02 was treated only as non-authoritative stop evidence.
+
+This exposed an ambiguity in the generation prompt, not a reason to relax the compiler. The prompt
+listed operation selectors and claim-context selectors together, while the replenishment request did
+not return the exact deterministic errors from rejected candidates. The repair therefore:
+
+1. publishes separate typed selector sets for mechanism operations and critical-claim bindings;
+2. requires `@claim` for `claim_blueprint_node_id` and allows only `@roots` in
+   `local_assumption_node_ids`;
+3. prohibits invented server-owned node IDs and duplicated root context;
+4. carries ordered `invalid_strategy_contract_errors` into the single production gap request; and
+5. leaves every deterministic admission and authority gate unchanged.
+
+Before the production change, the server policy test failed because
+`mechanism_operation_selectors` was absent, and the real Coordinator replenishment test failed
+because `invalid_strategy_contract_errors` was absent. After the change, the focused server and
+Desktop matrices passed six tests with no failure or error. The production-chain diagnostic is:
+
+```text
+STRATEGY BINDING CONTRACT RECOVERY DIAGNOSTIC
+INVALID_STRATEGY_CONTRACT_ERRORS=4
+INVENTED_NODE_REJECTIONS=2
+MISSCOPED_SELECTOR_REJECTIONS=2
+REPLENISHMENT_PROMPTS=1
+VALID_REPLACEMENT_ADMISSIONS=4
+INVALID_ROUTE_LEAKS=0
+ROOT_HASH_CHANGES=0
+RESULT=PASS
+```
+
+The stopped campaign was packaged without a provider call as
+`MathProofMesh_olympiad-5key-v1_28082bca9750_20260824T004052Z.zip`; its SHA-256 is
+`fc7efc6336316dc11ac6bd7a72047da7c91b2664c657edd088d91d2e05543211`.
+
+The first full release retry ran all 370 Desktop tests successfully, then failed SpotBugs because
+an inline 25-line feedback projection pushed the already large Coordinator beyond SpotBugs' class
+analysis limit and exposed 29 cascading findings. No finding was filtered or suppressed. The pure
+projection was moved into `StrategyPortfolioGapFeedback`, leaving only the production call in the
+Coordinator. A standalone reactor `verify` then fully analyzed all 165 Desktop classes with zero
+SpotBugs findings.
+
+The final `scripts/verify-all.ps1 -Offline` retry passed every release gate. It ran 2,948 tests
+(65 Contracts, 1,408 Core, 929 Server unit, 27 Server integration, 370 Desktop, and 149
+Compatibility) with zero failures or errors and six intentional skips. PostgreSQL/Testcontainers,
+all Flyway migrations, SpotBugs/FindSecBugs, dependency and secret checks, coverage, source
+immutability, Temporal, and the unchanged Python Sidecar performance gate all passed.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

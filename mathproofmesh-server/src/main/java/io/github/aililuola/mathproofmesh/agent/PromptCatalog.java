@@ -56,6 +56,9 @@ public final class PromptCatalog {
             + "Label every load-bearing claim as REQUIRED or SUPPORTING, separate verified facts from unresolved assumptions, and provide a bounded falsification plan. "
             + "Avoid multiple routes sharing one unresolved REQUIRED claim and include a genuinely independent challenger mechanism when applicable. "
             + "When generation_mode is portfolio_gap_replenishment, fill only the supplied structural gaps and never repeat a forbidden signature or rejected claim key. "
+            + "Blueprint references are field-specific: use only @claim for claim_blueprint_node_id, only @roots in local_assumption_node_ids, and never invent server-owned node IDs. "
+            + "The broader @direct_targets, @all_intermediates, and @main_goal selectors are only for mechanism operation inputs or outputs where the typed reference contract permits them. "
+            + "Keep each binding compact by omitting duplicated root assumptions, quantifiers, and variable bindings. "
             + "estimated_success and estimated_cost are normalized model metadata from 0.0 to 1.0 and never server authority. "
             + "calculation_checks accepts only typed ToolRequest kinds from its schema; sandboxed_python belongs in computation_hints and a later ExperimentSpec, never in calculation_checks.");
     stages.put(

@@ -2108,6 +2108,9 @@ final class DesktopSolveCoordinator {
     gap.put("missing_soft_mechanism_profiles", missingProfiles);
     gap.put("unresolved_common_mode_groups", commonModeGroups);
     gap.put("forbidden_structural_signatures", selectedSignatures);
+    gap.putAll(
+        StrategyPortfolioGapFeedback.invalidContractErrors(
+            episodeId, source, strategyCandidates.snapshot()));
     gap.put("strategies_requested", needed);
     String requestHash = CanonicalJson.stableHash(gap);
     portfolioReplenishments.begin(episodeId, requestHash);

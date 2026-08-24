@@ -20,6 +20,24 @@ public final class GenericStrategyGenerationPolicy {
             "Declare mechanism_operations using only the bounded operation kind enum.",
             "Bind each operation to server-validated blueprint selectors such as @roots, @direct_targets, @all_intermediates, or @main_goal.",
             "Use unknown when no bounded operation kind is justified; prose never determines the hard mechanism identity."),
+        "typed_reference_contract",
+        Map.of(
+            "mechanism_operation_selectors",
+            List.of("@roots", "@direct_targets", "@all_intermediates", "@main_goal"),
+            "critical_claim_node_selector",
+            "@claim",
+            "claim_local_assumption_selectors",
+            List.of("@roots"),
+            "rules",
+            List.of(
+                "Never invent blueprint node IDs; server-owned node IDs are not visible at generation time.",
+                "Never use @all_intermediates in local_assumption_node_ids.",
+                "For every critical claim emit exactly one binding with claim_blueprint_node_id=@claim.",
+                "Do not repeat root assumptions, quantifiers, or variable bindings; emit only genuine claim-local additions.")),
+        "compact_output_contract",
+        List.of(
+            "Return exactly strategies_requested strategies and no extra variants.",
+            "Keep statements and metadata concise; do not duplicate root context in each critical claim binding."),
         "falsification_contract",
         List.of(
             "Give a bounded falsification plan for each load-bearing claim.",
