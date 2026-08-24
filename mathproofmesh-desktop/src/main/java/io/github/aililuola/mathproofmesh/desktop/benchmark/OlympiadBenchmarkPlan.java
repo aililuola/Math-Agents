@@ -163,10 +163,10 @@ public final class OlympiadBenchmarkPlan {
   }
 
   public enum Tier {
-    SMOKE(24, 6, 624_000),
-    CORE(40, 8, 1_200_000),
-    ADVANCED(64, 12, 2_176_000),
-    STRESS(96, 16, 3_648_000);
+    SMOKE(24, 6, 1_152_000),
+    CORE(40, 8, 1_920_000),
+    ADVANCED(64, 12, 3_072_000),
+    STRESS(96, 16, 4_608_000);
 
     private final int maximumCalls;
     private final int maximumRounds;

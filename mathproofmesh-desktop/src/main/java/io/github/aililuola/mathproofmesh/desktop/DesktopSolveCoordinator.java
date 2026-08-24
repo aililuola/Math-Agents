@@ -15060,6 +15060,12 @@ final class DesktopSolveCoordinator {
       int recoveryLimit = recoveryOutputTokens(config, stage, outputLimit);
       try {
         Map<String, Object> recoveryContext = new LinkedHashMap<>(context);
+        recoveryContext.put("artifact_recovery_mode", "compact_structured_artifact_only");
+        recoveryContext.put(
+            "artifact_recovery_rule",
+            "Return exactly one complete compact JSON artifact matching the requested schema. "
+                + "Do not repeat private reasoning or add prose. Preserve required mathematical "
+                + "content, keep descriptive fields concise, and never fabricate missing evidence.");
         ResearchCheckpointFallbackEvidence fallbackEvidence = null;
         if (ResearchCheckpointedPromptFactory.isAllowedResearchStage(promptStage(stage))) {
           String routeId = checkpointRouteId(context);

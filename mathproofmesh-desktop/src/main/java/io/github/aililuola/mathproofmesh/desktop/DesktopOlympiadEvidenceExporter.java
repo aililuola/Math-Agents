@@ -9,7 +9,9 @@ import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadBenchmarkHarn
 import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadPromptTransportGuard;
 import io.github.aililuola.mathproofmesh.provider.ProviderCallRecord;
 import io.github.aililuola.mathproofmesh.provider.ProviderCallRepository;
+import io.github.aililuola.mathproofmesh.provider.UsageTotals;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -90,7 +92,8 @@ final class DesktopOlympiadEvidenceExporter {
     int negativeViolations = permanentNegativeLifetimeViolations(state.path("typedMemory"));
     int checkpointViolations = Files.isRegularFile(root.resolve(STATE_FILE)) ? 0 : 1;
     int graphViolations = state.path("proofGraph").isObject() ? 0 : 1;
-    int budgetViolations = budgetViolations(state);
+    UsageAccountingAudit usageAudit = usageAccountingAudit(root, state, result.usage());
+    int budgetViolations = usageAudit.violations();
     int recoveryViolations =
         recovery.providerCallReplays() + recovery.taskLosses() + recovery.stateDrifts();
 
@@ -99,6 +102,7 @@ final class DesktopOlympiadEvidenceExporter {
             state,
             calls,
             result,
+            usageAudit,
             Objects.requireNonNull(providerKeyLabels, "providerKeyLabels"),
             promptAudit,
             redactedConfigSnapshot);
@@ -129,7 +133,13 @@ final class DesktopOlympiadEvidenceExporter {
             "concurrency-metrics.json",
             "epochs.json",
             "recovery-evidence.json"));
-    issues.put("issue_013", observation(budgetViolations, "budget-usage.json", "budget-decisions.json"));
+    issues.put(
+        "issue_013",
+        observation(
+            budgetViolations,
+            "budget-usage.json",
+            "budget-decisions.json",
+            "usage-reconciliation.json"));
 
     JsonNode pricing = state.path("pricingSnapshot");
     String rootHash =
@@ -163,6 +173,7 @@ final class DesktopOlympiadEvidenceExporter {
       JsonNode state,
       List<ProviderCallRecord> calls,
       RunExecutionBackend.RunExecutionResult result,
+      UsageAccountingAudit usageAudit,
       Map<String, String> providerKeyLabels,
       OlympiadPromptTransportGuard.Audit promptAudit,
       String redactedConfigSnapshot) {
@@ -244,6 +255,7 @@ final class DesktopOlympiadEvidenceExporter {
     documents.put(
         "budget-usage.json",
         select(state, "usageTotals", "budgetReservations", "budgetUsage", "pricingSnapshot"));
+    documents.put("usage-reconciliation.json", usageAudit.evidence());
     documents.put("zero-gain.json", select(state, "zeroGain", "certifiedGains", "proofDebtHistory"));
     documents.put(
         "final-verification.json",
@@ -377,6 +389,139 @@ final class DesktopOlympiadEvidenceExporter {
       }
     }
     return violations;
+  }
+
+  static int budgetViolations(
+      JsonNode state, RunExecutionBackend.ExecutionUsage observedUsage) {
+    JsonNode checkpoint = Objects.requireNonNull(state, "state");
+    RunExecutionBackend.ExecutionUsage usage =
+        Objects.requireNonNull(observedUsage, "observedUsage");
+    int violations = budgetViolations(checkpoint);
+    if (!usageDominates(checkpoint.path("usageTotals"), usage)
+        || !usageCountersDominate(checkpoint.path("budgetUsage").path("committed"), usage)) {
+      violations++;
+    }
+    return violations;
+  }
+
+  static UsageAccountingAudit usageAccountingAudit(
+      Path runDirectory, JsonNode state, RunExecutionBackend.ExecutionUsage observedUsage) {
+    Path root = Objects.requireNonNull(runDirectory, "runDirectory").toAbsolutePath().normalize();
+    JsonNode checkpoint = Objects.requireNonNull(state, "state");
+    RunExecutionBackend.ExecutionUsage observed =
+        Objects.requireNonNull(observedUsage, "observedUsage");
+    UsageTotals checkpointUsage = usageTotals(checkpoint.path("usageTotals"));
+    UsageTotals terminalUsage =
+        new UsageTotals(
+            observed.providerCalls(),
+            observed.inputTokens(),
+            observed.outputTokens(),
+            observed.estimatedCostUsd(),
+            observed.latencyMs());
+    int violations = budgetViolations(checkpoint, observed);
+    boolean postCheckpointExtension = !sameUsage(checkpointUsage, terminalUsage);
+    String durableStatus;
+    int durableEvidenceCount = 0;
+    try {
+      DurableProviderUsageCollector.Result durable =
+          DurableProviderUsageCollector.collect(root, terminalUsage);
+      durableStatus = durable.status().name();
+      durableEvidenceCount = durable.evidence().size();
+      boolean durableConflict = durable.status().conflict();
+      boolean extensionBoundToRequests =
+          !postCheckpointExtension
+              || (durable.status() == DurableProviderUsageCollector.Status.DURABLE_EXTENSION
+                  && durableEvidenceCount > 0
+                  && sameUsage(durable.totals(), terminalUsage));
+      if (durableConflict || !extensionBoundToRequests) {
+        violations++;
+      }
+    } catch (IOException | RuntimeException ignored) {
+      durableStatus = "RECOVERY_FAILED";
+      violations++;
+    }
+    return new UsageAccountingAudit(
+        violations,
+        checkpointUsage,
+        terminalUsage,
+        durableStatus,
+        durableEvidenceCount);
+  }
+
+  private static boolean usageDominates(
+      JsonNode persisted, RunExecutionBackend.ExecutionUsage observed) {
+    return persisted.isObject()
+        && observed.providerCalls() >= persisted.path("calls").asLong(-1L)
+        && observed.inputTokens() >= persisted.path("inputTokens").asLong(-1L)
+        && observed.outputTokens() >= persisted.path("outputTokens").asLong(-1L)
+        && observed.estimatedCostUsd().compareTo(persisted.path("costUsd").decimalValue()) >= 0
+        && observed.latencyMs() >= persisted.path("latencyMs").asDouble(0.0d);
+  }
+
+  private static boolean usageCountersDominate(
+      JsonNode persisted, RunExecutionBackend.ExecutionUsage observed) {
+    // Budget commitments use the frozen pricing snapshot; actual provider cost lives in usageTotals.
+    return persisted.isObject()
+        && observed.providerCalls() >= persisted.path("calls").asLong(-1L)
+        && observed.inputTokens() >= persisted.path("inputTokens").asLong(-1L)
+        && observed.outputTokens() >= persisted.path("outputTokens").asLong(-1L);
+  }
+
+  private static UsageTotals usageTotals(JsonNode persisted) {
+    if (!persisted.isObject()) {
+      return UsageTotals.zero();
+    }
+    return new UsageTotals(
+        persisted.path("calls").asLong(0L),
+        persisted.path("inputTokens").asLong(0L),
+        persisted.path("outputTokens").asLong(0L),
+        persisted.path("costUsd").decimalValue(),
+        persisted.path("latencyMs").asDouble(0.0d));
+  }
+
+  private static boolean sameUsage(UsageTotals left, UsageTotals right) {
+    return left.calls() == right.calls()
+        && left.inputTokens() == right.inputTokens()
+        && left.outputTokens() == right.outputTokens()
+        && left.costUsd().compareTo(right.costUsd()) == 0
+        && Double.compare(left.latencyMs(), right.latencyMs()) == 0;
+  }
+
+  record UsageAccountingAudit(
+      int violations,
+      UsageTotals checkpointUsage,
+      UsageTotals terminalUsage,
+      String durableStatus,
+      int durableEvidenceCount) {
+    UsageAccountingAudit {
+      if (violations < 0 || durableEvidenceCount < 0) {
+        throw new IllegalArgumentException("usage audit counters must not be negative");
+      }
+      checkpointUsage = Objects.requireNonNull(checkpointUsage, "checkpointUsage");
+      terminalUsage = Objects.requireNonNull(terminalUsage, "terminalUsage");
+      durableStatus = required(durableStatus, "durable status");
+    }
+
+    Map<String, Object> evidence() {
+      Map<String, Object> result = new LinkedHashMap<>();
+      result.put("violation_count", violations);
+      result.put("semantic_checkpoint_usage", checkpointUsage);
+      result.put("terminal_usage", terminalUsage);
+      result.put(
+          "post_checkpoint_provider_calls",
+          Math.max(0L, terminalUsage.calls() - checkpointUsage.calls()));
+      result.put(
+          "post_checkpoint_input_tokens",
+          Math.max(0L, terminalUsage.inputTokens() - checkpointUsage.inputTokens()));
+      result.put(
+          "post_checkpoint_output_tokens",
+          Math.max(0L, terminalUsage.outputTokens() - checkpointUsage.outputTokens()));
+      BigDecimal costDelta = terminalUsage.costUsd().subtract(checkpointUsage.costUsd());
+      result.put("post_checkpoint_cost_usd", costDelta.max(BigDecimal.ZERO));
+      result.put("durable_reconciliation_status", durableStatus);
+      result.put("durable_provider_evidence_count", durableEvidenceCount);
+      return Map.copyOf(result);
+    }
   }
 
   private static String timestamp(Instant value) {

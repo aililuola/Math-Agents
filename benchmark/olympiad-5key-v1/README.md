@@ -29,15 +29,17 @@ released when the provider reports actual usage.
 
 | Tier | Calls | Rounds | Run tokens | Output tokens per call |
 | --- | ---: | ---: | ---: | ---: |
-| SMOKE | 24 | 6 | 624,000 | 10,000 |
-| CORE | 40 | 8 | 1,200,000 | 14,000 |
-| ADVANCED | 64 | 12 | 2,176,000 | 18,000 |
-| STRESS | 96 | 16 | 3,648,000 | 22,000 |
+| SMOKE | 24 | 6 | 1,152,000 | 32,000 |
+| CORE | 40 | 8 | 1,920,000 | 32,000 |
+| ADVANCED | 64 | 12 | 3,072,000 | 32,000 |
+| STRESS | 96 | 16 | 4,608,000 | 32,000 |
 
 Across all 34 isolated runs the immutable ceiling is 2,128 calls and
-74,112,000 tokens. At the frozen worst-case output price this is USD 64.47744,
-leaving more than USD 35 below the separately enforced USD 100 user cap. The
-hard overrun, settlement, authority, secret, and checkpoint gates remain
+102,144,000 tokens. At the frozen worst-case output price this is USD 88.86528,
+leaving USD 11.13472 below the separately enforced USD 100 user cap. Artifact
+recovery, post-failure recovery, and JSON repair share the same 32,000-token
+ceiling so a recovery call cannot silently fall back to a smaller envelope.
+The hard overrun, settlement, authority, secret, and checkpoint gates remain
 unchanged.
 
 The real run is deliberately excluded from ordinary test execution. After the

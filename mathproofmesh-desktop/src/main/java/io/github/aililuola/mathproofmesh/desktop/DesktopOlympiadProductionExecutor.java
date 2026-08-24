@@ -178,7 +178,9 @@ final class DesktopOlympiadProductionExecutor implements OlympiadBenchmarkHarnes
     budget.put("scale_budget_with_difficulty", false);
     capSurpriseBudgetToExploratoryCapacity(root, base, spec.tier().maximumCalls());
     capOutputEnvelopesToFrozenTier(root, spec);
-    ((ObjectNode) root.path("runtime")).put("save_raw_provider_responses", false);
+    ObjectNode runtime = (ObjectNode) root.path("runtime");
+    runtime.put("json_repair_max_output_tokens", benchmarkOutputTokenLimit(spec));
+    runtime.put("save_raw_provider_responses", false);
 
     List<String> labels = new ArrayList<>();
     labels.add(spec.coordinationKeyLabel());
@@ -226,6 +228,7 @@ final class DesktopOlympiadProductionExecutor implements OlympiadBenchmarkHarnes
     continuation.put(
         "max_output_tokens_per_segment",
         Math.min(continuation.path("max_output_tokens_per_segment").asInt(), outputLimit));
+    continuation.put("post_failure_bottleneck_max_output_tokens", outputLimit);
   }
 
   private static void capSurpriseBudgetToExploratoryCapacity(

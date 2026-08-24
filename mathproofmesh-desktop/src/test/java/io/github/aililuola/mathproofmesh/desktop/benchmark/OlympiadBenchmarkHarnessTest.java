@@ -101,10 +101,10 @@ final class OlympiadBenchmarkHarnessTest {
 
     assertEquals(34, estimate.runs());
     assertEquals(2_128L, estimate.maximumCalls());
-    assertEquals(74_112_000L, estimate.maximumTokens());
-    assertEquals(0, new BigDecimal("64.47744").compareTo(estimate.maximumCostUsd()));
+    assertEquals(102_144_000L, estimate.maximumTokens());
+    assertEquals(0, new BigDecimal("88.86528").compareTo(estimate.maximumCostUsd()));
     assertTrue(estimate.coveredBy(new BigDecimal("100")));
-    assertFalse(estimate.coveredBy(new BigDecimal("64")));
+    assertFalse(estimate.coveredBy(new BigDecimal("88")));
   }
 
   @Test

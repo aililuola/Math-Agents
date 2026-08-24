@@ -58,6 +58,8 @@ final class DesktopOlympiadProductionExecutorTest {
       assertEquals(spec.tier().maximumRounds(), configured.budget().maxRounds());
       assertEquals(spec.tier().maximumTokens(), configured.budget().maxTotalTokens());
       assertEquals(16_000, configured.budget().estimatedInputTokensPerCall());
+      assertEquals(32_000, perCallOutputLimit);
+      assertEquals(32_000, configured.runtime().jsonRepairMaxOutputTokens());
       assertTrue(
           configured.topology().inspiration().surpriseBudgetMinCalls() <= exploratoryCalls,
           () -> spec.identity() + " consumes the protected finalization reserve");
@@ -104,11 +106,11 @@ final class DesktopOlympiadProductionExecutorTest {
 
     assertEquals(40, configured.budget().maxTotalCalls());
     assertEquals(8, configured.budget().maxRounds());
-    assertEquals(1_200_000, configured.budget().maxTotalTokens());
+    assertEquals(1_920_000, configured.budget().maxTotalTokens());
     assertEquals(16_000, configured.budget().estimatedInputTokensPerCall());
     assertEquals(
         0,
-        new BigDecimal("1.044")
+        new BigDecimal("1.6704")
             .compareTo(BigDecimal.valueOf(configured.budget().maxCostUsd())));
     assertFalse(configured.budget().scaleBudgetWithDifficulty());
     assertFalse(configured.runtime().saveRawProviderResponses());

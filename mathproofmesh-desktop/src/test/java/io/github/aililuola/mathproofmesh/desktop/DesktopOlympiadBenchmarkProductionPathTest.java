@@ -66,9 +66,21 @@ final class DesktopOlympiadBenchmarkProductionPathTest {
             calls,
             new OlympiadBenchmarkHarness.RecoveryEvidence(0, 0, 0, "not-applicable", "not-applicable"),
             Instant.parse("2026-08-23T00:00:00Z"));
+    var checkpointState = ContractObjectMapper.parseTree(Files.readString(checkpoint));
 
     assertArrayEquals(before, Files.readAllBytes(checkpoint));
-    assertEquals(0, exported.hardViolationCount());
+    assertEquals(
+        0,
+        exported.hardViolationCount(),
+        () ->
+            "issues="
+                + exported.issueObservations()
+                + "; resultUsage="
+                + result.usage()
+                + "; checkpointUsage="
+                + checkpointState.path("usageTotals")
+                + "; checkpointCommitted="
+                + checkpointState.path("budgetUsage").path("committed"));
     assertEquals(exported.rootGoalHashInitial(), exported.rootGoalHashFinal());
     assertTrue(exported.evidenceDocuments().containsKey("provider-usage.ndjson"));
     assertTrue(exported.evidenceDocuments().containsKey("proof-graph.json"));
