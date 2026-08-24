@@ -904,6 +904,69 @@ secret leaks, and zero checksum failures as
 `MathProofMesh_olympiad-5key-v1_1bc5d0b313ad_20260824T190201Z.zip`; its SHA-256 is
 `2ba5370e7d8cd354b949c928e77fb9e31e5ba3ee6a2de49d250084cdda1d3fff`.
 
+### Unknown research-finding update isolation
+
+The next cold-start campaign from `03481b1`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T193101Z`, stopped on P01 run
+`p01-t1-20260824T193110Z-a3db0fa0`. Its seventh physical call was the optional strategy-portfolio
+replenishment. The nested `StrategySet` was otherwise usable, but the response also placed four
+model-local labels in `finding_updates.dispositions`: `candidate_lemma_identity`,
+`candidate_lemma_prime_valuation`, `exact_example_1`, and `next_micro_obligation_1`. These were
+not server-issued `research_finding_*` IDs. The strict Research Checkpoint Ledger correctly threw
+`IllegalArgumentException` rather than mutating unknown authority, but the Coordinator allowed
+that optional sidecar error to discard the valid structured result and stop the campaign.
+
+P01 stopped `INVALID` after seven calls, 26,555 input tokens, 53,703 output tokens, 80,258 total
+tokens, and USD 0.058273035. Its immutable Root Goal hash did not change, and no unknown finding,
+Claim, Fact, Negative Knowledge, route, or proof obligation received authority. The campaign was
+frozen and was never resumed.
+
+The new production-chain regression was run before the implementation change. It expected four
+stable rejection-audit events and observed zero because the first unknown ID escaped through
+`ResearchCheckpointLedger#requireFinding`. The repair keeps that protected Ledger unchanged.
+`ResearchFindingUpdateBoundary` now partitions optional model dispositions before the strict
+ledger transition: exact route-owned IDs retain their existing behavior; a campaign-owned
+`KEEP_ACTIVE` remains the existing no-op; a known cross-route mutation still fails closed; and an
+unknown ID is excluded and recorded as `reject_unknown_finding_update` with stable code
+`UNKNOWN_RESEARCH_FINDING_UPDATE`. The audit is idempotent across restore and grants no finding or
+mathematical authority. Worker-frontier merge carries the rejection audit while still applying
+the valid nested result.
+
+The structured-stage Prompt now requires exact, already supplied `research_finding_*` IDs and
+forbids local labels or same-response finding drafts in dispositions. This is guidance only; the
+deterministic production boundary remains authoritative.
+
+```text
+UNKNOWN RESEARCH FINDING UPDATE RECOVERY DIAGNOSTIC
+UNKNOWN_FINDING_UPDATES=4
+UNKNOWN_FINDING_UPDATE_REJECTIONS=4
+VALID_RESULT_APPLICATIONS=1
+PUBLIC_FINDINGS_PERSISTED=1
+UNKNOWN_FINDING_AUTHORITY_MUTATIONS=0
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+RESULT=PASS
+```
+
+The adjacent Core, Server, and Desktop matrix ran 18 tests with zero failures or errors, including
+research-ledger boundary validation, checkpointed Prompt policy, worker atomicity, campaign
+finding propagation, 20-round restore, and v7 migration. The protected-authority test also proves
+that the Issue-007-frozen `ResearchCheckpointLedger` remains byte-for-byte unchanged from its
+authority baseline.
+
+The first complete release retry detected that protected-file violation from the initial design;
+the Ledger extension was removed rather than weakening the protection test. The second retry ran
+all tests successfully but SpotBugs reported `SKIPPED_CLASS_TOO_BIG` after inline filtering pushed
+the Coordinator over its analysis limit, followed by cascading false findings. The boundary was
+extracted into its own production class; no SpotBugs rule was filtered or suppressed. A no-test
+reactor verify then reported zero findings in every module.
+
+The final `scripts/verify-all.ps1 -Offline` run completed with `FULL VERIFICATION: PASS`: 2,984
+tests (73 Contracts, 1,411 Core, 964 Server including PostgreSQL integration, 387 Desktop, and 149
+Compatibility) ran with zero failures or errors and six intentional skips. Docker/Testcontainers,
+PostgreSQL 18.4, all seven Flyway migrations, SpotBugs/FindSecBugs, coverage, security, source
+immutability, dependency, Temporal, and the unchanged Python Sidecar performance gate all passed.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

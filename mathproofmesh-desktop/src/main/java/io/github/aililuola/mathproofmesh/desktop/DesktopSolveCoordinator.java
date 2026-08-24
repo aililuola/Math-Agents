@@ -3475,7 +3475,7 @@ final class DesktopSolveCoordinator {
     Set<String> auditHashes =
         audit.stream().map(CanonicalJson::stableHash).collect(java.util.stream.Collectors.toSet());
     worker.audit().stream()
-        .filter(event -> changedFindings.contains(event.findingId()))
+        .filter(event -> ResearchFindingUpdateBoundary.mergeable(event, changedFindings))
         .filter(event -> !auditHashes.contains(CanonicalJson.stableHash(event)))
         .forEach(
             event ->
@@ -15315,8 +15315,14 @@ final class DesktopSolveCoordinator {
                   capture.providerCallId(),
                   capture.envelopeFrame()));
     }
-    staged.applyUpdates(
-        routeId, routeOwnedFindingUpdates(staged, routeId, capture.findingUpdates()));
+    staged =
+        ResearchFindingUpdateBoundary.apply(
+            staged,
+            routeId,
+            CAMPAIGN_RESEARCH_ROUTE_ID,
+            stage,
+            capture.providerCallId(),
+            capture.findingUpdates());
     ResearchWorkerContext worker = activeResearchWorker.get();
     if (worker == null) {
       researchCheckpoints = staged;
@@ -15342,31 +15348,6 @@ final class DesktopSolveCoordinator {
   private ResearchCheckpointLedger researchCheckpointLedger() {
     ResearchWorkerContext worker = activeResearchWorker.get();
     return worker == null ? researchCheckpoints : worker.researchCheckpoints;
-  }
-
-  private static ResearchFindingUpdateBatch routeOwnedFindingUpdates(
-      ResearchCheckpointLedger ledger, String routeId, ResearchFindingUpdateBatch batch) {
-    ResearchFindingUpdateBatch updates =
-        batch == null ? ResearchFindingUpdateBatch.empty() : batch;
-    List<io.github.aililuola.mathproofmesh.contract.ResearchFindingDisposition> routeOwned =
-        new ArrayList<>();
-    for (var disposition : updates.dispositions()) {
-      ResearchFindingRecord finding = ledger.finding(disposition.findingId());
-      if (finding.routeId().equals(routeId)) {
-        routeOwned.add(disposition);
-        continue;
-      }
-      if (finding.routeId().equals(CAMPAIGN_RESEARCH_ROUTE_ID)
-          && disposition.action() == ResearchFindingDispositionAction.KEEP_ACTIVE) {
-        continue;
-      }
-      throw new IllegalArgumentException(
-          "CROSS_ROUTE_FINDING_MUTATION_FORBIDDEN: "
-              + disposition.findingId()
-              + " is owned by "
-              + finding.routeId());
-    }
-    return new ResearchFindingUpdateBatch(routeOwned);
   }
 
   private static List<ResearchCheckpointRecord> append(

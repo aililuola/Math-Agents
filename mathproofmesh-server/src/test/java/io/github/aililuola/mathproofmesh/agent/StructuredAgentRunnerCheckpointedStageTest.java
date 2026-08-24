@@ -68,4 +68,15 @@ class StructuredAgentRunnerCheckpointedStageTest {
             "tool_replay",
             "experiment_codegen");
   }
+
+  @Test
+  void findingUpdateInstructionsRequirePreviouslyAssignedExactIds() {
+    String prompt = ResearchCheckpointRunnerTestSupport.prompt().promptBundle().user();
+
+    assertThat(prompt)
+        .contains("only an exact research_finding_* ID already supplied")
+        .contains("Never invent a finding ID or use a local label")
+        .contains("cannot be updated in the same response")
+        .contains("return an empty dispositions array");
+  }
 }

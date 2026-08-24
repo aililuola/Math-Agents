@@ -62,7 +62,12 @@ public final class ResearchCheckpointedPromptFactory {
                 + "must satisfy the original response contract exactly. An omitted finding remains "
                 + "active; do not silently discard it. ProofAttempt claim_semantic_context_bindings "
                 + "apply only to IDs declared in that attempt's proposed_lemmas; never repeat "
-                + "pre-existing Strategy critical Claim bindings there.")
+                + "pre-existing Strategy critical Claim bindings there. Each finding_updates "
+                + "disposition may reference only an exact research_finding_* ID already supplied "
+                + "in active_research_findings for this route. Never invent a finding ID or use a "
+                + "local label. Findings emitted in this response's public_checkpoint cannot be "
+                + "updated in the same response because their IDs are assigned after capture. If "
+                + "no existing finding needs a transition, return an empty dispositions array.")
             .strip();
     String user =
         (source.user()

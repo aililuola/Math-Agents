@@ -70,6 +70,7 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
     FINAL_JSON_OMISSION,
     NORMAL,
     TRUNCATED_RESULT,
+    UNKNOWN_FINDING_UPDATE,
     MULTI_ROUND
   }
 
@@ -641,6 +642,37 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
       }
       if (call == 1) {
         writeReasoningTrace(request);
+        if (scenario == Scenario.UNKNOWN_FINDING_UPDATE) {
+          return checkpointedResponse(
+              new InitialExplorationTurn(
+                  InitialExplorationAction.ABANDON,
+                  null,
+                  null,
+                  null,
+                  "The valid structured result remains usable after optional update rejection."),
+              new ResearchFindingUpdateBatch(
+                  List.of(
+                      new ResearchFindingDisposition(
+                          "candidate_lemma_identity",
+                          ResearchFindingDispositionAction.KEEP_ACTIVE,
+                          null,
+                          null),
+                      new ResearchFindingDisposition(
+                          "candidate_lemma_prime_valuation",
+                          ResearchFindingDispositionAction.KEEP_ACTIVE,
+                          null,
+                          null),
+                      new ResearchFindingDisposition(
+                          "exact_example_1",
+                          ResearchFindingDispositionAction.KEEP_ACTIVE,
+                          null,
+                          null),
+                      new ResearchFindingDisposition(
+                          "next_micro_obligation_1",
+                          ResearchFindingDispositionAction.KEEP_ACTIVE,
+                          null,
+                          null))));
+        }
         if (scenario == Scenario.BUDGET_EXHAUSTION) {
           ObjectNode metadata = JsonNodeFactory.instance.objectNode();
           metadata
