@@ -70,6 +70,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -177,6 +178,39 @@ final class DesktopLiveRunExecutionBackendTest {
             "final-review-reports.json")) {
       assertTrue(Files.isRegularFile(structured.resolve(projection)), projection);
     }
+  }
+
+  @Test
+  void blindFinalReviewReceivesTheCompleteAuditableProofBody() throws Exception {
+    Path runDirectory = temporaryDirectory.resolve("blind-proof-transport");
+    List<ProviderRequest> capturedRequests = new CopyOnWriteArrayList<>();
+
+    RunExecutionBackend.RunExecutionResult result =
+        backend(Mode.COMPLETED, capturedRequests)
+            .execute(
+                new SolveRequest("Prove that 1 + 1 = 2.", RUN_ID, null, PROFILE),
+                RUN_ID,
+                "trace-blind-proof-transport",
+                runDirectory,
+                sink(new ArrayList<>()));
+
+    assertEquals("completed", result.status());
+    List<String> blindProofTexts =
+        capturedRequests.stream()
+            .filter(request -> "BlindVerificationReport".equals(request.schemaName()))
+            .map(request -> sanitizedContext(request.messages().getLast().content()))
+            .map(context -> context.path("blind_review_packet").path("final_proof_text").asText())
+            .toList();
+    assertFalse(blindProofTexts.isEmpty());
+    assertTrue(
+        blindProofTexts.stream()
+            .allMatch(text -> text.contains("The target reduces to an elementary identity.")));
+    assertTrue(
+        blindProofTexts.stream()
+            .allMatch(text -> text.contains("This is the defining arithmetic reduction.")));
+    assertTrue(
+        blindProofTexts.stream()
+            .noneMatch(text -> text.equals(finalProof().answer())));
   }
 
   @Test
@@ -455,6 +489,11 @@ final class DesktopLiveRunExecutionBackendTest {
   }
 
   private DesktopLiveRunExecutionBackend backend(Mode mode) {
+    return backend(mode, new CopyOnWriteArrayList<>());
+  }
+
+  private DesktopLiveRunExecutionBackend backend(
+      Mode mode, List<ProviderRequest> capturedRequests) {
     Path project = projectRoot();
     DesktopRuntimeLocator locator = new DesktopRuntimeLocator(project, null);
     SystemConfig config = mockConfig(locator.loadProfile("proof-control-active.yaml"));
@@ -462,7 +501,8 @@ final class DesktopLiveRunExecutionBackendTest {
         new DesktopLiveRuntimeFactory.PreparedRuntime(PROFILE, config, Map.of(), false);
     DesktopLiveRuntimeFactory runtimes = mock(DesktopLiveRuntimeFactory.class);
     when(runtimes.prepare(eq(PROFILE), any(DesktopSettings.class))).thenReturn(prepared);
-    when(runtimes.openProviders(prepared)).thenAnswer(ignored -> providers(config, mode));
+    when(runtimes.openProviders(prepared))
+        .thenAnswer(ignored -> providers(config, mode, capturedRequests));
 
     DesktopPaths paths = DesktopTestSupport.paths(temporaryDirectory.resolve("desktop-data"));
     SettingsStore settings = new SettingsStore(paths.settingsFile(), DesktopTestSupport.MAPPER);
@@ -483,10 +523,12 @@ final class DesktopLiveRunExecutionBackendTest {
     };
   }
 
-  private static ProviderClientRegistry providers(SystemConfig config, Mode mode) {
+  private static ProviderClientRegistry providers(
+      SystemConfig config, Mode mode, List<ProviderRequest> capturedRequests) {
     AtomicLong requestIds = new AtomicLong();
     MockResponder responder =
         request -> {
+          capturedRequests.add(request);
           LLMResponse source = response(request, mode);
           return new LLMResponse(
               source.text(),

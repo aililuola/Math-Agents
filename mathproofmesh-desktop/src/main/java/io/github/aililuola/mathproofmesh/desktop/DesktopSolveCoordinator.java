@@ -5459,6 +5459,7 @@ final class DesktopSolveCoordinator {
         harvested.stream()
             .map(record -> rejectUnboundModernLocalClaim(route, record))
             .map(record -> rejectMismatchedBoundClaimStatement(route, record))
+            .map(record -> rejectInvalidClaimCourtVariableIdentity(route, record))
             .toList();
     checked.stream()
         .filter(record -> record.status() == AttemptArtifactStatus.UNCERTAIN)
@@ -5516,6 +5517,42 @@ final class DesktopSolveCoordinator {
         && !topology
             .mathNormalize(boundClaim.statement())
             .equals(topology.mathNormalize(statement));
+  }
+
+  private AttemptArtifactRecord rejectInvalidClaimCourtVariableIdentity(
+      RouteState route, AttemptArtifactRecord record) {
+    if (record.status() != AttemptArtifactStatus.HARVESTED
+        && record.status() != AttemptArtifactStatus.REVIEW_PENDING) {
+      return record;
+    }
+    String reason =
+        isolatableClaimCourtContextFailure(route, proofClaimForArtifact(record));
+    if (reason.isEmpty()) {
+      return record;
+    }
+    event(
+        "claim_context_rejected",
+        "claim_court",
+        record.authorAgentId(),
+        "blocked",
+        reason,
+        record.claimId());
+    return attemptArtifacts.markUncertain(record.artifactId(), reason);
+  }
+
+  private String isolatableClaimCourtContextFailure(RouteState route, ClaimCard claim) {
+    try {
+      claimCourtSemanticContext(route, claim);
+      return "";
+    } catch (IllegalArgumentException exception) {
+      String message = exception.getMessage() == null ? "" : exception.getMessage();
+      if (message.startsWith("MISSING_ATTEMPT_LOCAL_CLAIM_CONTEXT_BINDING:")
+          || message.startsWith("UNBOUND_CLAIM_COURT_QUANTIFIER:")
+          || message.startsWith("DUPLICATE_CLAIM_COURT_VARIABLE_BINDING:")) {
+        return message;
+      }
+      throw exception;
+    }
   }
 
   private ResearchWorkResultEnvelope executeClaimCourtCaseAgainstFrozenSnapshot(
@@ -6403,6 +6440,7 @@ final class DesktopSolveCoordinator {
                 claim ->
                     !mismatchesBoundCriticalClaim(
                         route, claim.claimId(), claim.statement()))
+            .filter(claim -> isolatableClaimCourtContextFailure(route, claim).isEmpty())
             .toList());
     List<AttemptArtifactRecord> harvested =
         new ArrayList<>(
@@ -12445,7 +12483,7 @@ final class DesktopSolveCoordinator {
     BlindReviewPacket blind =
         packets.build(
             frozenProblem,
-            finalProof.answer(),
+            finalProof,
             factPackets,
             List.of(),
             negativePackets,

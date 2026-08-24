@@ -641,6 +641,72 @@ secret leaks, and zero checksum failures as
 `MathProofMesh_olympiad-5key-v1_d4829d53ae2c_20260824T091823Z.zip`; its SHA-256 is
 `30cf19ef6001eeb27778d146295a396e2e85de3c0057648bbb625638e0aded5a`.
 
+### Complete blind-proof transport and invalid Claim-context isolation
+
+The next cold-start campaign from `f617b96`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T100153Z`, completed two runs before the hard
+stop. P01 reached synthesis and constructed a `FinalProof` containing 17 auditable proof steps,
+but final validation projected only `FinalProof.answer()` into `final_proof_text`. The independent
+blind reviewer therefore correctly rejected a short restatement of the theorem as containing no
+proof. P01 stopped `INCOMPLETE` after 35 calls and USD 0.273077340; its immutable root hash stayed
+`422cfd9130270941afe5978658df9217534cc98b4569939ada880d97818a1a7a`.
+
+P02 then exposed a separate local-artifact boundary. An attempt-local Claim declared four
+quantifiers but no corresponding variable bindings. The hard Claim Court compiler correctly
+raised `UNBOUND_CLAIM_COURT_QUANTIFIER`, but the exception stopped the whole run instead of
+quarantining only that invalid artifact. P02 stopped `INVALID` after 12 calls and USD 0.105640620;
+its immutable root hash stayed
+`6abfc35bd7e9e1ea68146ce4de07b32dd5a477379d632f8385557ca03d78abc4`.
+The frozen campaign recorded 47 calls and USD 0.378717960 in total and was never resumed.
+
+The two production-path regressions were run before the implementation change. The blind-review
+test failed because the captured `BlindVerificationReport` request contained only the final
+answer and omitted both the proof-step statement and justification. The Claim Court test failed
+with the real `UNBOUND_CLAIM_COURT_QUANTIFIER:tournament-T` stack through
+`freezeClaimForCourt`. Neither test uses a live provider.
+
+`BlindReviewPacketFactory` now accepts the complete typed `FinalProof` and deterministically
+renders an identity-free review body containing the answer, ordered proof steps, justifications,
+proof-step dependencies, calculations, declared dependencies, and caveats. It deliberately omits
+confidence, problem hash, source attempt IDs, route IDs, agents, and raw artifact references. The
+blind-review policy, independent reviewer, and pass criteria were not weakened.
+
+Before Claim Court dispatch, the Coordinator now applies the existing authoritative semantic-
+context compiler as a deterministic precheck. Missing modern local bindings, unbound quantified
+variables, and duplicate variable identities leave a durable `UNCERTAIN` Attempt Artifact but do
+not enter Lemma Memory, Claim Court, Fact Memory, or permanent Negative Knowledge. Unknown
+compiler failures still propagate fail closed. The existing strict compiler remains unchanged;
+the repair isolates invalid local input rather than inventing bindings or rewriting quantifiers.
+
+The expanded adjacent matrix ran 24 tests with zero failures, errors, or skips. During the first
+full release-gate run, the existing `DesktopUnboundLocalClaimFailsClosedTest` exposed the related
+missing-binding code path before the new Lemma Memory filter; that path was added to the same
+local quarantine boundary and the targeted five-test rerun passed:
+
+```text
+CLAIM COURT VARIABLE IDENTITY ISOLATION DIAGNOSTIC
+UNBOUND_QUANTIFIER_QUARANTINES=1
+UNBOUND_QUANTIFIER_COURT_CALLS=0
+UNBOUND_QUANTIFIER_FACT_LEAKS=0
+ROOT_HASH_CHANGES=0
+PERMANENT_NEGATIVE_HASH_CHANGES=0
+RESULT=PASS
+
+UNBOUND_MODERN_LOCAL_CLAIM_ADMISSIONS=0
+UNBOUND_MODERN_LOCAL_CLAIM_ROOT_FALLBACKS=0
+```
+
+The subsequent `scripts/verify-all.ps1 -Offline` rerun completed with
+`FULL VERIFICATION: PASS`: 2,971 tests ran with zero failures or errors and six intentional
+skips. Docker/Testcontainers and PostgreSQL integration, all Flyway migrations,
+SpotBugs/FindSecBugs, coverage, security, source immutability, dependency, Temporal, and the
+unchanged Python Sidecar performance gate all passed.
+
+The stopped campaign was packaged offline with zero provider calls during packaging, zero source-
+secret leaks, and zero checksum failures as
+`MathProofMesh_olympiad-5key-v1_f617b962be31_20260824T105815Z.zip`; its SHA-256 is
+`578aef0dcff38ae83734c7bd6bf881c0adbd3c7fe128d89985ffb23e86f163a7`.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

@@ -3,13 +3,33 @@ package io.github.aililuola.mathproofmesh.verification;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.aililuola.mathproofmesh.contract.BlindReviewPacket;
 import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
+import io.github.aililuola.mathproofmesh.contract.FinalProof;
 import io.github.aililuola.mathproofmesh.contract.ProblemContract;
+import io.github.aililuola.mathproofmesh.contract.ProofStep;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
 /** Builds the sole packet accepted by final blind reviewers. */
 public final class BlindReviewPacketFactory {
+
+  public BlindReviewPacket build(
+      ProblemContract problem,
+      FinalProof proof,
+      List<ObjectNode> factPackets,
+      List<String> missingFactRefs,
+      List<ObjectNode> negativeEvidence,
+      int negativeMaxItems,
+      int negativeCharBudget) {
+    return build(
+        problem,
+        renderProof(proof),
+        factPackets,
+        missingFactRefs,
+        negativeEvidence,
+        negativeMaxItems,
+        negativeCharBudget);
+  }
 
   public BlindReviewPacket build(
       ProblemContract problem,
@@ -101,6 +121,41 @@ public final class BlindReviewPacketFactory {
       return List.of();
     }
     return packets.stream().map(BlindReviewPolicy::sanitize).toList();
+  }
+
+  private static String renderProof(FinalProof proof) {
+    java.util.Objects.requireNonNull(proof, "proof");
+    StringBuilder rendered = new StringBuilder();
+    rendered.append("Final answer:\n").append(proof.answer()).append("\n\nProof steps:\n");
+    int ordinal = 1;
+    for (ProofStep step : proof.proofSteps()) {
+      rendered
+          .append(ordinal++)
+          .append(". [")
+          .append(step.stepId())
+          .append("] ")
+          .append(step.statement())
+          .append("\n   Justification: ")
+          .append(step.justification());
+      if (!step.dependencies().isEmpty()) {
+        rendered.append("\n   Depends on: ").append(String.join(", ", step.dependencies()));
+      }
+      if (!step.calculations().isEmpty()) {
+        rendered.append("\n   Calculations: ").append(String.join("; ", step.calculations()));
+      }
+      rendered.append('\n');
+    }
+    if (!proof.dependencies().isEmpty()) {
+      rendered.append("\nDeclared dependencies:\n- ")
+          .append(String.join("\n- ", proof.dependencies()))
+          .append('\n');
+    }
+    if (!proof.caveats().isEmpty()) {
+      rendered.append("\nCaveats:\n- ")
+          .append(String.join("\n- ", proof.caveats()))
+          .append('\n');
+    }
+    return rendered.toString().strip();
   }
 
   private static final class BlindProblemView {
