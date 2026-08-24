@@ -8,6 +8,7 @@ import io.github.aililuola.mathproofmesh.config.StrictYamlConfigLoader;
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
 import io.github.aililuola.mathproofmesh.contract.CriticalClaimContextBinding;
 import io.github.aililuola.mathproofmesh.contract.InitialExplorationTurn;
+import io.github.aililuola.mathproofmesh.contract.StrategySet;
 import io.github.aililuola.mathproofmesh.orchestration.BudgetBucket;
 import io.github.aililuola.mathproofmesh.orchestration.BudgetEnvelopeLedger;
 import io.github.aililuola.mathproofmesh.orchestration.BudgetEnvelopeStatus;
@@ -319,6 +320,80 @@ class StructuredAgentRunnerTest {
           .isInstanceOf(StructuredOutputError.class)
           .hasMessageContaining("strict contract");
       assertThat(providerCalls).hasValue(1);
+    }
+  }
+
+  @Test
+  void capturedStrategyRelationPolarityLabelsNormalizeBeforeAnotherProviderRepair() {
+    AtomicInteger providerCalls = new AtomicInteger();
+    String responseText =
+        strategySetWithPolarities("identity", "nonnegative_inequality");
+    try (Fixture fixture =
+        fixture(
+            "run-strategy-polarity-alias",
+            request -> {
+              providerCalls.incrementAndGet();
+              return response(responseText);
+            },
+            new CallLedger(2, null, BigDecimal.TEN),
+            List.of(),
+            0)) {
+      StructuredCallResult<StrategySet> result =
+          fixture
+              .runner()
+              .call(
+                  "run-strategy-polarity-alias",
+                  "strategy-polarity",
+                  "general",
+                  strategySetBundle(),
+                  fixture.pool().get("agent-a"),
+                  "breadth");
+
+      assertThat(providerCalls).hasValue(1);
+      assertThat(result.repaired()).isTrue();
+      assertThat(
+              result.value().strategies().getFirst().criticalClaimContextBindings())
+          .extracting(CriticalClaimContextBinding::polarity)
+          .containsExactly("positive", "positive");
+    }
+  }
+
+  @Test
+  void strategyRepairPromptStatesTheBinaryPolarityContract() {
+    AtomicInteger providerCalls = new AtomicInteger();
+    AtomicReference<ProviderRequest> repairRequest = new AtomicReference<>();
+    MockResponder responder =
+        request -> {
+          if (providerCalls.incrementAndGet() == 1) {
+            return response(strategySetWithPolarities("relation_type", "positive"));
+          }
+          repairRequest.set(request);
+          return response(strategySetWithPolarities("positive", "positive"));
+        };
+    try (Fixture fixture =
+        fixture(
+            "run-strategy-polarity-prompt",
+            responder,
+            new CallLedger(3, null, BigDecimal.TEN),
+            List.of(),
+            1)) {
+      StructuredCallResult<StrategySet> result =
+          fixture
+              .runner()
+              .call(
+                  "run-strategy-polarity-prompt",
+                  "strategy-polarity",
+                  "general",
+                  strategySetBundle(),
+                  fixture.pool().get("agent-a"),
+                  "breadth");
+
+      assertThat(providerCalls).hasValue(2);
+      assertThat(result.value().strategies()).hasSize(1);
+      assertThat(repairRequest.get().messages().getLast().content())
+          .contains(
+              "polarity accepts only positive or negative",
+              "relation name in polarity");
     }
   }
 
@@ -979,6 +1054,59 @@ class StructuredAgentRunnerTest {
         4096,
         false,
         null);
+  }
+
+  private static PromptBundle<StrategySet> strategySetBundle() {
+    return new PromptBundle<>(
+        "strategy_generation",
+        "Return one strict strategy set.",
+        "public strategy task",
+        StrategySet.class,
+        0.0d,
+        4096,
+        false,
+        null);
+  }
+
+  private static String strategySetWithPolarities(String first, String second) {
+    return """
+        {
+          "coverage_notes":"One exact mechanism is represented.",
+          "strategies":[
+            {
+              "strategy_id":"S-polarity",
+              "title":"Exact relation route",
+              "core_idea":"Prove the required exact relations.",
+              "bottleneck":"Establish both relations.",
+              "estimated_success":0.7,
+              "falsification_test":"Search for a bounded counterexample.",
+              "independence_basis":"Uses one exact algebraic mechanism.",
+              "critical_claim_context_bindings":[
+                {
+                  "claim_id":"claim-identity",
+                  "claim_blueprint_node_id":"@claim",
+                  "local_assumption_node_ids":[],
+                  "local_assumptions":[],
+                  "quantifiers":[],
+                  "variable_bindings":[],
+                  "scope_limitations":[],
+                  "polarity":"%s"
+                },
+                {
+                  "claim_id":"claim-inequality",
+                  "claim_blueprint_node_id":"@claim",
+                  "local_assumption_node_ids":[],
+                  "local_assumptions":[],
+                  "quantifiers":[],
+                  "variable_bindings":[],
+                  "scope_limitations":[],
+                  "polarity":"%s"
+                }
+              ]
+            }
+          ]
+        }
+        """.formatted(first, second);
   }
 
   private static LLMResponse response(String text) {

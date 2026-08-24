@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 public final class StructuredPayloadNormalizer {
@@ -33,6 +34,39 @@ public final class StructuredPayloadNormalizer {
           "lean_check");
   private static final Set<String> TURN_ENVELOPE_METADATA =
       Set.of("agent_id", "path_id", "problem_hash", "strategy_id", "usage");
+  private static final Set<String> AFFIRMATIVE_STRATEGY_POLARITY_ALIASES =
+      Set.of(
+          "identity",
+          "equality",
+          "equation",
+          "equivalence",
+          "equivalent",
+          "iff",
+          "if_and_only_if",
+          "derived_inequality",
+          "inequality",
+          "nonnegative",
+          "non_negative",
+          "nonnegative_inequality",
+          "non_negative_inequality",
+          "necessary_and_sufficient",
+          "sufficient_and_necessary",
+          "global_maximum",
+          "global_minimum",
+          "unique_solution",
+          "uniqueness",
+          "恒等式",
+          "等式",
+          "等价性",
+          "充分必要条件",
+          "必要充分条件",
+          "不等式",
+          "非负",
+          "非负不等式",
+          "非负且等式条件",
+          "全局最大值",
+          "全局最小值",
+          "唯一解");
 
   private StructuredPayloadNormalizer() {}
 
@@ -59,6 +93,7 @@ public final class StructuredPayloadNormalizer {
     normalizeAttemptClaimContextBindings(payload, "$", actions);
     normalizeOptionalCandidateConjectures(payload, modelName, actions);
     if ("StrategySet".equals(modelName)) {
+      normalizeStrategyClaimContextPolarities(payload, actions);
       normalizeOptionalStrategyCalculationChecks(payload, actions);
     }
     if ("ToolAuditReport".equals(modelName)) {
@@ -393,6 +428,48 @@ public final class StructuredPayloadNormalizer {
                 + "] because it is not a valid typed ToolRequest");
       }
     }
+  }
+
+  private static void normalizeStrategyClaimContextPolarities(
+      ObjectNode payload, List<String> actions) {
+    if (!(payload.get("strategies") instanceof ArrayNode strategies)) {
+      return;
+    }
+    for (int strategyIndex = 0; strategyIndex < strategies.size(); strategyIndex++) {
+      if (!(strategies.get(strategyIndex) instanceof ObjectNode strategy)
+          || !(strategy.get("critical_claim_context_bindings") instanceof ArrayNode bindings)) {
+        continue;
+      }
+      for (int bindingIndex = 0; bindingIndex < bindings.size(); bindingIndex++) {
+        if (!(bindings.get(bindingIndex) instanceof ObjectNode binding)) {
+          continue;
+        }
+        String polarity = textOrNull(binding.get("polarity"));
+        if (polarity == null
+            || "positive".equals(polarity)
+            || "negative".equals(polarity)
+            || !AFFIRMATIVE_STRATEGY_POLARITY_ALIASES.contains(normalizeAlias(polarity))) {
+          continue;
+        }
+        binding.put("polarity", "positive");
+        actions.add(
+            "canonicalized $.strategies["
+                + strategyIndex
+                + "].critical_claim_context_bindings["
+                + bindingIndex
+                + "].polarity "
+                + polarity
+                + " to positive");
+      }
+    }
+  }
+
+  private static String normalizeAlias(String value) {
+    return value
+        .strip()
+        .toLowerCase(Locale.ROOT)
+        .replace(' ', '_')
+        .replace('-', '_');
   }
 
   private static boolean validToolRequest(JsonNode value) {

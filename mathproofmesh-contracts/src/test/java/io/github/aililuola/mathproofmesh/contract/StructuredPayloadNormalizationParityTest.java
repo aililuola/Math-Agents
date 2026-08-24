@@ -280,6 +280,73 @@ class StructuredPayloadNormalizationParityTest {
   }
 
   @Test
+  void canonicalizesOnlyClosedAffirmativeStrategyPolarityLabels() {
+    List<String> aliases =
+        List.of(
+            "identity",
+            "nonnegative_inequality",
+            "equivalence",
+            "iff",
+            "derived_inequality",
+            "global_maximum",
+            "unique_solution",
+            "恒等式",
+            "非负不等式",
+            "等价性",
+            "充分必要条件",
+            "全局最大值",
+            "唯一解");
+
+    for (String alias : aliases) {
+      ObjectNode payload = strategyPolarityPayload(alias);
+
+      List<String> actions = StructuredPayloadNormalizer.normalize(payload, StrategySet.class);
+      CriticalClaimContextBinding binding =
+          ContractObjectMapper.read(payload, StrategySet.class)
+              .strategies()
+              .getFirst()
+              .criticalClaimContextBindings()
+              .getFirst();
+
+      assertEquals("positive", binding.polarity(), alias);
+      assertTrue(
+          actions.stream()
+              .anyMatch(
+                  action ->
+                      action.contains("critical_claim_context_bindings[0].polarity")
+                          && action.contains(alias)
+                          && action.endsWith("to positive")),
+          alias);
+    }
+  }
+
+  @Test
+  void preservesBinaryStrategyPolarityAndRejectsUnknownNarrative() {
+    for (String polarity : List.of("positive", "negative")) {
+      ObjectNode payload = strategyPolarityPayload(polarity);
+
+      List<String> actions = StructuredPayloadNormalizer.normalize(payload, StrategySet.class);
+      CriticalClaimContextBinding binding =
+          ContractObjectMapper.read(payload, StrategySet.class)
+              .strategies()
+              .getFirst()
+              .criticalClaimContextBindings()
+              .getFirst();
+
+      assertEquals(polarity, binding.polarity());
+      assertTrue(actions.stream().noneMatch(action -> action.contains(".polarity")));
+    }
+
+    ObjectNode ambiguous = strategyPolarityPayload("probably an equality");
+    List<String> actions = StructuredPayloadNormalizer.normalize(ambiguous, StrategySet.class);
+
+    assertTrue(actions.stream().noneMatch(action -> action.contains(".polarity")));
+    assertThrows(
+        ContractValidationException.class,
+        () -> ContractObjectMapper.read(ambiguous, StrategySet.class));
+  }
+
+  @Test
   void dropsInvalidOptionalStrategyChecksButPreservesSandboxComputationHints() {
     ObjectNode payload =
         object(
@@ -721,6 +788,47 @@ class StructuredPayloadNormalizationParityTest {
           "polarity":"positive"
         }
         """);
+  }
+
+  private static ObjectNode strategyPolarityPayload(String polarity) {
+    ObjectNode payload =
+        object(
+            """
+            {
+              "coverage_notes":"One auditable mechanism is represented.",
+              "strategies":[
+                {
+                  "strategy_id":"S-polarity",
+                  "title":"Exact relation route",
+                  "core_idea":"Prove one exact local relation.",
+                  "bottleneck":"Establish the required relation.",
+                  "estimated_success":0.7,
+                  "falsification_test":"Search for a bounded counterexample.",
+                  "independence_basis":"Uses a distinct exact relation.",
+                  "critical_claim_context_bindings":[
+                    {
+                      "claim_id":"claim-relation",
+                      "claim_blueprint_node_id":"@claim",
+                      "local_assumption_node_ids":[],
+                      "local_assumptions":[],
+                      "quantifiers":[],
+                      "variable_bindings":[],
+                      "scope_limitations":[],
+                      "polarity":"positive"
+                    }
+                  ]
+                }
+              ]
+            }
+            """);
+    ((ObjectNode)
+            payload
+                .path("strategies")
+                .get(0)
+                .path("critical_claim_context_bindings")
+                .get(0))
+        .put("polarity", polarity);
+    return payload;
   }
 
   private static ObjectNode quantifier(ObjectNode payload) {

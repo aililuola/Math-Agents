@@ -748,6 +748,49 @@ secret leaks, and zero checksum failures as
 `MathProofMesh_olympiad-5key-v1_563663959e79_20260824T120823Z.zip`; its SHA-256 is
 `8eb2d196ee77bfe00fbf3dec1fe52da27ded1b781e9b3487fbde2df965bc8055`.
 
+### Closed affirmative polarity normalization in strategy recovery
+
+The next cold-start campaign from `49a5061`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T134231Z`, completed P01 and P02 as
+`INCOMPLETE` before P03 stopped the campaign. P03's initial strategy response reached the
+32,000-token output limit with unterminated JSON. General repair produced a complete payload but
+placed relation categories such as `identity`, `equivalence`, `derived_inequality`,
+`nonnegative_inequality`, `global_maximum`, and `unique_solution` in the binary
+`critical_claim_context_bindings[].polarity` field. Nested result repair translated some labels
+but kept the same invalid representation. Strict validation correctly rejected the payload with
+an unsupported polarity literal. P03 stopped `INVALID` after four calls and USD 0.058068150; its
+immutable root hash remained
+`edfebe22a6b9c907c98998c9e37988da3e1d1664fb518c7541fabfdf3707d5f8`.
+The frozen campaign recorded 74 calls and USD 0.812405565 in total and was never resumed.
+
+`StructuredPayloadNormalizer` now canonicalizes only a closed, field-specific set of clearly
+affirmative relation-category aliases to `positive`, and only inside Strategy critical-Claim
+context bindings. Exact `positive` and `negative` values are preserved. Unknown or narrative
+values remain untouched and therefore still fail strict contract validation. The implementation
+does not infer polarity from arbitrary prose, rewrite statements, change assumptions, or grant
+Claim or Fact authority. The repair prompt also states the existing binary polarity contract so a
+bounded provider repair is less likely to repeat the representation error.
+
+The new Contracts regression failed before the production change with
+`ContractValidationException: polarity has an unsupported literal: identity`. After the repair,
+the focused Contracts and Server matrix ran 38 tests, and the adjacent Contracts, Server, and
+Desktop recovery/authority matrix ran 46 tests, all with zero failures or errors. A first static-
+analysis pass rejected a broad Unicode-normalization implementation. That implementation was
+removed rather than suppressed; the final code uses no SpotBugs exemption and keeps the alias set
+exact and closed.
+
+The final `scripts/verify-all.ps1 -Offline` run completed with `FULL VERIFICATION: PASS`: 2,980
+tests (73 Contracts, 1,411 Core, 963 Server including PostgreSQL integration, 384 Desktop, and 149
+Compatibility) ran with zero failures or errors and six intentional skips. Adjusted Contracts
+branch coverage was 85.545194 percent. Docker/Testcontainers, all Flyway migrations,
+SpotBugs/FindSecBugs, coverage, security, source immutability, dependency, Temporal, and the
+unchanged Python Sidecar performance gate all passed.
+
+The stopped campaign was packaged offline with zero provider calls during packaging, zero source-
+secret leaks, and zero checksum failures as
+`MathProofMesh_olympiad-5key-v1_49a50614f263_20260824T153811Z.zip`; its SHA-256 is
+`f6d224a8bdf4e11b4556927f3cc230ca7e578176427a0dc3488dbc2ae06be850`.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

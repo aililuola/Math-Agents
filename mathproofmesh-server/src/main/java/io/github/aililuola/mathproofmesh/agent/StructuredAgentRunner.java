@@ -1268,7 +1268,9 @@ public final class StructuredAgentRunner {
               + " calculation_checks accepts only typed ToolRequest kinds from the schema. "
               + "sandboxed_python is a ComputationHint or later ExperimentSpec method, never a "
               + "ToolRequest.kind; omit an invalid optional calculation check rather than changing "
-              + "its mathematical purpose.";
+              + "its mathematical purpose. critical_claim_context_bindings polarity accepts only "
+              + "positive or negative; use positive for an asserted identity, equality, equivalence, "
+              + "inequality, extremum, or uniqueness, and never put a relation name in polarity.";
       case "InitialExplorationTurn" ->
           common
               + " The action is a strict tagged union. request_computation requires exactly one "
