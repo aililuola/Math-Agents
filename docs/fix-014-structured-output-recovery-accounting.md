@@ -288,6 +288,49 @@ The stopped campaign was packaged without another provider call as
 `MathProofMesh_olympiad-5key-v1_61e0bdf40c3d_20260824T024519Z.zip`; its SHA-256 is
 `251c91a405ddcddd69a2ae0eb26b758f80a7bf06c632c39360361ab6483a98ff`.
 
+### Final blind-review root binding
+
+The cold-start campaign from `2c0329a012b0067e71fbf9313ac3da57d7f7e578`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T030907Z`, proved that the initial-route budget
+repair reached real research. `P01/T1` admitted four mechanisms, explored isolated routes, passed
+independent route review and Claim Court, closed the main goal, and synthesized a complete proof.
+Its structural final reviewer passed with intact problem authority.
+
+The run still ended `INCOMPLETE` because both `BLIND_SAME_MODEL` and `ADVERSARIAL_BLIND` were
+rejected locally before network transport with `benchmark provider prompt has no exact root
+statement`. Their shared `finalBlindReviewContext` contained the sanitized blind packet, including
+its problem, but omitted the top-level `immutable_problem` contract required by the Benchmark
+transport guard. This was deterministic prompt construction drift, not a mathematical rejection.
+The campaign was stopped while P02 was beginning strategy generation and was never resumed.
+
+The production fix projects the already sanitized blind problem view into top-level
+`immutable_problem`, binds `problem_hash`, and leaves the independently sanitized blind packet
+unchanged. It does not expose the full `ProblemContract`, semantic sidecars, reviewer identity, or
+other blind-review forbidden metadata.
+
+Before the production change, the real production-path regression observed two final blind
+prompts and two missing root bindings. After repair, the focused production, transport-guard, and
+20-round root-goal regression matrix passed five tests:
+
+```text
+OLYMPIAD FINAL VALIDATION ROOT PROMPT DIAGNOSTIC
+FINAL_BLIND_PROMPTS=2
+FINAL_BLIND_ROOT_BINDING_FAILURES=0
+RESULT=PASS
+```
+
+The subsequent `scripts/verify-all.ps1 -Offline` run completed with
+`FULL VERIFICATION: PASS`. It ran 2,953 tests (65 Contracts, 1,408 Core, 956 Server including
+PostgreSQL integration, 375 Desktop, and 149 Compatibility) with zero failures or errors and six
+intentional skips. SpotBugs analyzed all 168 Desktop classes with zero findings; coverage,
+security, source immutability, dependency, Temporal, and unchanged Python Sidecar performance
+gates all passed.
+
+The stopped campaign was packaged offline with zero provider calls, zero source-secret leaks, and
+zero checksum failures as
+`MathProofMesh_olympiad-5key-v1_2c0329a012b0_20260824T034301Z.zip`; its SHA-256 is
+`1a55f17060b299a4d57085cc29d7711e09d4c5604dea422f35392407f8ce9baf`.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

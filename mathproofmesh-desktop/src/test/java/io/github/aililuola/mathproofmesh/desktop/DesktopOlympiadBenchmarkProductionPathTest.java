@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import io.github.aililuola.mathproofmesh.api.RunExecutionBackend;
 import io.github.aililuola.mathproofmesh.api.SolveRequest;
 import io.github.aililuola.mathproofmesh.api.ReasoningTraceStore;
@@ -50,7 +51,8 @@ final class DesktopOlympiadBenchmarkProductionPathTest {
   @Test
   void exportsSanitizedEvidenceWithoutMutatingTheAuthoritativeCheckpoint() throws Exception {
     InMemoryProviderCallRepository calls = new InMemoryProviderCallRepository();
-    Fixture fixture = fixture(calls, DesktopDurableBoundaryObserver.none());
+    ProviderProbe probe = new ProviderProbe();
+    Fixture fixture = fixture(calls, DesktopDurableBoundaryObserver.none(), probe);
     Path runDirectory = temporaryDirectory.resolve("export-run");
     RunExecutionBackend.RunExecutionResult result =
         fixture.backend().execute(request(), RUN_ID, "trace-export", runDirectory, sink());
@@ -85,6 +87,15 @@ final class DesktopOlympiadBenchmarkProductionPathTest {
     assertTrue(exported.evidenceDocuments().containsKey("provider-usage.ndjson"));
     assertTrue(exported.evidenceDocuments().containsKey("proof-graph.json"));
     assertTrue(exported.evidenceDocuments().containsKey("budget-usage.json"));
+    assertEquals(2L, probe.finalBlindPrompts());
+    assertEquals(0L, probe.finalBlindRootBindingFailures());
+
+    System.out.println("OLYMPIAD FINAL VALIDATION ROOT PROMPT DIAGNOSTIC");
+    System.out.println("FINAL_BLIND_PROMPTS=" + probe.finalBlindPrompts());
+    System.out.println(
+        "FINAL_BLIND_ROOT_BINDING_FAILURES=" + probe.finalBlindRootBindingFailures());
+    System.out.println(
+        "RESULT=" + (probe.finalBlindRootBindingFailures() == 0L ? "PASS" : "FAIL"));
   }
 
   @Test
@@ -248,6 +259,7 @@ final class DesktopOlympiadBenchmarkProductionPathTest {
             OlympiadPromptPolicy.validateProviderPayload(
                 providerPayload, EXPECTED_PROBLEM, false);
           }
+          probe.recordPrompt(request, providerPayload);
           long requestId = probe.recordPhysicalCall();
           LLMResponse source =
               DesktopLiveRunExecutionBackendTest.response(
@@ -355,6 +367,20 @@ final class DesktopOlympiadBenchmarkProductionPathTest {
 
   private static final class ProviderProbe {
     private final AtomicLong physicalCalls = new AtomicLong();
+    private final AtomicLong finalBlindPrompts = new AtomicLong();
+    private final AtomicLong finalBlindRootBindingFailures = new AtomicLong();
+
+    private void recordPrompt(ProviderRequest request, String providerPayload) {
+      if (!"BlindVerificationReport".equals(request.schemaName())) {
+        return;
+      }
+      finalBlindPrompts.incrementAndGet();
+      JsonNode context = sanitizedContext(providerPayload);
+      if (!PROBLEM.equals(
+          context.path("immutable_problem").path("exact_statement").asText())) {
+        finalBlindRootBindingFailures.incrementAndGet();
+      }
+    }
 
     private long recordPhysicalCall() {
       return physicalCalls.incrementAndGet();
@@ -363,6 +389,26 @@ final class DesktopOlympiadBenchmarkProductionPathTest {
     private long physicalCalls() {
       return physicalCalls.get();
     }
+
+    private long finalBlindPrompts() {
+      return finalBlindPrompts.get();
+    }
+
+    private long finalBlindRootBindingFailures() {
+      return finalBlindRootBindingFailures.get();
+    }
+  }
+
+  private static JsonNode sanitizedContext(String prompt) {
+    String startMarker = "SANITIZED CONTEXT:\n";
+    String endMarker = "\n\nOUTPUT LANGUAGE:";
+    int start = prompt.indexOf(startMarker);
+    int end = start < 0 ? -1 : prompt.indexOf(endMarker, start + startMarker.length());
+    if (start < 0 || end < 0) {
+      return ContractObjectMapper.parseTree("{}");
+    }
+    return ContractObjectMapper.parseTree(
+        prompt.substring(start + startMarker.length(), end));
   }
 
   private static final class ControlledStop extends Error {

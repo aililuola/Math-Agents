@@ -12691,8 +12691,11 @@ final class DesktopSolveCoordinator {
       BlindReviewPacket blind,
       BlindReviewPacketFactory packets,
       AgentRuntime synthesizer) {
+    ObjectNode reviewerPayload = packets.reviewerPayload(blind);
     Map<String, Object> context = new LinkedHashMap<>();
-    context.put("blind_review_packet", packets.reviewerPayload(blind));
+    context.put("immutable_problem", reviewerPayload.path("problem").deepCopy());
+    context.put("problem_hash", problemHash);
+    context.put("blind_review_packet", reviewerPayload);
     context.put("validation_level", level.name());
     context.put("required_target_id", "final-proof");
     context.put("required_target_type", "final_proof");
