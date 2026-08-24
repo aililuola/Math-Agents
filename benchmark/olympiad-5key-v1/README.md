@@ -36,18 +36,24 @@ released when the provider reports actual usage.
 
 | Tier | Calls | Rounds | Run tokens | Output tokens per call |
 | --- | ---: | ---: | ---: | ---: |
-| SMOKE | 24 | 6 | 1,152,000 | 32,000 |
-| CORE | 40 | 8 | 1,920,000 | 32,000 |
+| SMOKE | 48 | 6 | 2,304,000 | 32,000 |
+| CORE | 48 | 8 | 2,304,000 | 32,000 |
 | ADVANCED | 64 | 12 | 3,072,000 | 32,000 |
 | STRESS | 96 | 16 | 4,608,000 | 32,000 |
 
-Across all 34 isolated runs the immutable ceiling is 2,128 calls and
-102,144,000 tokens. At the frozen worst-case output price this is USD 88.86528,
-leaving USD 11.13472 below the separately enforced USD 100 user cap. Artifact
+Across all 34 isolated runs the immutable ceiling is 2,304 calls and
+110,592,000 tokens. At the frozen worst-case output price this is USD 96.21504,
+leaving USD 3.78496 below the separately enforced USD 100 user cap. Artifact
 recovery, post-failure recovery, and JSON repair share the same 32,000-token
 ceiling so a recovery call cannot silently fall back to a smaller envelope.
 The hard overrun, settlement, authority, secret, and checkpoint gates remain
 unchanged.
+
+Before any provider call, every tier is also checked against the full bounded
+pre-route admission fan-out, three initial route exploration envelopes, and the
+protected finalization reserve. An incompatible tier fails with
+`BENCHMARK_INITIAL_EXPLORATION_ENVELOPE_EXHAUSTED` instead of spending calls and
+stopping before the ready queue.
 
 The real run is deliberately excluded from ordinary test execution. After the
 seven required environment variables have been injected into the launching

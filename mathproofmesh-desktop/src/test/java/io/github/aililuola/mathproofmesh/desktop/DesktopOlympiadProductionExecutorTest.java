@@ -2,9 +2,12 @@ package io.github.aililuola.mathproofmesh.desktop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
+import io.github.aililuola.mathproofmesh.contract.ContractObjectMapper;
 import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadBenchmarkPlan;
 import io.github.aililuola.mathproofmesh.orchestration.BudgetResourceVector;
 import io.github.aililuola.mathproofmesh.orchestration.PricingSnapshot;
@@ -12,6 +15,33 @@ import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
 
 final class DesktopOlympiadProductionExecutorTest {
+  @Test
+  void rejectsAPlanThatCannotReachItsInitialResearchQueue() {
+    DesktopRuntimeLocator locator =
+        new DesktopRuntimeLocator(DesktopLiveRunExecutionBackendTest.projectRoot(), null);
+    SystemConfig base = locator.loadProfile("deepseek-v4-pro.yaml");
+    PricingSnapshot pricing = new DesktopBudgetRuntime("benchmark-test", base).pricing();
+    OlympiadBenchmarkPlan.RunSpec smoke = OlympiadBenchmarkPlan.fullSchedule().getFirst();
+    SystemConfig configured =
+        DesktopOlympiadProductionExecutor.benchmarkConfig(base, smoke, pricing);
+    ObjectNode root = (ObjectNode) ContractObjectMapper.toTree(configured);
+    ObjectNode budget = (ObjectNode) root.path("budget");
+    budget.put("max_total_calls", 24);
+    budget.put("max_total_tokens", 1_152_000);
+    budget.put("max_cost_usd", 1.00224d);
+    SystemConfig undersized = ContractObjectMapper.read(root, SystemConfig.class);
+
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                DesktopOlympiadProductionExecutor.requireInitialExplorationCapacity(
+                    undersized, smoke, pricing));
+
+    assertEquals(
+        "BENCHMARK_INITIAL_EXPLORATION_ENVELOPE_EXHAUSTED", failure.getMessage());
+  }
+
   @Test
   void validatesEveryFrozenTierWithoutConsumingProtectedFinalizationReserve() {
     DesktopRuntimeLocator locator =
@@ -104,13 +134,13 @@ final class DesktopOlympiadProductionExecutorTest {
     SystemConfig configured =
         DesktopOlympiadProductionExecutor.benchmarkConfig(base, p09, pricing);
 
-    assertEquals(40, configured.budget().maxTotalCalls());
+    assertEquals(48, configured.budget().maxTotalCalls());
     assertEquals(8, configured.budget().maxRounds());
-    assertEquals(1_920_000, configured.budget().maxTotalTokens());
+    assertEquals(2_304_000, configured.budget().maxTotalTokens());
     assertEquals(16_000, configured.budget().estimatedInputTokensPerCall());
     assertEquals(
         0,
-        new BigDecimal("1.6704")
+        new BigDecimal("2.00448")
             .compareTo(BigDecimal.valueOf(configured.budget().maxCostUsd())));
     assertFalse(configured.budget().scaleBudgetWithDifficulty());
     assertFalse(configured.runtime().saveRawProviderResponses());

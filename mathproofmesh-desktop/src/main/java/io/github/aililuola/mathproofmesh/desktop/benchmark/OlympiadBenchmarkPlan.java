@@ -163,8 +163,8 @@ public final class OlympiadBenchmarkPlan {
   }
 
   public enum Tier {
-    SMOKE(24, 6, 1_152_000),
-    CORE(40, 8, 1_920_000),
+    SMOKE(48, 6, 2_304_000),
+    CORE(48, 8, 2_304_000),
     ADVANCED(64, 12, 3_072_000),
     STRESS(96, 16, 4_608_000);
 

@@ -14,6 +14,7 @@ import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadBenchmarkCost
 import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadBenchmarkHarness;
 import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadBenchmarkPlan;
 import io.github.aililuola.mathproofmesh.desktop.benchmark.OlympiadPromptTransportGuard;
+import io.github.aililuola.mathproofmesh.orchestration.BudgetResourceVector;
 import io.github.aililuola.mathproofmesh.orchestration.PricingSnapshot;
 import io.github.aililuola.mathproofmesh.provider.InMemoryProviderCallRepository;
 import io.github.aililuola.mathproofmesh.provider.JdkHttpTransport;
@@ -194,7 +195,47 @@ final class DesktopOlympiadProductionExecutor implements OlympiadBenchmarkHarnes
       agent.put("api_key_env", OlympiadBenchmarkPlan.keyEnvironmentName(labels.get(index)));
       agent.remove("api_key");
     }
-    return ContractObjectMapper.read(root, SystemConfig.class);
+    SystemConfig configured = ContractObjectMapper.read(root, SystemConfig.class);
+    requireInitialExplorationCapacity(configured, spec, pricing);
+    return configured;
+  }
+
+  static void requireInitialExplorationCapacity(
+      SystemConfig config,
+      OlympiadBenchmarkPlan.RunSpec spec,
+      PricingSnapshot pricing) {
+    Objects.requireNonNull(config, "config");
+    Objects.requireNonNull(spec, "spec");
+    Objects.requireNonNull(pricing, "pricing");
+    DesktopBudgetRuntime runtime =
+        new DesktopBudgetRuntime("benchmark-capacity-" + spec.identity(), config);
+    BudgetResourceVector required =
+        maximumPreRouteAdmission(config, spec, pricing)
+            .plus(runtime.estimateInitialExploration(config.budget().initialPaths()))
+            .plus(runtime.finishReserve());
+    if (!required.fitsWithin(runtime.limit())) {
+      throw new IllegalStateException("BENCHMARK_INITIAL_EXPLORATION_ENVELOPE_EXHAUSTED");
+    }
+  }
+
+  private static BudgetResourceVector maximumPreRouteAdmission(
+      SystemConfig config,
+      OlympiadBenchmarkPlan.RunSpec spec,
+      PricingSnapshot pricing) {
+    // Triage, initial generation, one replenishment, and at most two full candidate batches.
+    int calls = 3 + Math.multiplyExact(2, config.budget().strategiesToGenerate());
+    long input =
+        Math.multiplyExact(
+            (long) calls, config.budget().effectiveEstimatedInputTokensPerCall());
+    long output = Math.multiplyExact((long) calls, benchmarkOutputTokenLimit(spec));
+    BigDecimal cost =
+        BigDecimal.valueOf(input)
+            .multiply(pricing.inputPerMillion())
+            .add(BigDecimal.valueOf(output).multiply(pricing.outputPerMillion()))
+            .divide(ONE_MILLION, 12, RoundingMode.CEILING)
+            .stripTrailingZeros();
+    return new BudgetResourceVector(
+        calls, input, output, Math.addExact(input, output), cost);
   }
 
   static int benchmarkOutputTokenLimit(OlympiadBenchmarkPlan.RunSpec spec) {

@@ -58,18 +58,19 @@ The implemented design keeps the two authorities distinct:
 | Fail-closed behavior | Usage regression, durable evidence conflict, missing durable evidence for an extension, or mismatched totals is an Issue 013 violation. |
 | Exported evidence | `usage-reconciliation.json` records checkpoint usage, terminal usage, post-checkpoint deltas, reconciliation status, and durable evidence count. |
 
-The benchmark token plan now reserves 16,000 average input tokens plus a 32,000-token output
-envelope for every physical call. Calls and rounds are unchanged.
+The benchmark token plan reserves 16,000 average input tokens plus a 32,000-token output envelope
+for every physical call. Rounds remain unchanged; the final SMOKE and CORE call caps also include
+the bounded pre-route admission fan-out described below.
 
 | Tier | Calls | Rounds | Run token cap | Output cap per call |
 | --- | ---: | ---: | ---: | ---: |
-| SMOKE | 24 | 6 | 1,152,000 | 32,000 |
-| CORE | 40 | 8 | 1,920,000 | 32,000 |
+| SMOKE | 48 | 6 | 2,304,000 | 32,000 |
+| CORE | 48 | 8 | 2,304,000 | 32,000 |
 | ADVANCED | 64 | 12 | 3,072,000 | 32,000 |
 | STRESS | 96 | 16 | 4,608,000 | 32,000 |
 
-The immutable 34-run ceiling is 2,128 calls and 102,144,000 tokens. At the frozen worst-case
-output price it is USD 88.86528, leaving USD 11.13472 below the separately enforced USD 100 cap.
+The immutable 34-run ceiling is 2,304 calls and 110,592,000 tokens. At the frozen worst-case
+output price it is USD 96.21504, leaving USD 3.78496 below the separately enforced USD 100 cap.
 
 ## Focused verification
 
@@ -250,6 +251,42 @@ The final `scripts/verify-all.ps1 -Offline` run completed with `FULL VERIFICATIO
 PostgreSQL 18.4 Testcontainers, all Flyway migrations, SpotBugs/FindSecBugs, dependency and secret
 checks, coverage, source immutability, Temporal, and the unchanged Python Sidecar performance gate
 all passed.
+
+### Initial route exploration envelope compatibility
+
+The next cold-start campaign, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T021316Z`, exposed a deterministic tier
+compatibility defect. `P01/T1` used 12 calls and admitted two routes; `P02/T1` used only two calls
+and admitted three routes. Both then stopped before ready-queue admission with
+`INITIAL_ROUTE_EXPLORATION: ACTION_BUDGET_ENVELOPE_EXHAUSTED`, despite retaining respectively 12
+and 22 calls. This reproduced on two independent real problems, so the campaign was frozen rather
+than resumed. A partially started P03 is non-authoritative stop evidence only.
+
+The failing regression computed the complete bounded frontier before any real call: triage,
+initial strategy generation, one replenishment, at most two six-candidate preflight batches, three
+initial `DEEPEN` envelopes, and the protected finalization reserve. It found 12 incompatible runs:
+
+```text
+OLYMPIAD INITIAL EXPLORATION BUDGET COMPATIBILITY DIAGNOSTIC
+RUNS_CHECKED=34
+WORST_CASE_PRE_ROUTE_ADMISSION_CALLS=15
+INITIAL_ROUTES=3
+INCOMPATIBLE_RUNS=12
+INCOMPATIBLE_IDENTITIES=[P01/T1, P02/T1, P03/T1, P04/T1, P05/T1, P06/T1, P07/T1, P08/T1, P09/T1, P10/T1, P09/T2, P09/T3]
+RESULT=FAIL
+```
+
+SMOKE and CORE now each provide 48 calls and 2,304,000 tokens while preserving the 32,000-token
+per-call output ceiling. More importantly, `benchmarkConfig` performs the same multidimensional
+capacity proof before provider construction and fails with
+`BENCHMARK_INITIAL_EXPLORATION_ENVELOPE_EXHAUSTED` if a future tier cannot reach its initial
+research queue. The corrected diagnostic reports all 34 runs compatible. The USD 100 global hard
+cap, finalization reserve, action envelopes, authority gates, and issue-specific tests remain
+unchanged.
+
+The stopped campaign was packaged without another provider call as
+`MathProofMesh_olympiad-5key-v1_61e0bdf40c3d_20260824T024519Z.zip`; its SHA-256 is
+`251c91a405ddcddd69a2ae0eb26b758f80a7bf06c632c39360361ab6483a98ff`.
 
 ## Protected behavior
 
