@@ -791,6 +791,63 @@ secret leaks, and zero checksum failures as
 `MathProofMesh_olympiad-5key-v1_49a50614f263_20260824T153811Z.zip`; its SHA-256 is
 `f6d224a8bdf4e11b4556927f3cc230ca7e578176427a0dc3488dbc2ae06be850`.
 
+### Invalid optional portfolio-replenishment isolation
+
+The next cold-start campaign from `9ddb3a2`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T161024Z`, stopped on P01 run
+`p01-t1-20260824T161033Z-418a52df`. Its initial `StrategySet` passed strict parsing and reached
+deterministic portfolio preparation. The optional structural-gap replenishment response and its
+single bounded repair then supplied an invalid Claim context: `polarity=conclusion` and an
+ambiguous quantifier `kind=bound`. Strict validation correctly rejected both responses, but the
+resulting `StructuredOutputError` escaped the optional replenishment boundary and invalidated the
+whole run. The run stopped after seven physical calls and USD 0.058268685. Its immutable root hash
+remained `422cfd9130270941afe5978658df9217534cc98b4569939ada880d97818a1a7a`, and no invalid
+candidate, route, Claim, Fact, obligation, or other authority was admitted.
+
+The new production regression was written and run before the implementation change. It reproduced
+the campaign failure through the real `StructuredAgentRunner` and Coordinator path, ending in
+`StructuredOutputError` caused by `ContractValidationException: polarity has an unsupported
+literal: conclusion`. It then passed only after the optional batch received a local failure
+boundary.
+
+`replenishStrategyPortfolioOnce` now catches only a strict structured-output failure from this
+optional batch. It closes the stable replenishment episode with an empty candidate list, emits a
+rejection audit event, persists that completed frontier, and retains the already prepared source
+portfolio. It does not normalize `conclusion`, guess what `bound` means, infer mathematical
+semantics, admit any part of the invalid supplement, or catch unrelated provider and runtime
+failures. The completed empty episode also prevents a post-restore provider replay.
+
+The focused adjacent matrix ran nine tests with zero failures, errors, or skips. It covered invalid
+optional output, bounded repair, gap replenishment exactly once, invalid binding recovery,
+low-quality replenishment, unknown-mechanism isolation, hard-crash recovery, structured-output
+usage accounting, and the 20-round root-goal production chain. The production diagnostic was:
+
+```text
+INVALID OPTIONAL PORTFOLIO REPLENISHMENT DIAGNOSTIC
+REPLENISHMENT_PROVIDER_CALLS=1
+INVALID_REPLENISHMENT_CANDIDATE_LEAKS=0
+SOURCE_PORTFOLIO_ADMISSIONS=1
+SOURCE_ROUTE_ADMISSIONS=1
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+POST_RESTORE_REPLENISHMENT_CALLS=0
+POST_RESTORE_STATE_DRIFTS=0
+RESULT=PASS
+```
+
+The subsequent `scripts/verify-all.ps1 -Offline` run completed with
+`FULL VERIFICATION: PASS`: 2,981 tests (73 Contracts, 1,411 Core, 963 Server including PostgreSQL
+integration, 385 Desktop, and 149 Compatibility) ran with zero failures or errors and six
+intentional skips. Docker/Testcontainers, PostgreSQL 18.4, all seven Flyway migrations,
+SpotBugs/FindSecBugs, coverage, security, source immutability, dependency, Temporal, and the
+unchanged Python Sidecar performance gate all passed. Adjusted Contracts branch coverage remained
+85.545194 percent.
+
+The frozen campaign was packaged offline with zero provider calls during packaging, zero source-
+secret leaks, and zero checksum failures as
+`MathProofMesh_olympiad-5key-v1_9ddb3a265793_20260824T162744Z.zip`; its SHA-256 is
+`96ae90926eb00ddad95219aee22724a4df4f8ba5d8a06aa19668242e1b5d6ed4`.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

@@ -2134,16 +2134,31 @@ final class DesktopSolveCoordinator {
     context.putAll(gap);
     context.put("registered_computation_contracts", ContractsFunctions.experimentToolCatalog(Set.of()));
     context.put("migration_parity_requirements", strategyGenerationGuidance());
-    StrategySet supplement =
-        callStage(
-                "portfolio-gap-replenishment",
-                "strategy_generation",
-                StrategySet.class,
-                context,
-                planner,
-                "breadth",
-                "Filling structural gaps in the strategy portfolio")
-            .value();
+    StrategySet supplement;
+    try {
+      supplement =
+          callStage(
+                  "portfolio-gap-replenishment",
+                  "strategy_generation",
+                  StrategySet.class,
+                  context,
+                  planner,
+                  "breadth",
+                  "Filling structural gaps in the strategy portfolio")
+              .value();
+    } catch (StructuredOutputError failure) {
+      portfolioReplenishments.complete(episodeId, List.of());
+      event(
+          "strategy_portfolio_replenishment_rejected",
+          "strategy_generation",
+          planner.id(),
+          "rejected",
+          "Retained the prepared source portfolio after invalid optional replenishment output",
+          "portfolio-replenishment://" + episodeId);
+      strategySet = source;
+      persistUnchecked("portfolio_gap_replenishment_rejected", false);
+      return source;
+    }
     Set<String> existingIds =
         source.strategies().stream()
             .map(StrategyCard::strategyId)

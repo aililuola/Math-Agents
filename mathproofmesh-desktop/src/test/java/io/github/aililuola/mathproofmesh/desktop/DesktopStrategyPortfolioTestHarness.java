@@ -106,7 +106,21 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
 
   static DesktopStrategyPortfolioTestHarness open(
       Path directory, String runId, List<StrategySet> providerStrategySets) {
-    return open(directory, runId, SOURCE, providerStrategySets, Map.of());
+    return open(directory, runId, SOURCE, providerStrategySets, Map.of(), List.of());
+  }
+
+  static DesktopStrategyPortfolioTestHarness openWithRawStrategyResponses(
+      Path directory,
+      String runId,
+      StrategySet initialStrategySet,
+      List<String> rawStrategyResponses) {
+    return open(
+        directory,
+        runId,
+        SOURCE,
+        List.of(initialStrategySet),
+        Map.of(),
+        rawStrategyResponses);
   }
 
   static DesktopStrategyPortfolioTestHarness open(
@@ -114,12 +128,12 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
       String runId,
       List<StrategySet> providerStrategySets,
       Map<String, StrategyPreflightPlan> preflightPlans) {
-    return open(directory, runId, SOURCE, providerStrategySets, preflightPlans);
+    return open(directory, runId, SOURCE, providerStrategySets, preflightPlans, List.of());
   }
 
   static DesktopStrategyPortfolioTestHarness open(
       Path directory, String runId, String sourceStatement, List<StrategySet> providerStrategySets) {
-    return open(directory, runId, sourceStatement, providerStrategySets, Map.of());
+    return open(directory, runId, sourceStatement, providerStrategySets, Map.of(), List.of());
   }
 
   private static DesktopStrategyPortfolioTestHarness open(
@@ -127,14 +141,15 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
       String runId,
       String sourceStatement,
       List<StrategySet> providerStrategySets,
-      Map<String, StrategyPreflightPlan> preflightPlans) {
+      Map<String, StrategyPreflightPlan> preflightPlans,
+      List<String> rawStrategyResponses) {
     SystemConfig source =
         new DesktopRuntimeLocator(projectRoot(), null)
             .loadProfile("proof-control-active.yaml");
     SystemConfig config = mockConfig(source);
     RecordingResponder responder =
         new RecordingResponder(
-            providerStrategySets, sha256(sourceStatement), preflightPlans);
+            providerStrategySets, sha256(sourceStatement), preflightPlans, rawStrategyResponses);
     Map<String, MockResponder> responders = new LinkedHashMap<>();
     config.agents().forEach(agent -> responders.put(agent.id(), responder));
     ProviderClientRegistry providers =
@@ -903,17 +918,21 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
     private final List<StrategySet> strategySets;
     private final String problemHash;
     private final Map<String, StrategyPreflightPlan> preflightPlans;
+    private final List<String> rawStrategyResponses;
     private final Map<String, StrategyCard> strategies = new LinkedHashMap<>();
     private final List<ProviderRequest> requests = new ArrayList<>();
     private int cursor;
+    private int rawCursor;
 
     private RecordingResponder(
         List<StrategySet> strategySets,
         String problemHash,
-        Map<String, StrategyPreflightPlan> preflightPlans) {
+        Map<String, StrategyPreflightPlan> preflightPlans,
+        List<String> rawStrategyResponses) {
       this.strategySets = List.copyOf(strategySets);
       this.problemHash = problemHash;
       this.preflightPlans = Map.copyOf(preflightPlans);
+      this.rawStrategyResponses = List.copyOf(rawStrategyResponses);
       strategySets.forEach(value -> registerStrategies(value.strategies()));
     }
 
@@ -940,17 +959,28 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
                 new StrategyPreflightPlanCompiler().compile(problemHash, strategy));
         return response(payload, "strategy-preflight-plan-" + strategy.strategyId());
       }
-      if (!"StrategySet".equals(request.schemaName()) || cursor >= strategySets.size()) {
+      if (!"StrategySet".equals(request.schemaName())) {
         throw new AssertionError("unexpected provider call: " + request.schemaName());
       }
-      StrategySet payload = strategySets.get(cursor++);
-      registerStrategies(payload.strategies());
-      return response(payload, "strategy-portfolio-request-" + cursor);
+      if (cursor < strategySets.size()) {
+        StrategySet payload = strategySets.get(cursor++);
+        registerStrategies(payload.strategies());
+        return response(payload, "strategy-portfolio-request-" + cursor);
+      }
+      if (rawCursor < rawStrategyResponses.size()) {
+        String payload = rawStrategyResponses.get(rawCursor++);
+        return responseText(payload, "strategy-portfolio-raw-request-" + rawCursor);
+      }
+      throw new AssertionError("unexpected provider call: " + request.schemaName());
     }
 
     private static LLMResponse response(Object payload, String requestId) {
+      return responseText(ContractObjectMapper.write(payload), requestId);
+    }
+
+    private static LLMResponse responseText(String payload, String requestId) {
       return new LLMResponse(
-          ContractObjectMapper.write(payload),
+          payload,
           "scripted-model",
           "mock",
           11,
@@ -963,7 +993,7 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
     }
 
     private int strategyCalls() {
-      return cursor;
+      return cursor + rawCursor;
     }
 
     private List<ProviderRequest> requests() {
