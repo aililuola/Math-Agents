@@ -432,6 +432,40 @@ secret leaks, and zero checksum failures as
 `MathProofMesh_olympiad-5key-v1_197e8fc7d4b1_20260824T050313Z.zip`; its SHA-256 is
 `603ba80a9c0bd6ba8dac43f1eb460bbda46278f125ba041e691b8f3fab029cb3`.
 
+### Deterministic quantifier-alias recovery
+
+The cold-start campaign from `815ce93`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T060259Z`, passed all five credential preflights,
+immutable-goal checks, and triage. P01 strategy generation then reached the 32,000-token output
+ceiling and returned a truncated JSON object. Its first bounded repair returned a representation
+wrapper; the second returned a complete five-strategy object but used `universal` and `unique` as
+quantifier kinds. The strict contract accepts only `forall`, `exists`, and `exists_unique`, and the
+normalizer did not yet recognize those exact semantic aliases. P01 therefore stopped `INVALID`
+after four billed calls and USD 0.057195975. No later problem was started and the campaign was
+never resumed.
+
+The first regression failed before the production change with
+`kind has an unsupported literal: universal`. Structured payload normalization now canonicalizes
+only the explicit quantifier aliases `universal -> forall`, `existential -> exists`, and
+`unique -> exists_unique` inside fields that are structurally named `quantifiers`. Quantifier
+order, domain, restrictions, variable identity, and surrounding scope are untouched. Unknown
+semantics such as `at_most_one` remain unmodified and still fail strict contract validation.
+
+A production `StructuredAgentRunner` fixture also verifies that a bounded representation wrapper
+containing these aliases is repaired and parsed with one physical provider response rather than
+dispatching an avoidable second repair call. The focused Contracts and Server matrix ran 27 tests
+with zero failures, errors, or skips. The subsequent `scripts/verify-all.ps1 -Offline` run completed
+with `FULL VERIFICATION: PASS`: 2,961 tests (67 Contracts, 1,411 Core, 957 Server including
+PostgreSQL integration, 377 Desktop, and 149 Compatibility) ran with zero failures or errors and
+six intentional skips. Docker/Testcontainers, all Flyway migrations, SpotBugs/FindSecBugs,
+coverage, security, source immutability, dependency, Temporal, and the unchanged Python Sidecar
+performance gate all passed.
+
+The stopped campaign was packaged offline with zero provider calls during packaging, zero source-
+secret leaks, and zero checksum failures as
+`MathProofMesh_olympiad-5key-v1_815ce9386c15_20260824T062208Z.zip`; its SHA-256 is
+`445d18d8ceb50ca6e90663d6c1952ea724522141648052be26fe109a10653406`.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

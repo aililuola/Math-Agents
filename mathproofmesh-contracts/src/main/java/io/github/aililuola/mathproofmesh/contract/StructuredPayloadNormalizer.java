@@ -54,6 +54,7 @@ public final class StructuredPayloadNormalizer {
   public static List<String> normalize(ObjectNode payload, Class<?> responseModel) {
     String modelName = responseModel.getSimpleName();
     List<String> actions = normalizeDependencyRefKinds(payload);
+    normalizeQuantifierKinds(payload, "$", actions);
     normalizeTurnEnvelopeMetadata(payload, modelName, actions);
     normalizeOptionalCandidateConjectures(payload, modelName, actions);
     if ("StrategySet".equals(modelName)) {
@@ -112,6 +113,49 @@ public final class StructuredPayloadNormalizer {
     normalizeStepReferences(delta, actions);
     downgradeMissingFinalAnswer(payload, delta, "ContinuationTurn".equals(modelName), actions);
     return List.copyOf(actions);
+  }
+
+  private static void normalizeQuantifierKinds(
+      JsonNode value, String path, List<String> actions) {
+    if (value instanceof ObjectNode object) {
+      JsonNode rawQuantifiers = object.get("quantifiers");
+      if (rawQuantifiers instanceof ArrayNode quantifiers) {
+        for (int index = 0; index < quantifiers.size(); index++) {
+          if (!(quantifiers.get(index) instanceof ObjectNode quantifier)) {
+            continue;
+          }
+          String kind = textOrNull(quantifier.get("kind"));
+          String canonical =
+              switch (kind == null ? "" : kind) {
+                case "universal" -> "forall";
+                case "existential" -> "exists";
+                case "unique" -> "exists_unique";
+                default -> null;
+              };
+          if (canonical != null) {
+            quantifier.put("kind", canonical);
+            actions.add(
+                "canonicalized "
+                    + path
+                    + ".quantifiers["
+                    + index
+                    + "] quantifier kind "
+                    + kind
+                    + " to "
+                    + canonical);
+          }
+        }
+      }
+      object.properties()
+          .forEach(
+              entry ->
+                  normalizeQuantifierKinds(
+                      entry.getValue(), path + "." + entry.getKey(), actions));
+    } else if (value instanceof ArrayNode array) {
+      for (int index = 0; index < array.size(); index++) {
+        normalizeQuantifierKinds(array.get(index), path + "[" + index + "]", actions);
+      }
+    }
   }
 
   private static void normalizeTurnEnvelopeMetadata(

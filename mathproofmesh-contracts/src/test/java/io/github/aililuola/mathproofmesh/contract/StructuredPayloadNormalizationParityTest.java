@@ -14,6 +14,93 @@ import org.junit.jupiter.api.Test;
 
 class StructuredPayloadNormalizationParityTest {
   @Test
+  void canonicalizesExplicitQuantifierAliasesWithoutChangingTheirScope() {
+    ObjectNode payload =
+        object(
+            """
+            {
+              "claim_id":"claim-quantifiers",
+              "local_assumption_node_ids":[],
+              "local_assumptions":[],
+              "quantifiers":[
+                {
+                  "display_name":"n",
+                  "domain":"positive integer",
+                  "kind":"universal",
+                  "order":0,
+                  "restrictions":[],
+                  "variable_id":"n"
+                },
+                {
+                  "display_name":"d",
+                  "domain":"positive integer",
+                  "kind":"unique",
+                  "order":1,
+                  "restrictions":[],
+                  "variable_id":"d"
+                },
+                {
+                  "display_name":"k",
+                  "domain":"integer",
+                  "kind":"existential",
+                  "order":2,
+                  "restrictions":[],
+                  "variable_id":"k"
+                }
+              ],
+              "variable_bindings":[],
+              "scope_limitations":[],
+              "polarity":"positive"
+            }
+            """);
+
+    List<String> actions =
+        StructuredPayloadNormalizer.normalize(payload, CriticalClaimContextBinding.class);
+    CriticalClaimContextBinding binding =
+        ContractObjectMapper.read(payload, CriticalClaimContextBinding.class);
+
+    assertEquals(
+        List.of("forall", "exists_unique", "exists"),
+        binding.quantifiers().stream().map(QuantifierSpec::kind).toList());
+    assertEquals(List.of(0, 1, 2), binding.quantifiers().stream().map(QuantifierSpec::order).toList());
+    assertEquals(3, actions.stream().filter(action -> action.contains("quantifier kind")).count());
+  }
+
+  @Test
+  void leavesUnknownQuantifierSemanticsForStrictValidationToReject() {
+    ObjectNode payload =
+        object(
+            """
+            {
+              "claim_id":"claim-unknown-quantifier",
+              "local_assumption_node_ids":[],
+              "local_assumptions":[],
+              "quantifiers":[
+                {
+                  "display_name":"n",
+                  "domain":"positive integer",
+                  "kind":"at_most_one",
+                  "order":0,
+                  "restrictions":[],
+                  "variable_id":"n"
+                }
+              ],
+              "variable_bindings":[],
+              "scope_limitations":[],
+              "polarity":"positive"
+            }
+            """);
+
+    List<String> actions =
+        StructuredPayloadNormalizer.normalize(payload, CriticalClaimContextBinding.class);
+
+    assertTrue(actions.stream().noneMatch(action -> action.contains("quantifier kind")));
+    assertThrows(
+        ContractValidationException.class,
+        () -> ContractObjectMapper.read(payload, CriticalClaimContextBinding.class));
+  }
+
+  @Test
   void dropsInvalidOptionalStrategyChecksButPreservesSandboxComputationHints() {
     ObjectNode payload =
         object(

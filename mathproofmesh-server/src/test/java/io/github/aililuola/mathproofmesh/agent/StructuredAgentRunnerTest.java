@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import io.github.aililuola.mathproofmesh.config.StrictYamlConfigLoader;
 import io.github.aililuola.mathproofmesh.config.SystemConfig;
+import io.github.aililuola.mathproofmesh.contract.CriticalClaimContextBinding;
 import io.github.aililuola.mathproofmesh.contract.InitialExplorationTurn;
 import io.github.aililuola.mathproofmesh.orchestration.BudgetBucket;
 import io.github.aililuola.mathproofmesh.orchestration.BudgetEnvelopeLedger;
@@ -124,6 +125,80 @@ class StructuredAgentRunnerTest {
               new BoundedJsonRepairer(4096)
                   .repair("{\"result\":{\"answer\":\"x^2+y^2\"}}"))
           .contains("x^2+y^2");
+    }
+  }
+
+  @Test
+  void boundedRepresentationRepairCanonicalizesQuantifierAliasesWithoutAnotherCall() {
+    AtomicInteger providerCalls = new AtomicInteger();
+    String responseText =
+        """
+        {
+          "result": {
+            "claim_id":"claim-quantifiers",
+            "local_assumption_node_ids":[],
+            "local_assumptions":[],
+            "quantifiers":[
+              {
+                "display_name":"n",
+                "domain":"positive integer",
+                "kind":"universal",
+                "order":0,
+                "restrictions":[],
+                "variable_id":"n"
+              },
+              {
+                "display_name":"d",
+                "domain":"positive integer",
+                "kind":"unique",
+                "order":1,
+                "restrictions":[],
+                "variable_id":"d"
+              }
+            ],
+            "variable_bindings":[],
+            "scope_limitations":[],
+            "polarity":"positive"
+          }
+        }
+        """;
+    try (Fixture fixture =
+        fixture(
+            "run-quantifier-alias",
+            request -> {
+              providerCalls.incrementAndGet();
+              return response(responseText);
+            },
+            new CallLedger(2, null, BigDecimal.TEN),
+            List.of(),
+            1)) {
+      PromptBundle<CriticalClaimContextBinding> bundle =
+          new PromptBundle<>(
+              "claim_context",
+              "Return one strict claim context.",
+              "public claim",
+              CriticalClaimContextBinding.class,
+              0.0d,
+              4096,
+              false,
+              null);
+
+      StructuredCallResult<CriticalClaimContextBinding> result =
+          fixture
+              .runner()
+              .call(
+                  "run-quantifier-alias",
+                  "claim-context",
+                  "general",
+                  bundle,
+                  fixture.pool().get("agent-a"),
+                  "proof");
+
+      assertThat(providerCalls).hasValue(1);
+      assertThat(result.repaired()).isTrue();
+      assertThat(result.value().quantifiers())
+          .extracting(io.github.aililuola.mathproofmesh.contract.QuantifierSpec::kind)
+          .containsExactly("forall", "exists_unique");
     }
   }
 
