@@ -331,6 +331,45 @@ zero checksum failures as
 `MathProofMesh_olympiad-5key-v1_2c0329a012b0_20260824T034301Z.zip`; its SHA-256 is
 `1a55f17060b299a4d57085cc29d7711e09d4c5604dea422f35392407f8ce9baf`.
 
+### Record-only inspiration reservation reconciliation
+
+The next cold-start campaign from `fbefcd211e4807134dcd90de1e0ee5c6568a85b1`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260824T040430Z`, confirmed that the final blind-review
+root-binding exception no longer occurred. `P01/T1` passed the five-key preflight, immutable-goal
+checks, strategy generation and deterministic preflight, admitted a route, and entered real
+isolated exploration. The route's recoverable structured-output failure was contained without
+granting mathematical authority.
+
+The run then stopped `INVALID` in the bounded inspiration stage. The Benchmark profile uses
+Shadow inspiration: `reserveCycle` returned a record-only reservation that intentionally did not
+consume budget, but the engine had not retained that returned reservation in its reconciliation
+registry. The coordinator's common `finally` path therefore failed locally with
+`IllegalArgumentException: unknown inspiration reservation`. `P01/T1` used 16 physical calls and
+USD 0.112558425; no later problem was started, and the campaign was never resumed.
+
+The regression first failed in both Off and Shadow modes at `InspirationEngine#reconcileReservation`.
+The engine now retains the record-only reservation as an accounting record, without enabling a
+provider call or business mutation. Reconciliation deterministically records zero consumed and
+overrun calls, releases the complete planned amount, and remains idempotent. Active inspiration
+budget semantics are unchanged.
+
+After the repair, the new regression plus the existing inspiration reservation and policy suites
+ran six tests with zero failures, errors, or skips.
+
+The cross-module focused matrix then ran 21 tests with zero failures, errors, or skips, including
+the real Coordinator production-path fixture, final blind-review Prompt binding, Inspiration
+failure/resume policy, and the 20-round immutable Root Goal propagation test. The subsequent
+`scripts/verify-all.ps1 -Offline` run completed with `FULL VERIFICATION: PASS`: 2,954 tests
+(65 Contracts, 1,409 Core, 956 Server including PostgreSQL integration, 375 Desktop, and 149
+Compatibility) ran with zero failures or errors and six intentional skips. Docker/Testcontainers,
+all Flyway migrations, SpotBugs/FindSecBugs, coverage, security, source immutability, dependency,
+Temporal, and the unchanged Python Sidecar performance gate all passed.
+
+The stopped campaign was packaged offline with zero provider calls during packaging, zero
+source-secret leaks, and zero checksum failures as
+`MathProofMesh_olympiad-5key-v1_fbefcd211e48_20260824T042605Z.zip`; its SHA-256 is
+`4e75a54783912dc48873c2df47f3d395e8c099697917d255af49abc92899d8c4`.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

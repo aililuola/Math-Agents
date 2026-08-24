@@ -84,6 +84,7 @@ public final class InspirationEngine {
               "interrupted",
               task.taskId(),
               task.triggerId());
+      reservations.put(id, recorded);
       audit.add(
           new AuditEvent(
               "reservation_recorded_without_mutation",
