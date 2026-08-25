@@ -1225,6 +1225,69 @@ zero failures or errors and six intentional skips. Docker/Testcontainers, Postgr
 seven Flyway migrations, SpotBugs/FindSecBugs, coverage, security, source immutability, dependency
 checks, Temporal checks, and the unchanged Python Sidecar performance gate all passed.
 
+### Self-contained proof supersedes an unused strategy planning check
+
+The cold-start campaign from `eb4aa802a3680e04a3abed109a91f832a89eea53`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260825T161845Z`, confirmed the preceding repairs on two
+different problems: P01/T1 and P02/T1 both reached `COMPLETE`. P03/T1 run
+`p03-t1-20260825T175827Z-c48c2bb0` then stopped `INCOMPLETE` after 33 calls, 277,190 input tokens,
+199,340 output tokens, and USD 0.29400345. Its Root Goal hash remained unchanged.
+
+P03's AM-GM route contained a complete self-contained proof: substitute `1-a=b+c`, `1-b=c+a`,
+and `1-c=a+b`; multiply the three two-variable AM-GM inequalities; and use simultaneous equality
+to obtain `a=b=c=1/3`. Skeptic, structural, detailed, deterministic, same-model blind, and
+adversarial-blind validation all passed. The route was nevertheless marked `unverified` only
+because the original Strategy Card had requested a planning-time symbolic calculation, the final
+ProofAttempt did not depend on that calculation, no computation trace existed, and the old route
+gate still demanded an independent replay. Its sole terminal diagnostic was `tool evidence was
+not independently replayed`.
+
+The repaired policy keeps the conservative Tool Specialist assignment made from the planning-time
+risk assessment. Once a ProofAttempt is `COMPLETE`, has at least one proof step and a final answer,
+has no unresolved gaps, and contains neither calculation requests nor calculation evidence
+references, that unused strategy request no longer creates a hard final replay gate and no replay
+provider call is made. This exception
+does not apply when any durable computation trace exists, the Strategy binds an evidence reference,
+the ProofAttempt requests a calculation, the ProofAttempt cites calculation evidence, or the
+attempt is partial or has an unresolved gap. Those cases still fail closed and require independent
+replay.
+
+The new production-pipeline regression was run before the implementation change. It sent three
+strategies with explicit planning checks through the real Desktop backend and submitted complete
+symbolic ProofAttempts with no computation dependency. The old code returned `unverified`. After
+the repair, the same production path reported:
+
+```text
+SELF-CONTAINED PROOF TOOL-GATE DIAGNOSTIC
+STRATEGY_PLANNING_CHECKS=3
+ATTEMPT_TOOL_DEPENDENCIES=0
+TOOL_REPLAY_CALLS=0
+VERIFIED_ROUTES=3
+FALSE_TOOL_GATE_REJECTIONS=0
+RESULT=PASS
+```
+
+The focused 33-test matrix passed with zero failures, errors, or skips. It covers the exact
+production regression, the replay decision matrix, optional hints, full Desktop execution,
+registered strategy preflight, bounded non-refutation, independently replayed counterexamples,
+preflight crash recovery, full-context computation bindings, and failed-route artifact handling.
+The module regression then passed 75 Contracts tests, 1,412 Core tests, 941 Server unit tests, and
+397 Desktop tests with zero failures or errors and six intentional skips.
+
+The first full release-gate run exposed an engineering-only regression: the initial implementation
+made the already large `DesktopSolveCoordinator` exceed SpotBugs' analysis-size ceiling. All tests
+had passed, but the static-analysis gate correctly rejected the build. The replay decision was
+therefore kept in `RouteComputationEvidencePolicy` and the unnecessary Coordinator replanning code
+was removed. A direct SpotBugs rerun then reported zero bugs and zero errors for Contracts, Core,
+Server, and Desktop.
+
+The final `verify-all.ps1 -Offline` run passed 3,001 tests: 75 Contracts, 1,412 Core, 941 Server
+unit, 27 Server PostgreSQL/Testcontainers integration, 397 Desktop, and 149 Compatibility tests,
+with zero failures or errors and six intentional skips. Docker/PostgreSQL, all Flyway migrations,
+SpotBugs/FindSecBugs, dependency checks, coverage, security, source immutability, Temporal checks,
+and the unchanged Python Sidecar performance gate all passed. The final result was `FULL
+VERIFICATION: PASS`.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

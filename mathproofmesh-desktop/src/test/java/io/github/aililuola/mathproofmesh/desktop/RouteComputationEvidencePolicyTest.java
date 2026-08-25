@@ -65,6 +65,55 @@ final class RouteComputationEvidencePolicyTest {
     assertThat(RouteComputationEvidencePolicy.attemptRequestsTool(toolRequested)).isTrue();
   }
 
+  @Test
+  void completeSelfContainedAttemptSupersedesAnUnusedStrategyPlanningCheck() {
+    StrategyCard planningCheck = strategy(List.of(toolRequest()), List.of(), List.of());
+    ProofAttempt complete = attempt(step(List.of(), List.of(), List.of("symbolic identity")));
+
+    assertThat(RouteComputationEvidencePolicy.requiresReplay(planningCheck, null, false)).isTrue();
+    assertThat(RouteComputationEvidencePolicy.requiresReplay(planningCheck, complete, false))
+        .isFalse();
+  }
+
+  @Test
+  void observedOrAttemptBoundComputationCanNeverBeSuperseded() {
+    StrategyCard planningCheck = strategy(List.of(toolRequest()), List.of(), List.of());
+    StrategyCard strategyEvidence =
+        strategy(
+            List.of(),
+            List.of(new EvidenceRef("artifact://calculation/3", "hash", "result", "exact")),
+            List.of());
+    ProofAttempt attemptRequest = attempt(step(List.of(toolRequest()), List.of(), List.of()));
+    ProofAttempt attemptEvidence =
+        attempt(
+            step(
+                List.of(),
+                List.of(new EvidenceRef("artifact://calculation/4", null, null, "replay")),
+                List.of()));
+    ProofAttempt partial =
+        attempt(step(List.of(), List.of(), List.of()), AttemptStatus.PARTIAL, List.of());
+    ProofAttempt unresolved =
+        attempt(
+            step(List.of(), List.of(), List.of()),
+            AttemptStatus.COMPLETE,
+            List.of("one symbolic gap remains"));
+
+    assertThat(RouteComputationEvidencePolicy.requiresReplay(planningCheck, attemptRequest, false))
+        .isTrue();
+    assertThat(RouteComputationEvidencePolicy.requiresReplay(planningCheck, attemptEvidence, false))
+        .isTrue();
+    assertThat(RouteComputationEvidencePolicy.requiresReplay(strategyEvidence, attempt(null), false))
+        .isTrue();
+    assertThat(RouteComputationEvidencePolicy.requiresReplay(planningCheck, partial, false))
+        .isTrue();
+    assertThat(RouteComputationEvidencePolicy.requiresReplay(planningCheck, unresolved, false))
+        .isTrue();
+    assertThat(
+            RouteComputationEvidencePolicy.requiresReplay(
+                strategy(List.of(), List.of(), List.of()), attempt(null), true))
+        .isTrue();
+  }
+
   private static StrategyCard strategy(
       List<ToolRequest> checks,
       List<EvidenceRef> evidenceRefs,
@@ -92,6 +141,11 @@ final class RouteComputationEvidencePolicyTest {
   }
 
   private static ProofAttempt attempt(ProofStep step) {
+    return attempt(step, AttemptStatus.COMPLETE, List.of());
+  }
+
+  private static ProofAttempt attempt(
+      ProofStep step, AttemptStatus status, List<String> unresolvedGaps) {
     return new ProofAttempt(
         "author",
         "attempt-policy-test",
@@ -105,16 +159,16 @@ final class RouteComputationEvidencePolicyTest {
         "route-policy-test",
         "problem-hash",
         "A direct proof.",
-        List.of(step),
+        step == null ? List.of() : List.of(step),
         List.of(),
         null,
         null,
         0,
         1,
         0.9d,
-        AttemptStatus.COMPLETE,
+        status,
         "strategy-policy-test",
-        List.of(),
+        unresolvedGaps,
         new UsageRecord());
   }
 

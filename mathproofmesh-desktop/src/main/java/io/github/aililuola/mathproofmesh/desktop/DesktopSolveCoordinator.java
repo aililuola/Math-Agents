@@ -6128,15 +6128,20 @@ final class DesktopSolveCoordinator {
   }
 
   private boolean runToolAudit(RouteState route) {
+    List<ComputationTrace> traces = computationTracesForRoute(route.routeId);
+    if (!RouteComputationEvidencePolicy.requiresReplay(
+        route.strategy, route.attempt, !traces.isEmpty())) {
+      route.toolAudit = null;
+      return true;
+    }
     RoleAssignment assignment = route.plan.toolSpecialist();
     if (assignment == null) {
-      return true;
+      return false;
     }
     if (!assignment.assigned()) {
       return false;
     }
     AgentRuntime specialist = requireAgent(assignment.agentId());
-    List<ComputationTrace> traces = computationTracesForRoute(route.routeId);
     List<ComputationAudit> audits = auditComputations(traces);
     StructuredCallResult<ToolAuditReport> call =
         callStage(

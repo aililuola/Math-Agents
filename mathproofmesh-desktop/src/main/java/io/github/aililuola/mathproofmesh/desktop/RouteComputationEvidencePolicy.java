@@ -1,5 +1,6 @@
 package io.github.aililuola.mathproofmesh.desktop;
 
+import io.github.aililuola.mathproofmesh.contract.AttemptStatus;
 import io.github.aililuola.mathproofmesh.contract.ProofAttempt;
 import io.github.aililuola.mathproofmesh.contract.ProofStep;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
@@ -29,5 +30,29 @@ final class RouteComputationEvidencePolicy {
         && attempt.proofSteps().stream()
             .map(ProofStep::calculationChecks)
             .anyMatch(checks -> !checks.isEmpty());
+  }
+
+  static boolean strategyRequestRemainsRequired(StrategyCard strategy, ProofAttempt attempt) {
+    return strategyRequestsTool(strategy) && !isCompleteSelfContainedAttempt(attempt);
+  }
+
+  static boolean requiresReplay(
+      StrategyCard strategy, ProofAttempt attempt, boolean computationTraceObserved) {
+    return computationTraceObserved
+        || strategyHasBoundEvidence(strategy)
+        || attemptHasBoundEvidence(attempt)
+        || attemptRequestsTool(attempt)
+        || strategyRequestRemainsRequired(strategy, attempt);
+  }
+
+  private static boolean isCompleteSelfContainedAttempt(ProofAttempt attempt) {
+    return attempt != null
+        && attempt.status() == AttemptStatus.COMPLETE
+        && attempt.unresolvedGaps().isEmpty()
+        && !attempt.proofSteps().isEmpty()
+        && attempt.finalAnswer() != null
+        && !attempt.finalAnswer().isBlank()
+        && !attemptHasBoundEvidence(attempt)
+        && !attemptRequestsTool(attempt);
   }
 }
