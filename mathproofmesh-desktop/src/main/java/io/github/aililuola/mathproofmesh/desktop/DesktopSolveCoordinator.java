@@ -2895,19 +2895,22 @@ final class DesktopSolveCoordinator {
       throw new IllegalStateException("live profile has no exploration agent");
     }
     AgentRuntime author = explorers.get(routes.size() % explorers.size());
+    boolean numericalEvidence =
+        RouteComputationEvidencePolicy.strategyHasBoundEvidence(strategy);
+    boolean toolRequested = RouteComputationEvidencePolicy.strategyRequestsTool(strategy);
     RiskAssessment baseline =
         routeTeam.classifyRisk(
             new RouteTeam.RiskSignals(
                 !strategy.criticalClaims().isEmpty(),
                 false,
                 true,
-                !strategy.computationHints().isEmpty(),
+                numericalEvidence,
                 false,
                 false,
                 false,
                 false,
                 true,
-                !strategy.computationHints().isEmpty()));
+                toolRequested));
     RouteTeamPlan plan = teamFactory.plan(routeId, author.id(), baseline);
     RouteState state = new RouteState(routeId, author, strategy, plan, revisionCount);
     routes.add(state);
@@ -5784,6 +5787,7 @@ final class DesktopSolveCoordinator {
     Map<String, RouteState> routeById = new LinkedHashMap<>();
     for (int ordinal = 0; ordinal < pending.size(); ordinal++) {
       RouteState route = pending.get(ordinal);
+      ensureRouteTeamCoversActualRisk(route);
       routeById.put(route.routeId, route);
       specs.add(
           new AuthoritativeWorkSpec(
@@ -5799,7 +5803,12 @@ final class DesktopSolveCoordinator {
                   Set.of(currentResearchAuthorityAnchor().stableHash()),
                   Set.of(route.deltaId)),
               new ResearchWorkConflictSet(
-                  Set.of(route.routeId), Set.of(), Set.of(), Set.of(), Set.of()),
+                  Set.of(route.routeId),
+                  Set.of(),
+                  Set.of(),
+                  Set.of(),
+                  Set.of(),
+                  routeReviewResourceIds(route)),
               "route-delta://" + route.deltaId,
               RouteReviewDraft.class.getName(),
               ordinal));
@@ -6042,10 +6051,16 @@ final class DesktopSolveCoordinator {
   }
 
   private void ensureRouteTeamCoversActualRisk(RouteState route) {
-    boolean computationObserved = !computationTracesForRoute(route.routeId).isEmpty();
+    boolean numericalEvidence =
+        !computationTracesForRoute(route.routeId).isEmpty()
+            || RouteComputationEvidencePolicy.strategyHasBoundEvidence(route.strategy)
+            || RouteComputationEvidencePolicy.attemptHasBoundEvidence(route.attempt);
+    boolean toolRequested =
+        RouteComputationEvidencePolicy.strategyRequestsTool(route.strategy)
+            || RouteComputationEvidencePolicy.attemptRequestsTool(route.attempt);
     boolean toolAlreadyAssigned =
         route.plan.toolSpecialist() != null && route.plan.toolSpecialist().assigned();
-    if (!computationObserved || toolAlreadyAssigned) {
+    if ((!numericalEvidence && !toolRequested) || toolAlreadyAssigned) {
       return;
     }
     RiskAssessment actualRisk =
@@ -6054,13 +6069,13 @@ final class DesktopSolveCoordinator {
                 !route.strategy.criticalClaims().isEmpty(),
                 false,
                 true,
-                true,
+                numericalEvidence,
                 false,
                 false,
                 false,
                 route.revisionCount > 0,
                 true,
-                true));
+                toolRequested));
     route.plan = teamFactory.plan(route.routeId, route.author.id(), actualRisk);
     if (activeResearchWorker.get() == null) {
       registerRoute(route);
@@ -6070,8 +6085,25 @@ final class DesktopSolveCoordinator {
         "independent_review",
         route.author.id(),
         "completed",
-        "Observed computation evidence; assigned an independent Tool Specialist before review",
+        "Observed or explicitly bound computation evidence; assigned an independent Tool Specialist before review",
         route.routeId);
+  }
+
+  private Set<String> routeReviewResourceIds(RouteState route) {
+    LinkedHashSet<String> resources = new LinkedHashSet<>();
+    addRouteReviewResource(resources, route.plan.skeptic());
+    addRouteReviewResource(resources, route.plan.toolSpecialist());
+    addRouteReviewResource(resources, route.plan.referee());
+    crossProviderRouteReviewer(route)
+        .ifPresent(agent -> resources.add("agent:" + agent.id()));
+    return Set.copyOf(resources);
+  }
+
+  private static void addRouteReviewResource(
+      Set<String> resources, RoleAssignment assignment) {
+    if (assignment != null && assignment.assigned()) {
+      resources.add("agent:" + assignment.agentId());
+    }
   }
 
   private boolean reviewAssignedRole(
@@ -13102,20 +13134,24 @@ final class DesktopSolveCoordinator {
     routes.clear();
     for (DesktopSolveCheckpoint.RouteCheckpoint saved : checkpoint.routes()) {
       AgentRuntime author = requireAgent(saved.authorAgentId());
+      boolean numericalEvidence =
+          RouteComputationEvidencePolicy.strategyHasBoundEvidence(saved.strategy());
+      boolean toolRequested =
+          RouteComputationEvidencePolicy.strategyRequestsTool(saved.strategy());
       RiskAssessment risk =
           routeTeam.classifyRisk(
               new RouteTeam.RiskSignals(
                   !saved.strategy().criticalClaims().isEmpty(),
                   false,
                   true,
-                  !saved.strategy().computationHints().isEmpty(),
+                  numericalEvidence,
                   false,
                   saved.structuralReview() != null
                       && saved.structuralReview().verdict() != VerificationVerdict.PASS,
                   false,
                   saved.revisionCount() > 0,
                   true,
-                  !saved.strategy().computationHints().isEmpty()));
+                  toolRequested));
       RouteTeamPlan plan = teamFactory.plan(saved.routeId(), author.id(), risk);
       RouteState route =
           new RouteState(

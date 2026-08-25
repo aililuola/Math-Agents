@@ -34,6 +34,15 @@ final class DesktopResearchConcurrencyTestSupport {
   private DesktopResearchConcurrencyTestSupport() {}
 
   static Run run(ResearchWorkKind kind, int count, Delay delay) {
+    return run(kind, count, delay, false);
+  }
+
+  static Run runWithSharedResource(ResearchWorkKind kind, int count, Delay delay) {
+    return run(kind, count, delay, true);
+  }
+
+  private static Run run(
+      ResearchWorkKind kind, int count, Delay delay, boolean sharedResource) {
     Tracker tracker = new Tracker(delay);
     SystemConfig config = config();
     Map<String, MockResponder> responders =
@@ -55,6 +64,12 @@ final class DesktopResearchConcurrencyTestSupport {
       ResearchResultLedger results = new ResearchResultLedger();
       FrozenResearchSnapshot snapshot = snapshot("epoch-" + kind.name().toLowerCase());
       List<ResearchWorkItem> workItems = items(snapshot, kind, count);
+      if (sharedResource) {
+        workItems =
+            workItems.stream()
+                .map(DesktopResearchConcurrencyTestSupport::withSharedReviewerResource)
+                .toList();
+      }
       DesktopResearchEpochExecutor executor =
           new DesktopResearchEpochExecutor(
               "run-concurrency",
@@ -190,6 +205,32 @@ final class DesktopResearchConcurrencyTestSupport {
               ordinal));
     }
     return List.copyOf(items);
+  }
+
+  private static ResearchWorkItem withSharedReviewerResource(ResearchWorkItem item) {
+    return new ResearchWorkItem(
+        item.workItemId(),
+        item.epochId(),
+        item.snapshotHash(),
+        item.kind(),
+        item.routeId(),
+        item.claimId(),
+        item.obligationId(),
+        item.canonicalTargetId(),
+        item.requiredRole(),
+        item.leaseClass(),
+        item.excludedAgentIds(),
+        item.readSet(),
+        new ResearchWorkConflictSet(
+            item.conflictSet().routeIds(),
+            item.conflictSet().claimCaseIds(),
+            item.conflictSet().pivotIds(),
+            item.conflictSet().obligationIds(),
+            item.conflictSet().strategyEpochIds(),
+            java.util.Set.of("agent:shared-reviewer")),
+        item.inputArtifactRef(),
+        item.expectedResultSchema(),
+        item.stableOrdinal());
   }
 
   @FunctionalInterface

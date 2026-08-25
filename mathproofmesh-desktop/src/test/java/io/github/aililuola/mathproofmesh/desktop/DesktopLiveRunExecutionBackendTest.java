@@ -158,6 +158,16 @@ final class DesktopLiveRunExecutionBackendTest {
               assertFalse(route.path("teamResult").isMissingNode());
               assertFalse(route.path("validationExecution").isMissingNode());
             });
+    int routeReviewTasks = 0;
+    for (JsonNode task : state.path("researchTasks").path("tasks")) {
+      if ("ROUTE_REVIEW".equals(task.path("item").path("kind").asText())) {
+        routeReviewTasks++;
+        assertFalse(
+            task.path("item").path("conflictSet").path("resourceIds").isEmpty(),
+            task.toString());
+      }
+    }
+    assertEquals(3, routeReviewTasks);
     assertTrue(state.path("strategyBlueprints").size() >= 3);
     assertTrue(state.path("strategyArchive").path("lineage").size() >= 3);
     assertTrue(state.path("goalLinks").size() >= 3);

@@ -592,12 +592,16 @@ final class ConcurrencyDurabilityBoundaryTest {
             new ResearchWorkConflictSet(null, Set.of("c"), null, null, null),
             new ResearchWorkConflictSet(null, null, Set.of("p"), null, null),
             new ResearchWorkConflictSet(null, null, null, Set.of("o"), null),
-            new ResearchWorkConflictSet(null, null, null, null, Set.of("s")));
+            new ResearchWorkConflictSet(null, null, null, null, Set.of("s")),
+            new ResearchWorkConflictSet(
+                null, null, null, null, null, Set.of("agent:shared-reviewer")));
     for (ResearchWorkConflictSet conflictSet : conflictSets) {
       assertThat(conflictSet.conflictsWith(conflictSet)).isTrue();
     }
     assertThat(ResearchWorkConflictSet.empty().conflictsWith(ResearchWorkConflictSet.empty()))
         .isFalse();
+    assertThat(new ResearchWorkConflictSet(null, null, null, null, null).resourceIds())
+        .isEmpty();
 
     ResearchWorkItem first = withConflict(item(frozen, 0, "a"), conflictSets.getFirst());
     ResearchWorkItem conflicting = withConflict(item(frozen, 1, "b"), conflictSets.getFirst());

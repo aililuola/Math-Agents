@@ -1067,6 +1067,69 @@ PostgreSQL 18.4, all seven Flyway migrations, SpotBugs/FindSecBugs, coverage, se
 immutability, dependency checks, Temporal checks, and the unchanged Python Sidecar performance
 gate all passed.
 
+### Optional computation hints and shared-reviewer lease contention
+
+The next cold-start campaign from `131e2ccdc81963df244a8a7efb9f9a0c72268543` is preserved at
+`benchmark/olympiad-5key-v1/results/real-20260825T050539Z`. P01/T1 run
+`p01-t1-20260825T050546Z-9743918b` returned `INCOMPLETE` after 37 calls, 187,749 input tokens,
+170,692 output tokens, 358,441 total tokens, and USD 0.230172855. It was not a run-budget
+exhaustion: the SMOKE tier permits 48 calls and 2,304,000 tokens. The immutable Root Goal hash was
+unchanged.
+
+All three independent routes had complete symbolic proofs of the elementary gcd statement. The
+failure had two separate orchestration causes:
+
+1. Route 1 and Route 2 passed skeptic, structural, and detailed review, but their strategies each
+   contained an optional `computation_hint`. Although neither strategy nor proof step bound a
+   calculation artifact or submitted a `calculation_check`, the old risk mapping treated a hint as
+   numerical evidence, required a Tool Specialist, and then rejected the proof because there was no
+   computation trace to replay.
+2. Route 3 produced a complete seven-step proof, but Route 2 and Route 3 were scheduled
+   concurrently against the same fixed reviewer. Route 2 held that agent lease longer than the
+   fixed acquisition timeout, so Route 3 never entered skeptic, structural, or detailed review and
+   remained `reviewComplete=false`.
+
+The repair preserves fail-closed handling for real computation dependencies while separating
+advisory search ideas from evidence. Only a typed `calculation_check`, a bound
+`calculation_evidence_ref`, or an actual durable computation trace can require Tool Specialist
+review. A `computation_hint` remains available for optional falsification planning but cannot by
+itself create a proof-closing tool gate. The same policy is used at route creation, restore, and
+post-attempt risk reassessment.
+
+Fixed reviewer identities are now explicit `resourceIds` in each authoritative route-review
+conflict set. The existing frozen-snapshot scheduler serializes work that shares any reviewer
+resource before a worker attempts to acquire an Agent Pool lease. Distinct reviewer sets remain
+concurrent. The new conflict dimension is immutable, null-safe for older serialized work, and the
+existing five-argument constructor remains source compatible.
+
+The focused 28-test matrix passed with zero failures, errors, or skips. It covers the production
+fake-provider path, all persisted route-review resource bindings, every concurrency durability
+boundary, explicit computation evidence and requests, optional-hint route admission, and shared
+reviewer scheduling:
+
+```text
+OPTIONAL COMPUTATION HINT ADMISSION DIAGNOSTIC
+HINT_ONLY_STRATEGIES=4
+ADMITTED_ROUTES=4
+TOOL_SPECIALISTS_ASSIGNED=0
+RESULT=PASS
+
+SHARED REVIEWER RESOURCE SCHEDULING DIAGNOSTIC
+ROUTE_REVIEWS=3
+SUCCESSFUL_REVIEWS=3
+MAXIMUM_CONCURRENT_SHARED_REVIEWERS=1
+LEASE_TIMEOUTS=0
+RESULT=PASS
+```
+
+The final module regression passed with 73 Contracts tests, 1,411 Core tests, 964 Server tests,
+and 394 Desktop tests, with zero failures or errors and six intentional skips. The final
+`scripts/verify-all.ps1 -Offline` run completed with `FULL VERIFICATION: PASS`: 2,991 tests
+(73 Contracts, 1,411 Core, 964 Server, 394 Desktop, and 149 Compatibility) ran with zero failures
+or errors and six intentional skips. Docker/Testcontainers, PostgreSQL 18.4, all seven Flyway
+migrations, SpotBugs/FindSecBugs, coverage, security, source immutability, dependency checks,
+Temporal checks, and the unchanged Python Sidecar performance gate all passed.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

@@ -7,13 +7,24 @@ public record ResearchWorkConflictSet(
     Set<String> claimCaseIds,
     Set<String> pivotIds,
     Set<String> obligationIds,
-    Set<String> strategyEpochIds) {
+    Set<String> strategyEpochIds,
+    Set<String> resourceIds) {
   public ResearchWorkConflictSet {
     routeIds = safe(routeIds);
     claimCaseIds = safe(claimCaseIds);
     pivotIds = safe(pivotIds);
     obligationIds = safe(obligationIds);
     strategyEpochIds = safe(strategyEpochIds);
+    resourceIds = safe(resourceIds);
+  }
+
+  public ResearchWorkConflictSet(
+      Set<String> routeIds,
+      Set<String> claimCaseIds,
+      Set<String> pivotIds,
+      Set<String> obligationIds,
+      Set<String> strategyEpochIds) {
+    this(routeIds, claimCaseIds, pivotIds, obligationIds, strategyEpochIds, Set.of());
   }
 
   public boolean conflictsWith(ResearchWorkConflictSet other) {
@@ -21,7 +32,8 @@ public record ResearchWorkConflictSet(
         || overlaps(claimCaseIds, other.claimCaseIds)
         || overlaps(pivotIds, other.pivotIds)
         || overlaps(obligationIds, other.obligationIds)
-        || overlaps(strategyEpochIds, other.strategyEpochIds);
+        || overlaps(strategyEpochIds, other.strategyEpochIds)
+        || overlaps(resourceIds, other.resourceIds);
   }
 
   @Override
@@ -49,8 +61,14 @@ public record ResearchWorkConflictSet(
     return Set.copyOf(strategyEpochIds);
   }
 
+  @Override
+  public Set<String> resourceIds() {
+    return Set.copyOf(resourceIds);
+  }
+
   public static ResearchWorkConflictSet empty() {
-    return new ResearchWorkConflictSet(Set.of(), Set.of(), Set.of(), Set.of(), Set.of());
+    return new ResearchWorkConflictSet(
+        Set.of(), Set.of(), Set.of(), Set.of(), Set.of(), Set.of());
   }
 
   private static Set<String> safe(Set<String> values) {

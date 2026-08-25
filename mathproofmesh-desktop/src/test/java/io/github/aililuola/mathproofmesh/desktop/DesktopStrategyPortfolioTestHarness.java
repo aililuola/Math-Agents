@@ -38,6 +38,7 @@ import io.github.aililuola.mathproofmesh.contract.TriageResult;
 import io.github.aililuola.mathproofmesh.memory.LemmaMemory;
 import io.github.aililuola.mathproofmesh.memory.TypedMemory;
 import io.github.aililuola.mathproofmesh.memory.VerifiedCounterexampleAuthority;
+import io.github.aililuola.mathproofmesh.orchestration.teams.RouteTeamPlan;
 import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactLedger;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlFacade;
@@ -504,6 +505,15 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
     @SuppressWarnings("unchecked")
     List<Object> routes = (List<Object>) rawField("routes");
     return routes.stream().map(DesktopStrategyPortfolioTestHarness::routeStrategyId).toList();
+  }
+
+  List<String> routeToolSpecialistAgentIds() throws ReflectiveOperationException {
+    @SuppressWarnings("unchecked")
+    List<Object> routes = (List<Object>) rawField("routes");
+    return routes.stream()
+        .map(route -> (RouteTeamPlan) routeField(route, "plan"))
+        .map(plan -> plan.toolSpecialist() == null ? "" : plan.toolSpecialist().agentId())
+        .toList();
   }
 
   StrategyCandidateLedger candidates() throws ReflectiveOperationException {
