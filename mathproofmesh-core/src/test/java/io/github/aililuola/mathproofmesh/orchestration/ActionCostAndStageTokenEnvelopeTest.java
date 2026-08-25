@@ -54,4 +54,27 @@ class ActionCostAndStageTokenEnvelopeTest {
     assertThat(blocked.allowed()).isFalse();
     assertThat(blocked.code()).isEqualTo("INPUT_CONTEXT_EXCEEDS_BUDGET_ENVELOPE");
   }
+
+  @Test
+  void resolverReservesProviderOutputMeteringHeadroomWithoutExceedingActionBudget() {
+    StageTokenEnvelopeResolver resolver = new StageTokenEnvelopeResolver();
+
+    var resolution =
+        resolver.resolve(
+            new StageTokenEnvelopeResolver.Request(
+                2_000L,
+                128_000L,
+                96_000L,
+                64_000L,
+                32_000L,
+                24_000L,
+                30_000L,
+                40_000L,
+                8_000L,
+                1L));
+
+    assertThat(resolution.allowed()).isTrue();
+    assertThat(resolution.maxOutputTokens()).isEqualTo(23_999);
+    assertThat(resolution.reservedTotalTokens()).isEqualTo(26_000L);
+  }
 }

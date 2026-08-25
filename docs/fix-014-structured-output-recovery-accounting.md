@@ -1130,6 +1130,53 @@ or errors and six intentional skips. Docker/Testcontainers, PostgreSQL 18.4, all
 migrations, SpotBugs/FindSecBugs, coverage, security, source immutability, dependency checks,
 Temporal checks, and the unchanged Python Sidecar performance gate all passed.
 
+### Provider output-metering headroom
+
+The next cold-start campaign from `a2f5462`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260825T142216Z`, confirmed that optional computation
+hints and shared-reviewer scheduling no longer blocked P01. Its P01/T1 run
+`p01-t1-20260825T142226Z-150cce4c` instead stopped `INVALID` after two physical calls and
+USD 0.031808505. The strategy-generation request had an explicit 32,000-token output limit, but
+the provider's usage meter reported 32,001 completion tokens for the truncated response. The
+physical budget reservation was exactly 32,000 output tokens, so the correct actual-usage commit
+marked the envelope `ACTUAL_USAGE_OVERRUN`. A JSON-repair call had already been planned, but could
+not reserve capacity after that overrun. This was neither global cost exhaustion nor mathematical
+failure.
+
+The repair reserves one explicit provider output-metering token in every physical Call Ledger and
+Budget Envelope reservation while leaving the logical stage, agent, provider, and benchmark
+output ceilings unchanged. When a containing action envelope is tight, the resolver reduces the
+logical provider request by that one token so the physical reservation still fits exactly inside
+the authorized action capacity. Expected cost includes the headroom, exact reported usage remains
+durable, and no run, campaign, call, token, or USD limit was increased. A response reported at
+`requested + 1` can therefore proceed to bounded structured repair; `requested + 2` remains a hard
+`ACTUAL_USAGE_OVERRUN` and cannot trigger another provider call.
+
+The focused cross-module matrix ran 33 tests with zero failures, errors, or skips. It covered the
+new tight-action-envelope resolution, both provider metering boundaries, structured-output repair,
+durable accounting, evidence-aware budgets, and stage-token diagnostics:
+
+```text
+PROVIDER OUTPUT METERING HEADROOM DIAGNOSTIC
+REQUESTED_OUTPUT_LIMIT=provider logical maximum
+RESERVED_OUTPUT_CAPACITY=REQUESTED_OUTPUT_LIMIT+1
+REQUESTED_PLUS_ONE_REPAIR_CALLS=2
+REQUESTED_PLUS_ONE_ENVELOPE_OVERRUNS=0
+REQUESTED_PLUS_TWO_PROVIDER_CALLS=1
+REQUESTED_PLUS_TWO_RESULT=ACTUAL_USAGE_OVERRUN
+ACTION_ENVELOPE_TOKEN_BYPASSES=0
+RESULT=PASS
+```
+
+The module regression then passed 73 Contracts tests, 1,412 Core tests, 939 Server unit tests, and
+394 Desktop tests with zero failures or errors and six intentional skips. The complete release
+gate then completed with `FULL VERIFICATION: PASS`: 2,994 tests (73 Contracts, 1,412 Core,
+966 Server including 27 PostgreSQL/security integration tests, 394 Desktop, and 149
+Compatibility) ran with zero failures or errors and six intentional skips. Docker/Testcontainers,
+PostgreSQL 18.4, all seven Flyway migrations, SpotBugs/FindSecBugs, coverage, security, source
+immutability, dependency checks, Temporal checks, and the unchanged Python Sidecar performance
+gate all passed.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

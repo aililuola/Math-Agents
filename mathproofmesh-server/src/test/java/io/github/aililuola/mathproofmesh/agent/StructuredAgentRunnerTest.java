@@ -870,6 +870,105 @@ class StructuredAgentRunnerTest {
   }
 
   @Test
+  void oneTokenProviderOutputMeteringHeadroomDoesNotPoisonStructuredRepair() {
+    CallLedger callLedger = new CallLedger(4, 10_000L, BigDecimal.TEN);
+    BudgetEnvelopeLedger envelopes =
+        new BudgetEnvelopeLedger(
+            resource(4, 10_000, 10_000, 20_000, "10"), BudgetResourceVector.zero());
+    AtomicInteger providerCalls = new AtomicInteger();
+    try (Fixture fixture =
+        fixture(
+            "run-output-headroom",
+            request -> {
+              if (providerCalls.incrementAndGet() == 1) {
+                return new LLMResponse(
+                    "{",
+                    "mock-model",
+                    "mock",
+                    8,
+                    request.maxOutputTokens() + 1L,
+                    12.5d,
+                    "fixture-request-primary",
+                    "stop",
+                    false,
+                    JsonNodeFactory.instance.objectNode());
+              }
+              return response("{\"answer\":\"repaired\"}");
+            },
+            callLedger,
+            List.of(),
+            1)) {
+      fixture.runner().configureBudgetEnvelopeLedger(() -> envelopes);
+
+      StructuredCallResult<Answer> result =
+          fixture
+              .runner()
+              .call(
+                  "run-output-headroom",
+                  "output-headroom-key",
+                  "general",
+                  bundle("public prompt"),
+                  fixture.pool().get("agent-a"),
+                  "proof");
+
+      assertThat(result.value().answer()).isEqualTo("repaired");
+      assertThat(result.repaired()).isTrue();
+      assertThat(providerCalls).hasValue(2);
+      assertThat(envelopes.overrun()).isFalse();
+      assertThat(envelopes.reservationSnapshot().reservations())
+          .hasSize(2)
+          .allMatch(value -> value.status() == BudgetPhysicalReservation.Status.SETTLED);
+    }
+  }
+
+  @Test
+  void outputUsageBeyondMeteringHeadroomStillFailsClosed() {
+    CallLedger callLedger = new CallLedger(4, 10_000L, BigDecimal.TEN);
+    BudgetEnvelopeLedger envelopes =
+        new BudgetEnvelopeLedger(
+            resource(4, 10_000, 10_000, 20_000, "10"), BudgetResourceVector.zero());
+    AtomicInteger providerCalls = new AtomicInteger();
+    try (Fixture fixture =
+        fixture(
+            "run-output-overrun",
+            request -> {
+              providerCalls.incrementAndGet();
+              return new LLMResponse(
+                  "{",
+                  "mock-model",
+                  "mock",
+                  8,
+                  request.maxOutputTokens() + 2L,
+                  12.5d,
+                  "fixture-request-overrun",
+                  "stop",
+                  false,
+                  JsonNodeFactory.instance.objectNode());
+            },
+            callLedger,
+            List.of(),
+            1)) {
+      fixture.runner().configureBudgetEnvelopeLedger(() -> envelopes);
+
+      assertThatThrownBy(
+              () ->
+                  fixture
+                      .runner()
+                      .call(
+                          "run-output-overrun",
+                          "output-overrun-key",
+                          "general",
+                          bundle("public prompt"),
+                          fixture.pool().get("agent-a"),
+                          "proof"))
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessage("ACTUAL_USAGE_OVERRUN");
+      assertThat(providerCalls).hasValue(1);
+      assertThat(envelopes.overrun()).isTrue();
+    }
+  }
+
+  @Test
   void unknownRemoteResultQuarantinesWorstCaseEnvelopeAndCannotReplay() {
     CallLedger callLedger = new CallLedger(4, 10_000L, BigDecimal.TEN);
     BudgetEnvelopeLedger envelopes =

@@ -15,14 +15,16 @@ public final class StageTokenEnvelopeResolver {
       return Resolution.blocked("INPUT_CONTEXT_EXCEEDS_BUDGET_ENVELOPE");
     }
     long outputBudget = availableTotal - request.estimatedInputTokens();
+    long budgetBound =
+        Math.min(request.actionRemainingOutputTokens(), outputBudget)
+            - request.outputMeteringHeadroomTokens();
     long resolved =
         min(
             request.agentMaxOutputTokens(),
             request.providerMaxOutputTokens(),
             request.configuredStageLimit(),
             request.continuationOrDeepTierLimit(),
-            request.actionRemainingOutputTokens(),
-            outputBudget);
+            budgetBound);
     if (resolved < 1L) {
       return Resolution.blocked("OUTPUT_TOKEN_BUDGET_EXHAUSTED");
     }
@@ -31,7 +33,9 @@ public final class StageTokenEnvelopeResolver {
         "ALLOW",
         Math.toIntExact(Math.min(Integer.MAX_VALUE, resolved)),
         request.estimatedInputTokens(),
-        Math.addExact(request.estimatedInputTokens(), resolved));
+        Math.addExact(
+            request.estimatedInputTokens(),
+            Math.addExact(resolved, request.outputMeteringHeadroomTokens())));
   }
 
   private static long min(long... values) {
@@ -51,7 +55,31 @@ public final class StageTokenEnvelopeResolver {
       long actionRemainingOutputTokens,
       long actionRemainingTotalTokens,
       long globalRemainingTokens,
-      long finishReserveTokens) {
+      long finishReserveTokens,
+      long outputMeteringHeadroomTokens) {
+
+    public Request(
+        long estimatedInputTokens,
+        long agentMaxOutputTokens,
+        long providerMaxOutputTokens,
+        long configuredStageLimit,
+        long continuationOrDeepTierLimit,
+        long actionRemainingOutputTokens,
+        long actionRemainingTotalTokens,
+        long globalRemainingTokens,
+        long finishReserveTokens) {
+      this(
+          estimatedInputTokens,
+          agentMaxOutputTokens,
+          providerMaxOutputTokens,
+          configuredStageLimit,
+          continuationOrDeepTierLimit,
+          actionRemainingOutputTokens,
+          actionRemainingTotalTokens,
+          globalRemainingTokens,
+          finishReserveTokens,
+          0L);
+    }
 
     public Request {
       if (estimatedInputTokens < 0
@@ -60,9 +88,10 @@ public final class StageTokenEnvelopeResolver {
           || configuredStageLimit < 1
           || continuationOrDeepTierLimit < 1
           || actionRemainingOutputTokens < 0
-          || actionRemainingTotalTokens < 0
-          || globalRemainingTokens < 0
-          || finishReserveTokens < 0) {
+            || actionRemainingTotalTokens < 0
+            || globalRemainingTokens < 0
+            || finishReserveTokens < 0
+            || outputMeteringHeadroomTokens < 0) {
         throw new IllegalArgumentException("invalid stage token envelope input");
       }
     }

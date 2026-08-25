@@ -57,6 +57,8 @@ import java.util.function.Supplier;
  * application deliberately have separate idempotency records.
  */
 public final class StructuredAgentRunner {
+  private static final long OUTPUT_METERING_HEADROOM_TOKENS = 1L;
+
   private final AgentPool pool;
   private final ArtifactStore artifacts;
   private final ProviderCallRepository calls;
@@ -754,11 +756,14 @@ public final class StructuredAgentRunner {
                     actionOutputLimit,
                     actionTotalLimit,
                     ledgerTokenLimit(budget.remainingTokens()),
-                    0L));
+                    0L,
+                    OUTPUT_METERING_HEADROOM_TOKENS));
     if (!tokenEnvelope.allowed()) {
       throw new BudgetExhaustedError(tokenEnvelope.code());
     }
     int resolvedMaxOutputTokens = tokenEnvelope.maxOutputTokens();
+    long reservedOutputTokens =
+        tokenEnvelope.reservedTotalTokens() - tokenEnvelope.estimatedInputTokens();
     if (resolvedMaxOutputTokens != bundle.maxOutputTokens()) {
       bundle =
           new PromptBundle<>(
@@ -783,8 +788,7 @@ public final class StructuredAgentRunner {
                     "user", safeUser,
                     "max_output_tokens", resolvedMaxOutputTokens,
                     "streaming", bundle.streaming())));
-    BigDecimal expectedCost =
-        providerCost(estimatedInputTokens, resolvedMaxOutputTokens, agent);
+    BigDecimal expectedCost = providerCost(estimatedInputTokens, reservedOutputTokens, agent);
     String generatedCallId =
         nextProviderCallId(runId, idempotencyKey, agent.id(), bundle.stage(), requestHash);
     CallLedger.Reservation reservation =
@@ -792,7 +796,7 @@ public final class StructuredAgentRunner {
             "budget-reservation-" + generatedCallId.substring("provider-call-".length()),
             bundle.stage(),
             budgetBucket,
-            Math.addExact(estimatedInputTokens, resolvedMaxOutputTokens),
+            tokenEnvelope.reservedTotalTokens(),
             expectedCost);
     ProviderCallRecord planned =
         calls.plan(
@@ -828,8 +832,8 @@ public final class StructuredAgentRunner {
         new BudgetResourceVector(
             1L,
             estimatedInputTokens,
-            resolvedMaxOutputTokens,
-            Math.addExact(estimatedInputTokens, resolvedMaxOutputTokens),
+            reservedOutputTokens,
+            tokenEnvelope.reservedTotalTokens(),
             envelopeCost(expectedCost));
     PhysicalBudgetBinding physicalBudget;
     try {
