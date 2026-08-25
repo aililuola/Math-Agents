@@ -352,8 +352,12 @@ public final class StructuredAgentRunner {
     CheckpointedResearchEnvelope envelope = context.validatedEnvelope(envelopeResult.value());
     StructuredCallResult<T> mapped;
     try {
-      T value = parseCheckpointResult(envelope.result(), bundle.resultType());
-      mapped = mapCheckpointed(envelopeResult, value, envelopeResult.repaired());
+      Parsed<T> parsed = parseCheckpointResult(envelope.result(), bundle.resultType());
+      mapped =
+          mapCheckpointed(
+              envelopeResult,
+              parsed.value(),
+              envelopeResult.repaired() || parsed.repaired());
     } catch (StructuredOutputError failure) {
       StructuredCallResult<T> repairedResult =
           callSingle(
@@ -408,14 +412,16 @@ public final class StructuredAgentRunner {
         envelope.attemptedAgents());
   }
 
-  private static <T> T parseCheckpointResult(JsonNode result, Class<T> resultType) {
+  private static <T> Parsed<T> parseCheckpointResult(JsonNode result, Class<T> resultType) {
     try {
       JsonNode copy = result.deepCopy();
+      List<String> normalizations = List.of();
       if (copy instanceof ObjectNode object) {
         StructuredPayloadNormalizer.stripServerOwnedHashes(object);
-        StructuredPayloadNormalizer.normalize(object, resultType);
+        normalizations = StructuredPayloadNormalizer.normalize(object, resultType);
       }
-      return ContractObjectMapper.read(ContractObjectMapper.write(copy), resultType);
+      T value = ContractObjectMapper.read(ContractObjectMapper.write(copy), resultType);
+      return new Parsed<>(value, !normalizations.isEmpty());
     } catch (RuntimeException exception) {
       throw new StructuredOutputError(
           "checkpoint envelope result failed its original strict contract", exception);
@@ -432,6 +438,8 @@ public final class StructuredAgentRunner {
                 + "object matching the original result schema. The already committed public research "
                 + "checkpoints are immutable and must not be repeated or removed.\n\nJSON SCHEMA:\n"
                 + ContractObjectMapper.write(source.resultSchema())
+                + "\n\nCONTRACT-SPECIFIC RULES:\n"
+                + repairContractRules(original.responseType())
                 + "\n\nMALFORMED RESULT:\n"
                 + ContractObjectMapper.write(malformed)
                 + "\n\nVALIDATION ERROR:\n"
@@ -1274,7 +1282,11 @@ public final class StructuredAgentRunner {
               + "ToolRequest.kind; omit an invalid optional calculation check rather than changing "
               + "its mathematical purpose. critical_claim_context_bindings polarity accepts only "
               + "positive or negative; use positive for an asserted identity, equality, equivalence, "
-              + "inequality, extremum, or uniqueness, and never put a relation name in polarity.";
+              + "inequality, extremum, or uniqueness, and never put a relation name in polarity."
+              + " quantifiers[].kind accepts only forall, exists, or exists_unique. The values "
+              + "positive and negative belong only to the enclosing binding polarity; never infer "
+              + "or guess a quantifier from positive or negative. Omit an invalid optional strategy "
+              + "rather than changing its mathematical scope.";
       case "InitialExplorationTurn" ->
           common
               + " The action is a strict tagged union. request_computation requires exactly one "

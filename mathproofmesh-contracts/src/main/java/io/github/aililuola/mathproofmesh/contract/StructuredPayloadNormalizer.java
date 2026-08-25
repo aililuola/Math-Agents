@@ -95,6 +95,7 @@ public final class StructuredPayloadNormalizer {
     if ("StrategySet".equals(modelName)) {
       normalizeStrategyClaimContextPolarities(payload, actions);
       normalizeOptionalStrategyCalculationChecks(payload, actions);
+      isolateInvalidStrategyCandidates(payload, actions);
     }
     if ("ToolAuditReport".equals(modelName)) {
       normalizeToolAuditVerdict(payload, actions);
@@ -366,6 +367,39 @@ public final class StructuredPayloadNormalizer {
     if (canonical != null) {
       payload.put("verdict", canonical);
       actions.add("canonicalized tool-audit verdict " + verdict + " to " + canonical);
+    }
+  }
+
+  private static void isolateInvalidStrategyCandidates(
+      ObjectNode payload, List<String> actions) {
+    if (!(payload.get("strategies") instanceof ArrayNode strategies)
+        || strategies.size() < 2) {
+      return;
+    }
+    List<Integer> invalidIndexes = new ArrayList<>();
+    for (int index = 0; index < strategies.size(); index++) {
+      try {
+        ContractObjectMapper.read(strategies.get(index), StrategyCard.class);
+      } catch (ContractValidationException ignored) {
+        invalidIndexes.add(index);
+      }
+    }
+    if (invalidIndexes.size() == strategies.size()) {
+      return;
+    }
+    for (int offset = invalidIndexes.size() - 1; offset >= 0; offset--) {
+      int index = invalidIndexes.get(offset);
+      JsonNode candidate = strategies.get(index);
+      String strategyId =
+          candidate instanceof ObjectNode object
+              ? textOrNull(object.get("strategy_id"))
+              : null;
+      strategies.remove(index);
+      actions.add(
+          "isolated invalid StrategySet.strategies["
+              + index
+              + "] candidate"
+              + (strategyId == null ? "" : " " + strategyId));
     }
   }
 

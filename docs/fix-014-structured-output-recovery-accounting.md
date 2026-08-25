@@ -1177,6 +1177,54 @@ PostgreSQL 18.4, all seven Flyway migrations, SpotBugs/FindSecBugs, coverage, se
 immutability, dependency checks, Temporal checks, and the unchanged Python Sidecar performance
 gate all passed.
 
+### Strategy candidate isolation after structured repair
+
+The next cold-start campaign from `c572a02`, preserved at
+`benchmark/olympiad-5key-v1/results/real-20260825T151531Z`, proved that provider output metering no
+longer blocked repair. Its P01/T1 run `p01-t1-20260825T151541Z-653e106c` instead stopped `INVALID`
+after four physical calls and USD 0.052778115. The immutable Root Goal hash was unchanged and no
+strategy or route was admitted.
+
+The initial 32,000-token strategy response was truncated. Full-envelope repair returned six
+complete strategy candidates, but one candidate used `positive` as a `QuantifierSpec.kind` while
+also using `positive` correctly as its enclosing Claim-context polarity. The strict contract
+correctly permits only `forall`, `exists`, and `exists_unique` for a quantifier kind. Nested result
+repair received that exact validation error but repeated the invalid literal, so whole-set
+deserialization discarded the other five complete candidates as collateral damage. This was not a
+budget exhaustion or a mathematical proof failure.
+
+The repair keeps the quantifier contract strict and does not guess scope. After the existing safe
+representation normalizations, a `StrategySet` with multiple candidates is validated one
+`StrategyCard` at a time. Candidate-local contract failures are isolated only when at least one
+other complete candidate remains. The original provider response artifact is retained unchanged,
+the resulting structured call is marked repaired, and the surviving candidates continue through
+the normal server-owned preflight, diversity, admission, and optional replenishment paths. If
+every candidate is invalid, none is silently removed: bounded repair or strict rejection still
+applies. In particular, `positive` is never rewritten to a guessed universal or existential
+quantifier.
+
+Both full-output and nested-result repair prompts now state that `quantifiers[].kind` accepts only
+`forall`, `exists`, or `exists_unique`, that `positive` and `negative` belong to binding polarity,
+and that an optional invalid strategy must be omitted rather than having its mathematical scope
+invented. Checkpointed normalization is also propagated to `StructuredCallResult.repaired` instead
+of being lost at the nested-result mapping boundary.
+
+The regression was written and run before the production change. The Contracts test failed with
+`kind has an unsupported literal: positive`, demonstrating that one invalid candidate still
+invalidated the complete `StrategySet`; the reactor stopped before the new Server test ran. After
+the repair, the focused cross-module matrix passed 49 tests with zero failures, errors, or skips.
+It covers mixed valid/invalid candidate isolation, all-invalid fail-closed behavior, checkpointed
+StrategySet parsing, nested repair instructions, generic structured repair, public-checkpoint
+retention, desktop recovery accounting, and existing portfolio replenishment isolation.
+
+The module regression then passed 75 Contracts tests, 1,412 Core tests, 941 Server unit tests, and
+394 Desktop tests with zero failures or errors and six intentional skips. The complete release
+gate completed with `FULL VERIFICATION: PASS`: 2,998 tests (75 Contracts, 1,412 Core, 968 Server
+including 27 PostgreSQL/security integration tests, 394 Desktop, and 149 Compatibility) ran with
+zero failures or errors and six intentional skips. Docker/Testcontainers, PostgreSQL 18.4, all
+seven Flyway migrations, SpotBugs/FindSecBugs, coverage, security, source immutability, dependency
+checks, Temporal checks, and the unchanged Python Sidecar performance gate all passed.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

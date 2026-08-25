@@ -347,6 +347,38 @@ class StructuredPayloadNormalizationParityTest {
   }
 
   @Test
+  void isolatesInvalidStrategyQuantifierWithoutGuessingItsMeaning() {
+    ObjectNode payload = strategySetWithQuantifierKinds("forall", "positive");
+
+    List<String> actions = StructuredPayloadNormalizer.normalize(payload, StrategySet.class);
+    StrategySet strategies = ContractObjectMapper.read(payload, StrategySet.class);
+
+    assertEquals(
+        List.of("S-valid"),
+        strategies.strategies().stream().map(StrategyCard::strategyId).toList());
+    assertTrue(
+        actions.stream()
+            .anyMatch(
+                action ->
+                    action.equals(
+                        "isolated invalid StrategySet.strategies[1] candidate S-invalid")));
+  }
+
+  @Test
+  void leavesAnEntirelyInvalidStrategySetForStrictRepairOrRejection() {
+    ObjectNode payload = strategySetWithQuantifierKinds("positive", "negative");
+
+    List<String> actions = StructuredPayloadNormalizer.normalize(payload, StrategySet.class);
+
+    assertTrue(
+        actions.stream()
+            .noneMatch(action -> action.startsWith("isolated invalid StrategySet")));
+    assertThrows(
+        ContractValidationException.class,
+        () -> ContractObjectMapper.read(payload, StrategySet.class));
+  }
+
+  @Test
   void dropsInvalidOptionalStrategyChecksButPreservesSandboxComputationHints() {
     ObjectNode payload =
         object(
@@ -403,6 +435,73 @@ class StructuredPayloadNormalizationParityTest {
         ComputationMethod.SANDBOXED_PYTHON,
         strategies.strategies().getFirst().computationHints().getFirst().suggestedMethod());
     assertTrue(actions.stream().anyMatch(action -> action.contains("valid typed ToolRequest")));
+  }
+
+  private static ObjectNode strategySetWithQuantifierKinds(String firstKind, String secondKind) {
+    return object(
+        """
+        {
+          "coverage_notes":"Two complete candidate strategies are represented.",
+          "strategies":[
+            {
+              "strategy_id":"S-valid",
+              "title":"First route",
+              "core_idea":"Prove the first route.",
+              "bottleneck":"Establish its critical claim.",
+              "estimated_success":0.7,
+              "falsification_test":"Search for a bounded counterexample.",
+              "independence_basis":"Uses the first exact mechanism.",
+              "critical_claim_context_bindings":[
+                {
+                  "claim_id":"S-valid-C1",
+                  "claim_blueprint_node_id":"@claim",
+                  "local_assumption_node_ids":[],
+                  "local_assumptions":[],
+                  "quantifiers":[{
+                    "display_name":"p",
+                    "domain":"primes",
+                    "kind":"%s",
+                    "order":1,
+                    "restrictions":[],
+                    "variable_id":"S-valid-p"
+                  }],
+                  "variable_bindings":[],
+                  "scope_limitations":[],
+                  "polarity":"positive"
+                }
+              ]
+            },
+            {
+              "strategy_id":"S-invalid",
+              "title":"Second route",
+              "core_idea":"Prove the second route.",
+              "bottleneck":"Establish its critical claim.",
+              "estimated_success":0.6,
+              "falsification_test":"Search for a bounded counterexample.",
+              "independence_basis":"Uses the second exact mechanism.",
+              "critical_claim_context_bindings":[
+                {
+                  "claim_id":"S-invalid-C1",
+                  "claim_blueprint_node_id":"@claim",
+                  "local_assumption_node_ids":[],
+                  "local_assumptions":[],
+                  "quantifiers":[{
+                    "display_name":"q",
+                    "domain":"primes",
+                    "kind":"%s",
+                    "order":1,
+                    "restrictions":[],
+                    "variable_id":"S-invalid-q"
+                  }],
+                  "variable_bindings":[],
+                  "scope_limitations":[],
+                  "polarity":"positive"
+                }
+              ]
+            }
+          ]
+        }
+        """.formatted(firstKind, secondKind));
   }
 
   @Test
