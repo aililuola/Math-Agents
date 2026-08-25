@@ -1288,6 +1288,65 @@ SpotBugs/FindSecBugs, dependency checks, coverage, security, source immutability
 and the unchanged Python Sidecar performance gate all passed. The final result was `FULL
 VERIFICATION: PASS`.
 
+### Authoritative computation-target isolation
+
+The next clean cold-start campaign from `0bbf2897abc239a3a1dbcbb6eee449fa0cda6736` is preserved at
+`benchmark/olympiad-5key-v1/results/real-20260825T195001Z`. It confirmed the preceding repair on
+three consecutive real problems: P01/T1, P02/T1, and P03/T1 all reached `COMPLETE`. In particular,
+P03 no longer scheduled a Tool Specialist or rejected its self-contained symbolic proof because
+of an unused planning check.
+
+P04/T1 run `p04-t1-20260825T220505Z-f0ef93f9` then stopped `INVALID` after 18 physical calls,
+149,096 input tokens, 151,533 output tokens, 300,629 total tokens, and USD 0.19669047. Its initial
+and final Root Goal hashes were both
+`2a62f00da1d899842fc8b1c25f62e1a48a7847bf6dcff6cabeb8cc60f0f23396`. The terminal failure was
+`IllegalArgumentException (ComputationExecutionContext#<init>:31)`, not a budget failure or a
+mathematical rejection.
+
+The model supplied a nonblank target Claim ID together with an incomplete semantic binding whose
+statement and semantic hashes were blank. The existing exact-target resolver correctly downgraded
+that input to an isolated computation question. The execution path nevertheless constructed
+`ComputationExecutionContext` from the raw model `ExperimentSpec`, so the constructor saw a Claim
+ID without its required semantic hash and aborted. The Core outcome projector also had a second
+authority bypass: when the authoritative context contained no Claim ID, it could re-import the raw
+model Claim ID during projection.
+
+The repair makes the server-resolved `ComputationTargetBinding` the only production authority for
+the execution context. `ComputationOutcomeProjector` now preserves an empty Claim binding in an
+authoritative context; fallback to the raw spec remains only for explicitly non-authoritative
+legacy contexts. A downgraded computation may close its own isolated computation question, but it
+cannot create or update the model-named Claim and cannot promote a Fact under that Claim identity.
+
+The two regression tests were run before the production change. The Core test failed because the
+projector returned `model-proposed-claim` instead of an empty Claim ID. The Desktop production-path
+test failed at the same `ComputationExecutionContext` constructor as the real P04 run with
+`claim-bound computation requires claimSemanticHash`.
+
+After repair, the focused Core/Desktop pair passed with this diagnostic:
+
+```text
+UNTRUSTED_BINDING_EXECUTION_CONTEXT_FAILURES=0
+UNTRUSTED_MODEL_CLAIM_AUTHORITY_BINDINGS=0
+UNTRUSTED_MODEL_CLAIM_AUTHORITY_PROJECTIONS=0
+ISOLATED_COMPUTATION_QUESTION_PROJECTIONS=1
+RESULT=PASS
+```
+
+The adjacent computation-boundary matrix passed 12 tests with zero failures or errors. It covered
+wrong focused obligations, similarity-only targets, full-context bindings, exact-context Negative
+Knowledge, counterexample context round trips, native computation, and wrong-target certificate or
+counterexample projection. All wrong-target closures, refutations, and authority bindings remained
+zero.
+
+The module regression passed 2,827 tests: 75 Contracts, 1,413 Core, 941 Server, and 398 Desktop
+tests, with zero failures or errors and six intentional skips. The final
+`scripts/verify-all.ps1 -Offline` run completed with `FULL VERIFICATION: PASS`: 3,003 tests
+(75 Contracts, 1,413 Core, 941 Server unit, 27 Server PostgreSQL/security integration, 398 Desktop,
+and 149 Compatibility) ran with zero failures or errors and six intentional skips. PostgreSQL
+18.4 Testcontainers, all Flyway migrations, SpotBugs/FindSecBugs, dependency and security checks,
+coverage, source immutability, Temporal checks, and the unchanged Python Sidecar performance gate
+all passed.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

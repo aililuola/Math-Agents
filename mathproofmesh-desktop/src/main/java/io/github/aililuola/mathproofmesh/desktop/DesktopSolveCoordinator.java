@@ -4319,20 +4319,13 @@ final class DesktopSolveCoordinator {
                 "Generating a bounded sandbox computation");
         program = sandboxProgram(prepared.spec(), draft.value());
       }
-      String claimId = prepared.spec().targetClaimId();
-      String claimSemanticHash =
-          prepared.spec().claimEvidenceSemanticBinding() == null
-              ? claimId == null || claimId.isBlank()
-                  ? ""
-                  : CanonicalJson.stableHash(prepared.spec().targetClaim())
-              : prepared.spec().claimEvidenceSemanticBinding().claimSemanticHash();
       ComputationExecutionContext executionContext =
           new ComputationExecutionContext(
               problemHash,
               rootGoal().sourceStatementHash(),
               route.routeId,
-              claimId,
-              claimSemanticHash,
+              targetBinding.claimId(),
+              targetBinding.claimSemanticHash(),
               targetBinding.obligationId(),
               targetBinding.canonicalTargetId(),
               roundIndex.get(),

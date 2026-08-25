@@ -21,8 +21,10 @@ public final class ComputationOutcomeProjector {
     if (context.decisionPlan() != null) {
       return context.decisionPlan();
     }
-    String targetClaimId =
-        context.claimId().isEmpty() ? spec.targetClaimId() : context.claimId();
+    String targetClaimId = context.claimId();
+    if (!context.authoritativeBinding() && targetClaimId.isEmpty()) {
+      targetClaimId = spec.targetClaimId();
+    }
     String targetClaimHash = context.claimSemanticHash();
     String obligationId = context.obligationId();
     if ((targetClaimId == null || targetClaimId.isBlank()) && obligationId.isEmpty()) {
