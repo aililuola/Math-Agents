@@ -114,6 +114,13 @@ final class DesktopBudgetRuntime {
     return finishReserve;
   }
 
+  BudgetResourceVector availableExplorationCapacity() {
+    BudgetResourceVector available = envelopes.available();
+    return finishReserve.fitsWithin(available)
+        ? available.minus(finishReserve)
+        : BudgetResourceVector.zero();
+  }
+
   ZeroGainState zeroGain() {
     return zeroGain;
   }

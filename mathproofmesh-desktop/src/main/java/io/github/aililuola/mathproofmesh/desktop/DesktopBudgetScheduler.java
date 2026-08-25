@@ -124,6 +124,53 @@ final class DesktopBudgetScheduler {
         != null;
   }
 
+  boolean reserveClaimCourtBatch(List<String> claimIds, String authorityHash) {
+    if (claimIds.isEmpty()) {
+      return false;
+    }
+    List<String> stableClaimIds = claimIds.stream().distinct().sorted().toList();
+    String stableAuthorityHash = require(authorityHash, "authorityHash");
+    String batchSignature =
+        CanonicalJson.stableHash(
+            Map.of("claim_ids", stableClaimIds, "authority_hash", stableAuthorityHash));
+    String epochId = "claim-court-epoch-" + host.currentRound();
+    String workItemId = "claim-court-batch-" + batchSignature.substring(0, 20);
+    BudgetEnvelope active = runtime.activeEnvelope().orElse(null);
+    if (active != null
+        && active.epochId().equals(epochId)
+        && active.workItemId().equals(workItemId)) {
+      return true;
+    }
+    if (active != null) {
+      finish();
+    }
+    BudgetResourceVector resources = runtime.availableExplorationCapacity();
+    if (resources.calls() < 1L) {
+      host.event("CLAIM_COURT", false, "ACTION_BUDGET_ENVELOPE_EXHAUSTED");
+      return false;
+    }
+    String decisionId =
+        CanonicalJson.stableHash(
+            Map.of(
+                "run_id", runId,
+                "round", host.currentRound(),
+                "claim_ids", stableClaimIds,
+                "resource_capacity", resources,
+                "authority_hash", stableAuthorityHash,
+                "budget_envelope_frontier_hash",
+                    CanonicalJson.stableHash(runtime.envelopeSnapshot())));
+    return reserve(
+            epochId,
+            workItemId,
+            decisionId,
+            BudgetBucket.DEPTH,
+            resources,
+            new TargetMechanismKey(
+                "claim-court", batchSignature, ActionKind.DEEPEN, batchSignature),
+            "CLAIM_COURT")
+        != null;
+  }
+
   void finish() {
     runtime
         .finishActiveEnvelope(host.gainBaseline(), host.noGainExhaustionThreshold())

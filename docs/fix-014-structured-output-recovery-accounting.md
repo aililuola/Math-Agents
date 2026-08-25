@@ -967,6 +967,106 @@ Compatibility) ran with zero failures or errors and six intentional skips. Docke
 PostgreSQL 18.4, all seven Flyway migrations, SpotBugs/FindSecBugs, coverage, security, source
 immutability, dependency, Temporal, and the unchanged Python Sidecar performance gate all passed.
 
+### Closure-critical Claim Court budget isolation
+
+The next cold-start campaign from `a07afdc9d213c0ef070bdc71b0ae98f51f0d9ef3` is preserved at
+`benchmark/olympiad-5key-v1/results/real-20260825T004540Z`. P01/T1 run
+`p01-t1-20260825T004549Z-a1765948` returned `INCOMPLETE`, but the mathematical route itself had
+not failed: `route-1` was verified, `attempt-route-1-r0` was complete, the synthesized proof was
+correct, and all structural and final model reviews passed with confidence from 0.98 to 1.0. The
+immutable Root Goal hash did not change.
+
+The deterministic final gate failed because `main-goal` and all 13 Proof Graph obligations were
+still open. The internally created Route Theorem Artifact
+`attempt-artifact-3c3c4cb0d9e8390678531311` remained `REVIEW_PENDING`, had no Claim Court review
+IDs, and therefore could not become a Fact or call `closeRouteTheoremObligations`. This was an
+orchestration false negative, not evidence that the elementary gcd proof was incomplete.
+
+The exact starvation boundary was the initial route-exploration action envelope. It reserved and
+consumed exactly 21 calls. Claim Court shared that fixed envelope even though its real fan-out is
+determined only after harvesting Attempt Artifacts. Optional local Claims consumed the remaining
+physical-call capacity, and the Route Theorem statement-falsification stage then failed with
+`BudgetExhaustedError`. The run as a whole had used only 33 of 48 calls, 408,361 tokens, and
+USD 0.26352126, so 15 run calls remained available outside the exhausted action envelope.
+
+The benchmark launcher and both Java processes were deliberately stopped before source changes.
+The campaign is retained only as pre-fix evidence and will not be resumed; the next benchmark must
+be a cold start.
+
+The repair makes the following production guarantees:
+
+1. Route exploration is settled before Claim Court planning, so a fixed pre-harvest estimate no
+   longer governs dynamic Claim Court fan-out.
+2. Claim Court receives a durable action envelope from the remaining exploration capacity while
+   the immutable synthesis/final-verification reserve remains protected in every resource
+   dimension.
+3. A verified Route Theorem is sorted ahead of local Claims before the 64-item review limit, so a
+   full optional batch cannot crowd it out.
+4. Closure-critical Route Theorems execute in deterministic one-item authoritative epochs before
+   the concurrent supporting-Claim epoch. Optional work can no longer preempt main-goal closure.
+5. A restored active Claim Court envelope is reused only when its epoch and work-item identity
+   match the same sorted Claim set and restore-stable authority hash. A different active envelope
+   is settled before a new decision is bound to the current budget-envelope frontier, preventing
+   stale or unrelated capacity from being reactivated after rollback.
+6. Mathematical authority is unchanged: only a Claim Court `VERIFIED` Route Theorem may become a
+   Fact and close the main goal. A failed, uncertain, unreviewed, or unverified theorem still fails
+   closed.
+
+The new production regression was run before the implementation change. Its first Claim Court
+request was `optional-budget-claim-0` instead of `claim-route-1-theorem-r1`, so the required
+closure-first assertion failed. After the repair, both the bounded-budget path and the full-batch
+crowding boundary pass:
+
+```text
+ROUTE THEOREM BUDGET STARVATION DIAGNOSTIC
+INITIAL_FIXED_ENVELOPE_RESERVED=1
+OPTIONAL_LOCAL_CLAIMS=4
+ROUTE_THEOREM_COURT_FIRST=1
+OPTIONAL_CLAIM_PREEMPTIONS=0
+ROUTE_THEOREM_PROMOTIONS=1
+MAIN_GOAL_CLOSURES=1
+RESULT=PASS
+
+ROUTE THEOREM BATCH CROWDING DIAGNOSTIC
+OPTIONAL_LOCAL_CLAIMS=64
+CLAIM_REVIEW_BATCH_LIMIT=64
+ROUTE_THEOREMS_RETAINED=1
+ROUTE_THEOREMS_CROWDED_OUT=0
+RESULT=PASS
+```
+
+The adjacent Claim Court atomicity retry also passed all ten injected failure points with zero
+partial Court records, proof revisions, Claim status writes, Fact writes, Proof Graph writes, task
+lease leaks, or pending-task leaks. Claim Court hard-crash recovery, concurrent completion-order
+determinism, 20-round Claim Court restore, 20-round Claim salvage restore, evidence-aware budget,
+initial Olympiad envelope compatibility, and no-budget-bypass checks remained green.
+
+The first full-module retry exposed one restore-specific regression: unconditional settlement of
+an active Claim Court envelope caused the v20 prepared-epoch replay test to quarantine a durable
+prepared result. The final implementation derives Claim Court batch identity from the sorted Claim
+IDs and the restore-stable mathematical authority hash, so the exact prepared batch reuses its
+envelope without making a second provider call. A different batch cannot reuse it. The focused
+matrix then ran five tests with zero failures, errors, or skips, including all ten Claim Court
+atomicity points and all five hard-crash points. The prepared-epoch diagnostic reported one modern
+replayed commit, one mutation receipt, one merge receipt, zero provider-call replays, and no legacy
+fail-open acceptance.
+
+The first complete release retry after this repair also found that the additional inline Claim
+Court orchestration pushed `DesktopSolveCoordinator` past SpotBugs' analyzable class-size limit.
+The ordering and partition logic was moved into `DesktopClaimCourtBatchExecutor`, and callback
+implementations were isolated in generated nested classes. No SpotBugs rule, suppression, or
+performance threshold was weakened. A no-test reactor verify then reported zero SpotBugs findings
+in every module.
+
+The final module regression completed successfully: 73 Contracts tests, 1,411 Core tests, 964
+Server tests, and 389 Desktop tests ran with zero failures or errors; the Server and Desktop totals
+contained six intentional skips. The final `scripts/verify-all.ps1 -Offline` run completed with
+`FULL VERIFICATION: PASS`: 2,986 tests (73 Contracts, 1,411 Core, 964 Server, 389 Desktop, and 149
+Compatibility) ran with zero failures or errors and six intentional skips. Docker/Testcontainers,
+PostgreSQL 18.4, all seven Flyway migrations, SpotBugs/FindSecBugs, coverage, security, source
+immutability, dependency checks, Temporal checks, and the unchanged Python Sidecar performance
+gate all passed.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

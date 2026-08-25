@@ -68,6 +68,7 @@ import io.github.aililuola.mathproofmesh.concurrency.ResearchAuthorityAnchor;
 import io.github.aililuola.mathproofmesh.contract.BrokerArtifactUseManifest;
 import io.github.aililuola.mathproofmesh.persistence.ArtifactStore;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactLedger;
+import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactRecord;
 import io.github.aililuola.mathproofmesh.proofcontrol.ClaimLifecycleController;
 import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlFacade;
 import io.github.aililuola.mathproofmesh.proofcontrol.RootGoalContract;
@@ -91,6 +92,8 @@ import io.github.aililuola.mathproofmesh.provider.ProviderClientRegistry;
 import io.github.aililuola.mathproofmesh.provider.ProviderRequest;
 import io.github.aililuola.mathproofmesh.research.ResearchCheckpointLedger;
 import io.github.aililuola.mathproofmesh.strategydiversity.StrategyPortfolioRegistry;
+import io.github.aililuola.mathproofmesh.verification.EscalationPlan;
+import io.github.aililuola.mathproofmesh.verification.ValidationExecution;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -426,6 +429,100 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
 
   void integrateInstalledRound() throws Exception {
     invoke("integrateCommittedRoutes");
+  }
+
+  boolean reserveInitialExplorationBudget() throws Exception {
+    return (boolean) invoke("reserveInitialExplorationBudget");
+  }
+
+  void installVerifiedAttemptWithOptionalClaims(int round, int optionalClaimCount)
+      throws ReflectiveOperationException {
+    if (optionalClaimCount < 1) {
+      throw new IllegalArgumentException("optionalClaimCount must be positive");
+    }
+    setRound(round);
+    Object route = route();
+    AgentRuntime author = field(route, "author", AgentRuntime.class);
+    StrategyCard strategy = field(route, "strategy", StrategyCard.class);
+    List<ClaimCard> claims = new ArrayList<>();
+    for (int index = 0; index < optionalClaimCount; index++) {
+      claims.add(
+          claim(
+              "optional-budget-claim-" + index,
+              "OPTIONAL_VALID_LOCAL_"
+                  + index
+                  + ": every multiple of four is even.",
+              List.of("local_lemma")));
+    }
+    ProofStep theoremStep =
+        proofStep(
+            "route-theorem-budget",
+            SOURCE,
+            "Let d divide both expressions. The standard coprimality reduction proves the exact "
+                + "frozen goal.");
+    ProofAttempt attempt =
+        new ProofAttempt(
+            author.id(),
+            "verified-budget-attempt-" + round,
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of("checked the exact route theorem"),
+            SOURCE,
+            null,
+            null,
+            PROBLEM_HASH,
+            "A complete proof of the frozen main goal.",
+            List.of(theoremStep),
+            List.copyOf(claims),
+            "artifact://verified-budget-route/" + round,
+            null,
+            round,
+            1,
+            0.99d,
+            AttemptStatus.COMPLETE,
+            strategy.strategyId(),
+            List.of(),
+            new UsageRecord());
+    setField(route, "attempt", attempt);
+    setField(route, "status", "verified");
+    setField(route, "failureReason", null);
+    setField(route, "reviewComplete", true);
+    setField(route, "checkpointProcessed", true);
+    setField(route, "integrated", false);
+    setField(route, "delta", null);
+    setField(route, "deltaId", null);
+    setField(route, "claimReview", null);
+    setField(
+        route,
+        "validationExecution",
+        new ValidationExecution(
+            new EscalationPlan(0.0d, List.of(), List.of(), false),
+            List.of(),
+            true,
+            true,
+            List.of()));
+  }
+
+  List<String> claimCourtRequestClaimIds() {
+    return responder.claimCourtRequestClaimIds();
+  }
+
+  @SuppressWarnings("unchecked")
+  List<AttemptArtifactRecord> prepareClaimCourtWorkItemForInstalledRoute() throws Exception {
+    Object route = route();
+    List<AttemptArtifactRecord> harvested =
+        (List<AttemptArtifactRecord>)
+            invoke(
+                "harvestAttemptArtifacts",
+                new Class<?>[] {route.getClass()},
+                new Object[] {route});
+    return (List<AttemptArtifactRecord>)
+        invoke(
+            "prepareClaimCourtWorkItem",
+            new Class<?>[] {route.getClass(), List.class},
+            new Object[] {route, harvested});
   }
 
   void distributeBrokerArtifacts() throws Exception {
@@ -1701,6 +1798,22 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
 
     List<ProviderRequest> requests() {
       return List.copyOf(requests);
+    }
+
+    List<String> claimCourtRequestClaimIds() {
+      return requests.stream()
+          .filter(request -> request.schemaName().startsWith("Claim"))
+          .map(ClaimReviewResponder::sanitizedContext)
+          .map(
+              context -> {
+                JsonNode frozen = context.path("frozen_claim");
+                if (!frozen.isMissingNode()) {
+                  return text(frozen, "claimId", "claim_id");
+                }
+                return context.path("blind_claim_packet").path("claimId").asText();
+              })
+          .filter(value -> value != null && !value.isBlank())
+          .toList();
     }
 
     int reviewCalls(String attemptId) {

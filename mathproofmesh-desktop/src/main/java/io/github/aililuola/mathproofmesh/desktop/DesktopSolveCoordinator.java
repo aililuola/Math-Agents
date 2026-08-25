@@ -5378,6 +5378,7 @@ final class DesktopSolveCoordinator {
       recordInspirationOutcome(route);
       persistUnchecked("claim_memory_graph", false);
     }
+    finishActiveSchedulerBudgetEnvelope();
     complete(RoutePipelineFunctions.RunStage.CLAIM_MEMORY_GRAPH);
     persistUnchecked("claim_memory_graph", false);
   }
@@ -5439,25 +5440,57 @@ final class DesktopSolveCoordinator {
                 ordinal++));
       }
     }
-    if (!specs.isEmpty()) {
-      ClaimCourtSnapshot courtBase = claimCourt.snapshot();
-      ClaimProofRevisionSnapshot revisionsBase = claimProofRevisions.snapshot();
-      ClaimCourtStageExecutionSnapshot executionsBase = claimCourtExecutions.snapshot();
-      executeAuthoritativeEpoch(
-          "claim-court-r" + roundIndex.get(),
-          specs,
-          (frozen, item) ->
-              executeClaimCourtCaseAgainstFrozenSnapshot(
-                  frozen,
-                  item,
-                  routeById,
-                  artifactByCase,
-                  courtBase,
-                  revisionsBase,
-                  executionsBase),
-          results ->
-              commitClaimCourtResultsInStableOrder(
-                  results, routeById, artifactByCase, targetsByCourtCase));
+    boolean claimCourtExecuted =
+        DesktopClaimCourtBatchExecutor.execute(
+            budgetScheduler,
+            specs,
+            AuthoritativeWorkSpec::claimId,
+            currentResearchAuthorityAnchor().restoreStableHash(),
+            new java.util.function.Predicate<>() {
+              @Override
+              public boolean test(AuthoritativeWorkSpec spec) {
+                RouteState route = routeById.get(spec.routeId());
+                AttemptArtifactRecord artifact =
+                    artifactByCase.get(claimCourtCaseKey(spec.routeId(), spec.claimId()));
+                return route != null
+                    && artifact != null
+                    && "verified".equals(route.status)
+                    && artifact.kind() == AttemptArtifactKind.ROUTE_THEOREM;
+              }
+            },
+            roundIndex.get(),
+            new java.util.function.BiConsumer<>() {
+              @Override
+              public void accept(String epochId, List<AuthoritativeWorkSpec> batch) {
+                ClaimCourtSnapshot courtBase = claimCourt.snapshot();
+                ClaimProofRevisionSnapshot revisionsBase = claimProofRevisions.snapshot();
+                ClaimCourtStageExecutionSnapshot executionsBase = claimCourtExecutions.snapshot();
+                executeAuthoritativeEpoch(
+                    epochId,
+                    batch,
+                    (frozen, item) ->
+                        executeClaimCourtCaseAgainstFrozenSnapshot(
+                            frozen,
+                            item,
+                            routeById,
+                            artifactByCase,
+                            courtBase,
+                            revisionsBase,
+                            executionsBase),
+                    results ->
+                        commitClaimCourtResultsInStableOrder(
+                            results, routeById, artifactByCase, targetsByCourtCase));
+              }
+            });
+    if (!claimCourtExecuted) {
+      event(
+          "claim_court_budget_deferred",
+          "claim_memory_graph",
+          null,
+          "deferred",
+          "Closure-critical Claim Court work could not reserve capacity without consuming the "
+              + "finalization reserve",
+          "claim-court://round-" + roundIndex.get());
     }
     Map<String, List<AttemptArtifactRecord>> reviewedByRoute = new LinkedHashMap<>();
     for (RouteState route : submitted) {
@@ -5490,6 +5523,7 @@ final class DesktopSolveCoordinator {
                 record ->
                     record.status() == AttemptArtifactStatus.HARVESTED
                         || record.status() == AttemptArtifactStatus.REVIEW_PENDING)
+            .sorted(DesktopClaimCourtBatchExecutor.reviewPriority())
             .limit(ClaimReviewBatch.MAX_DECISIONS)
             .toList();
     if (reviewable.stream()
