@@ -86,6 +86,35 @@ final class DesktopBudgetScheduler {
         != null;
   }
 
+  boolean reserveExhaustedPortfolioRecovery(BudgetStateSnapshot state) {
+    Objects.requireNonNull(state, "state");
+    BudgetEnvelope active = runtime.activeEnvelope().orElse(null);
+    if (active != null) {
+      return active.epochId().equals(state.researchEpochId())
+          && "exhausted-portfolio-recovery".equals(active.workItemId());
+    }
+    BudgetResourceVector estimate = runtime.estimate(ActionKind.WIDEN);
+    String decisionId =
+        CanonicalJson.stableHash(
+            Map.of(
+                "budget_state_hash", state.snapshotHash(),
+                "action", "EXHAUSTED_PORTFOLIO_RECOVERY",
+                "resource_estimate", estimate));
+    return reserve(
+            state.researchEpochId(),
+            "exhausted-portfolio-recovery",
+            decisionId,
+            BudgetBucket.BREADTH,
+            estimate,
+            new TargetMechanismKey(
+                "exhausted-portfolio-recovery",
+                "scheduler-portfolio-gap",
+                ActionKind.WIDEN,
+                "scheduler-portfolio-gap"),
+            "WIDEN")
+        != null;
+  }
+
   boolean reserveProofTaskBatch(
       List<ProofTaskBudgetInput> tasks, String authorityHash) {
     if (tasks.isEmpty()) {

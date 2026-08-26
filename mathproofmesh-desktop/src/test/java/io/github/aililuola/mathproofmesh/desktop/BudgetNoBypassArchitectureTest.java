@@ -31,6 +31,13 @@ final class BudgetNoBypassArchitectureTest {
         "private boolean schedulePendingProofTasksBatch()",
         "private BudgetStateSnapshot state()");
     assertBefore(batch, "reserveProofTaskBatch(batch)", "schedulePendingProofTask()");
+    String recovery =
+        method(
+            coordinator,
+            "private boolean scheduleExhaustedPortfolioRecovery()",
+            "private BudgetStateSnapshot state()");
+    assertBefore(
+        recovery, "reserveExhaustedPortfolioRecovery(state())", "widenRoutes()");
     String reservation = method(
         budgetScheduler,
         "private BudgetEnvelope reserve(",

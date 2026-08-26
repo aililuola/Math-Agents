@@ -256,6 +256,33 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
     return (boolean) invoke("widenRoutes");
   }
 
+  boolean scheduleExhaustedPortfolioRecovery() throws Exception {
+    Object budgetHost = rawField("budgetHost");
+    Method method =
+        budgetHost.getClass().getDeclaredMethod("scheduleExhaustedPortfolioRecovery");
+    method.setAccessible(true);
+    try {
+      return (boolean) method.invoke(budgetHost);
+    } catch (InvocationTargetException exception) {
+      if (exception.getCause() instanceof Exception cause) {
+        throw cause;
+      }
+      if (exception.getCause() instanceof Error cause) {
+        throw cause;
+      }
+      throw exception;
+    }
+  }
+
+  void abandonOnlyRoute() throws ReflectiveOperationException {
+    @SuppressWarnings("unchecked")
+    List<Object> routes = (List<Object>) rawField("routes");
+    if (routes.size() != 1) {
+      throw new IllegalStateException("scheduler recovery fixture requires exactly one route");
+    }
+    setRouteField(routes.getFirst(), "status", "abandoned");
+  }
+
   void queueWideningCandidate(StrategyCard candidate) throws Exception {
     StrategySet staged =
         new StrategySet("Incremental widening candidate.", List.of(), List.of(candidate));
@@ -828,6 +855,13 @@ final class DesktopStrategyPortfolioTestHarness implements AutoCloseable {
     } catch (ReflectiveOperationException exception) {
       throw new IllegalStateException(exception);
     }
+  }
+
+  private static void setRouteField(Object route, String name, Object value)
+      throws ReflectiveOperationException {
+    Field field = route.getClass().getDeclaredField(name);
+    field.setAccessible(true);
+    field.set(route, value);
   }
 
   private static RunExecutionBackend.ProgressSink noOpProgress() {

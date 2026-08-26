@@ -513,6 +513,8 @@ final class DesktopSolveCoordinator {
   private StrategyPortfolioRegistry strategyPortfolios = new StrategyPortfolioRegistry();
   private PortfolioReplenishmentLedger portfolioReplenishments =
       new PortfolioReplenishmentLedger();
+  private final ExhaustedPortfolioRecovery exhaustedPortfolioRecovery =
+      new ExhaustedPortfolioRecovery();
   private StrategyPortfolioFailurePoint strategyPortfolioFailurePoint =
       StrategyPortfolioFailurePoint.NONE;
   private StrategyPortfolioFailurePoint strategyPortfolioHardCrashPoint =
@@ -8999,6 +9001,9 @@ final class DesktopSolveCoordinator {
           enqueueDebtRepairTaskIfStalled();
           scheduled = budgetHost.schedulePendingProofTasksBatch();
         }
+        if (!scheduled) {
+          scheduled = budgetHost.scheduleExhaustedPortfolioRecovery();
+        }
         EvidenceAwareBudgetDecision decision = null;
         if (!scheduled) {
           BudgetStateSnapshot budgetState = schedulerBudgetState();
@@ -9914,6 +9919,9 @@ final class DesktopSolveCoordinator {
       eventSchedulerAction(
           "NEW_ROUTE", false, "generic route widening deferred during focused recovery");
       return false;
+    }
+    if (nextStrategyIndex.get() >= admittedStrategies.size()) {
+      exhaustedPortfolioRecovery.stage();
     }
     if (nextStrategyIndex.get() >= admittedStrategies.size()
         || routes.size() >= config.budget().maxPaths()) {
@@ -16051,7 +16059,7 @@ final class DesktopSolveCoordinator {
     }
   }
 
-  private record PreparedStrategyCandidate(
+  record PreparedStrategyCandidate(
       StrategyCard strategy,
       ProofControlModels.Strategy controlStrategy,
       StrategyBlueprintCompiler.Compilation blueprint,
@@ -16059,7 +16067,7 @@ final class DesktopSolveCoordinator {
       StrategyMechanismSignature signature,
       StrategyMechanismProfile profile,
       StrategyPreflightReport preflight) {
-    private PreparedStrategyCandidate {
+    PreparedStrategyCandidate {
       Objects.requireNonNull(strategy, "strategy");
       Objects.requireNonNull(controlStrategy, "controlStrategy");
       Objects.requireNonNull(blueprint, "blueprint");
@@ -16087,17 +16095,17 @@ final class DesktopSolveCoordinator {
     }
   }
 
-  private record StrategyPortfolioPreparation(
+  record StrategyPortfolioPreparation(
       List<StrategyPortfolioCandidate> candidates,
       Map<String, PreparedStrategyCandidate> prepared,
       StrategyPortfolioDecision decision) {
-    private StrategyPortfolioPreparation {
+    StrategyPortfolioPreparation {
       candidates = List.copyOf(candidates);
       prepared = Map.copyOf(prepared);
       Objects.requireNonNull(decision, "decision");
     }
 
-    private StrategyPortfolioPreparation withDecision(StrategyPortfolioDecision replacement) {
+    StrategyPortfolioPreparation withDecision(StrategyPortfolioDecision replacement) {
       return new StrategyPortfolioPreparation(candidates, prepared, replacement);
     }
   }
@@ -16506,6 +16514,113 @@ final class DesktopSolveCoordinator {
     }
   }
 
+  /** Owns the bounded one-shot recovery that supplements an exhausted strategy portfolio. */
+  private final class ExhaustedPortfolioRecovery {
+    private String episodeId() {
+      return strategyPortfolioEpisodeId() + "-scheduler-recovery";
+    }
+
+    private boolean routeWideningEligible() {
+      return proofGraphConvergence.controlMode() != ProofGraphControlMode.FOCUSED_RECOVERY
+          && routes.size() < config.budget().maxPaths()
+          && roundIndex.get() < config.budget().maxRounds()
+          && ledger.remainingCalls() > 0
+          && hasOpenObligations()
+          && routes.stream().noneMatch(DesktopSolveCoordinator.this::canDeepenRoute)
+          && routes.stream().noneMatch(DesktopSolveCoordinator.this::canReviseRoute);
+    }
+
+    private boolean eligible() {
+      if (!routeWideningEligible() || nextStrategyIndex.get() < admittedStrategies.size()) {
+        return false;
+      }
+      String recoveryEpisodeId = episodeId();
+      if (strategyPortfolios.receipt(recoveryEpisodeId).isPresent()) {
+        return false;
+      }
+      return portfolioReplenishments
+          .find(recoveryEpisodeId)
+          .map(record -> record.completed() && !record.candidateIds().isEmpty())
+          .orElse(true);
+    }
+
+    private boolean stage() {
+      if (!eligible()) {
+        return false;
+      }
+      String recoveryEpisodeId = episodeId();
+      StrategyPortfolioPreparation preparation;
+      if (portfolioReplenishments.mayRequest(recoveryEpisodeId)) {
+        StrategyPortfolioPreparation current =
+            prepareStrategyPortfolio(recoveryEpisodeId, strategySet);
+        strategySet =
+            replenishStrategyPortfolioOnce(recoveryEpisodeId, strategySet, current);
+        preparation = prepareStrategyPortfolio(recoveryEpisodeId, strategySet);
+      } else {
+        preparation = prepareStrategyPortfolio(recoveryEpisodeId, strategySet);
+      }
+      StrategyPortfolioDecision decision =
+          strategyPortfolios
+              .find(recoveryEpisodeId)
+              .orElseGet(() -> strategyPortfolios.record(preparation.decision()));
+      finalizeCandidateDecisions(preparation.candidates(), decision);
+      return append(recoveryEpisodeId, preparation.withDecision(decision));
+    }
+
+    private boolean append(
+        String recoveryEpisodeId, StrategyPortfolioPreparation preparation) {
+      SchedulerPortfolioRecoveryApplier.MutableState state =
+          new SchedulerPortfolioRecoveryApplier.MutableState(
+              admittedStrategies, strategyPortfolios);
+      try {
+        SchedulerPortfolioRecoveryApplier.Result result =
+            SchedulerPortfolioRecoveryApplier.apply(
+                recoveryEpisodeId,
+                preparation,
+                routes.stream().map(route -> route.routeId).toList(),
+                strategyArchive,
+                strategyBlueprints,
+                goalLinks,
+                nextStrategyIndex,
+                roundIndex.get(),
+                currentStage,
+                persistence(),
+                state);
+        result.additions().forEach(
+            strategy ->
+                event(
+                    "strategy_replenishment_admitted",
+                    "scheduler_decision",
+                    null,
+                    "completed",
+                    "Admitted an independent recovery mechanism after all active routes exhausted",
+                    "strategy://" + strategy.strategyId()));
+        return result.changed();
+      } finally {
+        admittedStrategies = state.admittedStrategies();
+        strategyPortfolios = state.portfolios();
+      }
+    }
+
+    private SchedulerPortfolioRecoveryApplier.Persistence persistence() {
+      return new SchedulerPortfolioRecoveryApplier.Persistence() {
+        @Override
+        public void persist(String reason) {
+          persistUnchecked(reason, false);
+        }
+
+        @Override
+        public void rollback(String stageBefore, boolean persistAttempted) {
+          if (persistAttempted) {
+            persistUnchecked(stageBefore, false);
+          } else {
+            currentStage = stageBefore;
+          }
+        }
+      };
+    }
+  }
+
   private final class BudgetHost implements DesktopBudgetScheduler.Host {
     private boolean reserveInitial() {
       int pendingRoutes =
@@ -16563,6 +16678,18 @@ final class DesktopSolveCoordinator {
         budgetScheduler.finish();
       }
       return scheduled > 0;
+    }
+
+    private boolean scheduleExhaustedPortfolioRecovery() {
+      if (!exhaustedPortfolioRecovery.routeWideningEligible()
+          || !budgetScheduler.reserveExhaustedPortfolioRecovery(state())) {
+        return false;
+      }
+      boolean scheduled = widenRoutes();
+      if (!scheduled) {
+        budgetScheduler.finish();
+      }
+      return scheduled;
     }
 
     private BudgetStateSnapshot state() {

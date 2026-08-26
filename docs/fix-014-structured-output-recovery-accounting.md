@@ -1467,9 +1467,68 @@ The adjacent frozen-Epoch, completion-order, atomicity, hard-crash recovery, che
 unknown-update, focused-worker, Campaign Finding, and empty-portfolio matrix passed 17 tests. The
 full Desktop-and-dependencies regression passed 3,013 tests: 75 Contracts, 1,413 Core, 968 Server,
 408 Desktop, and 149 Compatibility tests, with zero failures or errors and six intentional skips.
-A no-test `verify` then passed all five modules; SpotBugs reported zero bugs and zero errors. P09's
-nonterminal durable checkpoint is retained for an economical resume after this fix is committed;
+A no-test `verify` then passed all five modules; SpotBugs reported zero bugs and zero errors.
 P01-P08 remain immutable completed evidence.
+
+### Bounded recovery after every admitted route is exhausted
+
+P09 resumed from the durable research checkpoint without repeating its first 14 provider calls and
+crossed the former merge failure. It later stopped `INCOMPLETE` after 31 calls, 191,833 input
+tokens, 181,620 output tokens, and USD 0.241456755. The Root Goal hash remained
+`0cb0a46f4e99f355767519c56199cbb190bea8fe721a5735a68afb791d2857c9`. This was neither a budget
+exhaustion nor an invalid proof translation: 17 calls, 1,930,547 tokens, USD 1.7630, five route
+slots, and six scheduler rounds remained.
+
+The sole admitted mechanism had produced a coherent complex-coordinate proof and passed its
+Skeptic review, but a durable computation trace remained inconclusive and its replay could not be
+completed inside the local Tool Specialist envelope. The computation evidence gate therefore
+correctly failed closed. The route then exhausted its one revision, while no queued admitted
+strategy remained. The scheduler only knew how to widen from that fixed queue, so it emitted
+`STOP_NO_ADMISSIBLE_WORK` without asking for another independent mechanism.
+
+The repair adds one stable `scheduler-recovery` portfolio episode. It is eligible only when open
+obligations remain, every existing route is non-deepenable and non-revisable, the route and round
+caps have capacity, calls remain, and focused recovery is inactive. Before any provider call or
+route mutation, `DesktopBudgetScheduler` durably reserves the ordinary multidimensional `WIDEN`
+envelope, whose estimate already includes one planner call and bounded route exploration. The
+supplement then passes the existing Blueprint, explicit Claim Context, critical-Claim Preflight,
+Negative Knowledge, mechanism-diversity, and route-widening gates. No computation, Claim, Fact,
+or final-proof authority rule was relaxed.
+
+The replenishment request, candidate set, portfolio decision, apply receipt, admitted strategies,
+Blueprints, Goal Links, and next-strategy cursor are checkpointed. A fresh Coordinator can restore
+the episode and consume remaining candidates without another provider call. An active recovery
+budget envelope is also recognized after restore. An invalid or empty optional supplement records
+a terminal empty result and does not loop.
+
+The new test was run before the production change and failed at the real `widenRoutes()` boundary:
+`Expecting value to be true but was false`. After repair, including JSON checkpoint round-trip and
+fresh-Coordinator restore, it reported:
+
+```text
+EXHAUSTED PORTFOLIO RECOVERY DIAGNOSTIC
+INITIAL_ADMITTED_MECHANISMS=1
+EXHAUSTED_INITIAL_ROUTES=1
+REMAINING_ROUTE_CAPACITY_PRESENT=true
+SCHEDULER_REPLENISHMENT_CALLS=1
+NEW_ROUTE_ADMISSIONS=3
+REPEATED_REPLENISHMENT_CALLS=0
+POST_RESTORE_REPLENISHMENT_CALLS=0
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+RESULT=PASS
+```
+
+The adjacent Portfolio replenishment, shortfall preservation, invalid-output isolation, mechanism
+widening, hard-crash recovery, Campaign Finding, concurrent Finding merge, and budget no-bypass
+matrix passed 11 tests with zero failures or errors.
+
+The focused recovery test and architecture gate passed three tests. The complete Desktop reactor
+regression then passed 2,838 tests: 75 Contracts, 1,413 Core, 941 Server, and 409 Desktop, with zero
+failures, zero errors, and six intentional skips. The full run used PostgreSQL 18.4 Testcontainers
+and all seven Flyway migrations. A following no-test `verify` passed all five reactor modules;
+SpotBugs reported zero bugs and zero errors. No static-analysis rule or performance threshold was
+relaxed.
 
 ## Protected behavior
 
