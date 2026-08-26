@@ -1745,10 +1745,13 @@ final class DesktopSolveCoordinator {
           Math.min(requestedPortfolioSize, distinctStrategies(strategySet.strategies()).size());
       boolean qualifiedPortfolioShortfall =
           preparation.decision().selectedStrategyIds().size() < qualifiedPortfolioTarget;
+      boolean noAdmissibleInitialStrategy =
+          preparation.decision().selectedStrategyIds().isEmpty();
       if ((preparation.decision().selectedStrategyIds().size()
                   < effectiveMinimumPortfolioSize
               || qualifiedPortfolioShortfall)
-          && strategySet.strategies().size() >= effectiveMinimumPortfolioSize
+          && (strategySet.strategies().size() >= effectiveMinimumPortfolioSize
+              || noAdmissibleInitialStrategy)
           && initialBatchGeneratedHere
           && portfolioReplenishments.mayRequest(episodeId)) {
         strategySet = replenishStrategyPortfolioOnce(episodeId, strategySet, preparation);

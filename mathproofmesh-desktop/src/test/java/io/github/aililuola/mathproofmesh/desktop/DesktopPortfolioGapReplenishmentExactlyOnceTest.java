@@ -13,6 +13,83 @@ class DesktopPortfolioGapReplenishmentExactlyOnceTest {
   @TempDir Path temporaryDirectory;
 
   @Test
+  void replenishesWhenAnUnderfilledInitialBatchLeavesNoAdmissibleCandidate()
+      throws Exception {
+    StrategyCard unresolved =
+        DesktopStrategyPortfolioTestHarness.strategy(
+            "initial-only",
+            "Single unresolved route",
+            "Apply a direct case split at one selected vertex",
+            "The selected vertex induces the required finite case split.",
+            0.70d);
+    StrategySet initial =
+        new StrategySet(
+            "The provider returned one candidate without a verifiable operation graph.",
+            List.of(),
+            List.of(withoutMechanismOperations(unresolved)));
+    StrategySet supplement =
+        new StrategySet(
+            "A complete replacement portfolio.",
+            List.of(),
+            DesktopStrategyPortfolioTestHarness.fourIndependent("underfill-replacement"));
+
+    try (DesktopStrategyPortfolioTestHarness harness =
+        DesktopStrategyPortfolioTestHarness.open(
+            temporaryDirectory.resolve("underfilled-initial"),
+            "underfilled-initial-portfolio",
+            List.of(initial, supplement))) {
+      harness.freeze();
+      harness.generateAndAdmit();
+
+      assertThat(harness.providerStrategyCalls()).isEqualTo(2);
+      assertThat(harness.replenishmentProviderCalls()).isEqualTo(1);
+      assertThat(harness.replenishments().snapshot().episodes().values())
+          .singleElement()
+          .satisfies(
+              record -> {
+                assertThat(record.providerCalls()).isEqualTo(1);
+                assertThat(record.completed()).isTrue();
+                assertThat(record.candidateIds()).hasSize(4);
+              });
+      assertThat(harness.admittedStrategies()).hasSizeGreaterThanOrEqualTo(2);
+      assertThat(harness.routeStrategyIds()).hasSizeGreaterThanOrEqualTo(2);
+
+      System.out.println("EMPTY ADMISSIBLE INITIAL PORTFOLIO RECOVERY DIAGNOSTIC");
+      System.out.println("INITIAL_CANDIDATES=1");
+      System.out.println("INITIAL_ADMISSIBLE_CANDIDATES=0");
+      System.out.println("REPLENISHMENT_REQUESTS=1");
+      System.out.println("REPLENISHMENT_PROVIDER_CALLS=1");
+      System.out.println("VALID_REPLACEMENT_CANDIDATES=4");
+      System.out.println("RESULT=PASS");
+    }
+  }
+
+  private static StrategyCard withoutMechanismOperations(StrategyCard source) {
+    return new StrategyCard(
+        source.assignedAgentId(),
+        source.bottleneck(),
+        source.calculationChecks(),
+        source.calculationEvidenceRefs(),
+        source.computationHints(),
+        source.coreIdea(),
+        source.criticalClaims(),
+        source.estimatedCost(),
+        source.estimatedSuccess(),
+        source.expectedLemmas(),
+        source.falsificationTest(),
+        source.independenceBasis(),
+        source.inspirationProposalId(),
+        source.keyOriginalStep(),
+        source.parentStrategyIds(),
+        source.prerequisites(),
+        source.strategyId(),
+        source.tags(),
+        source.title(),
+        List.of(),
+        source.criticalClaimContextBindings());
+  }
+
+  @Test
   void requestsAtMostOneGapFillAndNeverRepeatsItAfterRestore() throws Exception {
     List<StrategyCard> initial =
         java.util.stream.IntStream.range(0, 4)
