@@ -1347,6 +1347,63 @@ and 149 Compatibility) ran with zero failures or errors and six intentional skip
 coverage, source immutability, Temporal checks, and the unchanged Python Sidecar performance gate
 all passed.
 
+### Bounded final-proof repair and independent rereview
+
+The cold-start campaign preserved at
+`benchmark/olympiad-5key-v1/results/real-20260825T232127Z` first confirmed that the earlier P01
+failure was no longer reproducible. P01/T1 run `p01-t1-20260825T232134Z-192e3447` reached
+`COMPLETE` after 33 calls at USD 0.247992195 with an unchanged Root Goal hash. P02/T1 run
+`p02-t1-20260825T235605Z-cd2a46ad` then stopped `INCOMPLETE` after 36 calls, 233,953 input tokens,
+267,310 output tokens, and USD 0.334329255. Its Root Goal hash also remained unchanged.
+
+P02's proof used the correct extremal argument, but final step `s9` omitted the boundary case
+`i=k-1` and its dependency on `s7`. The structural final reviewer identified that exact local
+repair and reported `FailureLevel.PLAN` with `problem_integrity_ok=true`. Blind and adversarial
+review found the proof locally repairable. The production pipeline nevertheless treated the first
+structural failure as terminal even though `final_revision` was already part of the configured
+prompt catalog. This was not a budget failure, a root-goal drift, or a wrong mathematical route.
+
+The repair permits exactly one final-proof revision only when the structural reviewer failed the
+final-proof target, confirmed problem integrity, found no critical or strategy-level defect,
+requested no tool action, and supplied a nonblank repair hint for every error. The revision sees
+the immutable source problem, original proof, exact review findings, proof graph, and authoritative
+source-attempt IDs. Server code then restores the authoritative problem hash and source-attempt
+IDs instead of trusting those fields from the model. A fresh structural-review call independently
+reviews the revised proof. There is no repair loop: an ineligible defect, an integrity failure, a
+failed rereview, or an ordinary repair failure remains unverified. The existing blind,
+adversarial, deterministic, computation, and authority gates remain unchanged.
+
+The production-path regression was first run against the old behavior and failed with
+`expected <completed> but was <unverified>`. After the repair it reported:
+
+```text
+FINAL PROOF LOCAL REPAIR DIAGNOSTIC
+INITIAL_STRUCTURAL_FAILURES=1
+FINAL_REVISION_CALLS=1
+STRUCTURAL_REREVIEWS=1
+ROOT_HASH_REBIND_FAILURES=0
+SOURCE_ATTEMPT_REBIND_FAILURES=0
+RESULT=PASS
+```
+
+The focused policy and production-chain suite passed 7 tests, and the adjacent final-proof,
+benchmark-path, execution-backend, structured-recovery, and token-envelope matrix passed 31 tests,
+all with zero failures or errors. The four-module regression then passed 75 Contracts tests, 1,413
+Core tests, 941 Server tests, and 405 Desktop tests with zero failures or errors and six intentional
+skips. The real campaign was stopped immediately after the P02 defect, so its partially started P03
+run is not treated as benchmark evidence.
+
+The first full release-gate run let all 405 Desktop tests finish successfully but then rejected a
+generic `RuntimeException` rethrow at the new fail-closed boundary. The implementation was narrowed
+to rethrow the typed budget-exhaustion and provider-cancellation failures directly; no SpotBugs
+suppression or gate relaxation was added. A direct four-module SpotBugs rerun then reported zero
+bugs and zero errors. The final `scripts/verify-all.ps1 -Offline` run completed with `FULL
+VERIFICATION: PASS`: 3,010 tests (75 Contracts, 1,413 Core, 941 Server unit, 27 Server
+PostgreSQL/security integration, 405 Desktop, and 149 Compatibility) ran with zero failures or
+errors and six intentional skips. Docker/PostgreSQL, all Flyway migrations,
+SpotBugs/FindSecBugs, dependency and security checks, coverage, source immutability, Temporal
+checks, and the unchanged Python Sidecar performance gate all passed.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

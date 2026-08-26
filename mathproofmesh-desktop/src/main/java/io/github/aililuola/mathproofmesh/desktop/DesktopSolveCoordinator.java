@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import io.github.aililuola.mathproofmesh.agent.BudgetExhaustedError;
 import io.github.aililuola.mathproofmesh.agent.CallLedger;
 import io.github.aililuola.mathproofmesh.agent.CheckpointedPromptBundle;
 import io.github.aililuola.mathproofmesh.agent.CheckpointedStructuredCallResult;
@@ -12585,7 +12586,84 @@ final class DesktopSolveCoordinator {
             blind,
             packets,
             "Independently checking final proof structure, dependency closure, scopes, and quantifiers");
+    FinalProofRevisionPolicy revisionPolicy = new FinalProofRevisionPolicy();
+    FinalProofRevisionPolicy.Decision revisionDecision = revisionPolicy.assess(structural);
+    if (revisionDecision.revise()) {
+      FinalProof priorProof = finalProof;
+      BlindReviewPacket priorBlind = blind;
+      VerificationReport priorStructural = structural;
+      try {
+        StructuredCallResult<FinalProof> revision =
+            callStage(
+                "final-revision-1",
+                "final_revision",
+                FinalProof.class,
+                revisionPolicy.revisionContext(
+                    frozenProblem,
+                    problemHash,
+                    priorProof,
+                    priorStructural,
+                    proofGraph.snapshot()),
+                synthesizer,
+                "synthesis",
+                "Repairing the independently verified local defects in the final proof");
+        finalProof = revisionPolicy.bindAuthoritative(revision.value(), priorProof, problemHash);
+        blind =
+            packets.build(
+                frozenProblem,
+                finalProof,
+                factPackets,
+                List.of(),
+                negativePackets,
+                config.topology().typedMemory().maxNegativeContext(),
+                24_000);
+        structural =
+            runFinalProofReview(
+                structuralReviewer,
+                "final-structural-revision-1",
+                "structural_verification",
+                VerificationStage.STRUCTURAL,
+                blind,
+                packets,
+                "Independently rechecking the bounded final-proof repair");
+        event(
+            "final_proof_revision",
+            "final_revision",
+            synthesizer.id(),
+            finalReportPassed(structural) ? "verified" : "unverified",
+            "One bounded repair was independently re-reviewed",
+            structural.reportId());
+      } catch (RuntimeException failure) {
+        if (failure instanceof BudgetExhaustedError budgetFailure) {
+          throw budgetFailure;
+        }
+        if (failure instanceof AgentCallFailure agentFailure
+            && agentFailure.providerFailure().kind() == ProviderErrorKind.CANCELLED) {
+          throw agentFailure;
+        }
+        finalProof = priorProof;
+        blind = priorBlind;
+        structural = priorStructural;
+        event(
+            "final_proof_revision",
+            "final_revision",
+            synthesizer.id(),
+            "failed",
+            "Bounded repair failed closed: " + failure.getClass().getSimpleName(),
+            priorStructural.reportId());
+      }
+    } else {
+      event(
+          "final_proof_revision",
+          "final_revision",
+          synthesizer.id(),
+          "skipped",
+          "Bounded repair was not eligible: " + revisionDecision.code().name(),
+          structural.reportId());
+    }
     reports.add(structural);
+    BlindReviewPacket reviewedBlind = blind;
+    VerificationReport reviewedStructural = structural;
 
     List<ComputationTrace> auditableComputations =
         computationTraces.stream()
@@ -12608,7 +12686,7 @@ final class DesktopSolveCoordinator {
         new ValidationEscalator(finalPolicy)
             .plan(
                 Math.max(0.0d, 1.0d - finalProof.confidence()),
-                List.of(structural.verdict().value()),
+                List.of(reviewedStructural.verdict().value()),
                 crossProviderReviewer.isPresent(),
                 toolOrFormalAvailable,
                 false,
@@ -12617,7 +12695,7 @@ final class DesktopSolveCoordinator {
         new EnumMap<>(ValidationLevel.class);
     handlers.put(
         ValidationLevel.DETERMINISTIC,
-        () -> deterministicFinalStep(blind));
+        () -> deterministicFinalStep(reviewedBlind));
     handlers.put(
         ValidationLevel.BLIND_SAME_MODEL,
         () ->
@@ -12625,7 +12703,7 @@ final class DesktopSolveCoordinator {
                 ValidationLevel.BLIND_SAME_MODEL,
                 "blind_final_verification",
                 selectIndependentAgent(excluded, "final_verifier"),
-                blind,
+                reviewedBlind,
                 packets,
                 synthesizer,
                 reports));
@@ -12636,7 +12714,7 @@ final class DesktopSolveCoordinator {
                 ValidationLevel.ADVERSARIAL_BLIND,
                 "adversarial_final_verification",
                 selectIndependentAgent(excluded, "final_verifier"),
-                blind,
+                reviewedBlind,
                 packets,
                 synthesizer,
                 reports));
@@ -12647,7 +12725,7 @@ final class DesktopSolveCoordinator {
                 .map(
                     reviewer ->
                         runCrossProviderFinalStep(
-                            reviewer, blind, packets, synthesizer, reports))
+                            reviewer, reviewedBlind, packets, synthesizer, reports))
                 .orElseGet(() -> ValidationStepResult.missing(ValidationLevel.CROSS_PROVIDER)));
     handlers.put(
         ValidationLevel.TOOL_OR_FORMAL,
@@ -12659,7 +12737,7 @@ final class DesktopSolveCoordinator {
     finalReviewReports.addAll(reports);
     finalReview = reports.stream().filter(report -> !finalReportPassed(report)).findFirst().orElse(reports.getLast());
     finalValidationPassed =
-        finalReportPassed(structural)
+        finalReportPassed(reviewedStructural)
             && finalValidationExecution.passed()
             && reports.stream().allMatch(this::finalReportPassed);
     event(
