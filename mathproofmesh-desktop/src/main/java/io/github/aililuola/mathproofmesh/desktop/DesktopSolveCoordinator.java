@@ -3343,20 +3343,38 @@ final class DesktopSolveCoordinator {
     for (Map.Entry<String, List<ResearchWorkResultEnvelope>> routeResults :
         resultsByRoute.entrySet()) {
       RouteState route = Objects.requireNonNull(routeById.get(routeResults.getKey()), "route");
-      List<ExplorationTurnDraft> drafts =
-          routeResults.getValue().stream().map(this::explorationDraft).toList();
-      for (ExplorationTurnDraft workerDraft : drafts) {
-        mergeResearchCheckpointDraft(route.routeId, workerDraft.researchCheckpoints());
-      }
-      ExplorationTurnDraft draft =
+      List<ResearchWorkResultEnvelope> orderedResults =
           routeResults.getValue().stream()
-              .min(
+              .sorted(
                   java.util.Comparator.comparingInt(
-                      result ->
-                          explorationCommitPriority(
-                              researchTasks.require(result.workItemId()).item().kind())))
-              .map(this::explorationDraft)
-              .orElseThrow();
+                          (ResearchWorkResultEnvelope result) ->
+                              explorationCommitPriority(
+                                  researchTasks.require(result.workItemId()).item().kind()))
+                      .thenComparingInt(
+                          result ->
+                              researchTasks
+                                  .require(result.workItemId())
+                                  .item()
+                                  .stableOrdinal())
+                      .thenComparing(ResearchWorkResultEnvelope::workItemId))
+              .toList();
+      List<ExplorationTurnDraft> drafts =
+          orderedResults.stream().map(this::explorationDraft).toList();
+      ExplorationTurnDraft draft = drafts.getFirst();
+      Set<String> frozenFindingIds =
+          researchCheckpoints.snapshot().findings().values().stream()
+              .filter(record -> record.routeId().equals(route.routeId))
+              .map(ResearchFindingRecord::findingId)
+              .collect(java.util.stream.Collectors.toUnmodifiableSet());
+      mergeResearchCheckpointDraft(
+          route.routeId, draft.researchCheckpoints(), frozenFindingIds, true);
+      for (int index = 1; index < drafts.size(); index++) {
+        mergeResearchCheckpointDraft(
+            route.routeId,
+            drafts.get(index).researchCheckpoints(),
+            frozenFindingIds,
+            false);
+      }
       route.latestResearchCheckpointId = draft.latestResearchCheckpointId();
       route.lastCheckpointedProviderCallId = draft.lastCheckpointedProviderCallId();
       route.checkpointRecoveryCount =
@@ -3448,60 +3466,17 @@ final class DesktopSolveCoordinator {
 
   private void mergeResearchCheckpointDraft(
       String routeId,
-      io.github.aililuola.mathproofmesh.research.ResearchCheckpointSnapshot worker) {
-    io.github.aililuola.mathproofmesh.research.ResearchCheckpointSnapshot current =
-        researchCheckpoints.snapshot();
-    Map<String, ResearchCheckpointRecord> checkpointsById =
-        new LinkedHashMap<>(current.checkpoints());
-    worker.checkpoints().values().stream()
-        .filter(record -> record.routeId().equals(routeId))
-        .forEach(
-            record -> {
-              ResearchCheckpointRecord prior =
-                  checkpointsById.putIfAbsent(record.checkpointId(), record);
-              if (prior != null && !prior.equals(record)) {
-                throw new IllegalStateException("research checkpoint worker result conflicted");
-              }
-            });
-    Map<String, ResearchFindingRecord> findingsById = new LinkedHashMap<>(current.findings());
-    Set<String> changedFindings = new LinkedHashSet<>();
-    worker.findings().values().stream()
-        .filter(record -> record.routeId().equals(routeId))
-        .forEach(
-            record -> {
-              ResearchFindingRecord prior = findingsById.get(record.findingId());
-              if (prior == null || prior.version() < record.version()) {
-                findingsById.put(record.findingId(), record);
-                changedFindings.add(record.findingId());
-              } else if (prior.version() == record.version() && !prior.equals(record)) {
-                throw new IllegalStateException("research finding worker result conflicted");
-              }
-            });
-    List<io.github.aililuola.mathproofmesh.research.ResearchFindingAuditEvent> audit =
-        new ArrayList<>(current.audit());
-    Set<String> auditHashes =
-        audit.stream().map(CanonicalJson::stableHash).collect(java.util.stream.Collectors.toSet());
-    worker.audit().stream()
-        .filter(event -> ResearchFindingUpdateBoundary.mergeable(event, changedFindings))
-        .filter(event -> !auditHashes.contains(CanonicalJson.stableHash(event)))
-        .forEach(
-            event ->
-                audit.add(
-                    new io.github.aililuola.mathproofmesh.research.ResearchFindingAuditEvent(
-                        audit.size(),
-                        event.findingId(),
-                        event.action(),
-                        event.priorStatus(),
-                        event.nextStatus(),
-                        event.reason())));
+      io.github.aililuola.mathproofmesh.research.ResearchCheckpointSnapshot worker,
+      Set<String> frozenFindingIds,
+      boolean dispositionAuthority) {
     researchCheckpoints =
         ResearchCheckpointLedger.restore(
-            new io.github.aililuola.mathproofmesh.research.ResearchCheckpointSnapshot(
-                io.github.aililuola.mathproofmesh.research.ResearchCheckpointSnapshot
-                    .CURRENT_SCHEMA_VERSION,
-                checkpointsById,
-                findingsById,
-                audit));
+            ResearchCheckpointWorkerFrontierMerger.merge(
+                researchCheckpoints.snapshot(),
+                worker,
+                routeId,
+                frozenFindingIds,
+                dispositionAuthority));
   }
 
   private Map<String, Object> baseRouteContext(RouteState route) {

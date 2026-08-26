@@ -31,8 +31,11 @@ import io.github.aililuola.mathproofmesh.contract.InitialExplorationAction;
 import io.github.aililuola.mathproofmesh.contract.InitialExplorationTurn;
 import io.github.aililuola.mathproofmesh.contract.ProblemKind;
 import io.github.aililuola.mathproofmesh.contract.ProofAttempt;
+import io.github.aililuola.mathproofmesh.contract.ResearchCheckpointFrame;
+import io.github.aililuola.mathproofmesh.contract.ResearchFindingDraft;
 import io.github.aililuola.mathproofmesh.contract.ResearchFindingDisposition;
 import io.github.aililuola.mathproofmesh.contract.ResearchFindingDispositionAction;
+import io.github.aililuola.mathproofmesh.contract.ResearchFindingKind;
 import io.github.aililuola.mathproofmesh.contract.ResearchFindingUpdateBatch;
 import io.github.aililuola.mathproofmesh.contract.StrategyCard;
 import io.github.aililuola.mathproofmesh.contract.StrategySet;
@@ -67,6 +70,7 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
     CAMPAIGN_DEFER,
     CAMPAIGN_KEEP_ACTIVE,
     CAMPAIGN_PROPAGATION,
+    CONCURRENT_FINDING_DISPOSITIONS,
     FINAL_JSON_OMISSION,
     NORMAL,
     TRUNCATED_RESULT,
@@ -215,6 +219,42 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
         new StrategySet("One bounded research route.", List.of(), List.of(strategy())));
     invoke("generateAndAdmitStrategies");
     invoke("ensureInitialRoutes");
+  }
+
+  String prepareFocusedRouteWithActiveFinding() throws Exception {
+    if (scenario != Scenario.CONCURRENT_FINDING_DISPOSITIONS) {
+      throw new IllegalStateException(
+          "focused finding setup requires CONCURRENT_FINDING_DISPOSITIONS");
+    }
+    prepareProductionRoute();
+    ResearchCheckpointLedger ledger = new ResearchCheckpointLedger();
+    ledger.appendEnvelopeFrame(
+        DesktopNegativeKnowledgeTestHarness.PROBLEM_HASH,
+        "route-1",
+        "independent_exploration",
+        "provider-call-seed-finding",
+        new ResearchCheckpointFrame(
+            0,
+            "A prior route segment exposed one unresolved candidate.",
+            List.of(
+                new ResearchFindingDraft(
+                    ResearchFindingKind.CANDIDATE_LEMMA,
+                    finding,
+                    "The frozen worker frontier must preserve a single disposition authority.",
+                    List.of("fixed route assumptions"),
+                    List.of("route-1"),
+                    null,
+                    null,
+                    null,
+                    null,
+                    null))));
+    setField(coordinator, "researchCheckpoints", ledger);
+    @SuppressWarnings("unchecked")
+    List<Object> routes = (List<Object>) rawField(coordinator, "routes");
+    Object route = routes.getFirst();
+    setField(route, "focusObligationId", "focused-obligation-1");
+    setField(route, "focusedCanonicalTargetId", "focused-canonical-target-1");
+    return ledger.activeFindings("route-1").getFirst().findingId();
   }
 
   StructuredCallResult<InitialExplorationTurn> runCheckpointedRound(int round) throws Exception {
@@ -634,6 +674,9 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
         throw new AssertionError(
             "unexpected research checkpoint black-box schema: " + request.schemaName());
       }
+      if (scenario == Scenario.CONCURRENT_FINDING_DISPOSITIONS) {
+        return concurrentFindingDispositionResponse(request);
+      }
       int call = explorationCalls.incrementAndGet();
       String prompt = request.messages().getLast().content();
       prompts.add(prompt);
@@ -722,6 +765,52 @@ final class DesktopResearchCheckpointBlackBoxHarness implements AutoCloseable {
               null,
               null,
               "The scripted route stops after the next prompt is captured."));
+    }
+
+    private LLMResponse concurrentFindingDispositionResponse(ProviderRequest request) {
+      explorationCalls.incrementAndGet();
+      String prompt = request.messages().getLast().content();
+      prompts.add(prompt);
+      String findingId = campaignFindingId(prompt);
+      ResearchFindingDispositionAction action;
+      String reason;
+      String workKind;
+      if (prompt.contains("FOCUSED_PROVER")) {
+        workKind = "focused_prover";
+        action = ResearchFindingDispositionAction.DEFER;
+        reason = "The stable primary worker defers this candidate for a later route segment.";
+      } else if (prompt.contains("FOCUSED_REPROVER")) {
+        workKind = "focused_reprover";
+        action = ResearchFindingDispositionAction.REJECT_WITH_REASON;
+        reason = "A secondary perspective rejects the candidate.";
+      } else if (prompt.contains("FOCUSED_FALSIFIER")) {
+        workKind = "focused_falsifier";
+        action = ResearchFindingDispositionAction.REJECT_WITH_REASON;
+        reason = "A falsification perspective rejects the candidate.";
+      } else if (prompt.contains("DEPENDENCY_AUDITOR")) {
+        workKind = "dependency_auditor";
+        action = ResearchFindingDispositionAction.KEEP_ACTIVE;
+        reason = "The dependency perspective leaves the candidate active.";
+      } else {
+        throw new AssertionError("focused work kind is missing from prompt: " + prompt);
+      }
+      writeReasoningTrace(
+          request,
+          List.of(
+              Map.of(
+                  "kind", "representation_insight",
+                  "statement", workKind + " produced one append-only perspective",
+                  "rationale", "Each isolated worker may retain its own public checkpoint.",
+                  "scope_limitations", List.of("route-1"))));
+      return checkpointedResponse(
+          new InitialExplorationTurn(
+              InitialExplorationAction.ABANDON,
+              null,
+              null,
+              null,
+              "The isolated perspective has no additional route action."),
+          new ResearchFindingUpdateBatch(
+              List.of(new ResearchFindingDisposition(findingId, action, reason, null))));
     }
 
     private LLMResponse campaignPropagationResponse(ProviderRequest request) {

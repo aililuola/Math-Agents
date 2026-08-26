@@ -1404,6 +1404,73 @@ errors and six intentional skips. Docker/PostgreSQL, all Flyway migrations,
 SpotBugs/FindSecBugs, dependency and security checks, coverage, source immutability, Temporal
 checks, and the unchanged Python Sidecar performance gate all passed.
 
+### Empty-admissible strategy portfolio replenishment
+
+The five-key campaign at `benchmark/olympiad-5key-v1/results/real-20260826T020609Z`
+reused the already complete P01-P06 bundles without additional provider calls. Its first P07
+attempt stopped before research after 3 calls and USD 0.031458765: strategy generation returned an
+underfilled portfolio whose only candidate was rejected by deterministic admission, leaving zero
+admissible routes. The existing replenishment path only handled an underfilled accepted portfolio,
+so a recoverable generation result was incorrectly treated as terminal.
+
+The production repair requests one bounded replenishment when, and only when, strategy admission
+leaves an empty portfolio. It does not weaken candidate admission, count rejected strategies as
+progress, or repeatedly replenish a nonempty underfilled portfolio. An initially broader change
+was rejected during regression because it changed protected Campaign Finding behavior; the final
+condition is deliberately limited to zero admissible strategies.
+
+The focused replenishment and adjacent production matrix passed 12 tests. The Desktop regression
+at that revision passed 407 tests with zero failures or errors. P07 was then rerun by itself and
+reached `COMPLETE` after 44 calls at USD 0.298747125 with an unchanged Root Goal. P08 resumed from
+its durable checkpoint, reached `COMPLETE` after 31 calls at USD 0.224465220, and did not repeat
+triage. P01-P06 were not rerun.
+
+### Stable single-writer research finding merges
+
+P09/T1 run `p09-t1-20260826T210125Z-75ae9ff2` reached the durable
+`research_epoch_all_settled` checkpoint after 14 physical calls, 118,301 input tokens, 113,110
+output tokens, and USD 0.149866635. Its initial and current Root Goal hashes were both
+`0cb0a46f4e99f355767519c56199cbb190bea8fe721a5735a68afb791d2857c9`. The run then stopped on
+`research finding worker result conflicted`; it was not a mathematical `INCOMPLETE` result and no
+later problem was started.
+
+The focused research workers had correctly shared one frozen Epoch snapshot, but several workers
+returned different dispositions for the same pre-existing Research Finding. The old stable commit
+merged every complete worker snapshot before choosing the primary result. Consequently two
+same-version records with different statuses could abort the commit even though only the stable
+single writer was allowed to mutate Route authority.
+
+The repair orders worker results deterministically by commit priority, stable ordinal, and work
+item ID. The stable primary worker owns disposition changes to findings that existed at the frozen
+frontier. Secondary workers cannot rewrite those findings, but their route-local append-only
+findings, checkpoints, and matching audit events are still retained. Genuine checkpoint ID
+collisions and non-frozen same-version conflicts continue to fail closed.
+
+The new production-path test was first run before the repair and failed with the same
+`IllegalStateException` and merge location as P09. After the change it reported:
+
+```text
+CONCURRENT RESEARCH FINDING MERGE DIAGNOSTIC
+FOCUSED_WORKERS=4
+CONFLICTING_SECONDARY_DISPOSITIONS=2
+PRIMARY_FINDING_STATUS=DEFERRED
+PRIMARY_FINDING_VERSION=1
+COMMITTED_DISPOSITION_AUDITS=1
+WORKER_APPEND_ONLY_FINDINGS_PRESERVED=4
+WORKER_APPEND_ONLY_CHECKPOINTS_PRESERVED=4
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+RESULT=PASS
+```
+
+The adjacent frozen-Epoch, completion-order, atomicity, hard-crash recovery, checkpoint restore,
+unknown-update, focused-worker, Campaign Finding, and empty-portfolio matrix passed 17 tests. The
+full Desktop-and-dependencies regression passed 3,013 tests: 75 Contracts, 1,413 Core, 968 Server,
+408 Desktop, and 149 Compatibility tests, with zero failures or errors and six intentional skips.
+A no-test `verify` then passed all five modules; SpotBugs reported zero bugs and zero errors. P09's
+nonterminal durable checkpoint is retained for an economical resume after this fix is committed;
+P01-P08 remain immutable completed evidence.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint
