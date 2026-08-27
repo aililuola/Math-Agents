@@ -1674,6 +1674,82 @@ PARTIAL_PROOF_GRAPH_WRITES=0
 TASK_LEASE_LEAKS=0
 ```
 
+### Prepared research epochs tolerate durable non-authoritative findings
+
+The next isolated P09 attempt, `p09-t1-20260827T030727Z-c2c5caad`, stopped `INVALID` after 11
+physical calls at USD 0.117475230. P01-P08 were reused without provider calls. Two of the three
+concurrent route-exploration results completed with durable public findings; the third result was
+also recorded durably after its provider attempt failed. The epoch reached `MERGE_PREPARED`, with
+all three result envelopes present and with no authority-mutation or merge receipt. The initial and
+final Root Goal hashes both remained
+`0cb0a46f4e99f355767519c56199cbb190bea8fe721a5735a68afb791d2857c9`.
+
+The first checkpoint continuation made zero provider calls and failed after 22 seconds at
+`DesktopSolveCoordinator#reconcileResearchEpochAuthorityCommitsAfterRestore:1076` with:
+
+```text
+QUARANTINED_PARTIAL_AUTHORITY_COMMIT:
+[canonicalization, research_checkpoints, run_authority]
+```
+
+The mathematical authority had not changed. `ResearchCheckpointLedger` is the durable,
+non-authoritative public-finding sidecar, but restore compared its advancing hash as though it were
+Claim, Proof Graph, Root Goal, or Negative Knowledge authority. This rejected a valid prepared
+epoch before its already durable results could be committed exactly once.
+
+Prepared-epoch restore now uses a dedicated authority boundary. It is available only to a
+`MERGE_PREPARED` epoch with no mutation or merge receipts. All authoritative projections must still
+match the frozen anchor; only the research-checkpoint hash may advance. The complete current
+research projection must also be bound to the same `problemHash` and pass checkpoint-to-finding,
+route, provider-call, reverse-membership, and audit-reference integrity checks. Cross-problem or
+internally inconsistent sidecars remain quarantined. Hash comparisons use constant-time equality,
+and the boundary is isolated from the already large coordinator so the complete SpotBugs analysis
+remains effective.
+
+The focused restore test passed both the valid same-problem roll-forward and the cross-problem
+fail-closed case:
+
+```text
+PREPARED RESEARCH EPOCH SIDECAR RESTORE DIAGNOSTIC
+PREPARED_EPOCHS=1
+DURABLE_RESEARCH_CHECKPOINTS=1
+RESTORE_FAILURES=0
+DUPLICATE_PROVIDER_CALLS=0
+COMMITTED_EPOCHS=1
+ROOT_HASH_CHANGES=0
+NEGATIVE_REGISTRY_HASH_CHANGES=0
+RESULT=PASS
+```
+
+The adjacent authoritative hard-crash, frozen-epoch pipeline, concurrent-task replay, 60-finding
+multi-round restore, and v20 prepared-epoch protocol matrix passed seven tests with zero failures,
+zero errors, and zero skips. The complete Desktop reactor regression passed 2,848 tests: 75
+Contracts, 1,413 Core, 941 Server, and 419 Desktop, with zero failures, zero errors, and six
+intentional skips. PostgreSQL 18.4 Testcontainers started successfully and all seven Flyway
+migrations ran. A no-test `verify` passed all five modules; SpotBugs reported zero bugs and zero
+errors.
+
+### Strategy authority hashes survive a new JVM
+
+A following zero-provider checkpoint diagnostic crossed the research-sidecar boundary but still
+failed closed on `strategy_portfolio`. The underlying strategy records were mathematically
+unchanged. Several authority-bearing fields are sets, however, and the former `Set.copyOf` copies
+did not retain the iteration order written to the checkpoint. A fresh JVM could therefore emit the
+same set members in a different JSON array order and produce a different `CanonicalJson` hash.
+This was a persistence determinism defect, not permission to ignore the strategy authority hash.
+
+The repair keeps these collections immutable while preserving their persisted encounter order.
+Jackson is bound narrowly to `LinkedHashSet` for the affected strategy mechanism and preflight set
+components, and their records retain that order in immutable defensive copies. No set member,
+strategy, Claim, route, or authority comparison is removed. A new serialization regression uses
+20 deliberately reversed semantic keys and verifies canonical hash stability across JSON
+write/read for both strategy mechanism and preflight snapshots.
+
+The focused test passed once, and the adjacent strategy, prepared-epoch restore, and authoritative
+hard-crash matrix passed 49 tests: two Contracts, 33 Core, four Server, and ten Desktop tests, with
+zero failures, errors, or skips. The 20-round production strategy diagnostic retained identical
+candidate, mechanism, and portfolio hashes before and after restore.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

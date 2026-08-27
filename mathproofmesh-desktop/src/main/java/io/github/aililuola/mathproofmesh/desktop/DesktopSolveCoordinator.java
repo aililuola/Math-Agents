@@ -1021,7 +1021,8 @@ final class DesktopSolveCoordinator {
       if (!sameWork) {
         continue;
       }
-      if (!authorityEquivalentAcrossRestore(epoch.authority(), current)) {
+      if (!PreparedResearchEpochAuthority.equivalentAcrossRestore(
+          epoch.authority(), current, researchCheckpoints.snapshot())) {
         throw new IllegalStateException(
             "STALE_RESTORED_EPOCH_AUTHORITY: "
                 + changedAuthorityProjections(epoch.authority(), current));
@@ -1043,7 +1044,8 @@ final class DesktopSolveCoordinator {
           && epoch.authority() != null
           && mutation.isEmpty()
           && merge.isEmpty()
-          && authorityEquivalentAcrossRestore(epoch.authority(), current)) {
+          && PreparedResearchEpochAuthority.equivalentAcrossRestore(
+              epoch.authority(), current, researchCheckpoints.snapshot())) {
         restorablePreparedEpochIds.add(epoch.epochId());
         continue;
       }

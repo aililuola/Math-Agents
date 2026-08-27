@@ -1,5 +1,7 @@
 package io.github.aililuola.mathproofmesh.strategydiversity;
 
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -7,7 +9,7 @@ public record StrategyMechanismSnapshot(
     int schemaVersion,
     Map<String, StrategyMechanismSignature> signatures,
     Map<String, StrategyMechanismProfile> profiles,
-    Set<String> legacyActiveStrategyIds,
+    @JsonDeserialize(as = LinkedHashSet.class) Set<String> legacyActiveStrategyIds,
     long version) {
   public static final int CURRENT_SCHEMA_VERSION = 1;
 
@@ -15,7 +17,7 @@ public record StrategyMechanismSnapshot(
     signatures = signatures == null ? Map.of() : Map.copyOf(signatures);
     profiles = profiles == null ? Map.of() : Map.copyOf(profiles);
     legacyActiveStrategyIds =
-        legacyActiveStrategyIds == null ? Set.of() : Set.copyOf(legacyActiveStrategyIds);
+        StrategyImmutableCollections.orderedSet(legacyActiveStrategyIds);
     if (version < 0L) {
       throw new IllegalArgumentException("version must be nonnegative");
     }
@@ -37,6 +39,6 @@ public record StrategyMechanismSnapshot(
 
   @Override
   public Set<String> legacyActiveStrategyIds() {
-    return Set.copyOf(legacyActiveStrategyIds);
+    return StrategyImmutableCollections.orderedSet(legacyActiveStrategyIds);
   }
 }

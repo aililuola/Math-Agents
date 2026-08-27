@@ -1,12 +1,14 @@
 package io.github.aililuola.mathproofmesh.strategydiversity;
 
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import java.util.LinkedHashSet;
 import java.util.Set;
 
 public record StrategyMechanismSignature(
     String problemHash,
     String rootGoalHash,
-    Set<String> targetCanonicalIds,
-    Set<String> requiredClaimSemanticKeys,
+    @JsonDeserialize(as = LinkedHashSet.class) Set<String> targetCanonicalIds,
+    @JsonDeserialize(as = LinkedHashSet.class) Set<String> requiredClaimSemanticKeys,
     String domainObjectRoleSignature,
     String representationSignature,
     String dependencyDagShapeHash,
@@ -17,9 +19,9 @@ public record StrategyMechanismSignature(
   public StrategyMechanismSignature {
     problemHash = StrategySemanticNormalizer.require(problemHash, "problemHash");
     rootGoalHash = StrategySemanticNormalizer.require(rootGoalHash, "rootGoalHash");
-    targetCanonicalIds = targetCanonicalIds == null ? Set.of() : Set.copyOf(targetCanonicalIds);
+    targetCanonicalIds = StrategyImmutableCollections.orderedSet(targetCanonicalIds);
     requiredClaimSemanticKeys =
-        requiredClaimSemanticKeys == null ? Set.of() : Set.copyOf(requiredClaimSemanticKeys);
+        StrategyImmutableCollections.orderedSet(requiredClaimSemanticKeys);
     domainObjectRoleSignature =
         StrategySemanticNormalizer.require(domainObjectRoleSignature, "domainObjectRoleSignature");
     representationSignature =
@@ -62,11 +64,11 @@ public record StrategyMechanismSignature(
 
   @Override
   public Set<String> targetCanonicalIds() {
-    return Set.copyOf(targetCanonicalIds);
+    return StrategyImmutableCollections.orderedSet(targetCanonicalIds);
   }
 
   @Override
   public Set<String> requiredClaimSemanticKeys() {
-    return Set.copyOf(requiredClaimSemanticKeys);
+    return StrategyImmutableCollections.orderedSet(requiredClaimSemanticKeys);
   }
 }

@@ -1,5 +1,7 @@
 package io.github.aililuola.mathproofmesh.strategydiversity;
 
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -10,7 +12,7 @@ public record StrategyPreflightReport(
     boolean hardRejected,
     boolean requiresRegeneration,
     double requiredClaimEvidenceCoverage,
-    Set<String> unresolvedRequiredClaimKeys,
+    @JsonDeserialize(as = LinkedHashSet.class) Set<String> unresolvedRequiredClaimKeys,
     String reportHash) {
   public StrategyPreflightReport {
     strategyId = StrategySemanticNormalizer.require(strategyId, "strategyId");
@@ -22,7 +24,7 @@ public record StrategyPreflightReport(
       throw new IllegalArgumentException("requiredClaimEvidenceCoverage must be in [0,1]");
     }
     unresolvedRequiredClaimKeys =
-        unresolvedRequiredClaimKeys == null ? Set.of() : Set.copyOf(unresolvedRequiredClaimKeys);
+        StrategyImmutableCollections.orderedSet(unresolvedRequiredClaimKeys);
     reportHash = StrategySemanticNormalizer.require(reportHash, "reportHash");
   }
 
@@ -33,6 +35,6 @@ public record StrategyPreflightReport(
 
   @Override
   public Set<String> unresolvedRequiredClaimKeys() {
-    return Set.copyOf(unresolvedRequiredClaimKeys);
+    return StrategyImmutableCollections.orderedSet(unresolvedRequiredClaimKeys);
   }
 }
