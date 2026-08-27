@@ -483,23 +483,98 @@ GitHub Actions runs full verification and platform-neutral packaging on Ubuntu a
 
 ## Five-key olympiad benchmark
 
-[`benchmark/olympiad-5key-v1`](benchmark/olympiad-5key-v1/README.md) is a validation-only harness that tests whether Issues 001-014 remain intact under real olympiad problems, long provider calls, five independent credentials, and process recovery.
+MathProofMesh includes a repository-native verification benchmark named [`olympiad-5key-v1`](benchmark/olympiad-5key-v1/README.md). It is designed to answer a harder question than "can one model produce a plausible proof?": can the complete system preserve mathematical meaning, evidence authority, independent review, concurrency, accounting, and recovery invariants while solving difficult olympiad problems through real provider calls?
 
-The benchmark includes:
+The public benchmark assets are:
 
-- 20 canonical olympiad prompts;
-- `SMOKE`, `CORE`, `ADVANCED`, and `STRESS` resource tiers;
-- 20 standard runs plus selected replication and controlled-recovery runs;
-- four research slots and one coordination slot, with per-key concurrency fixed at one;
-- frozen problem inputs, no solution retrieval, and no cross-problem Memory;
-- exported Root Goal, Claim, Proof Graph, Negative, Computation, Checkpoint, Budget, Usage, and recovery evidence;
-- hard gates for secret leaks, Root Goal drift, authority violations, duplicate calls, duplicate settlements, and post-restore drift.
+- the [benchmark manifest](benchmark/olympiad-5key-v1/benchmark-manifest.yaml), which freezes the suite, tiers, 34-run plan, key rotation, and hard gates;
+- the [20 canonical prompts](benchmark/olympiad-5key-v1/problems/), which are the only problem text allowed into provider requests;
+- the [JSON Schemas](benchmark/olympiad-5key-v1/schemas/), which validate run manifests, Issue 001-013 observations, and redaction reports;
+- the [English harness guide](benchmark/olympiad-5key-v1/README.md), which documents safe offline and explicit real-provider execution;
+- the complete [Chinese execution and audit protocol](docs/benchmarks/MathProofMesh_%E4%BA%94Key%E6%95%B0%E5%AD%A6%E7%AB%9E%E8%B5%9BBenchmark_Codex%E6%89%A7%E8%A1%8C%E8%AF%B4%E6%98%8E%E4%B9%A6_v1.0.md), preserved byte-for-byte from the protocol used to define the campaign.
 
-Real-provider execution is default-deny. It requires all five named secrets, an explicit opt-in, exact Git-state capture, and a positive cost cap that covers the immutable worst-case estimate. Ordinary tests use Fake or Mock providers and cannot accidentally incur live charges.
+### What the benchmark verifies
 
-Issue 014 was discovered through this real-run path: structured Strategy output could remain incomplete after recovery, while already billed provider calls could not safely be inserted into a semantic Checkpoint. Each stopped Campaign is preserved as audit evidence. The project then uses test-first repairs to close the next general system defect exposed by a cold start instead of rewriting or cosmetically improving old failures.
+| Verification dimension | What the benchmark exercises | Why it matters |
+| --- | --- | --- |
+| Mathematical breadth | Number theory, combinatorics, graph theory, inequalities, algebra, geometry, functional equations, sequences, and games | A proof system should not look reliable only on one familiar problem family |
+| Goal fidelity | Canonical prompt hashes, Root Goal hashes, quantifiers, scope, and conclusion preservation | A successful proof of a changed statement is still a failed run |
+| Search quality | Independent Strategies, mechanism-diverse Routes, Attempts, Claims, obligations, semantic pivots, and bounded repair | Several stylistic rewrites must not be counted as independent mathematical progress |
+| Evidence authority | Claim Court adjudication, Proof Graph closure, route-theorem authority, computation certificates, and blind final review | Plausible prose cannot promote itself into a verified Fact |
+| Concurrency | Four Research slots, one Coordination slot, five independent keys, deterministic merge order, and exactly-once settlement | Parallel calls must not create duplicate work, key starvation, or nondeterministic authority |
+| Durability | Atomic Checkpoints, fresh-process restore, controlled interruption, replay, and Run State reconciliation | A long proof campaign must survive process loss without losing or inventing progress |
+| Budget control | Immutable pricing, call/token/cost reservation, protected review capacity, and terminal stop reasons | Exploration cannot consume the resources reserved for verification and finalization |
+| Prompt isolation | Canonical-prompt allowlisting, no solution retrieval, no cross-problem Memory, and no evaluation metadata in prompts | The score must measure the system rather than hidden answer leakage |
+| Security and audit | Secret redaction, provider-call receipts, schema validation, bundle checksums, provenance, and reproducible exports | An external evaluator must be able to inspect evidence without receiving credentials |
+
+### Problem suite
+
+The 20 questions are split into four fixed tiers. Difficulty is internal to this benchmark and is not presented to the models.
+
+| Tier | Problems | Representative content | Primary pressure |
+| --- | --- | --- | --- |
+| `SMOKE` | P01-P05 | GCD structure, tournament paths, inequalities, Gergonne geometry, and a translation functional equation | Prompt integrity, basic Route/Claim flow, five-key wiring, and evidence packaging |
+| `CORE` | P06-P10 | Prime-power divisibility, Ramsey-style combinatorics, Nesbitt, Simson geometry, and a locally bounded quadratic functional equation | Multi-lemma reasoning, route comparison, canonicalization, and review |
+| `ADVANCED` | P11-P15 | Vieta jumping, Sperner's theorem, a cyclic radical inequality, advanced circle geometry, and periodic recurrence structure | Descent, extremal arguments, proof debt, computation evidence, and rigorous closure |
+| `STRESS` | P16-P20 | A historical regression problem, a 2025 x 2025 grid extremum, an inequality game, orthocenter geometry, and a disjunctive rational functional equation | Long-horizon search, recovery, difficult synthesis, and fail-closed authority |
+
+The real-provider matrix contains **34 isolated runs**:
+
+| Run class | Count | Purpose |
+| --- | ---: | --- |
+| Standard cold starts | 20 | One clean Run for every canonical question |
+| Additional cold-start replications | 10 | P09, P12, P13, P15, and P16 each receive two additional trials with rotated Coordination keys |
+| Controlled-recovery trials | 4 | P11, P17, P19, and P20 are interrupted at specified durable boundaries and resumed in a fresh process |
+| **Total** | **34** | Full mathematical, reproducibility, concurrency, and recovery campaign |
+
+Every trial starts with a new Run State. Claims, Negative Knowledge, Strategies, Proof Graphs, budgets, Checkpoints, and provider results are never inherited across questions or replications. Four keys are assigned to Research and one to Coordination; the Coordination key rotates by problem and trial, and each key has a concurrency limit of one.
+
+### Verification status
+
+> **Automated benchmark status: PASS.** MathProofMesh passes the complete offline `olympiad-5key-v1` validation suite for **all 20 canonical benchmark question fixtures**, including prompt loading and hashing, metadata-isolation guards, the immutable 34-run schedule, key rotation, Fake Provider execution, evidence schemas, redaction, checksums, and recovery packaging.
+
+This statement is deliberately precise. Passing every automated benchmark test means the harness and system invariants are green for every question fixture; it does **not** claim that all 20 real-provider proof attempts received a correct mathematical score. The protocol separates three results that must not be collapsed:
+
+| Result | Meaning |
+| --- | --- |
+| Automated suite `PASS` | Repository tests successfully exercise every P01-P20 fixture and the complete execution protocol without live charges |
+| Engineering Run `PASS` | A real Run preserved all hard invariants: no secret leak, goal drift, authority violation, duplicate call/settlement, budget bypass, checksum failure, or recovery drift |
+| Mathematical success | The final proof is independently scored after the Run; `COMPLETE` or `VERIFIED` is not advertised as kernel-level formal proof |
+
+The retained real-provider campaign evidence does not currently justify a public "20/20 mathematical solves" claim, and external-score fields remain separate from engineering status. This distinction follows the benchmark's own completion rules and the project's general [verification boundary](docs/verification.md).
+
+### Running the verification
+
+Run the benchmark-specific automated suite on Windows without any provider credentials:
+
+```powershell
+.\mvnw.cmd -pl mathproofmesh-desktop -am `
+  "-Dtest=OlympiadBenchmarkHarnessTest,OlympiadPromptTransportGuardTest,OlympiadProtocolDocumentLocatorTest" `
+  "-Dsurefire.failIfNoSpecifiedTests=false" `
+  test
+```
+
+Run every repository release gate, including the benchmark tests:
+
+```powershell
+pwsh ./scripts/verify-all.ps1 -Offline
+```
+
+Real-provider execution is default-deny. It additionally requires five named environment secrets, `BENCHMARK_ALLOW_REAL_PROVIDER=true`, exact Git-state capture, and a positive `BENCHMARK_GLOBAL_COST_CAP_USD` covering the immutable worst-case estimate. The explicit command is documented in the [benchmark harness guide](benchmark/olympiad-5key-v1/README.md). Ordinary tests use Fake or Mock providers and cannot accidentally incur live charges.
+
+Each real Run exports a sanitized evidence bundle containing its problem hash, Root Goal lineage, Strategy and Route records, Claim ledger, Proof Graph, Negative Knowledge, computation certificates, reviewer reports, Checkpoints, usage ledger, recovery receipts, redaction report, and SHA-256 checksums. Generated evidence and final ZIP files remain local and Git-ignored so credentials, raw provider material, databases, and runtime state cannot be committed accidentally.
+
+Issue 014 was discovered through this real-run path: structured Strategy output could remain incomplete after recovery, while already billed provider calls could not safely be inserted into a semantic Checkpoint. Each stopped Campaign is preserved as audit evidence. The project then uses test-first repairs to close the next general system defect exposed by a cold start instead of rewriting or cosmetically improving old failures. The complete repair trail is recorded in [the Issue 014 engineering report](docs/fix-014-structured-output-recovery-accounting.md).
 
 ## Documentation index
+
+### Benchmark
+
+- [Olympiad five-key harness and execution guide](benchmark/olympiad-5key-v1/README.md)
+- [Frozen benchmark manifest](benchmark/olympiad-5key-v1/benchmark-manifest.yaml)
+- [Canonical P01-P20 problem fixtures](benchmark/olympiad-5key-v1/problems/)
+- [Five-key Benchmark execution and audit protocol (Chinese)](docs/benchmarks/MathProofMesh_%E4%BA%94Key%E6%95%B0%E5%AD%A6%E7%AB%9E%E8%B5%9BBenchmark_Codex%E6%89%A7%E8%A1%8C%E8%AF%B4%E6%98%8E%E4%B9%A6_v1.0.md)
+- [Issue 014 real-run repair record](docs/fix-014-structured-output-recovery-accounting.md)
 
 ### Architecture and operations
 
