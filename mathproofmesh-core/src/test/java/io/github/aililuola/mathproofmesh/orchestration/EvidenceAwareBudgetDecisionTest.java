@@ -103,6 +103,101 @@ class EvidenceAwareBudgetDecisionTest {
             });
   }
 
+  @Test
+  void completedFailedRouteIsRevisedInsteadOfBeingSelectedForVerificationAgain() {
+    AdaptiveBudgetManager manager = manager(LIMIT, BudgetResourceVector.zero());
+    PathBudgetStats failed =
+        path(
+            "strategy-failed",
+            "route-failed",
+            false,
+            true,
+            "uncertain",
+            0,
+            AttemptEvidence.FailureClass.STRUCTURAL,
+            0);
+
+    var decision = manager.decide(state("failed-review", BudgetUsageTotals.zero(), List.of(failed)));
+
+    assertThat(decision.selectedActions()).extracting(BudgetActionCandidate::action)
+        .containsExactly(ActionKind.REVISE);
+    assertThat(decision.actions())
+        .filteredOn(candidate -> candidate.action() == ActionKind.VERIFY)
+        .allMatch(candidate -> !candidate.eligible());
+  }
+
+  @Test
+  void exhaustedFailedRouteDoesNotMaskAnIndependentDeepeningCandidate() {
+    AdaptiveBudgetManager manager = manager(LIMIT, BudgetResourceVector.zero());
+    PathBudgetStats exhaustedFailure =
+        path(
+            "strategy-failed",
+            "route-failed",
+            false,
+            true,
+            "uncertain",
+            0,
+            AttemptEvidence.FailureClass.PROBLEM_INTEGRITY,
+            1);
+    PathBudgetStats partial =
+        path("strategy-partial", "route-partial", false, false, "unknown", 0);
+
+    var decision =
+        manager.decide(
+            state(
+                "independent-partial-route",
+                BudgetUsageTotals.zero(),
+                List.of(exhaustedFailure, partial)));
+
+    assertThat(decision.selectedActions())
+        .extracting(BudgetActionCandidate::action, BudgetActionCandidate::targetId)
+        .containsExactly(org.assertj.core.groups.Tuple.tuple(ActionKind.DEEPEN, "route-partial"));
+  }
+
+  @Test
+  void restoredLegacyPolicyDecisionIsRecomputedForTheSameCanonicalState() {
+    AdaptiveBudgetManager manager = manager(LIMIT, BudgetResourceVector.zero());
+    PathBudgetStats failed =
+        path(
+            "strategy-failed",
+            "route-failed",
+            false,
+            true,
+            "uncertain",
+            0,
+            AttemptEvidence.FailureClass.STRUCTURAL,
+            0);
+    BudgetStateSnapshot state = state("restored-v2-decision", BudgetUsageTotals.zero(), List.of(failed));
+    EvidenceAwareBudgetDecision legacy =
+        new EvidenceAwareBudgetDecision(
+            new BudgetDecisionIdentity(state.snapshotHash(), "evidence-budget-v2", "legacy-hash"),
+            List.of(
+                new BudgetActionCandidate(
+                    ActionKind.VERIFY,
+                    "route-failed",
+                    "strategy-failed",
+                    "legacy failed-route verification",
+                    true,
+                    "",
+                    3.0d,
+                    BudgetResourceVector.zero(),
+                    BudgetBucket.VERIFICATION,
+                    1,
+                    false,
+                    true)),
+            "legacy decision",
+            "");
+    manager.restoreDecisionSnapshot(
+        new BudgetDecisionSnapshot(BudgetDecisionSnapshot.CURRENT_SCHEMA_VERSION, List.of(legacy)));
+
+    EvidenceAwareBudgetDecision recomputed = manager.decide(state);
+
+    assertThat(recomputed.identity().policyVersion()).isEqualTo("evidence-budget-v3");
+    assertThat(recomputed.selectedActions()).extracting(BudgetActionCandidate::action)
+        .containsExactly(ActionKind.REVISE);
+    assertThat(manager.decisionSnapshot().decisions()).containsExactly(recomputed);
+  }
+
   private static AdaptiveBudgetManager manager(
       BudgetResourceVector limit, BudgetResourceVector finish) {
     return new AdaptiveBudgetManager(
@@ -154,6 +249,26 @@ class EvidenceAwareBudgetDecisionTest {
 
   private static PathBudgetStats path(
       String strategy, String route, boolean complete, boolean verified, String verdict, int stagnation) {
+    return path(
+        strategy,
+        route,
+        complete,
+        verified,
+        verdict,
+        stagnation,
+        AttemptEvidence.FailureClass.NONE,
+        0);
+  }
+
+  private static PathBudgetStats path(
+      String strategy,
+      String route,
+      boolean complete,
+      boolean verified,
+      String verdict,
+      int stagnation,
+      AttemptEvidence.FailureClass failureClass,
+      int failedRepairAttempts) {
     return new PathBudgetStats(
         strategy,
         route,
@@ -166,10 +281,10 @@ class EvidenceAwareBudgetDecisionTest {
         verified ? 0.1d : 0.5d,
         verified ? 0.9d : 0.4d,
         verdict,
-        AttemptEvidence.FailureClass.NONE,
-        0.0d,
-        0,
-        0,
+        failureClass,
+        failureClass == AttemptEvidence.FailureClass.NONE ? 0.0d : 0.95d,
+        failureClass == AttemptEvidence.FailureClass.NONE ? 0 : 1,
+        failedRepairAttempts,
         complete ? 0 : 1,
         stagnation,
         0L,
