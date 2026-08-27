@@ -1502,7 +1502,9 @@ final class DesktopSolveCoordinator {
       if (checkpoint.schemaVersion() < STATE_SCHEMA_VERSION) {
         persist(currentStage, checkpoint.terminal() && !repairedLegacyAdmission);
       }
-      if (checkpoint.terminal() && !repairedLegacyAdmission) {
+      if (checkpoint.terminal()
+          && !repairedLegacyAdmission
+          && CURSOR_TERMINAL.equals(workflowCursor)) {
         return resultFromCurrentState();
       }
     }
@@ -13424,6 +13426,7 @@ final class DesktopSolveCoordinator {
     }
     reconsiderDeferredExpansions();
     budgetScheduler.restore(checkpoint);
+    budgetHost.reopenStalePolicyTerminal(checkpoint);
     var resumeDecision =
         proofControl
             .resume()
@@ -16689,6 +16692,25 @@ final class DesktopSolveCoordinator {
   }
 
   private final class BudgetHost implements DesktopBudgetScheduler.Host {
+    private void reopenStalePolicyTerminal(DesktopSolveCheckpoint checkpoint) {
+      String recovery =
+          DesktopStaleBudgetPolicyTerminalRecovery.evaluate(
+              checkpoint,
+              workflowCursor,
+              adaptiveBudget,
+              this::state,
+              targetId ->
+                  findRouteTarget(targetId)
+                      .filter(
+                          route -> route.failure != null && route.reviewComplete && route.integrated)
+                      .isPresent());
+      if (recovery != null) {
+        schedulerStop = null;
+        workflowCursor = CURSOR_SCHEDULER_DECISION;
+        eventSchedulerAction("RESUME_STALE_BUDGET_POLICY", true, recovery);
+      }
+    }
+
     private boolean reserveInitial() {
       int pendingRoutes =
           (int)

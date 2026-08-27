@@ -1750,6 +1750,44 @@ hard-crash matrix passed 49 tests: two Contracts, 33 Core, four Server, and ten 
 zero failures, errors, or skips. The 20-round production strategy diagnostic retained identical
 candidate, mechanism, and portfolio hashes before and after restore.
 
+### Stale budget-policy terminals reopen only when reviewed work remains actionable
+
+The same P09 checkpoint then resumed successfully in a fresh JVM, crossed both restore boundaries,
+and made seven new provider calls without rerunning P01-P08. P09 reached 18 cumulative calls and
+USD 0.186822495; the campaign total became USD 2.709118665. Its initial and final Root Goal hashes
+remained `0cb0a46f4e99f355767519c56199cbb190bea8fe721a5735a68afb791d2857c9`.
+
+That continuation exposed a separate deterministic scheduler defect. The `evidence-budget-v2`
+policy selected `VERIFY` for a failed route whose independent review had already completed. The
+Desktop action boundary correctly refused to repeat the review, but the scheduler interpreted the
+inapplicable action as `no_candidate` and persisted a terminal checkpoint despite three routes,
+14 open obligations, seven remaining rounds, 30 remaining calls, 2,019,452 remaining tokens, and
+USD 1.817657505 remaining local cost capacity.
+
+The `evidence-budget-v3` policy excludes failed paths from verification and synthesis, excludes
+failed or complete paths from preferred deepening, and therefore selects bounded revision or an
+independent partial route instead. A restored decision is reused only when its policy version is
+current. Desktop additionally reopens a terminal checkpoint only when all of the following hold:
+the stop code is exactly `no_candidate`; calls, rounds, and open obligations remain; every persisted
+budget decision predates the current policy; and the stale selected verification targets a failed,
+already reviewed and integrated route. Budget exhaustion, round exhaustion, current-policy
+terminals, synthesis terminals, and ordinary completed checkpoints remain closed.
+
+The two behavioral regressions failed before the production change: the scheduler selected
+`SYNTHESIZE` instead of `REVISE`, and a high-valued exhausted failure masked an independent partial
+route instead of selecting `DEEPEN`. The repaired focused and adjacent matrix passed 33 tests: 25
+Core budget tests and eight Desktop scheduling, restoration, proof-task, route-theorem, and
+portfolio tests. The production restore diagnostic reported:
+
+```text
+STALE BUDGET POLICY TERMINAL RECOVERY DIAGNOSTIC
+STALE_POLICY_TERMINALS_REOPENED=1
+CURRENT_POLICY_DECISIONS=1
+ROOT_HASH_CHANGES=0
+PROVIDER_CALLS_DURING_RESTORE=0
+RESULT=PASS
+```
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

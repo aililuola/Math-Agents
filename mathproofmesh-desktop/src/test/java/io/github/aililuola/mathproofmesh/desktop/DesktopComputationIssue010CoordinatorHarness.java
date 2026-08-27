@@ -37,6 +37,8 @@ import io.github.aililuola.mathproofmesh.contract.StrategySet;
 import io.github.aililuola.mathproofmesh.contract.VariableBinding;
 import io.github.aililuola.mathproofmesh.orchestration.BudgetStateSnapshot;
 import io.github.aililuola.mathproofmesh.orchestration.EvidenceAwareBudgetDecision;
+import io.github.aililuola.mathproofmesh.proofcontrol.FailureControlService;
+import io.github.aililuola.mathproofmesh.proofcontrol.ProofControlModels;
 import io.github.aililuola.mathproofmesh.proofgraph.CanonicalObligationRecord;
 import io.github.aililuola.mathproofmesh.proofgraph.ProofGraphStore;
 import io.github.aililuola.mathproofmesh.proofcontrol.claimcourt.FrozenClaimSnapshot;
@@ -495,6 +497,33 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
         new Object[] {"issue_013_terminal", true});
   }
 
+  void markRouteAsCompletedStructuralFailure() throws ReflectiveOperationException {
+    Object route = route();
+    setRouteField(route, "status", "unverified");
+    setRouteField(route, "reviewComplete", true);
+    setRouteField(route, "integrated", true);
+    setRouteField(
+        route,
+        "failure",
+        new FailureControlService.Failure(
+            "failure-budget-policy-v2",
+            routeId(),
+            "legacy-reviewed-target",
+            ProofControlModels.FailureClass.BRIDGE,
+            "legacy-reviewed-fingerprint",
+            List.of("the completed review found a bridge failure"),
+            "create_minimal_bridge",
+            0.95d));
+  }
+
+  String workflowCursor() throws ReflectiveOperationException {
+    return String.valueOf(field("workflowCursor"));
+  }
+
+  DesktopSolveCheckpoint.SchedulerStop schedulerStop() throws ReflectiveOperationException {
+    return (DesktopSolveCheckpoint.SchedulerStop) field("schedulerStop");
+  }
+
   RunExecutionBackend.RunExecutionResult resumeExecution() throws Exception {
     return coordinator.execute(true);
   }
@@ -670,6 +699,13 @@ final class DesktopComputationIssue010CoordinatorHarness implements AutoCloseabl
     Field value = route.getClass().getDeclaredField(name);
     value.setAccessible(true);
     return value.get(route);
+  }
+
+  private static void setRouteField(Object route, String name, Object replacement)
+      throws ReflectiveOperationException {
+    Field value = route.getClass().getDeclaredField(name);
+    value.setAccessible(true);
+    value.set(route, replacement);
   }
 
   private Object field(String name) throws ReflectiveOperationException {

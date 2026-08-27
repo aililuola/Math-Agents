@@ -337,6 +337,10 @@ public final class AdaptiveBudgetManager {
     return result;
   }
 
+  public static String currentPolicyVersion() {
+    return POLICY_VERSION;
+  }
+
   public synchronized BudgetDecisionSnapshot decisionSnapshot() {
     return new BudgetDecisionSnapshot(
         BudgetDecisionSnapshot.CURRENT_SCHEMA_VERSION,
