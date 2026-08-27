@@ -1,0 +1,175 @@
+{
+  "qualified_name": "mathproofmesh.schemas.InvariantHypothesis",
+  "schema": {
+    "$defs": {
+      "NoveltySignature": {
+        "additionalProperties": false,
+        "properties": {
+          "core_objects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Core Objects",
+            "type": "array"
+          },
+          "extension_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Extension Tags",
+            "type": "array"
+          },
+          "key_transformations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Key Transformations",
+            "type": "array"
+          },
+          "mechanism_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Mechanism Tags",
+            "type": "array"
+          },
+          "normalization_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Normalization Confidence"
+          },
+          "normalized_hash": {
+            "default": "",
+            "title": "Normalized Hash",
+            "type": "string"
+          },
+          "normalizer_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Normalizer Version"
+          },
+          "proof_principles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Proof Principles",
+            "type": "array"
+          },
+          "raw_tags": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Raw Tags",
+            "type": "object"
+          },
+          "representation_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Representation Tags",
+            "type": "array"
+          },
+          "targeted_obligation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Targeted Obligation Ids",
+            "type": "array"
+          }
+        },
+        "title": "NoveltySignature",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "allowed_operations": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Allowed Operations",
+        "type": "array"
+      },
+      "behavior": {
+        "enum": [
+          "invariant",
+          "nondecreasing",
+          "nonincreasing"
+        ],
+        "title": "Behavior",
+        "type": "string"
+      },
+      "boundary_case": {
+        "minLength": 1,
+        "title": "Boundary Case",
+        "type": "string"
+      },
+      "boundary_result": {
+        "minLength": 1,
+        "title": "Boundary Result",
+        "type": "string"
+      },
+      "candidate_expression": {
+        "minLength": 1,
+        "title": "Candidate Expression",
+        "type": "string"
+      },
+      "falsification_request": {
+        "minLength": 1,
+        "title": "Falsification Request",
+        "type": "string"
+      },
+      "hypothesis_id": {
+        "title": "Hypothesis Id",
+        "type": "string"
+      },
+      "novelty_signature": {
+        "$ref": "#/$defs/NoveltySignature"
+      },
+      "state_definition": {
+        "minLength": 1,
+        "title": "State Definition",
+        "type": "string"
+      },
+      "target_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Obligation Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "target_obligation_ids",
+      "state_definition",
+      "allowed_operations",
+      "candidate_expression",
+      "behavior",
+      "boundary_case",
+      "boundary_result",
+      "falsification_request",
+      "novelty_signature"
+    ],
+    "title": "InvariantHypothesis",
+    "type": "object"
+  }
+}

@@ -1,0 +1,136 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.ClaimGoalLink",
+  "schema": {
+    "$defs": {
+      "GoalRelation": {
+        "enum": [
+          "equivalent",
+          "sufficient",
+          "necessary_only",
+          "heuristic_only",
+          "unrelated",
+          "unknown"
+        ],
+        "title": "GoalRelation",
+        "type": "string"
+      },
+      "ScopeRelation": {
+        "enum": [
+          "same",
+          "claim_stronger",
+          "claim_weaker",
+          "incomparable",
+          "unknown"
+        ],
+        "title": "ScopeRelation",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "alignment_confidence": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Alignment Confidence",
+        "type": "number"
+      },
+      "assessment_source": {
+        "default": "deterministic",
+        "enum": [
+          "deterministic",
+          "model_review",
+          "tool"
+        ],
+        "title": "Assessment Source",
+        "type": "string"
+      },
+      "countermodel_status": {
+        "default": "not_requested",
+        "enum": [
+          "not_requested",
+          "pending",
+          "none_found_bounded",
+          "found",
+          "inapplicable",
+          "deferred"
+        ],
+        "title": "Countermodel Status",
+        "type": "string"
+      },
+      "evidence_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Evidence Refs",
+        "type": "array"
+      },
+      "implication_outline": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Implication Outline",
+        "type": "array"
+      },
+      "link_id": {
+        "title": "Link Id",
+        "type": "string"
+      },
+      "minimality_score": {
+        "default": 0.5,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Minimality Score",
+        "type": "number"
+      },
+      "relation": {
+        "$ref": "#/$defs/GoalRelation"
+      },
+      "remaining_obligation_ids_if_proved": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Remaining Obligation Ids If Proved",
+        "type": "array"
+      },
+      "required_bridge_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Required Bridge Obligation Ids",
+        "type": "array"
+      },
+      "scope_relation": {
+        "$ref": "#/$defs/ScopeRelation"
+      },
+      "subject_id": {
+        "title": "Subject Id",
+        "type": "string"
+      },
+      "subject_kind": {
+        "enum": [
+          "strategy",
+          "claim",
+          "message",
+          "obligation",
+          "proof_step"
+        ],
+        "title": "Subject Kind",
+        "type": "string"
+      },
+      "target_obligation_id": {
+        "title": "Target Obligation Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "subject_id",
+      "subject_kind",
+      "target_obligation_id",
+      "relation",
+      "scope_relation"
+    ],
+    "title": "ClaimGoalLink",
+    "type": "object"
+  }
+}

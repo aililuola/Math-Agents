@@ -1,0 +1,35 @@
+{
+  "qualified_name": "mathproofmesh.schemas.LocalGoalPrecheck",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "reasons": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Reasons",
+        "type": "array"
+      },
+      "rule_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Rule Ids",
+        "type": "array"
+      },
+      "status": {
+        "enum": [
+          "clear",
+          "model_review_required"
+        ],
+        "title": "Status",
+        "type": "string"
+      }
+    },
+    "required": [
+      "status"
+    ],
+    "title": "LocalGoalPrecheck",
+    "type": "object"
+  }
+}

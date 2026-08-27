@@ -1,0 +1,92 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.WakeCondition",
+  "schema": {
+    "$defs": {
+      "WakeConditionKind": {
+        "enum": [
+          "provider_available",
+          "budget_available",
+          "dependency_fact_available",
+          "obligation_state_changed",
+          "reviewer_available",
+          "task_recompiled",
+          "user_intervention",
+          "config_changed",
+          "round_advanced"
+        ],
+        "title": "WakeConditionKind",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "condition_id": {
+        "title": "Condition Id",
+        "type": "string"
+      },
+      "earliest_round": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Earliest Round"
+      },
+      "earliest_time": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Earliest Time"
+      },
+      "kind": {
+        "$ref": "#/$defs/WakeConditionKind"
+      },
+      "satisfied": {
+        "default": false,
+        "title": "Satisfied",
+        "type": "boolean"
+      },
+      "satisfied_at": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Satisfied At"
+      },
+      "target_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Target Id"
+      }
+    },
+    "required": [
+      "condition_id",
+      "kind"
+    ],
+    "title": "WakeCondition",
+    "type": "object"
+  }
+}

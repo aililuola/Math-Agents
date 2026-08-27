@@ -1,0 +1,118 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ComputationDecision",
+  "schema": {
+    "$defs": {
+      "ComputationContractRepairStatus": {
+        "enum": [
+          "not_needed",
+          "succeeded",
+          "abandoned",
+          "failed",
+          "disabled"
+        ],
+        "title": "ComputationContractRepairStatus",
+        "type": "string"
+      },
+      "ComputationDecisionStatus": {
+        "enum": [
+          "allow",
+          "defer",
+          "reject"
+        ],
+        "title": "ComputationDecisionStatus",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "cache_hit": {
+        "default": false,
+        "title": "Cache Hit",
+        "type": "boolean"
+      },
+      "canonical_request_hash": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Canonical Request Hash"
+      },
+      "contract_repair_reason": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Contract Repair Reason"
+      },
+      "contract_repair_status": {
+        "$ref": "#/$defs/ComputationContractRepairStatus",
+        "default": "not_needed"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "decision": {
+        "$ref": "#/$defs/ComputationDecisionStatus"
+      },
+      "experiment_id": {
+        "title": "Experiment Id",
+        "type": "string"
+      },
+      "original_request_hash": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Original Request Hash"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "remaining_experiments": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Remaining Experiments",
+        "type": "integer"
+      },
+      "request_hash": {
+        "title": "Request Hash",
+        "type": "string"
+      },
+      "requires_meta_review": {
+        "default": false,
+        "title": "Requires Meta Review",
+        "type": "boolean"
+      },
+      "rule_id": {
+        "title": "Rule Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "experiment_id",
+      "request_hash",
+      "decision",
+      "reason",
+      "rule_id"
+    ],
+    "title": "ComputationDecision",
+    "type": "object"
+  }
+}

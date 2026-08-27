@@ -1,0 +1,1 @@
+Let a,b,c be positive real numbers with a+b+c=1. Prove that (1-a)(1-b)(1-c) >= 8abc, and determine all equality cases.

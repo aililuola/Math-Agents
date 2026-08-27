@@ -1,0 +1,9 @@
+{
+  "qualified_name": "mathproofmesh.schemas.StrictModel",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "StrictModel",
+    "type": "object"
+  }
+}

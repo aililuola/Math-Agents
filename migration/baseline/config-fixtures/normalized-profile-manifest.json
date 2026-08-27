@@ -1,0 +1,38 @@
+[
+  {
+    "agent_count": 5,
+    "normalized_path": "config-fixtures/normalized/config.deepseek-v4-pro.proof-control-active.json",
+    "normalized_sha256": "f4d5960576c7a2b560f95ec4a49fca90fbb14d1a6b12c384ef4e1df7f16fe6ea",
+    "source_path": "config.deepseek-v4-pro.proof-control-active.yaml"
+  },
+  {
+    "agent_count": 5,
+    "normalized_path": "config-fixtures/normalized/config.deepseek-v4-pro.proof-control-shadow.json",
+    "normalized_sha256": "dded18ef9c3799fef98a199c1b8fef94ac65f1a61eda576cc46acdfe9d0f4e52",
+    "source_path": "config.deepseek-v4-pro.proof-control-shadow.yaml"
+  },
+  {
+    "agent_count": 5,
+    "normalized_path": "config-fixtures/normalized/config.deepseek-v4-pro.smoke.json",
+    "normalized_sha256": "55a8fe7ec350d5bd14aad6d2455cb4bcef77ad90e9cc775fcb54dc9f5f807d7b",
+    "source_path": "config.deepseek-v4-pro.smoke.yaml"
+  },
+  {
+    "agent_count": 5,
+    "normalized_path": "config-fixtures/normalized/config.deepseek-v4-pro.topology-active.json",
+    "normalized_sha256": "8b30aac62c17caa9cbbb6e8dd59a7a90363585e4cbafaccb5547367aa0c057b9",
+    "source_path": "config.deepseek-v4-pro.topology-active.yaml"
+  },
+  {
+    "agent_count": 5,
+    "normalized_path": "config-fixtures/normalized/config.deepseek-v4-pro.json",
+    "normalized_sha256": "a531bbab8b2ac2ecbf54a85ee3df644ac03e6e7dc1e721a5943ce87f40a22680",
+    "source_path": "config.deepseek-v4-pro.yaml"
+  },
+  {
+    "agent_count": 6,
+    "normalized_path": "config-fixtures/normalized/config.example.json",
+    "normalized_sha256": "7dca5fbbcfe33a3997a0b43c83d00abb0777171b7dc552dd50d177adc924e97b",
+    "source_path": "config.example.yaml"
+  }
+]

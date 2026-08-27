@@ -1,0 +1,89 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.InductionBlueprintNode",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "base_cases": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Base Cases",
+        "type": "array"
+      },
+      "blueprint_node_id": {
+        "title": "Blueprint Node Id",
+        "type": "string"
+      },
+      "induction_step_relation": {
+        "title": "Induction Step Relation",
+        "type": "string"
+      },
+      "measure_name": {
+        "title": "Measure Name",
+        "type": "string"
+      },
+      "prohibited_circularity": {
+        "title": "Prohibited Circularity",
+        "type": "string"
+      },
+      "proposal_id": {
+        "title": "Proposal Id",
+        "type": "string"
+      },
+      "review_evidence_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Review Evidence Ids",
+        "type": "array"
+      },
+      "reviewer_agent_id": {
+        "title": "Reviewer Agent Id",
+        "type": "string"
+      },
+      "route_id": {
+        "title": "Route Id",
+        "type": "string"
+      },
+      "status": {
+        "default": "active",
+        "enum": [
+          "active",
+          "retired"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "strict_decrease_argument": {
+        "title": "Strict Decrease Argument",
+        "type": "string"
+      },
+      "target_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Obligation Ids",
+        "type": "array"
+      },
+      "well_founded_domain": {
+        "title": "Well Founded Domain",
+        "type": "string"
+      }
+    },
+    "required": [
+      "proposal_id",
+      "route_id",
+      "target_obligation_ids",
+      "measure_name",
+      "well_founded_domain",
+      "base_cases",
+      "induction_step_relation",
+      "strict_decrease_argument",
+      "prohibited_circularity",
+      "reviewer_agent_id",
+      "review_evidence_ids"
+    ],
+    "title": "InductionBlueprintNode",
+    "type": "object"
+  }
+}

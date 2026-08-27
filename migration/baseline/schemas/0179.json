@@ -1,0 +1,67 @@
+{
+  "qualified_name": "mathproofmesh.schemas.InspirationTask",
+  "schema": {
+    "$defs": {
+      "InspirationMechanism": {
+        "enum": [
+          "representation_switch",
+          "structural_analogy",
+          "auxiliary_construction",
+          "invariant_hypothesis",
+          "reverse_goal_analysis",
+          "bridge_lemma",
+          "surprise_exploration",
+          "meta_replan",
+          "inspiration_composition"
+        ],
+        "title": "InspirationMechanism",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "max_proposals": {
+        "default": 1,
+        "minimum": 1,
+        "title": "Max Proposals",
+        "type": "integer"
+      },
+      "mechanism": {
+        "$ref": "#/$defs/InspirationMechanism"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "target_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Obligation Ids",
+        "type": "array"
+      },
+      "target_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Route Ids",
+        "type": "array"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      },
+      "trigger_id": {
+        "title": "Trigger Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "trigger_id",
+      "mechanism",
+      "reason"
+    ],
+    "title": "InspirationTask",
+    "type": "object"
+  }
+}

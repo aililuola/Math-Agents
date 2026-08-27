@@ -1,0 +1,224 @@
+{
+  "qualified_name": "mathproofmesh.schemas.RepresentationCandidate",
+  "schema": {
+    "$defs": {
+      "NoveltySignature": {
+        "additionalProperties": false,
+        "properties": {
+          "core_objects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Core Objects",
+            "type": "array"
+          },
+          "extension_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Extension Tags",
+            "type": "array"
+          },
+          "key_transformations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Key Transformations",
+            "type": "array"
+          },
+          "mechanism_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Mechanism Tags",
+            "type": "array"
+          },
+          "normalization_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Normalization Confidence"
+          },
+          "normalized_hash": {
+            "default": "",
+            "title": "Normalized Hash",
+            "type": "string"
+          },
+          "normalizer_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Normalizer Version"
+          },
+          "proof_principles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Proof Principles",
+            "type": "array"
+          },
+          "raw_tags": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Raw Tags",
+            "type": "object"
+          },
+          "representation_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Representation Tags",
+            "type": "array"
+          },
+          "targeted_obligation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Targeted Obligation Ids",
+            "type": "array"
+          }
+        },
+        "title": "NoveltySignature",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "candidate_id": {
+        "title": "Candidate Id",
+        "type": "string"
+      },
+      "expected_advantage": {
+        "title": "Expected Advantage",
+        "type": "string"
+      },
+      "failure_risks": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Failure Risks",
+        "type": "array"
+      },
+      "fast_failure_tests": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Fast Failure Tests",
+        "type": "array"
+      },
+      "generated_obligations": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Generated Obligations",
+        "type": "array"
+      },
+      "known_failure_modes": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Known Failure Modes",
+        "type": "array"
+      },
+      "lost_conditions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Lost Conditions",
+        "type": "array"
+      },
+      "new_candidate_tools": {
+        "items": {
+          "type": "string"
+        },
+        "title": "New Candidate Tools",
+        "type": "array"
+      },
+      "novelty_signature": {
+        "$ref": "#/$defs/NoveltySignature"
+      },
+      "object_mapping": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Object Mapping",
+        "type": "object"
+      },
+      "operator_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Operator Id"
+      },
+      "operator_preconditions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Operator Preconditions",
+        "type": "array"
+      },
+      "preserved_invariants": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Preserved Invariants",
+        "type": "array"
+      },
+      "representation_name": {
+        "title": "Representation Name",
+        "type": "string"
+      },
+      "reversibility_requirements": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Reversibility Requirements",
+        "type": "array"
+      },
+      "rewritten_problem_view": {
+        "title": "Rewritten Problem View",
+        "type": "string"
+      },
+      "source_problem_hash": {
+        "title": "Source Problem Hash",
+        "type": "string"
+      }
+    },
+    "required": [
+      "source_problem_hash",
+      "representation_name",
+      "rewritten_problem_view",
+      "object_mapping",
+      "preserved_invariants",
+      "expected_advantage",
+      "failure_risks",
+      "novelty_signature"
+    ],
+    "title": "RepresentationCandidate",
+    "type": "object"
+  }
+}

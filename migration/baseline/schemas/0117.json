@@ -1,0 +1,101 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.StrategyBlueprint",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "blueprint_id": {
+        "title": "Blueprint Id",
+        "type": "string"
+      },
+      "compilation_confidence": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Compilation Confidence",
+        "type": "number"
+      },
+      "complete_path_to_main_goal": {
+        "title": "Complete Path To Main Goal",
+        "type": "boolean"
+      },
+      "direct_target_node_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Direct Target Node Ids",
+        "type": "array"
+      },
+      "edge_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Edge Ids",
+        "type": "array"
+      },
+      "main_goal_node_id": {
+        "title": "Main Goal Node Id",
+        "type": "string"
+      },
+      "node_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Node Ids",
+        "type": "array"
+      },
+      "open_gap_node_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Open Gap Node Ids",
+        "type": "array"
+      },
+      "preserves_mechanism_signature": {
+        "title": "Preserves Mechanism Signature",
+        "type": "boolean"
+      },
+      "problem_hash": {
+        "title": "Problem Hash",
+        "type": "string"
+      },
+      "root_entry_node_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Root Entry Node Ids",
+        "type": "array"
+      },
+      "status": {
+        "default": "draft",
+        "enum": [
+          "draft",
+          "compiled",
+          "needs_review",
+          "accepted",
+          "rejected"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "strategy_id": {
+        "title": "Strategy Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "blueprint_id",
+      "strategy_id",
+      "problem_hash",
+      "node_ids",
+      "edge_ids",
+      "main_goal_node_id",
+      "direct_target_node_ids",
+      "root_entry_node_ids",
+      "open_gap_node_ids",
+      "preserves_mechanism_signature",
+      "complete_path_to_main_goal",
+      "compilation_confidence"
+    ],
+    "title": "StrategyBlueprint",
+    "type": "object"
+  }
+}

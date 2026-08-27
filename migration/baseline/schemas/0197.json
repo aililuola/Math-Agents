@@ -1,0 +1,53 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ProblemSemanticViewCandidate",
+  "schema": {
+    "additionalProperties": false,
+    "description": "Model-proposed English reading; never an authoritative problem statement.",
+    "properties": {
+      "confidence": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "english_statement": {
+        "minLength": 1,
+        "title": "English Statement",
+        "type": "string"
+      },
+      "notes": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Notes",
+        "type": "array"
+      },
+      "preserves_conclusion": {
+        "title": "Preserves Conclusion",
+        "type": "boolean"
+      },
+      "preserves_domains": {
+        "title": "Preserves Domains",
+        "type": "boolean"
+      },
+      "preserves_hypotheses": {
+        "title": "Preserves Hypotheses",
+        "type": "boolean"
+      },
+      "preserves_quantifiers": {
+        "title": "Preserves Quantifiers",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "english_statement",
+      "preserves_hypotheses",
+      "preserves_quantifiers",
+      "preserves_domains",
+      "preserves_conclusion",
+      "confidence"
+    ],
+    "title": "ProblemSemanticViewCandidate",
+    "type": "object"
+  }
+}

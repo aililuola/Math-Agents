@@ -1,0 +1,40 @@
+{
+  "qualified_name": "mathproofmesh.schemas.UsageRecord",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "estimated_cost_usd": {
+        "default": 0.0,
+        "minimum": 0.0,
+        "title": "Estimated Cost Usd",
+        "type": "number"
+      },
+      "input_tokens": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Input Tokens",
+        "type": "integer"
+      },
+      "latency_ms": {
+        "default": 0.0,
+        "minimum": 0.0,
+        "title": "Latency Ms",
+        "type": "number"
+      },
+      "output_tokens": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Output Tokens",
+        "type": "integer"
+      },
+      "total_tokens": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Total Tokens",
+        "type": "integer"
+      }
+    },
+    "title": "UsageRecord",
+    "type": "object"
+  }
+}

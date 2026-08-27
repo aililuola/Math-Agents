@@ -1,0 +1,144 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.DependencyResolutionResult",
+  "schema": {
+    "$defs": {
+      "DependencyKind": {
+        "enum": [
+          "local_step",
+          "local_claim",
+          "global_fact",
+          "message",
+          "obligation",
+          "tool_certificate",
+          "formal_certificate",
+          "external_result"
+        ],
+        "title": "DependencyKind",
+        "type": "string"
+      },
+      "DependencyRef": {
+        "additionalProperties": false,
+        "properties": {
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "kind": {
+            "$ref": "#/$defs/DependencyKind"
+          },
+          "kind_migration": {
+            "anyOf": [
+              {
+                "enum": [
+                  "legacy_external_to_local_step",
+                  "legacy_external_to_local_claim",
+                  "legacy_external_to_external_result"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Kind Migration"
+          },
+          "source_attempt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Attempt Id"
+          },
+          "source_delta_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Delta Id"
+          },
+          "source_route_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Route Id"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "target_id"
+        ],
+        "title": "DependencyRef",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "ambiguous_refs": {
+        "items": {
+          "$ref": "#/$defs/DependencyRef"
+        },
+        "title": "Ambiguous Refs",
+        "type": "array"
+      },
+      "invalid_refs": {
+        "items": {
+          "$ref": "#/$defs/DependencyRef"
+        },
+        "title": "Invalid Refs",
+        "type": "array"
+      },
+      "missing_refs": {
+        "items": {
+          "$ref": "#/$defs/DependencyRef"
+        },
+        "title": "Missing Refs",
+        "type": "array"
+      },
+      "resolved": {
+        "title": "Resolved",
+        "type": "boolean"
+      },
+      "resolved_refs": {
+        "items": {
+          "$ref": "#/$defs/DependencyRef"
+        },
+        "title": "Resolved Refs",
+        "type": "array"
+      }
+    },
+    "required": [
+      "resolved"
+    ],
+    "title": "DependencyResolutionResult",
+    "type": "object"
+  }
+}

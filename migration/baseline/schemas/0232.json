@@ -1,0 +1,52 @@
+{
+  "qualified_name": "mathproofmesh.verification.escalation.EscalationPlan",
+  "schema": {
+    "$defs": {
+      "ValidationLevel": {
+        "enum": [
+          "deterministic",
+          "blind_same_model",
+          "adversarial_blind",
+          "cross_provider",
+          "tool_or_formal"
+        ],
+        "title": "ValidationLevel",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "blocks_fact_promotion": {
+        "default": false,
+        "title": "Blocks Fact Promotion",
+        "type": "boolean"
+      },
+      "diagnostics": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Diagnostics",
+        "type": "array"
+      },
+      "levels": {
+        "items": {
+          "$ref": "#/$defs/ValidationLevel"
+        },
+        "title": "Levels",
+        "type": "array"
+      },
+      "risk_score": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Risk Score",
+        "type": "number"
+      }
+    },
+    "required": [
+      "risk_score",
+      "levels"
+    ],
+    "title": "EscalationPlan",
+    "type": "object"
+  }
+}

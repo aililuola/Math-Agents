@@ -1,0 +1,42 @@
+{
+  "qualified_name": "mathproofmesh.server.SolveRequest",
+  "schema": {
+    "properties": {
+      "canonical_statement": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Canonical Statement"
+      },
+      "problem": {
+        "minLength": 1,
+        "title": "Problem",
+        "type": "string"
+      },
+      "run_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Run Id"
+      }
+    },
+    "required": [
+      "problem"
+    ],
+    "title": "SolveRequest",
+    "type": "object"
+  }
+}

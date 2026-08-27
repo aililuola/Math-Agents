@@ -1,0 +1,184 @@
+{
+  "qualified_name": "mathproofmesh.config.ComputationConfig",
+  "schema": {
+    "additionalProperties": false,
+    "description": "Reasoning-first experiment policy, budgets, and sandbox controls.",
+    "properties": {
+      "bounded_typed_probe_fast_path": {
+        "default": true,
+        "title": "Bounded Typed Probe Fast Path",
+        "type": "boolean"
+      },
+      "bounded_typed_probe_max_cases": {
+        "default": 25000,
+        "maximum": 1000000,
+        "minimum": 1,
+        "title": "Bounded Typed Probe Max Cases",
+        "type": "integer"
+      },
+      "broad_search_after_stalled_rounds": {
+        "default": 1,
+        "maximum": 64,
+        "minimum": 0,
+        "title": "Broad Search After Stalled Rounds",
+        "type": "integer"
+      },
+      "broad_search_requires_meta_review": {
+        "default": true,
+        "title": "Broad Search Requires Meta Review",
+        "type": "boolean"
+      },
+      "cache_results": {
+        "default": true,
+        "title": "Cache Results",
+        "type": "boolean"
+      },
+      "contract_repair_max_output_tokens": {
+        "default": 8192,
+        "maximum": 32000,
+        "minimum": 256,
+        "title": "Contract Repair Max Output Tokens",
+        "type": "integer"
+      },
+      "critical_calculation_gate_enabled": {
+        "default": true,
+        "title": "Critical Calculation Gate Enabled",
+        "type": "boolean"
+      },
+      "critical_calculation_max_checks_per_artifact": {
+        "default": 8,
+        "maximum": 64,
+        "minimum": 1,
+        "title": "Critical Calculation Max Checks Per Artifact",
+        "type": "integer"
+      },
+      "critical_calculation_require_declarations": {
+        "default": true,
+        "title": "Critical Calculation Require Declarations",
+        "type": "boolean"
+      },
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "execute_planner_hints_immediately": {
+        "default": false,
+        "title": "Execute Planner Hints Immediately",
+        "type": "boolean"
+      },
+      "hard_experiments_per_path": {
+        "default": 6,
+        "maximum": 100,
+        "minimum": 1,
+        "title": "Hard Experiments Per Path",
+        "type": "integer"
+      },
+      "max_cases_per_experiment": {
+        "default": 1000000,
+        "maximum": 100000000,
+        "minimum": 1,
+        "title": "Max Cases Per Experiment",
+        "type": "integer"
+      },
+      "max_compute_cycles_per_segment": {
+        "default": 1,
+        "maximum": 8,
+        "minimum": 0,
+        "title": "Max Compute Cycles Per Segment",
+        "type": "integer"
+      },
+      "max_contract_repairs_per_segment": {
+        "default": 1,
+        "maximum": 2,
+        "minimum": 0,
+        "title": "Max Contract Repairs Per Segment",
+        "type": "integer"
+      },
+      "max_output_chars": {
+        "default": 20000,
+        "maximum": 2000000,
+        "minimum": 256,
+        "title": "Max Output Chars",
+        "type": "integer"
+      },
+      "max_total_cpu_seconds": {
+        "default": 120.0,
+        "maximum": 86400.0,
+        "minimum": 0.1,
+        "title": "Max Total Cpu Seconds",
+        "type": "number"
+      },
+      "policy": {
+        "const": "reasoning_first",
+        "default": "reasoning_first",
+        "title": "Policy",
+        "type": "string"
+      },
+      "sandbox_cpus": {
+        "default": 1.0,
+        "maximum": 16.0,
+        "minimum": 0.1,
+        "title": "Sandbox Cpus",
+        "type": "number"
+      },
+      "sandbox_image": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sandbox Image"
+      },
+      "sandbox_memory_mb": {
+        "default": 256,
+        "maximum": 8192,
+        "minimum": 32,
+        "title": "Sandbox Memory Mb",
+        "type": "integer"
+      },
+      "sandbox_pids_limit": {
+        "default": 32,
+        "maximum": 1024,
+        "minimum": 4,
+        "title": "Sandbox Pids Limit",
+        "type": "integer"
+      },
+      "sandbox_timeout_seconds": {
+        "default": 20.0,
+        "maximum": 600.0,
+        "minimum": 0.1,
+        "title": "Sandbox Timeout Seconds",
+        "type": "number"
+      },
+      "sandboxed_python_enabled": {
+        "default": false,
+        "title": "Sandboxed Python Enabled",
+        "type": "boolean"
+      },
+      "soft_experiments_per_path": {
+        "default": 2,
+        "maximum": 100,
+        "minimum": 0,
+        "title": "Soft Experiments Per Path",
+        "type": "integer"
+      },
+      "targeted_falsification_fast_path": {
+        "default": true,
+        "title": "Targeted Falsification Fast Path",
+        "type": "boolean"
+      },
+      "typed_tools_enabled": {
+        "default": true,
+        "title": "Typed Tools Enabled",
+        "type": "boolean"
+      }
+    },
+    "title": "ComputationConfig",
+    "type": "object"
+  }
+}

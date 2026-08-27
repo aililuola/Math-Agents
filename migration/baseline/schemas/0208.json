@@ -1,0 +1,148 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ResearchProgressReport",
+  "schema": {
+    "$defs": {
+      "FormalizationCoverageReport": {
+        "additionalProperties": false,
+        "properties": {
+          "coverage": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Coverage",
+            "type": "number"
+          },
+          "formally_certified_step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Formally Certified Step Ids",
+            "type": "array"
+          },
+          "total_step_count": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Total Step Count",
+            "type": "integer"
+          }
+        },
+        "title": "FormalizationCoverageReport",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "execution_notes": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Execution Notes",
+        "type": "array"
+      },
+      "formalization_coverage": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/FormalizationCoverageReport"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "negative_evidence": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Negative Evidence",
+        "type": "array"
+      },
+      "open_obligations": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Open Obligations",
+        "type": "array"
+      },
+      "problem_hash": {
+        "title": "Problem Hash",
+        "type": "string"
+      },
+      "refuted_routes": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Refuted Routes",
+        "type": "array"
+      },
+      "remaining_gaps": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Remaining Gaps",
+        "type": "array"
+      },
+      "strongest_partial_attempt_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Strongest Partial Attempt Id"
+      },
+      "summary": {
+        "title": "Summary",
+        "type": "string"
+      },
+      "termination_reason": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Termination Reason"
+      },
+      "valid_partial_attempt_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Valid Partial Attempt Ids",
+        "type": "array"
+      },
+      "verified_local_claim_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Verified Local Claim Ids",
+        "type": "array"
+      },
+      "verified_step_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Verified Step Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "problem_hash",
+      "summary"
+    ],
+    "title": "ResearchProgressReport",
+    "type": "object"
+  }
+}

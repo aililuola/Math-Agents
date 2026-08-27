@@ -1,0 +1,1182 @@
+[
+  {
+    "file": "0001.json",
+    "qualified_name": "mathproofmesh.activity.ActivityEvent",
+    "schema_sha256": "1a38af0399bf15d712f5c59e9140f36138c470f659cd703a310dbfa13c73cbd1"
+  },
+  {
+    "file": "0002.json",
+    "qualified_name": "mathproofmesh.config.AgentCapabilityConfig",
+    "schema_sha256": "354e7a357a788be6a7c916440d04017393c0f5af251656d1596cc1ba59d47b82"
+  },
+  {
+    "file": "0003.json",
+    "qualified_name": "mathproofmesh.config.AgentConfig",
+    "schema_sha256": "7eded811a6bfd0a539e641463c1b607a7af30c3a0929f3f25f6d240d96d7e344"
+  },
+  {
+    "file": "0004.json",
+    "qualified_name": "mathproofmesh.config.BlueprintReviewControlConfig",
+    "schema_sha256": "36abb1db02814f9fbb8a4c9d4dd14b2dad7842ac5f3c305a6a25be5c0304046e"
+  },
+  {
+    "file": "0005.json",
+    "qualified_name": "mathproofmesh.config.BottleneckControlConfig",
+    "schema_sha256": "870e53eea8a8b88cf5b04c3fde0b4504aaa9ea295c0becfae714c5785a6a9cf4"
+  },
+  {
+    "file": "0006.json",
+    "qualified_name": "mathproofmesh.config.BrokerConfig",
+    "schema_sha256": "cf7ef5f9bcb2f3bd83faf3991c0eda60b611adebff720fca42f4a3401f42f19a"
+  },
+  {
+    "file": "0007.json",
+    "qualified_name": "mathproofmesh.config.BudgetConfig",
+    "schema_sha256": "cfe535dd5be57c828fdf14d22264d1225ccfccbde3c7b98694b4478e72761377"
+  },
+  {
+    "file": "0008.json",
+    "qualified_name": "mathproofmesh.config.CommonModeControlConfig",
+    "schema_sha256": "15427214aa015a3eb10c6caad3320eb6da1d656bcaebff9822ea47053d27f65b"
+  },
+  {
+    "file": "0009.json",
+    "qualified_name": "mathproofmesh.config.ComputationConfig",
+    "schema_sha256": "a6f50c83077f5944bb6ac0c049e13eb2d2980932a5cdfd6c27f7670e314e95e7"
+  },
+  {
+    "file": "0010.json",
+    "qualified_name": "mathproofmesh.config.ConfigModel",
+    "schema_sha256": "1122f50777e01c1f579207a49c3021e28ec5e15712d5608fa034702983e32a9c"
+  },
+  {
+    "file": "0011.json",
+    "qualified_name": "mathproofmesh.config.ContinuationConfig",
+    "schema_sha256": "dc9930bdcfaa4bd4655245396daadf35f9ba65820b927dd2fb21a50850d6c5b9"
+  },
+  {
+    "file": "0012.json",
+    "qualified_name": "mathproofmesh.config.ContinueGateControlConfig",
+    "schema_sha256": "405dbedd2fa8fb107f5f878b229c5485f7724b72819eec1792e99f76fb2c271d"
+  },
+  {
+    "file": "0013.json",
+    "qualified_name": "mathproofmesh.config.CoreDebtControlConfig",
+    "schema_sha256": "2aa95245d7a26935a5b004fafae8f9880dec5df16d096a9874565bd47daf440c"
+  },
+  {
+    "file": "0014.json",
+    "qualified_name": "mathproofmesh.config.CrossRouteConfig",
+    "schema_sha256": "30fcf42f26a026d62e87ebfab7a1ae167d9503811a5f403b80f085e4050abe64"
+  },
+  {
+    "file": "0015.json",
+    "qualified_name": "mathproofmesh.config.DeepExplorationPolicyConfig",
+    "schema_sha256": "200cdb0e353539e4f022a75050e2f72ae92cd5402b0df183dfdf8c479cf35d58"
+  },
+  {
+    "file": "0016.json",
+    "qualified_name": "mathproofmesh.config.ExplorationTierPolicyConfig",
+    "schema_sha256": "cbff6b5dd44dcc5b3b1ee65de2878769780b557e6a76502417e94b33d9a67ec1"
+  },
+  {
+    "file": "0017.json",
+    "qualified_name": "mathproofmesh.config.FailureControlConfig",
+    "schema_sha256": "ad96faaf94366b540c8b67572dcf0b9de925304594369a838fb8208b06f13e38"
+  },
+  {
+    "file": "0018.json",
+    "qualified_name": "mathproofmesh.config.FalsificationFastLaneControlConfig",
+    "schema_sha256": "65d396c09acdaaf3940c26beb5ddd30171a369d9b67258e65d1c68fffd7063d5"
+  },
+  {
+    "file": "0019.json",
+    "qualified_name": "mathproofmesh.config.FinalTopologyConfig",
+    "schema_sha256": "d09a642e0aa09d29d3c7a326401bc9f54758a6a817a7ced8faa0561ec6db839a"
+  },
+  {
+    "file": "0020.json",
+    "qualified_name": "mathproofmesh.config.GoalAlignmentControlConfig",
+    "schema_sha256": "eb732940a80a111bc006813b350ef768f8e0b86f7669df2bd01e03946961ea96"
+  },
+  {
+    "file": "0021.json",
+    "qualified_name": "mathproofmesh.config.InductionControlConfig",
+    "schema_sha256": "42962fe4b9c021a836201fdad84d3df5a351fb7eeb4f4dd749c0b759291249ca"
+  },
+  {
+    "file": "0022.json",
+    "qualified_name": "mathproofmesh.config.InspirationConfig",
+    "schema_sha256": "143fb86acacf913e6f474446608af858e5c5673616461c8f8d3ae41aa394772c"
+  },
+  {
+    "file": "0023.json",
+    "qualified_name": "mathproofmesh.config.MessageUtilityControlConfig",
+    "schema_sha256": "ea1ecf6df968cf2ca8e21756a8759c7a15da298791588c32a9a5fab6a1ffbffa"
+  },
+  {
+    "file": "0024.json",
+    "qualified_name": "mathproofmesh.config.NearMissControlConfig",
+    "schema_sha256": "c1b6b38d99402cffc195b302eb4b6ed708322efc7f2228488d66595503874ba2"
+  },
+  {
+    "file": "0025.json",
+    "qualified_name": "mathproofmesh.config.PricingConfig",
+    "schema_sha256": "23a2a184cbe5a534877fbe17d8ce8e1521c5d35d485f96d73c492a0f34b75d63"
+  },
+  {
+    "file": "0026.json",
+    "qualified_name": "mathproofmesh.config.ProofControlConfig",
+    "schema_sha256": "8b55c6bd1ea33319a7704d976b63348529d71cd8f41f571f652a93cd1f957395"
+  },
+  {
+    "file": "0027.json",
+    "qualified_name": "mathproofmesh.config.ProofGraphConfig",
+    "schema_sha256": "a91e38200605db0110fa6aa6737d412b38a5747522cf92d4b9147da4fad61f79"
+  },
+  {
+    "file": "0028.json",
+    "qualified_name": "mathproofmesh.config.RealizerControlConfig",
+    "schema_sha256": "70401bff228f695e26f61d3de86a76be6ad8825c06e7fa5088a5bab4c8e92daf"
+  },
+  {
+    "file": "0029.json",
+    "qualified_name": "mathproofmesh.config.RouteAdmissionControlConfig",
+    "schema_sha256": "43674230bce332b89887f783d0b9695dcc23ac62585869b8fe2d358592435eff"
+  },
+  {
+    "file": "0030.json",
+    "qualified_name": "mathproofmesh.config.RouteTeamConfig",
+    "schema_sha256": "bd4f058fa9057ab442316672bff89daab4dae3c01808cef9c63480221da6b9a5"
+  },
+  {
+    "file": "0031.json",
+    "qualified_name": "mathproofmesh.config.RuntimeConfig",
+    "schema_sha256": "0d0091571cc2c6fb4dbe783ca2c2b22468933095741e61ab947fc7926199c598"
+  },
+  {
+    "file": "0032.json",
+    "qualified_name": "mathproofmesh.config.SchedulerConfig",
+    "schema_sha256": "73e4981deb51de51a65a43db6b150cd9c7fa13bb6afd64ab0c406c77e4e83b90"
+  },
+  {
+    "file": "0033.json",
+    "qualified_name": "mathproofmesh.config.ScopeGuardControlConfig",
+    "schema_sha256": "c10f8a7eb9398d9e50822b45bbafc10665fb9a059698e153dc981eac19a14514"
+  },
+  {
+    "file": "0034.json",
+    "qualified_name": "mathproofmesh.config.SynthesisReadinessControlConfig",
+    "schema_sha256": "d9c4c6630691a019048451737ad119fc6b046f9fcd2e05671f3fb5a67725da9d"
+  },
+  {
+    "file": "0035.json",
+    "qualified_name": "mathproofmesh.config.SystemConfig",
+    "schema_sha256": "dbcd84dc64c6c657485868d6736e693a89fa0a33b1d907a5191f830f03f0bf1c"
+  },
+  {
+    "file": "0036.json",
+    "qualified_name": "mathproofmesh.config.TopologyConfig",
+    "schema_sha256": "95e6a6fcf232adfdebad814a404c7b456de18f27a49fa0025b8b83ef670011e7"
+  },
+  {
+    "file": "0037.json",
+    "qualified_name": "mathproofmesh.config.TypedCommunicationConfig",
+    "schema_sha256": "62b22662bc066c7efccffe16be043335d8c17930ecb997509c5ae91c263d341f"
+  },
+  {
+    "file": "0038.json",
+    "qualified_name": "mathproofmesh.config.TypedMemoryConfig",
+    "schema_sha256": "a924c92c2e112de11935dda0c6b8b894d2b9e9ca7028c94ea1b3b8017e2dd05b"
+  },
+  {
+    "file": "0039.json",
+    "qualified_name": "mathproofmesh.config.ValidationEscalationConfig",
+    "schema_sha256": "df58574f2edd5ad863bb6de30ed041da7635be676edca72f6ced6b02b838168d"
+  },
+  {
+    "file": "0040.json",
+    "qualified_name": "mathproofmesh.config.VerificationConfig",
+    "schema_sha256": "e434259eb3894aaa1c223131d39073538a54ed0a76412ee1249d3c4c009bbc18"
+  },
+  {
+    "file": "0041.json",
+    "qualified_name": "mathproofmesh.deep_exploration.BottleneckPivotRecord",
+    "schema_sha256": "16caccfd31e64539269fd250d16f13fee5ef9627ee92ee2b3763cad500d63705"
+  },
+  {
+    "file": "0042.json",
+    "qualified_name": "mathproofmesh.deep_exploration.ExplorationAdmission",
+    "schema_sha256": "ef70680732a3ae605d93a620cf5e33de5f4f1db24b96cf7de7e1ec4f8d89f1be"
+  },
+  {
+    "file": "0043.json",
+    "qualified_name": "mathproofmesh.deep_exploration.ExplorationAttemptRecord",
+    "schema_sha256": "cdf694aa3a1c54c9677f95d1f10ddd52f48200fef9aacbc4b0fbf2608dae91cc"
+  },
+  {
+    "file": "0044.json",
+    "qualified_name": "mathproofmesh.deep_exploration.ExplorationEvidence",
+    "schema_sha256": "a26ac985da1e9897b9f6fdf35f2223cfb84bf1ed0c5657ac742cd7edf535c1ac"
+  },
+  {
+    "file": "0045.json",
+    "qualified_name": "mathproofmesh.deep_exploration.ExplorationModel",
+    "schema_sha256": "3216eff14e2463989b204cbf1b79292d4e55eaa469d2174ffcce68e494bbed54"
+  },
+  {
+    "file": "0046.json",
+    "qualified_name": "mathproofmesh.deep_exploration.ExplorationSignature",
+    "schema_sha256": "b9730b3486ab6e78ff5f13d7569ab1373c6eb351836db03027a9de5908e1662c"
+  },
+  {
+    "file": "0047.json",
+    "qualified_name": "mathproofmesh.desktop.app.ClarificationDecisionRequest",
+    "schema_sha256": "44ec16664d12741b08dba6323b55d9399c33dd1ff327dad64275cd6b91bb38f5"
+  },
+  {
+    "file": "0048.json",
+    "qualified_name": "mathproofmesh.desktop.app.CredentialsRequest",
+    "schema_sha256": "2ca1d36f106a7a6934894744074ec85b1cc36c2cf39bf237225f684cd08e4cbf"
+  },
+  {
+    "file": "0049.json",
+    "qualified_name": "mathproofmesh.desktop.app.OpenPathRequest",
+    "schema_sha256": "9840d6262aef36f4aa7b8c9fa26b6dad6396d2fcce907616263f6d0e02344fe6"
+  },
+  {
+    "file": "0050.json",
+    "qualified_name": "mathproofmesh.desktop.app.ResumeRunRequest",
+    "schema_sha256": "ebf1b26eb121e99f65ace43b6727557dd859191fcfb6a74c358edd4cce7edf7b"
+  },
+  {
+    "file": "0051.json",
+    "qualified_name": "mathproofmesh.desktop.app.StartRunRequest",
+    "schema_sha256": "894983da70d712b2e4f71219b3a46001d521021b0f214024f71545cdff060e03"
+  },
+  {
+    "file": "0052.json",
+    "qualified_name": "mathproofmesh.desktop.app._ApiModel",
+    "schema_sha256": "62173c63ca947e38e19df495964412c767472240e4d2babd6bc3e8cd704a18bc"
+  },
+  {
+    "file": "0053.json",
+    "qualified_name": "mathproofmesh.desktop.repository.DesktopRunMetadata",
+    "schema_sha256": "e2589b10c3e8da9afbc27cf1c7814bc0789c7c2de21674a986f28c1196d55484"
+  },
+  {
+    "file": "0054.json",
+    "qualified_name": "mathproofmesh.desktop.settings.DesktopSettings",
+    "schema_sha256": "ec1857980fbe3a57bd42014385032d0c707e44f275bdf77f2bb217c0c949c594"
+  },
+  {
+    "file": "0055.json",
+    "qualified_name": "mathproofmesh.inspiration.trigger_policy.InspirationSnapshot",
+    "schema_sha256": "cb81053608726b5ccdd3016260e61c0e7c49f36b71499fb286f382628ebd47e3"
+  },
+  {
+    "file": "0056.json",
+    "qualified_name": "mathproofmesh.proof_control.models.AbstractRealizerExtraction",
+    "schema_sha256": "761bde1b91ebac964c7c85f7ed930f3349f8b4e7803db16ffe1127df86b592ee"
+  },
+  {
+    "file": "0057.json",
+    "qualified_name": "mathproofmesh.proof_control.models.AbstractStructureProposal",
+    "schema_sha256": "3da6101666ce523ac406aed8830ac1aa5ecbbc4c4ab36ae17776a7c3cbae05ed"
+  },
+  {
+    "file": "0058.json",
+    "qualified_name": "mathproofmesh.proof_control.models.AssumptionChallengeProposal",
+    "schema_sha256": "bf93e9cc245f65985ad4ace63fbbaa197309b1e28b8f04dfb3a13a679ce54c51"
+  },
+  {
+    "file": "0059.json",
+    "qualified_name": "mathproofmesh.proof_control.models.AssumptionChallengeResult",
+    "schema_sha256": "4c85e107826c41c5ef92c1224d9a607f39f651e09f04b8ff0a0e7057cf179797"
+  },
+  {
+    "file": "0060.json",
+    "qualified_name": "mathproofmesh.proof_control.models.AssumptionChallengeReview",
+    "schema_sha256": "95f361a9fd0dccd9809ead78b3d80feff02ede5a0ac67f328dfc129ec9e2d96c"
+  },
+  {
+    "file": "0061.json",
+    "qualified_name": "mathproofmesh.proof_control.models.AssumptionChallengerTask",
+    "schema_sha256": "c50bc8e4695af209a3974fa7d386c23de978a0e5e679b1f2648c72fedc60b701"
+  },
+  {
+    "file": "0062.json",
+    "qualified_name": "mathproofmesh.proof_control.models.AssumptionDomainRecord",
+    "schema_sha256": "cdce5b3464e9a0fb8053714c8a2e38d75b322393acaab9870eafa235017a7a68"
+  },
+  {
+    "file": "0063.json",
+    "qualified_name": "mathproofmesh.proof_control.models.AssumptionFamily",
+    "schema_sha256": "4206989238a18298ab611cf3fb3c426b958d766b25ef989f256aead187df12b2"
+  },
+  {
+    "file": "0064.json",
+    "qualified_name": "mathproofmesh.proof_control.models.BlueprintEdge",
+    "schema_sha256": "1c10a158bebbc72c69c56d1817bd0da0ef64a79bc7ec54d3ae39d32a04d5cd53"
+  },
+  {
+    "file": "0065.json",
+    "qualified_name": "mathproofmesh.proof_control.models.BlueprintNode",
+    "schema_sha256": "100a4fda65312db0d8da75b41d1d60831a36612e7137a60462282efc14bd6260"
+  },
+  {
+    "file": "0066.json",
+    "qualified_name": "mathproofmesh.proof_control.models.BlueprintRewriteRequest",
+    "schema_sha256": "fc8b71096fb0833247b317614ca7fd45c1a7eec65f080d567b5712c614afe2a0"
+  },
+  {
+    "file": "0067.json",
+    "qualified_name": "mathproofmesh.proof_control.models.BlueprintSemanticAssessment",
+    "schema_sha256": "490da295221eddc4173ea54c60b8ba7a67f6ac62e13dd29a297268c2673f8c07"
+  },
+  {
+    "file": "0068.json",
+    "qualified_name": "mathproofmesh.proof_control.models.BottleneckBridgeTask",
+    "schema_sha256": "f39fc6f942961cc04923b3f0ea69f0a5b6abf057a0f3786952cd98bf3b679468"
+  },
+  {
+    "file": "0069.json",
+    "qualified_name": "mathproofmesh.proof_control.models.BottleneckCluster",
+    "schema_sha256": "a5a6755b145935465127d15e33b8039e971a483499e5443bbbd3173c372bed87"
+  },
+  {
+    "file": "0070.json",
+    "qualified_name": "mathproofmesh.proof_control.models.BroadcastDecisionRecord",
+    "schema_sha256": "c52849e62a712f5d6fae1a0d0d02bbfbe152b806bdded6a75c85294c24ff0750"
+  },
+  {
+    "file": "0071.json",
+    "qualified_name": "mathproofmesh.proof_control.models.ClaimGoalLink",
+    "schema_sha256": "b9f326aff71ae809aff9889d5617fae05ec3c37c18958526097b914301ce6dbc"
+  },
+  {
+    "file": "0072.json",
+    "qualified_name": "mathproofmesh.proof_control.models.ClaimRefereeRecord",
+    "schema_sha256": "8d27adb77e74eed6f4c1ca63e85312e0ab4da19fa20981e479d2043aca9446d8"
+  },
+  {
+    "file": "0073.json",
+    "qualified_name": "mathproofmesh.proof_control.models.ClaimVerificationLedgerEntry",
+    "schema_sha256": "04f3e0278cf173e77afbcb3c7b814260eeb2829f796972910e4f6439ed6d800c"
+  },
+  {
+    "file": "0074.json",
+    "qualified_name": "mathproofmesh.proof_control.models.ContinueGateRecord",
+    "schema_sha256": "9f6c42ea371aecc74059c5300ec580e4995c979d4eb903d651e9cd90a196d8af"
+  },
+  {
+    "file": "0075.json",
+    "qualified_name": "mathproofmesh.proof_control.models.ControlActionRecord",
+    "schema_sha256": "fdd4ee95ee8a5f8a121e15891468d5fa1e5b0de4103ec2335a84bee117e7616f"
+  },
+  {
+    "file": "0076.json",
+    "qualified_name": "mathproofmesh.proof_control.models.ControlActionResult",
+    "schema_sha256": "edfbd923a1aa5a590fa6deab8fd2f5c20205fbe45a15dfd7216f898cba2f37fe"
+  },
+  {
+    "file": "0077.json",
+    "qualified_name": "mathproofmesh.proof_control.models.CountermodelResult",
+    "schema_sha256": "db45ef5098757ffeead27ea75996606bab45d8e4fdc879770247c13f0afb5312"
+  },
+  {
+    "file": "0078.json",
+    "qualified_name": "mathproofmesh.proof_control.models.CountermodelTaskRecord",
+    "schema_sha256": "259161179afd07e58310bf05c9b0c2188e4a0a99c944df6648bed42ba074c5d8"
+  },
+  {
+    "file": "0079.json",
+    "qualified_name": "mathproofmesh.proof_control.models.CriticalAssumption",
+    "schema_sha256": "4acfdec59ff858c9622bd42e194dfa3bffa1e1e249b895e5b4574bcb97adede0"
+  },
+  {
+    "file": "0080.json",
+    "qualified_name": "mathproofmesh.proof_control.models.DependencyAtom",
+    "schema_sha256": "9ae1ab1cba1fcc46d842e5423674380d4aff6a8e1a3c84ee1cbf5afee55a084b"
+  },
+  {
+    "file": "0081.json",
+    "qualified_name": "mathproofmesh.proof_control.models.DependencyMigrationResult",
+    "schema_sha256": "a0641534c9c37a75b4c289f1aa516b3f9ef0bf5ad7de672831ad9744320de7e8"
+  },
+  {
+    "file": "0082.json",
+    "qualified_name": "mathproofmesh.proof_control.models.DependencyNormalizationTask",
+    "schema_sha256": "30ee5de398510fcd1d65802bbf446fc323efefbce36a452e5219678cf81aab1a"
+  },
+  {
+    "file": "0083.json",
+    "qualified_name": "mathproofmesh.proof_control.models.DependencyRef",
+    "schema_sha256": "2997a3cc6726ec43d56cf3ec39ef9ada45e9dc95a3cbfd75c2b4a34a6e5d2769"
+  },
+  {
+    "file": "0084.json",
+    "qualified_name": "mathproofmesh.proof_control.models.DependencyResolutionResult",
+    "schema_sha256": "a0a62f253db7bcd76c4ef4ef5c699f47c342f92b42822a6966312dfb1c0e5c5f"
+  },
+  {
+    "file": "0085.json",
+    "qualified_name": "mathproofmesh.proof_control.models.ExecutableTaskRecord",
+    "schema_sha256": "155fd526adc4cae179b67d09c69ac1697ab0108090e200cb565872271fa667a7"
+  },
+  {
+    "file": "0086.json",
+    "qualified_name": "mathproofmesh.proof_control.models.FailureClassificationRecord",
+    "schema_sha256": "1079dbe463c8759038869cdce4a273bcc1a0d318e2094251cf4bc71fffc7ea97"
+  },
+  {
+    "file": "0087.json",
+    "qualified_name": "mathproofmesh.proof_control.models.FalsificationTaskRecord",
+    "schema_sha256": "75119c07e2a2f360d19f0cb451f60a275979b76c52f142696b6f3e0909912402"
+  },
+  {
+    "file": "0088.json",
+    "qualified_name": "mathproofmesh.proof_control.models.GoalAlignmentContractResult",
+    "schema_sha256": "6d8afc5fb76d0fce95b333abffa58c8bd8ad5adccc7bede1b9c93ea435a3e8a3"
+  },
+  {
+    "file": "0089.json",
+    "qualified_name": "mathproofmesh.proof_control.models.InductionBlueprintNode",
+    "schema_sha256": "05ba09f2a42b96ffc4bdb44497ea5556623ede8655d7cb34069c4b99245f58fb"
+  },
+  {
+    "file": "0090.json",
+    "qualified_name": "mathproofmesh.proof_control.models.InductionMeasureProposal",
+    "schema_sha256": "5b82bed1969b4f49ea9f3ffffae0982ec182862ca772f2f9eeb6cd9f24eca637"
+  },
+  {
+    "file": "0091.json",
+    "qualified_name": "mathproofmesh.proof_control.models.InferenceRiskRecord",
+    "schema_sha256": "03dbe2ed11b557d2e731a30205fdb45db247cceb4ce98de3847ab4f5441f849f"
+  },
+  {
+    "file": "0092.json",
+    "qualified_name": "mathproofmesh.proof_control.models.InspirationReviewDeferral",
+    "schema_sha256": "b50b8a5e0e7d38388d227f5c5db1bb600f5645ca1f71f771c7392b85d8301306"
+  },
+  {
+    "file": "0093.json",
+    "qualified_name": "mathproofmesh.proof_control.models.MessageUsageReceipt",
+    "schema_sha256": "f60bc6b2fbd8055fa1e5164d02ade0a588cafcd95ce66f6e968a9fa495d6701e"
+  },
+  {
+    "file": "0094.json",
+    "qualified_name": "mathproofmesh.proof_control.models.MessageUtilityContract",
+    "schema_sha256": "9f93fc845a94ffc14c1ea3db9c8926798a6593468d119c5ea6ac3b7f53757ff2"
+  },
+  {
+    "file": "0095.json",
+    "qualified_name": "mathproofmesh.proof_control.models.MetaPivotOutcome",
+    "schema_sha256": "0b1fcd7b0d05d8f935c6c7cbae6469ecdc1d5a991e19a4ef6b13feeb4a9b14a5"
+  },
+  {
+    "file": "0096.json",
+    "qualified_name": "mathproofmesh.proof_control.models.MetaPivotState",
+    "schema_sha256": "d26886af70cfa3089494767af8138ec9cafc63e110aa8752d257f63af48e0405"
+  },
+  {
+    "file": "0097.json",
+    "qualified_name": "mathproofmesh.proof_control.models.MinimalBridgeProposal",
+    "schema_sha256": "6752386b04a58f640a4aec8aa911dac7ad59cab78c2a0e5ea1c33dc14efe4a07"
+  },
+  {
+    "file": "0098.json",
+    "qualified_name": "mathproofmesh.proof_control.models.NearMissRecord",
+    "schema_sha256": "82e6705d80f0e0e951033bd6b4ea59de49becce1666f20c9c3b52c445cd86d10"
+  },
+  {
+    "file": "0099.json",
+    "qualified_name": "mathproofmesh.proof_control.models.NegativePatternRecord",
+    "schema_sha256": "b4001eaa15b7b76b6e8113a56ed09ad783303e0dff3f1debaf71be551cc9c869"
+  },
+  {
+    "file": "0100.json",
+    "qualified_name": "mathproofmesh.proof_control.models.ObligationDomainRecord",
+    "schema_sha256": "436c7432f7e9214b61d5120d9a047798a7d6a26c1811bbec325d00470b0ff4a2"
+  },
+  {
+    "file": "0101.json",
+    "qualified_name": "mathproofmesh.proof_control.models.ObligationSemanticQuality",
+    "schema_sha256": "198732d4dc4a02f3c222524c90c4cf3d59e206794e358449a28114711b40c7bb"
+  },
+  {
+    "file": "0102.json",
+    "qualified_name": "mathproofmesh.proof_control.models.OriginalStrategyArchiveEntry",
+    "schema_sha256": "edfca9dbb35f6bd20e91e54dd7a40d13b05617a0652ad0f9f7bb73c52633f902"
+  },
+  {
+    "file": "0103.json",
+    "qualified_name": "mathproofmesh.proof_control.models.PremiseClosureRecord",
+    "schema_sha256": "07e272ab9acf4532978a136d1cdda2c8f7495432828e755f559ab5ff55a962bf"
+  },
+  {
+    "file": "0104.json",
+    "qualified_name": "mathproofmesh.proof_control.models.ProcessFailureDiagnostic",
+    "schema_sha256": "2bd57d80f1141144b178750d3bee5da7c6ccd4fc9c161215613179c8f0dec0a9"
+  },
+  {
+    "file": "0105.json",
+    "qualified_name": "mathproofmesh.proof_control.models.RealizerCandidate",
+    "schema_sha256": "58a83ab2f03a924cd6c6b6b9867ba8b4658e9b3b7ddcf84650f5fb4c9f68b58d"
+  },
+  {
+    "file": "0106.json",
+    "qualified_name": "mathproofmesh.proof_control.models.RealizerRepairResult",
+    "schema_sha256": "f4d7cfc8b73054cae0317af5c405d20aa947f6db2b4004a8722f0d9e36c0236a"
+  },
+  {
+    "file": "0107.json",
+    "qualified_name": "mathproofmesh.proof_control.models.RealizerRepairTask",
+    "schema_sha256": "2719baa4b2ffbc2b4edacde6bcba35a4ddb708ba7429ae8a222e1d4725a5ece8"
+  },
+  {
+    "file": "0108.json",
+    "qualified_name": "mathproofmesh.proof_control.models.RelationSignature",
+    "schema_sha256": "aa79008e156dc3e8e4c29f66d504ab9601c7cda5fabf88844fbe6062b63d721f"
+  },
+  {
+    "file": "0109.json",
+    "qualified_name": "mathproofmesh.proof_control.models.ResumeDecision",
+    "schema_sha256": "57c8a1944185413f3dfbe816a20c52c64b64bc069bcd0ef27f4f2d5bae49ef9d"
+  },
+  {
+    "file": "0110.json",
+    "qualified_name": "mathproofmesh.proof_control.models.RevisedStrategyResult",
+    "schema_sha256": "5b8c990ba157b3a70a45c7375d5017fb8a55229cedb0f875c6d0df410db5e4b5"
+  },
+  {
+    "file": "0111.json",
+    "qualified_name": "mathproofmesh.proof_control.models.RewriteSemanticAssessment",
+    "schema_sha256": "0d90e74a8b44da71388ca39f8f07ffa7e515113b0a6f8d177fc4edda0288761f"
+  },
+  {
+    "file": "0112.json",
+    "qualified_name": "mathproofmesh.proof_control.models.RouteAdmissionRecord",
+    "schema_sha256": "989e6040d58ace7b86268d465196d4cfefccb9a21adf1d82e58fb4254e5e2ba3"
+  },
+  {
+    "file": "0113.json",
+    "qualified_name": "mathproofmesh.proof_control.models.RouteFreezeRecord",
+    "schema_sha256": "a4ce9f86fa27c43c0f1276a04c1dd18a53d942c12b0d4a16f11f3a545307bdb1"
+  },
+  {
+    "file": "0114.json",
+    "qualified_name": "mathproofmesh.proof_control.models.RouteTargetBinding",
+    "schema_sha256": "f28370f7af0115062fc754e8565e4ad790230dcf1fc89db8464a40bf604b2beb"
+  },
+  {
+    "file": "0115.json",
+    "qualified_name": "mathproofmesh.proof_control.models.RouteUpdateTask",
+    "schema_sha256": "d3e81653962c1092fb7c34e1d121c0d83b8b1b4f01ae6a2ae84e073f48847ce2"
+  },
+  {
+    "file": "0116.json",
+    "qualified_name": "mathproofmesh.proof_control.models.ScopeSignature",
+    "schema_sha256": "b6c42fdcae92a11a2493a82b4e6e764adf13fbfca4911c4d2c30dbe22dcb4979"
+  },
+  {
+    "file": "0117.json",
+    "qualified_name": "mathproofmesh.proof_control.models.StrategyBlueprint",
+    "schema_sha256": "aacb260f781049ca2a3104127f285f71399ea1cc50ad307f6e90c60fc52929b7"
+  },
+  {
+    "file": "0118.json",
+    "qualified_name": "mathproofmesh.proof_control.models.StrategyBlueprintCompilation",
+    "schema_sha256": "6a1ed8c8eb80d7f116c4a057490eb063177f1371d5cbafa565845f7be084fe7b"
+  },
+  {
+    "file": "0119.json",
+    "qualified_name": "mathproofmesh.proof_control.models.StrategyCandidateAssessment",
+    "schema_sha256": "a96b60772b4de50d8ca09a4398e100c5283f7ed2168ec3c36879501143c4fd41"
+  },
+  {
+    "file": "0120.json",
+    "qualified_name": "mathproofmesh.proof_control.models.StrategyLineageRecord",
+    "schema_sha256": "11d1a03fa6f4066558423400587aa1bc2020bcd6ca4297b2cb761bafb3f5b6ec"
+  },
+  {
+    "file": "0121.json",
+    "qualified_name": "mathproofmesh.proof_control.models.StructuredVerifierIssue",
+    "schema_sha256": "4182141f593e8f3d9ff1a656680da96191b281d263eadc68f12b2919cb79d5f7"
+  },
+  {
+    "file": "0122.json",
+    "qualified_name": "mathproofmesh.proof_control.models.SynthesisReadinessRecord",
+    "schema_sha256": "5427fc9db59efac8b4689671d6d5be46227effb34022225c8e7043a43fc77333"
+  },
+  {
+    "file": "0123.json",
+    "qualified_name": "mathproofmesh.proof_control.models.TypedFalsificationContract",
+    "schema_sha256": "37c8913b05fcbda7ba7f74847df8d51dafa999541a4f131ccfddb97a2f83803a"
+  },
+  {
+    "file": "0124.json",
+    "qualified_name": "mathproofmesh.proof_control.models.WakeCondition",
+    "schema_sha256": "3beb98f1974a634a71d30a065a27c0957e6853e912445717d5225c5d6e207ead"
+  },
+  {
+    "file": "0125.json",
+    "qualified_name": "mathproofmesh.proof_graph.contradictions.ContradictionRecord",
+    "schema_sha256": "f2f3405912f50c8dfa7d160f2ffa0eb7b8e6b3f7b310c7ddb727e9ec6bc00fcd"
+  },
+  {
+    "file": "0126.json",
+    "qualified_name": "mathproofmesh.schemas.AgentMetric",
+    "schema_sha256": "e85672b2079824deedae158d9ccd7a87a4c0608fa69f8444447ad39892bcb202"
+  },
+  {
+    "file": "0127.json",
+    "qualified_name": "mathproofmesh.schemas.AnalogyMapping",
+    "schema_sha256": "f82bb7493b1580da2bbcab0df44ba36b6e445a7a13802ae1d775f0f8e6cae175"
+  },
+  {
+    "file": "0128.json",
+    "qualified_name": "mathproofmesh.schemas.BidirectionalFrontierState",
+    "schema_sha256": "4206dfaa19c0e5a476989b29ea09595bf11ba1df3b588056163ec23e48591452"
+  },
+  {
+    "file": "0129.json",
+    "qualified_name": "mathproofmesh.schemas.BlindReviewPacket",
+    "schema_sha256": "65ea0732372f8da4b24e3319c2e2124fd051155c1c15d8601523532bd6e63743"
+  },
+  {
+    "file": "0130.json",
+    "qualified_name": "mathproofmesh.schemas.BlindVerificationReport",
+    "schema_sha256": "a0cff01653aa01df65c4972159ad8e786ec8c6820da723dd93011f40b81cd6ef"
+  },
+  {
+    "file": "0131.json",
+    "qualified_name": "mathproofmesh.schemas.BridgeTask",
+    "schema_sha256": "f61b8e4254c776eacbf9bc8e5253fe51aa3681169be45a6e8832dc0734a6a558"
+  },
+  {
+    "file": "0132.json",
+    "qualified_name": "mathproofmesh.schemas.BrokerDecision",
+    "schema_sha256": "019398318fb51c01f86079174391182daab3d80fba1fac2c54edca4b1470a174"
+  },
+  {
+    "file": "0133.json",
+    "qualified_name": "mathproofmesh.schemas.BudgetAction",
+    "schema_sha256": "6957602b43e2364115f5b5216ea3a6f2eb3de2e960b177697da207ad73618f3e"
+  },
+  {
+    "file": "0134.json",
+    "qualified_name": "mathproofmesh.schemas.BudgetDecision",
+    "schema_sha256": "9b8a6b64b955d05f213e57e514abbc77186ba212592f825782dac394529a1929"
+  },
+  {
+    "file": "0135.json",
+    "qualified_name": "mathproofmesh.schemas.CalculationGateRecord",
+    "schema_sha256": "1d91599f234e3d85f7f7d0f05d609df0cecc425954208257f322abc84a984841"
+  },
+  {
+    "file": "0136.json",
+    "qualified_name": "mathproofmesh.schemas.CandidateAssessment",
+    "schema_sha256": "d61ef1c769450328649bd90ac5550c4ae506a94cf5558e78bb6bd76fade6637a"
+  },
+  {
+    "file": "0137.json",
+    "qualified_name": "mathproofmesh.schemas.CandidateConjecture",
+    "schema_sha256": "129cdd029b409e67e47cbce4725a71be656035ae7ba6e05a9c3ffe1598c31618"
+  },
+  {
+    "file": "0138.json",
+    "qualified_name": "mathproofmesh.schemas.CandidateConjectureBatch",
+    "schema_sha256": "e51b193b9fa6e76da4722d791152a3b5455e278fa8cf9a14ab2272a63c406eb7"
+  },
+  {
+    "file": "0139.json",
+    "qualified_name": "mathproofmesh.schemas.CitationRecord",
+    "schema_sha256": "e83fcc4300dd441b7eca9028f1027a9f7eb154d8bf33acd5b0bb49c571d6ca37"
+  },
+  {
+    "file": "0140.json",
+    "qualified_name": "mathproofmesh.schemas.ClaimBatch",
+    "schema_sha256": "139e79698aefa9cd7e81362e1009df914a4e3ac4747185ff4348c60e32f92ba8"
+  },
+  {
+    "file": "0141.json",
+    "qualified_name": "mathproofmesh.schemas.ClaimCard",
+    "schema_sha256": "fc49ebee247f0b940eff5a298815be98b8e12bb801174ffd118f75e6504cb4f7"
+  },
+  {
+    "file": "0142.json",
+    "qualified_name": "mathproofmesh.schemas.ComposedInspiration",
+    "schema_sha256": "11cb2e0ee4735fbe76bd367acaeb1b774b4551c832fd0027067be7df08594fbc"
+  },
+  {
+    "file": "0143.json",
+    "qualified_name": "mathproofmesh.schemas.ComputationCertificate",
+    "schema_sha256": "ed2dad3c92feb678ade9aeac3b4e96de9fd7baaab32f0fb11c58153c19ef7d75"
+  },
+  {
+    "file": "0144.json",
+    "qualified_name": "mathproofmesh.schemas.ComputationContractRepair",
+    "schema_sha256": "017ff4695c664f82476db5bcceba4aa493ad60d41512214f30a9f741dbd07869"
+  },
+  {
+    "file": "0145.json",
+    "qualified_name": "mathproofmesh.schemas.ComputationDecision",
+    "schema_sha256": "dc663493381f4a2ae74951dc5a45e7399df72c35fbe1b872cf6c789efa816093"
+  },
+  {
+    "file": "0146.json",
+    "qualified_name": "mathproofmesh.schemas.ComputationHint",
+    "schema_sha256": "987f3476ab94fdfd214b54102daba0af7f0addf0a9312ececa11311461449e72"
+  },
+  {
+    "file": "0147.json",
+    "qualified_name": "mathproofmesh.schemas.ComputationPlan",
+    "schema_sha256": "7580e39fdeb10763c8c78d4561cb34bb3ad49a5913f7045fe5bc009a72a31995"
+  },
+  {
+    "file": "0148.json",
+    "qualified_name": "mathproofmesh.schemas.ConstructionProposal",
+    "schema_sha256": "95c735a341f164a503699c18e9f81afa28af6e1236ffe5f793dd11b9d9a7957c"
+  },
+  {
+    "file": "0149.json",
+    "qualified_name": "mathproofmesh.schemas.ContextPack",
+    "schema_sha256": "37d521298318bde0189a89e517bdf3f45935b5cef84340db2ca33a6740e45558"
+  },
+  {
+    "file": "0150.json",
+    "qualified_name": "mathproofmesh.schemas.ContinuationTurn",
+    "schema_sha256": "023f83f79969830d924a70fa12c41095cf829a5047195e7b309f94be1e4be47a"
+  },
+  {
+    "file": "0151.json",
+    "qualified_name": "mathproofmesh.schemas.CriticalClaim",
+    "schema_sha256": "25ae36ce3e65b04842a4272184c6132181c3d9bd9975abd5dc8c20690ad6da1b"
+  },
+  {
+    "file": "0152.json",
+    "qualified_name": "mathproofmesh.schemas.DeferredExperimentRequest",
+    "schema_sha256": "412a02d396c4a6c1d12b2e10c6b82abb4ea2bfb6d47f52fdaccf0686be10bd96"
+  },
+  {
+    "file": "0153.json",
+    "qualified_name": "mathproofmesh.schemas.DeliverableAssessment",
+    "schema_sha256": "8e5ff0bc43b58ed34e001b4121567c0f6a5ca96a2ac5eebdc0800b24d02a28ba"
+  },
+  {
+    "file": "0154.json",
+    "qualified_name": "mathproofmesh.schemas.DomainOperatorSpec",
+    "schema_sha256": "623430113594495d46acca0349c37d8387c7cc84f1b5d10c7deb654add27b5e6"
+  },
+  {
+    "file": "0155.json",
+    "qualified_name": "mathproofmesh.schemas.EvidenceRef",
+    "schema_sha256": "0228fa5b22828f05c9639e8d01cd259c12156969d255ee884a4e656b0c516a3f"
+  },
+  {
+    "file": "0156.json",
+    "qualified_name": "mathproofmesh.schemas.ExperimentProgram",
+    "schema_sha256": "2611b31c3ad9cafb6ba9d321a0d4d3055171b96aabc9e943a55eb649f127dc2a"
+  },
+  {
+    "file": "0157.json",
+    "qualified_name": "mathproofmesh.schemas.ExperimentResult",
+    "schema_sha256": "2666bffc04a6acfa1b3231bd27e6682cb1f9a3b626434bacb257fe834070379f"
+  },
+  {
+    "file": "0158.json",
+    "qualified_name": "mathproofmesh.schemas.ExperimentSpec",
+    "schema_sha256": "041bf928e5ac143664832ee2996054cdc877b3d480cb697f7b76e27db8928021"
+  },
+  {
+    "file": "0159.json",
+    "qualified_name": "mathproofmesh.schemas.FinalProof",
+    "schema_sha256": "428d9b2e59c998ff9f9ccae9f90d9cfbbfc031e6c2a01b7485be00a61c486857"
+  },
+  {
+    "file": "0160.json",
+    "qualified_name": "mathproofmesh.schemas.FormalCertificateRef",
+    "schema_sha256": "6fc5c8559d6028390f3e287d3153687fc151601d8a832ac5636d041e7815ea60"
+  },
+  {
+    "file": "0161.json",
+    "qualified_name": "mathproofmesh.schemas.FormalStatementPacket",
+    "schema_sha256": "d26866d0a5da01fff37cbf7d06ff87082ea6e632a5bbeb4761c5d0660199abd2"
+  },
+  {
+    "file": "0162.json",
+    "qualified_name": "mathproofmesh.schemas.FormalizationCoverageReport",
+    "schema_sha256": "f51aa4e1028bf675bd78c192b72d4aa23caad7e6190152bc1717d22250b3228f"
+  },
+  {
+    "file": "0163.json",
+    "qualified_name": "mathproofmesh.schemas.FrontierBridge",
+    "schema_sha256": "e361c2ab19337a6ef71ea4388bfbf25c2c975b0253285dcd617b5aaa1b526943"
+  },
+  {
+    "file": "0164.json",
+    "qualified_name": "mathproofmesh.schemas.FrontierClaim",
+    "schema_sha256": "2f2a5e7aeed7be983a850836ad8e4695d80701ed9cb7e95f21d532da7ba2b84a"
+  },
+  {
+    "file": "0165.json",
+    "qualified_name": "mathproofmesh.schemas.GoalClarificationDecision",
+    "schema_sha256": "b3518387c27364d120ca362a3068bc99e2d0991f332c6373c19c9ad95bf961a9"
+  },
+  {
+    "file": "0166.json",
+    "qualified_name": "mathproofmesh.schemas.GoalClarificationRequest",
+    "schema_sha256": "de5f65c6b7cf5d56c4f92900ab451a998a7858a12dc41d74c58070240890185c"
+  },
+  {
+    "file": "0167.json",
+    "qualified_name": "mathproofmesh.schemas.GoalInterpretationCandidate",
+    "schema_sha256": "d1bc99a17a8ddad104f6bf10e0c90868984a3181442723144f8f06aca36a5d1b"
+  },
+  {
+    "file": "0168.json",
+    "qualified_name": "mathproofmesh.schemas.GoalNormalizationAssessment",
+    "schema_sha256": "cc76d08913f94154446a3613fed003d1c32a3d18616a095548ba6775c6f2bbf0"
+  },
+  {
+    "file": "0169.json",
+    "qualified_name": "mathproofmesh.schemas.InitialExplorationTurn",
+    "schema_sha256": "a97e8c12eca864c4b068243b25ba2e938fb269d18012c57eede2f1d269ebd00b"
+  },
+  {
+    "file": "0170.json",
+    "qualified_name": "mathproofmesh.schemas.InspirationAssignmentPlan",
+    "schema_sha256": "6286b3a9cb19088f1042d81b17efffdd4efba096f4486672a11ba0c0db4bded8"
+  },
+  {
+    "file": "0171.json",
+    "qualified_name": "mathproofmesh.schemas.InspirationCallReservation",
+    "schema_sha256": "0cba42b55c2e7cedc566c318522efff620171c197a6440f2ac9e6cebca80f790"
+  },
+  {
+    "file": "0172.json",
+    "qualified_name": "mathproofmesh.schemas.InspirationCandidateDecision",
+    "schema_sha256": "b9a3db6cea0752f1e6d75142d1dcfd9c6e41754a0749012a87b259ce915e691a"
+  },
+  {
+    "file": "0173.json",
+    "qualified_name": "mathproofmesh.schemas.InspirationCreditTarget",
+    "schema_sha256": "ff6b69cbc75ae14d82896677e209f9735fe4801fa0b49056c43689637a71bb9a"
+  },
+  {
+    "file": "0174.json",
+    "qualified_name": "mathproofmesh.schemas.InspirationMaterialization",
+    "schema_sha256": "0d406fb68751f192c14984b0259f5aaa3a6e21b82855ecfb576654ea24172a2c"
+  },
+  {
+    "file": "0175.json",
+    "qualified_name": "mathproofmesh.schemas.InspirationOutcome",
+    "schema_sha256": "cb54db84698177e5a71b886d259cfaad170651c3e53991e382740abf355ff337"
+  },
+  {
+    "file": "0176.json",
+    "qualified_name": "mathproofmesh.schemas.InspirationProposal",
+    "schema_sha256": "fc08e1ebfde2fbf8e8052c6fb20ed5c1bbb5f5878bef45145a04ebd35e91f911"
+  },
+  {
+    "file": "0177.json",
+    "qualified_name": "mathproofmesh.schemas.InspirationProposalAssignment",
+    "schema_sha256": "3e9ed4f268972a626440274e5d63202c51276b83483a20aa5f08766c8b971d91"
+  },
+  {
+    "file": "0178.json",
+    "qualified_name": "mathproofmesh.schemas.InspirationReview",
+    "schema_sha256": "04d9d15f9da664787f34a8668c38f702e0a7b6c5f10a87f6d45c0d9949cf7318"
+  },
+  {
+    "file": "0179.json",
+    "qualified_name": "mathproofmesh.schemas.InspirationTask",
+    "schema_sha256": "da2506e033dbc9d830ed01004c98ce7631317ad46aec218f56b5c98f49b10700"
+  },
+  {
+    "file": "0180.json",
+    "qualified_name": "mathproofmesh.schemas.InspirationTrigger",
+    "schema_sha256": "cd3ab21432c44e407d3939856b7a1cfed68624d2a04dd669cd7ff90ce8e0f6cd"
+  },
+  {
+    "file": "0181.json",
+    "qualified_name": "mathproofmesh.schemas.InvariantHypothesis",
+    "schema_sha256": "583ea3c12e5701289621956b8f2ae84561b65fc85130025be9b90eebfedd3890"
+  },
+  {
+    "file": "0182.json",
+    "qualified_name": "mathproofmesh.schemas.LocalGoalPrecheck",
+    "schema_sha256": "12c937f3f483f6f8ec2029079ecb5fbcd857885e20d2f9516c6e1ba6fa0304f0"
+  },
+  {
+    "file": "0183.json",
+    "qualified_name": "mathproofmesh.schemas.MechanismChainSignature",
+    "schema_sha256": "8a2b84cedbfedff7a6e1d1e3cd9c2ea3b8e2e9c9eecf5147555a533dcd5aebc8"
+  },
+  {
+    "file": "0184.json",
+    "qualified_name": "mathproofmesh.schemas.MessageEnvelope",
+    "schema_sha256": "6e917fed47a025e5392574bbf802bba7f43ee1bf87ba4a8ef6822b563fb6d1bb"
+  },
+  {
+    "file": "0185.json",
+    "qualified_name": "mathproofmesh.schemas.MessageReceipt",
+    "schema_sha256": "951a2c917fcdbcdb09bd152cc612f09d4d4eda2f7103c42854ea2edeca5e6998"
+  },
+  {
+    "file": "0186.json",
+    "qualified_name": "mathproofmesh.schemas.MetaDirective",
+    "schema_sha256": "1303812065a761feaf6a52c75ed4c5268f22ae6d8667adb776006cc6a82c7028"
+  },
+  {
+    "file": "0187.json",
+    "qualified_name": "mathproofmesh.schemas.MetaDirectiveAudit",
+    "schema_sha256": "540423c1bb44b399fa59011b923bb7317bf058eab8e67ed7ff25147a5d17eb19"
+  },
+  {
+    "file": "0188.json",
+    "qualified_name": "mathproofmesh.schemas.MetaDirectiveExecution",
+    "schema_sha256": "f70c41bef31a13ffee0596f2aefea1208beaca0a9e95463afd7ff01ec81514f9"
+  },
+  {
+    "file": "0189.json",
+    "qualified_name": "mathproofmesh.schemas.MetaReview",
+    "schema_sha256": "876ea169424ca4a1953b1499d7f047cd082eddbd7fcf2c3bde54da8815a2f9c7"
+  },
+  {
+    "file": "0190.json",
+    "qualified_name": "mathproofmesh.schemas.MetaStrategyDecision",
+    "schema_sha256": "ab051c94821298f9cea1600f68e3f803fde864d12d4829ab761c95068f4c6fba"
+  },
+  {
+    "file": "0191.json",
+    "qualified_name": "mathproofmesh.schemas.NegativeAnalogyRecord",
+    "schema_sha256": "c40bab2714de8fc75cd93a3e08a9a34d6136018a626d727369f4ab5f5eef8100"
+  },
+  {
+    "file": "0192.json",
+    "qualified_name": "mathproofmesh.schemas.NoveltySignature",
+    "schema_sha256": "391a3f9f9439e26f7e96f4f9eb65789abe5913d9da170d94c2d451cbca3b9687"
+  },
+  {
+    "file": "0193.json",
+    "qualified_name": "mathproofmesh.schemas.PathStats",
+    "schema_sha256": "ffc4e8ae80c83f74c1d23e2a568c16d45f87227698a21ecd098f92c092e9fcf7"
+  },
+  {
+    "file": "0194.json",
+    "qualified_name": "mathproofmesh.schemas.PostFailureBottleneckDiagnostic",
+    "schema_sha256": "23bef9bd835e3159b6475827e50d8da2143ba324c4e987f44b3d9caba63b964b"
+  },
+  {
+    "file": "0195.json",
+    "qualified_name": "mathproofmesh.schemas.ProblemContract",
+    "schema_sha256": "50291f0abb93bb369e6cda03bcae56cafac4f98602c894ae8599d519e55cc12e"
+  },
+  {
+    "file": "0196.json",
+    "qualified_name": "mathproofmesh.schemas.ProblemSemanticView",
+    "schema_sha256": "87bedefcf83da13d6586943ff7704336ff1fd5d95121e52b7154b67c58e441e8"
+  },
+  {
+    "file": "0197.json",
+    "qualified_name": "mathproofmesh.schemas.ProblemSemanticViewCandidate",
+    "schema_sha256": "d0e72862ebbfc9f96bda1f1b5660f38cbd69c82dd1a277c4dfb9a99ad27cd5ce"
+  },
+  {
+    "file": "0198.json",
+    "qualified_name": "mathproofmesh.schemas.ProofAttempt",
+    "schema_sha256": "fe303aa5582620e25d4b7462f2f7a550055ff5ae3acf2026e9e866afdfc2d7b7"
+  },
+  {
+    "file": "0199.json",
+    "qualified_name": "mathproofmesh.schemas.ProofCheckpoint",
+    "schema_sha256": "dd843a0cd5b8e4eb9849c8a191533dab0331e902f71ea224e838c609db26c435"
+  },
+  {
+    "file": "0200.json",
+    "qualified_name": "mathproofmesh.schemas.ProofDelta",
+    "schema_sha256": "10fc6aa9a1e30038188c56c5dcb97ae3ccae6fcc44f8c9df7f4a37ac5cc32fc5"
+  },
+  {
+    "file": "0201.json",
+    "qualified_name": "mathproofmesh.schemas.ProofGraphEdge",
+    "schema_sha256": "f4570fea6aec50088fecee12dfaa0e0d9901da7dac2694dca10514c134bd3e56"
+  },
+  {
+    "file": "0202.json",
+    "qualified_name": "mathproofmesh.schemas.ProofObligation",
+    "schema_sha256": "a1af0c435c59c540f2e46109be7659ff075a5573b79cb0df3bb0350c7f26574b"
+  },
+  {
+    "file": "0203.json",
+    "qualified_name": "mathproofmesh.schemas.ProofStep",
+    "schema_sha256": "68e51ba55f7597de7d9a691d0f23ddd0d000b74d82e55156fc40c2acf0d35218"
+  },
+  {
+    "file": "0204.json",
+    "qualified_name": "mathproofmesh.schemas.PropositionNormalizationBatch",
+    "schema_sha256": "0ae8e9265599c4aa46792516db4bcfac916c499af6178401770b302176335544"
+  },
+  {
+    "file": "0205.json",
+    "qualified_name": "mathproofmesh.schemas.PropositionNormalizationItem",
+    "schema_sha256": "4d763a0688d97f070694724a42083463edbc881addb4195c67477e91525bb68b"
+  },
+  {
+    "file": "0206.json",
+    "qualified_name": "mathproofmesh.schemas.QuantifierSpec",
+    "schema_sha256": "7db2746200a2ff09944128bb2590bfba120cb644b8964a6471c2ac9fe3fe05ff"
+  },
+  {
+    "file": "0207.json",
+    "qualified_name": "mathproofmesh.schemas.RepresentationCandidate",
+    "schema_sha256": "45e12e7c4dc3d3bd3f9205fc4c54e0f2bad05db4c9825e63bd3e3cf6649bc769"
+  },
+  {
+    "file": "0208.json",
+    "qualified_name": "mathproofmesh.schemas.ResearchProgressReport",
+    "schema_sha256": "5260383ddeb3b6428f54e295b1432ce5977686ce1229beffc08fed2d8610e9c4"
+  },
+  {
+    "file": "0209.json",
+    "qualified_name": "mathproofmesh.schemas.ReverseGoalPlan",
+    "schema_sha256": "f81b351acc7ce391998b446560812348b4782d4a2bbbe933954ab035ab86b455"
+  },
+  {
+    "file": "0210.json",
+    "qualified_name": "mathproofmesh.schemas.RouteDescriptor",
+    "schema_sha256": "889ad1c8b486fa0e240d5353520b9ae2554ae7cbe9168ef2c8068cbb4ad2bc85"
+  },
+  {
+    "file": "0211.json",
+    "qualified_name": "mathproofmesh.schemas.RouteMember",
+    "schema_sha256": "be7958fc35a706bf090ad63adb82f2566d8bbee686f92a6d819bb94d5ca32d2c"
+  },
+  {
+    "file": "0212.json",
+    "qualified_name": "mathproofmesh.schemas.RunResult",
+    "schema_sha256": "39e1cfc67e4bdf34aa442c0b855bb98013fd8c746f5e65e720a6ffe73a278f70"
+  },
+  {
+    "file": "0213.json",
+    "qualified_name": "mathproofmesh.schemas.SemanticInvariantAudit",
+    "schema_sha256": "98a6c9330b0d6c57b12b62ba6cc3c442952557234f5ab4f27dbb01e00ea6914a"
+  },
+  {
+    "file": "0214.json",
+    "qualified_name": "mathproofmesh.schemas.StrategyCard",
+    "schema_sha256": "81d2f99135f47f29f20d2dcbdf80e2bdee1782abe2a455ee17df21e80baec06c"
+  },
+  {
+    "file": "0215.json",
+    "qualified_name": "mathproofmesh.schemas.StrategySet",
+    "schema_sha256": "0f4aa12c105be447accb1c9a6b68360d6bbeac0b83d18a2bc4eea7b3edcb325b"
+  },
+  {
+    "file": "0216.json",
+    "qualified_name": "mathproofmesh.schemas.StrictModel",
+    "schema_sha256": "f38bf9eef4d1834748d20a9ec77b2bdd9934c9cb6e18b426727651a43bfed6a0"
+  },
+  {
+    "file": "0217.json",
+    "qualified_name": "mathproofmesh.schemas.SurpriseBudgetState",
+    "schema_sha256": "dcb85fc8d66c2421677ba40f62a780c180885070bacb07bd5604fc58ef0555d5"
+  },
+  {
+    "file": "0218.json",
+    "qualified_name": "mathproofmesh.schemas.SurpriseMutationDirective",
+    "schema_sha256": "39b9411be6591009b1390d02c121896ec1e6985d19233b35f50dcadc6a3c6af7"
+  },
+  {
+    "file": "0219.json",
+    "qualified_name": "mathproofmesh.schemas.ToolAuditReport",
+    "schema_sha256": "8a2590b6bd7fcf102e0af640b363d9d89917b3d39ed995160294f3cb978804ec"
+  },
+  {
+    "file": "0220.json",
+    "qualified_name": "mathproofmesh.schemas.ToolRequest",
+    "schema_sha256": "d5d8b65d3fbddce082f26656dd9de93fc2c877d8a4bf987efc2fb25f0ea13933"
+  },
+  {
+    "file": "0221.json",
+    "qualified_name": "mathproofmesh.schemas.ToolResult",
+    "schema_sha256": "13256e7f7b64f86da2edb4062466caccacb6309f89aa6543ebd2b90bc0c392be"
+  },
+  {
+    "file": "0222.json",
+    "qualified_name": "mathproofmesh.schemas.TriageResult",
+    "schema_sha256": "816d5466333e24f5687b083243ba825811b9324f653a5b563917b6ac08f8fe25"
+  },
+  {
+    "file": "0223.json",
+    "qualified_name": "mathproofmesh.schemas.UsageRecord",
+    "schema_sha256": "ed68a6ea03a581a64206177a1cc8e35722bfea98565c45f31674c946d621086b"
+  },
+  {
+    "file": "0224.json",
+    "qualified_name": "mathproofmesh.schemas.VariableBinding",
+    "schema_sha256": "63e080e5eb86ea079420bdd5a30571bf0f58653b97495b1d2b406df9a0cc4e9f"
+  },
+  {
+    "file": "0225.json",
+    "qualified_name": "mathproofmesh.schemas.VerificationIssue",
+    "schema_sha256": "b1971a16f55f23e02c465426d204df342d32df953de5e18b32b868697ae72093"
+  },
+  {
+    "file": "0226.json",
+    "qualified_name": "mathproofmesh.schemas.VerificationReport",
+    "schema_sha256": "f3bffeac0040a8714fb6b7c50fb786383fd0bc21a1e91e4b69eb1f9d102f01a4"
+  },
+  {
+    "file": "0227.json",
+    "qualified_name": "mathproofmesh.schemas.VerifiedExperienceRecord",
+    "schema_sha256": "c7aff110b8c993b2a9b16e602462e0f0c0fec7a3d84704fecd66e4f6b3692742"
+  },
+  {
+    "file": "0228.json",
+    "qualified_name": "mathproofmesh.schemas.WorkingProofCheckpoint",
+    "schema_sha256": "87d07277bd59ff24733df763726acd303b2185751043c52912f93977d96ef611"
+  },
+  {
+    "file": "0229.json",
+    "qualified_name": "mathproofmesh.server.ResumeRequest",
+    "schema_sha256": "8064f026cd57d5b9408a4c2983e0d20da487a0087776ecb0c1ace5f6068a2dab"
+  },
+  {
+    "file": "0230.json",
+    "qualified_name": "mathproofmesh.server.SolveRequest",
+    "schema_sha256": "d8947afd3197b8172098d04197a38beb4e665a55a4ab9b2abbec9eef79862564"
+  },
+  {
+    "file": "0231.json",
+    "qualified_name": "mathproofmesh.verification.capability_profile.CapabilityCell",
+    "schema_sha256": "05af166325311065d164166c15f2ff75667bebfd57b3df19435b97dc8d703ac8"
+  },
+  {
+    "file": "0232.json",
+    "qualified_name": "mathproofmesh.verification.escalation.EscalationPlan",
+    "schema_sha256": "e3cb284544f51da558f4e67722fb840948c3a1487122d3c5c8c971d03052e890"
+  },
+  {
+    "file": "0233.json",
+    "qualified_name": "mathproofmesh.verification.escalation.ValidationExecution",
+    "schema_sha256": "c3667d6e574fbbb8705b4186e1965911fd6a562d47f96aa564e9384bf405bab5"
+  },
+  {
+    "file": "0234.json",
+    "qualified_name": "mathproofmesh.verification.escalation.ValidationStepResult",
+    "schema_sha256": "3c820fce33826ab50b21c29d08fb37ad31e96d0c93f3d2c40a6a88389642c044"
+  },
+  {
+    "file": "0235.json",
+    "qualified_name": "mathproofmesh.verification.mutation.MutationResult",
+    "schema_sha256": "2f7ce54faafce6be3c77ccf93212fe01b2d21ca4550c66a5c9f1235c7091f8ae"
+  },
+  {
+    "file": "0236.json",
+    "qualified_name": "mathproofmesh.verification.mutation.ProofMutation",
+    "schema_sha256": "72f16e1cce791035dae1e5b9e5807458f579e82a2d24a4f5a1bfa7f670a31097"
+  }
+]

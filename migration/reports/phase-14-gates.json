@@ -1,0 +1,148 @@
+{
+  "schema_version": "1.0",
+  "phase": "14",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-31T04:22:48.247Z",
+  "scope": "REST API, resumable SSE, CLI, reports, and observability",
+  "source": {
+    "authoritative_zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+    "source_files": 401,
+    "source_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "immutability": "PASS"
+  },
+  "http_api": {
+    "loopback_default": true,
+    "cors_enabled": false,
+    "bearer_auth_except_health": "PASS",
+    "provider_override_fields_accepted": false,
+    "unknown_fields_rejected": true,
+    "body_and_field_bounds": "PASS",
+    "concurrency_limit_429": "PASS",
+    "endpoints": [
+      "GET /health",
+      "POST /solve",
+      "POST /solve/stream",
+      "POST /resume",
+      "GET /runs/{runId}",
+      "GET /runs/{runId}/activity",
+      "GET /runs/{runId}/routes",
+      "GET /runs/{runId}/proof-graph",
+      "GET /runs/{runId}/artifacts/{sha256}"
+    ],
+    "run_queries_read_only": true,
+    "artifact_hash_and_size_checks": "PASS"
+  },
+  "streaming": {
+    "format": "SSE",
+    "monotonic_event_ids": "PASS",
+    "last_event_id_resume": "PASS",
+    "heartbeat_content_free": "PASS",
+    "terminal_event_exactly_once": "PASS",
+    "event_types": [
+      "activity",
+      "heartbeat",
+      "result",
+      "error"
+    ],
+    "secret_and_private_reasoning_redaction": "PASS",
+    "reasoning_trace_append_only": "PASS"
+  },
+  "cli_and_reporting": {
+    "framework": "picocli 4.7.7",
+    "commands": [
+      "solve",
+      "resume",
+      "demo",
+      "probe",
+      "serve"
+    ],
+    "mock_demo": "PASS",
+    "structured_status_parity": "PASS",
+    "hierarchical_and_run_reports": "PASS",
+    "unverified_progress_labels": "PASS"
+  },
+  "observability": {
+    "metrics": "bounded counters, timers, active-request gauge, and outcome tags PASS",
+    "trace_id_propagation": "PASS",
+    "structured_logs": "PASS",
+    "prompt_proof_secret_logging": false,
+    "management_loopback_only": true,
+    "exposed_management_endpoints": [
+      "health",
+      "metrics"
+    ],
+    "documentation": "docs/observability.md"
+  },
+  "tests": {
+    "mapped_python_test_files": 4,
+    "mapped_python_functions": 12,
+    "authority_named_junit_cases": 12,
+    "api_gate_cases": 7,
+    "reactor_total": 1401,
+    "report_files": 175,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "online_clean_verify": "PASS",
+    "offline_clean_verify": "PASS",
+    "online_log": "migration/reports/phase-14-verify-online.log",
+    "online_log_sha256": "5fe542264b4c9e239e6be0734bce15d52936b83e213e2979a05e3f9c4e4d7fdc",
+    "offline_log": "migration/reports/phase-14-verify-offline.log",
+    "offline_log_sha256": "8a41dc35d35bd9d931108ca460eda12715cf18ff9f8c348cf10db4ef45d236ab"
+  },
+  "quality_and_dependency_security": {
+    "java": "Eclipse Temurin 25.0.4+7",
+    "maven": "3.9.16",
+    "maven_wrapper": "3.3.4 only-script",
+    "dependencies_added": [
+      "org.springframework.boot:spring-boot-starter-web:4.1.0",
+      "org.springframework.boot:spring-boot-starter-actuator:4.1.0"
+    ],
+    "dependency_version_changes": [
+      "org.apache.tomcat.embed:* 11.0.22 -> 11.0.24"
+    ],
+    "dependency_convergence": "PASS",
+    "external_snapshots": 0,
+    "duplicate_classes": 0,
+    "spotbugs_findsecbugs_findings": 0,
+    "modulith_structure": "PASS",
+    "dependency_tree": "migration/reports/phase-14-dependency-tree.txt",
+    "dependency_tree_sha256": "8f43553323c76189dd9169801131fd6ea152738fa85a5a521bc871e2cc56dc7a",
+    "sbom": {
+      "format": "CycloneDX",
+      "spec_version": "1.6",
+      "components": 111,
+      "dependency_entries": 112,
+      "path": "migration/reports/phase-01-sbom.json",
+      "sha256": "ceffa2ef4762376dec03430fb7fe4ff62ba96016c5e95d9647e37f308dbbadcd"
+    },
+    "owasp": {
+      "engine": "12.2.2",
+      "dependencies": 115,
+      "fail_build_on_cvss": 7.0,
+      "findings_at_or_above_gate": 0,
+      "below_gate_findings": [
+        {
+          "cve": "CVE-2021-4277",
+          "artifact": "com.cronutils:cron-utils:9.2.1",
+          "severity": "MEDIUM",
+          "cvss": 5.3
+        }
+      ],
+      "report_json_sha256": "f9c64fb402b777cc5432d55429bf21e0a80af967367d932867c2d7cefac77277",
+      "report_html_sha256": "b30b13bc7f1548d571bbe1dd0323923b4eef29f0e0668177a402e06ca3ddc4ba"
+    }
+  },
+  "mappings": {
+    "source_rows": "6/6 migrated",
+    "test_rows": "4/4 ported; 12 Python test functions",
+    "auxiliary_rows": "2/2 translated_verified",
+    "activity_timeline_sha256": "63a2bf89890ba603892569aa512b7f6c8f1c520c13163025dab95712600c66ed",
+    "problem_example_sha256": "38d046bd471ba40078196ffa8a091afa9759e814d2ead93420a685de724328b4",
+    "state_rows": "142 + 167 + 92 = 401 unique paths"
+  },
+  "stop_condition": {
+    "phase_15_started_before_phase_14_pass": false
+  }
+}

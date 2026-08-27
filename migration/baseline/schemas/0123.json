@@ -1,0 +1,108 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.TypedFalsificationContract",
+  "schema": {
+    "$defs": {
+      "FalsificationCompilationStatus": {
+        "enum": [
+          "executable",
+          "needs_rewrite",
+          "non_automatable"
+        ],
+        "title": "FalsificationCompilationStatus",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "compile_reason": {
+        "title": "Compile Reason",
+        "type": "string"
+      },
+      "contract_id": {
+        "title": "Contract Id",
+        "type": "string"
+      },
+      "counterexample_predicate": {
+        "additionalProperties": true,
+        "title": "Counterexample Predicate",
+        "type": "object"
+      },
+      "exact_relation": {
+        "additionalProperties": true,
+        "title": "Exact Relation",
+        "type": "object"
+      },
+      "expected_if_found": {
+        "title": "Expected If Found",
+        "type": "string"
+      },
+      "expected_if_not_found": {
+        "title": "Expected If Not Found",
+        "type": "string"
+      },
+      "finite_domains": {
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "title": "Finite Domains",
+        "type": "object"
+      },
+      "max_cases": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Max Cases",
+        "type": "integer"
+      },
+      "parameters": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Parameters",
+        "type": "array"
+      },
+      "registered_handler": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Registered Handler"
+      },
+      "status": {
+        "$ref": "#/$defs/FalsificationCompilationStatus"
+      },
+      "target_subject_id": {
+        "title": "Target Subject Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "contract_id",
+      "target_subject_id",
+      "expected_if_found",
+      "expected_if_not_found",
+      "status",
+      "compile_reason"
+    ],
+    "title": "TypedFalsificationContract",
+    "type": "object"
+  }
+}

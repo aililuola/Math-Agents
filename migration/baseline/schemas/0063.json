@@ -1,0 +1,157 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.AssumptionFamily",
+  "schema": {
+    "$defs": {
+      "AssumptionChallengeOutcome": {
+        "enum": [
+          "verified",
+          "refuted",
+          "avoided",
+          "inconclusive",
+          "blocked"
+        ],
+        "title": "AssumptionChallengeOutcome",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "canonical_statement": {
+        "title": "Canonical Statement",
+        "type": "string"
+      },
+      "challenger_task_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Challenger Task Id"
+      },
+      "common_mode_risk": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Common Mode Risk",
+        "type": "number"
+      },
+      "dependency_atom_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Dependency Atom Ids",
+        "type": "array"
+      },
+      "family_id": {
+        "title": "Family Id",
+        "type": "string"
+      },
+      "is_dependency_cutset": {
+        "default": false,
+        "title": "Is Dependency Cutset",
+        "type": "boolean"
+      },
+      "load_bearing_score": {
+        "default": 0.5,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Load Bearing Score",
+        "type": "number"
+      },
+      "member_assumption_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Member Assumption Ids",
+        "type": "array"
+      },
+      "normalization_confidence": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Normalization Confidence",
+        "type": "number"
+      },
+      "proof_graph_neighborhood": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Proof Graph Neighborhood",
+        "type": "array"
+      },
+      "resolution_outcome": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AssumptionChallengeOutcome"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "resolution_result_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Resolution Result Id"
+      },
+      "route_dependency_closures": {
+        "additionalProperties": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": "Route Dependency Closures",
+        "type": "object"
+      },
+      "route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Route Ids",
+        "type": "array"
+      },
+      "scope_signature_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Scope Signature Ids",
+        "type": "array"
+      },
+      "semantic_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Semantic Tags",
+        "type": "array"
+      },
+      "typed_dependency_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Typed Dependency Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "canonical_statement",
+      "member_assumption_ids",
+      "route_ids",
+      "semantic_tags",
+      "common_mode_risk",
+      "normalization_confidence"
+    ],
+    "title": "AssumptionFamily",
+    "type": "object"
+  }
+}

@@ -1,0 +1,43 @@
+benchmark_id: olympiad-5key-v1
+baseline_commit: ea94a34041fd32a4f94ecb1a3532ddc314430a47
+branch: validation/014-five-key-math-olympiad-benchmark
+real_provider: explicit-opt-in
+provider_key_labels: [KEY_A, KEY_B, KEY_C, KEY_D, KEY_E]
+provider_key_env:
+  KEY_A: DEEPSEEK_API_KEY_A
+  KEY_B: DEEPSEEK_API_KEY_B
+  KEY_C: DEEPSEEK_API_KEY_C
+  KEY_D: DEEPSEEK_API_KEY_D
+  KEY_E: DEEPSEEK_API_KEY_E
+network_policy: DEEPSEEK_ONLY
+solution_retrieval: false
+cross_problem_memory: false
+enabled_keys: 5
+per_key_max_concurrency: 1
+research_slots: 4
+coordination_slots: 1
+max_in_flight_provider_calls: 5
+allow_coordination_borrowing: false
+budget_revision: initial-route-envelope-v4
+estimated_input_tokens_per_call: 16000
+budget_tiers:
+  SMOKE: {max_calls: 48, max_rounds: 6, max_total_tokens: 2304000, max_output_tokens_per_call: 32000}
+  CORE: {max_calls: 48, max_rounds: 8, max_total_tokens: 2304000, max_output_tokens_per_call: 32000}
+  ADVANCED: {max_calls: 64, max_rounds: 12, max_total_tokens: 3072000, max_output_tokens_per_call: 32000}
+  STRESS: {max_calls: 96, max_rounds: 16, max_total_tokens: 4608000, max_output_tokens_per_call: 32000}
+schedule_maximum_calls: 2304
+schedule_maximum_tokens: 110592000
+schedule_worst_case_cost_usd: 96.21504
+suites:
+  standard: [P01, P02, P03, P04, P05, P06, P07, P08, P09, P10, P11, P12, P13, P14, P15, P16, P17, P18, P19, P20]
+  replication: [P09, P12, P13, P15, P16]
+  controlled_recovery: [P11, P17, P19, P20]
+hard_gates:
+  secret_leaks: 0
+  cross_problem_state_leaks: 0
+  root_goal_drifts: 0
+  authority_violations: 0
+  duplicate_provider_calls: 0
+  duplicate_budget_settlements: 0
+  post_restore_state_drifts: 0
+  bundle_checksum_failures: 0

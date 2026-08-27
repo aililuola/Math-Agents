@@ -1,0 +1,225 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.ClaimVerificationLedgerEntry",
+  "schema": {
+    "$defs": {
+      "ClaimVerificationState": {
+        "enum": [
+          "proposed",
+          "locally_verified",
+          "independently_verified",
+          "referee_accepted",
+          "fact_candidate",
+          "fact",
+          "invalidated",
+          "rejected"
+        ],
+        "title": "ClaimVerificationState",
+        "type": "string"
+      },
+      "DependencyKind": {
+        "enum": [
+          "local_step",
+          "local_claim",
+          "global_fact",
+          "message",
+          "obligation",
+          "tool_certificate",
+          "formal_certificate",
+          "external_result"
+        ],
+        "title": "DependencyKind",
+        "type": "string"
+      },
+      "DependencyRef": {
+        "additionalProperties": false,
+        "properties": {
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "kind": {
+            "$ref": "#/$defs/DependencyKind"
+          },
+          "kind_migration": {
+            "anyOf": [
+              {
+                "enum": [
+                  "legacy_external_to_local_step",
+                  "legacy_external_to_local_claim",
+                  "legacy_external_to_external_result"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Kind Migration"
+          },
+          "source_attempt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Attempt Id"
+          },
+          "source_delta_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Delta Id"
+          },
+          "source_route_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Route Id"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "target_id"
+        ],
+        "title": "DependencyRef",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "claim_id": {
+        "title": "Claim Id",
+        "type": "string"
+      },
+      "dependency_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Dependency Ids",
+        "type": "array"
+      },
+      "dependency_refs": {
+        "items": {
+          "$ref": "#/$defs/DependencyRef"
+        },
+        "title": "Dependency Refs",
+        "type": "array"
+      },
+      "independent_report_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Independent Report Ids",
+        "type": "array"
+      },
+      "invalidating_evidence_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Invalidating Evidence Ids",
+        "type": "array"
+      },
+      "invalidation_reason": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Invalidation Reason"
+      },
+      "local_report_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Local Report Ids",
+        "type": "array"
+      },
+      "referee_agent_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Referee Agent Ids",
+        "type": "array"
+      },
+      "referee_review_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Referee Review Ids",
+        "type": "array"
+      },
+      "source_attempt_id": {
+        "title": "Source Attempt Id",
+        "type": "string"
+      },
+      "source_attempt_incomplete": {
+        "default": false,
+        "title": "Source Attempt Incomplete",
+        "type": "boolean"
+      },
+      "source_delta_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Delta Id"
+      },
+      "state": {
+        "$ref": "#/$defs/ClaimVerificationState",
+        "default": "proposed"
+      },
+      "transition_history": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Transition History",
+        "type": "array"
+      }
+    },
+    "required": [
+      "claim_id",
+      "source_attempt_id"
+    ],
+    "title": "ClaimVerificationLedgerEntry",
+    "type": "object"
+  }
+}

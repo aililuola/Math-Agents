@@ -1,0 +1,1 @@
+In triangle ABC, the incircle touches BC, CA, and AB at D, E, and F, respectively. Prove that the cevians AD, BE, and CF are concurrent.

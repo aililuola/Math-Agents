@@ -1,0 +1,113 @@
+{
+  "schema_version": "1.0",
+  "phase": "05",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-30T14:13:18.249Z",
+  "scope": "Typed message broker, sparse routing, receipts, utility, and exactly-once delivery",
+  "source": {
+    "authoritative_zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+    "source_files": 401,
+    "source_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "immutability": "PASS"
+  },
+  "communication": {
+    "admission_gate_order": "PASS; all 14 ordered gates and rejection reasons",
+    "typed_envelopes_only": "PASS",
+    "delivery_states_distinct": "PASS; delivered, prompt_consumed, acknowledged, actually_used",
+    "resume_prompt_reemission": "PASS; consumed delivery is never re-emitted",
+    "delivery_key": "run_id, recipient_id, stage, message_id",
+    "idempotent_delivery": "PASS",
+    "idempotent_domain_effect": "PASS",
+    "authenticated_receipts": "PASS",
+    "verified_utility": "PASS",
+    "semantic_deduplication": "PASS",
+    "ttl_and_priority": "PASS",
+    "bounded_initial_isolation": "PASS",
+    "invalidation_archive": "PASS",
+    "republication_after_invalidation": "PASS",
+    "route_registry": "PASS"
+  },
+  "topology": {
+    "sparse_routing": "PASS",
+    "deterministic_embedding": "SHA-256 based; no provider call",
+    "math_normalization_and_similarity": "PASS",
+    "strategy_and_claim_selection": "PASS",
+    "benchmark_cases": 6,
+    "benchmark_variants": 11,
+    "benchmark_provider_calls": 0,
+    "benchmark_result": "PASS",
+    "benchmark_json_sha256": "f746814f2561a0519adab3c7258743d2ef1102b6a99c89f0e78e3805e036193c",
+    "benchmark_markdown_sha256": "436a5ed3f502e7976364874ffd91080a4737eb25da5ca079b8e54c64d39a5962"
+  },
+  "persistence": {
+    "migration": "mathproofmesh-server/src/main/resources/db/migration/V2__typed_message_broker.sql",
+    "migration_sha256": "71c000f519f37c863b711fa64d6f482f24cb1eca0d5b41c4ff6645ffe7a8300e",
+    "flyway_migrations": 2,
+    "application_tables": 41,
+    "postgresql_restart": "PASS",
+    "exactly_once_after_restart": "PASS",
+    "transactional_invalidation": "PASS",
+    "audit_retention": "PASS"
+  },
+  "tests": {
+    "admission_policy": 15,
+    "delivery_and_receipts": 17,
+    "route_registry": 5,
+    "sparse_topology": 8,
+    "jdbc_message_repository": 4,
+    "topology_benchmark": 1,
+    "phase_05_focused": 50,
+    "reactor_total": 755,
+    "report_files": 34,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "online_clean_verify": "PASS",
+    "offline_clean_verify": "PASS",
+    "containers_remaining_after_tests": 0
+  },
+  "quality_and_dependency_security": {
+    "java": "Eclipse Temurin 25.0.4+7",
+    "maven": "3.9.16",
+    "maven_wrapper": "3.3.4 only-script",
+    "dependency_convergence": "PASS",
+    "external_snapshots": 0,
+    "duplicate_classes": 0,
+    "spotbugs_findsecbugs_findings": 0,
+    "dependency_tree": "migration/reports/phase-05-dependency-tree.txt",
+    "dependency_tree_sha256": "a9e64a3fadfa36a91f66d866256b0a64fd1613c8b09031b2ddab0bc2b628c72f",
+    "sbom": {
+      "format": "CycloneDX",
+      "spec_version": "1.6",
+      "components": 88,
+      "dependency_entries": 89,
+      "path": "migration/reports/phase-01-sbom.json",
+      "sha256": "53fff79ac235a38abf4efb333e7a47783cdb37491f9d9900a6b7c79b11e52963"
+    },
+    "owasp": {
+      "engine": "12.2.2",
+      "dependencies": 112,
+      "unsuppressed_vulnerable_dependencies": 0,
+      "unsuppressed_vulnerability_findings": 0,
+      "temporarily_suppressed_cves": [
+        "CVE-2026-54399",
+        "CVE-2026-54428"
+      ],
+      "suppression_scope": "Test-only docker-java zerodep transport over the trusted local Docker named pipe",
+      "suppression_owner": "dependency/CI maintenance",
+      "suppression_expires": "2026-10-31",
+      "report_json_sha256": "f66ae3325f8679ff85b9e7fd79b81d650be47ebac1ae7f8932a837d984109ef6",
+      "report_html_sha256": "0669230ae00594f576a389152f2c4b8c99a129569d77dd5eecb9dcbb615ce28d"
+    }
+  },
+  "mappings": {
+    "source_rows": "7/7 migrated",
+    "test_rows": "13/13 ported",
+    "auxiliary_rows": "11/11 translated_verified",
+    "state_rows": "142 + 167 + 92 = 401 unique paths"
+  },
+  "stop_condition": {
+    "phase_06_started": false
+  }
+}

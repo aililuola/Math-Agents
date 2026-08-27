@@ -1,0 +1,125 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.BottleneckCluster",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "alias_map": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Alias Map",
+        "type": "object"
+      },
+      "bridge_task_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Bridge Task Id"
+      },
+      "canonical_obligation_id": {
+        "title": "Canonical Obligation Id",
+        "type": "string"
+      },
+      "canonical_statement": {
+        "title": "Canonical Statement",
+        "type": "string"
+      },
+      "centrality": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Centrality",
+        "type": "number"
+      },
+      "cluster_id": {
+        "title": "Cluster Id",
+        "type": "string"
+      },
+      "first_error_fingerprints": {
+        "items": {
+          "type": "string"
+        },
+        "title": "First Error Fingerprints",
+        "type": "array"
+      },
+      "materialization_action_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Materialization Action Id"
+      },
+      "member_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Member Obligation Ids",
+        "type": "array"
+      },
+      "member_statuses": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Member Statuses",
+        "type": "object"
+      },
+      "minimal_bridge_candidate_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Minimal Bridge Candidate Ids",
+        "type": "array"
+      },
+      "proof_debt": {
+        "minimum": 0.0,
+        "title": "Proof Debt",
+        "type": "number"
+      },
+      "route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Route Ids",
+        "type": "array"
+      },
+      "shared_assumptions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Shared Assumptions",
+        "type": "array"
+      },
+      "status": {
+        "default": "active",
+        "enum": [
+          "active",
+          "resolved",
+          "split"
+        ],
+        "title": "Status",
+        "type": "string"
+      }
+    },
+    "required": [
+      "member_obligation_ids",
+      "canonical_obligation_id",
+      "canonical_statement",
+      "shared_assumptions",
+      "route_ids",
+      "centrality",
+      "proof_debt"
+    ],
+    "title": "BottleneckCluster",
+    "type": "object"
+  }
+}

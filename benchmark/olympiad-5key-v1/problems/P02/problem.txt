@@ -1,0 +1,1 @@
+A tournament is obtained by orienting every edge of a finite complete graph. Prove that every finite tournament contains a directed Hamiltonian path.

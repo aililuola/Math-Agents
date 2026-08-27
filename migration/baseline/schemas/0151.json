@@ -1,0 +1,68 @@
+{
+  "qualified_name": "mathproofmesh.schemas.CriticalClaim",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "claim_id": {
+        "title": "Claim Id",
+        "type": "string"
+      },
+      "evidence_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Evidence Refs",
+        "type": "array"
+      },
+      "falsification_test": {
+        "minLength": 1,
+        "title": "Falsification Test",
+        "type": "string"
+      },
+      "necessity": {
+        "default": "required",
+        "enum": [
+          "required",
+          "supporting"
+        ],
+        "title": "Necessity",
+        "type": "string"
+      },
+      "preferred_tool": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Preferred Tool"
+      },
+      "statement": {
+        "minLength": 1,
+        "title": "Statement",
+        "type": "string"
+      },
+      "status": {
+        "default": "needs_check",
+        "enum": [
+          "candidate",
+          "needs_check",
+          "verified",
+          "refuted",
+          "blocked"
+        ],
+        "title": "Status",
+        "type": "string"
+      }
+    },
+    "required": [
+      "statement",
+      "falsification_test"
+    ],
+    "title": "CriticalClaim",
+    "type": "object"
+  }
+}

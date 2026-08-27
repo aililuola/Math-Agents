@@ -1,0 +1,170 @@
+{
+  "qualified_name": "mathproofmesh.schemas.VerifiedExperienceRecord",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "cited_by_final_proof": {
+        "default": false,
+        "title": "Cited By Final Proof",
+        "type": "boolean"
+      },
+      "graph_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Graph Tags",
+        "type": "array"
+      },
+      "key_construction": {
+        "default": "",
+        "title": "Key Construction",
+        "type": "string"
+      },
+      "mechanism_chain": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Mechanism Chain",
+        "type": "array"
+      },
+      "mechanism_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Mechanism Tags",
+        "type": "array"
+      },
+      "negative_transfer_examples": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Negative Transfer Examples",
+        "type": "array"
+      },
+      "non_transferable_conditions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Non Transferable Conditions",
+        "type": "array"
+      },
+      "object_correspondence": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Object Correspondence",
+        "type": "object"
+      },
+      "object_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Object Tags",
+        "type": "array"
+      },
+      "obligation_graph_motif": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Obligation Graph Motif",
+        "type": "array"
+      },
+      "obligation_kinds": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Obligation Kinds",
+        "type": "array"
+      },
+      "operation_correspondence": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Operation Correspondence",
+        "type": "object"
+      },
+      "operation_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Operation Tags",
+        "type": "array"
+      },
+      "problem_hash": {
+        "title": "Problem Hash",
+        "type": "string"
+      },
+      "problem_skeleton": {
+        "title": "Problem Skeleton",
+        "type": "string"
+      },
+      "problem_summary": {
+        "default": "",
+        "title": "Problem Summary",
+        "type": "string"
+      },
+      "proof_principles": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Proof Principles",
+        "type": "array"
+      },
+      "proof_summary": {
+        "default": "",
+        "title": "Proof Summary",
+        "type": "string"
+      },
+      "record_id": {
+        "title": "Record Id",
+        "type": "string"
+      },
+      "representation_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Representation Tags",
+        "type": "array"
+      },
+      "required_bridge_lemmas": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Required Bridge Lemmas",
+        "type": "array"
+      },
+      "source_proposal_id": {
+        "title": "Source Proposal Id",
+        "type": "string"
+      },
+      "transfer_risks": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Transfer Risks",
+        "type": "array"
+      },
+      "transferable_lemmas": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Transferable Lemmas",
+        "type": "array"
+      },
+      "verified": {
+        "const": true,
+        "default": true,
+        "title": "Verified",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "record_id",
+      "source_proposal_id",
+      "problem_hash",
+      "problem_skeleton"
+    ],
+    "title": "VerifiedExperienceRecord",
+    "type": "object"
+  }
+}

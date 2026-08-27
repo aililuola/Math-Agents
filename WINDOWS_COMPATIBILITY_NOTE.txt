@@ -1,0 +1,6 @@
+JavaMathProofMesh-0.8.0 Windows-compatible package
+
+This package intentionally uses ASCII-only file names.
+The previous archive stored Chinese UTF-8 file-name bytes without the ZIP UTF-8 flag,
+which caused Windows Explorer to decode the names with a legacy code page and display mojibake.
+File contents remain UTF-8. Use CODEX_MASTER_INSTRUCTIONS.md as the Codex entry document.

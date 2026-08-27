@@ -1,0 +1,48 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.AssumptionDomainRecord",
+  "schema": {
+    "$defs": {
+      "AssumptionDomain": {
+        "enum": [
+          "mathematical",
+          "search",
+          "protocol",
+          "process",
+          "tool",
+          "verification",
+          "safety"
+        ],
+        "title": "AssumptionDomain",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "assumption_key": {
+        "title": "Assumption Key",
+        "type": "string"
+      },
+      "confidence": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "domain": {
+        "$ref": "#/$defs/AssumptionDomain"
+      },
+      "inferred_from": {
+        "title": "Inferred From",
+        "type": "string"
+      }
+    },
+    "required": [
+      "assumption_key",
+      "domain",
+      "inferred_from",
+      "confidence"
+    ],
+    "title": "AssumptionDomainRecord",
+    "type": "object"
+  }
+}

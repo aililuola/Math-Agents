@@ -1,0 +1,112 @@
+{
+  "qualified_name": "mathproofmesh.schemas.VerificationIssue",
+  "schema": {
+    "$defs": {
+      "Severity": {
+        "enum": [
+          "info",
+          "warning",
+          "error",
+          "critical"
+        ],
+        "title": "Severity",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "claim_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Claim Id"
+      },
+      "conclusion_summary": {
+        "default": "",
+        "title": "Conclusion Summary",
+        "type": "string"
+      },
+      "counterexample": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Counterexample"
+      },
+      "description": {
+        "title": "Description",
+        "type": "string"
+      },
+      "issue_code": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Issue Code"
+      },
+      "issue_id": {
+        "title": "Issue Id",
+        "type": "string"
+      },
+      "phase": {
+        "title": "Phase",
+        "type": "string"
+      },
+      "premise_summary": {
+        "default": "",
+        "title": "Premise Summary",
+        "type": "string"
+      },
+      "repair_hint": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Repair Hint"
+      },
+      "severity": {
+        "$ref": "#/$defs/Severity"
+      },
+      "step_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Step Id"
+      }
+    },
+    "required": [
+      "phase",
+      "severity",
+      "description"
+    ],
+    "title": "VerificationIssue",
+    "type": "object"
+  }
+}

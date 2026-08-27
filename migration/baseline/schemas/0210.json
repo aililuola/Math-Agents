@@ -1,0 +1,254 @@
+{
+  "qualified_name": "mathproofmesh.schemas.RouteDescriptor",
+  "schema": {
+    "$defs": {
+      "RouteMember": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "assigned_round": {
+            "minimum": 0,
+            "title": "Assigned Round",
+            "type": "integer"
+          },
+          "role": {
+            "$ref": "#/$defs/RouteRole"
+          }
+        },
+        "required": [
+          "agent_id",
+          "role",
+          "assigned_round"
+        ],
+        "title": "RouteMember",
+        "type": "object"
+      },
+      "RouteRole": {
+        "enum": [
+          "prover",
+          "skeptic",
+          "tool_specialist",
+          "referee",
+          "bridge_prover",
+          "conflict_resolver",
+          "counterexample_hunter"
+        ],
+        "title": "RouteRole",
+        "type": "string"
+      },
+      "RouteStatus": {
+        "enum": [
+          "active",
+          "waiting",
+          "repair_once",
+          "frozen",
+          "terminal",
+          "frozen_stalled",
+          "refuted",
+          "cooling",
+          "merged",
+          "abandoned",
+          "completed"
+        ],
+        "title": "RouteStatus",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "cooldown_until_round": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Cooldown Until Round"
+      },
+      "duplicate_attempt_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Duplicate Attempt Count",
+        "type": "integer"
+      },
+      "failure_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Failure Count",
+        "type": "integer"
+      },
+      "frozen_reason": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Frozen Reason"
+      },
+      "frozen_signature": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Frozen Signature"
+      },
+      "inspiration_proposal_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Inspiration Proposal Id"
+      },
+      "last_progress_signature": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Last Progress Signature"
+      },
+      "latest_attempt_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Latest Attempt Id"
+      },
+      "latest_checkpoint_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Latest Checkpoint Id"
+      },
+      "mechanism_signature": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Mechanism Signature",
+        "type": "array"
+      },
+      "members": {
+        "items": {
+          "$ref": "#/$defs/RouteMember"
+        },
+        "title": "Members",
+        "type": "array"
+      },
+      "merged_into_route_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Merged Into Route Id"
+      },
+      "neighbor_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Neighbor Route Ids",
+        "type": "array"
+      },
+      "no_progress_strikes": {
+        "default": 0,
+        "minimum": 0,
+        "title": "No Progress Strikes",
+        "type": "integer"
+      },
+      "requires_revision": {
+        "default": false,
+        "title": "Requires Revision",
+        "type": "boolean"
+      },
+      "revision_summary": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Revision Summary"
+      },
+      "route_id": {
+        "title": "Route Id",
+        "type": "string"
+      },
+      "shared_assumptions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Shared Assumptions",
+        "type": "array"
+      },
+      "stagnation_rounds": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Stagnation Rounds",
+        "type": "integer"
+      },
+      "status": {
+        "$ref": "#/$defs/RouteStatus",
+        "default": "active"
+      },
+      "strategy_id": {
+        "title": "Strategy Id",
+        "type": "string"
+      },
+      "strategy_signature": {
+        "default": "",
+        "title": "Strategy Signature",
+        "type": "string"
+      }
+    },
+    "required": [
+      "route_id",
+      "strategy_id",
+      "mechanism_signature"
+    ],
+    "title": "RouteDescriptor",
+    "type": "object"
+  }
+}

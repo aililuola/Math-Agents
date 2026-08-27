@@ -1,0 +1,57 @@
+{
+  "qualified_name": "mathproofmesh.schemas.InspirationCandidateDecision",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "maximum_similarity": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Maximum Similarity",
+        "type": "number"
+      },
+      "nearest_proposal_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Nearest Proposal Id"
+      },
+      "proposal_id": {
+        "title": "Proposal Id",
+        "type": "string"
+      },
+      "rank": {
+        "minimum": 1,
+        "title": "Rank",
+        "type": "integer"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "selected_for_review": {
+        "title": "Selected For Review",
+        "type": "boolean"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "proposal_id",
+      "task_id",
+      "selected_for_review",
+      "rank",
+      "reason"
+    ],
+    "title": "InspirationCandidateDecision",
+    "type": "object"
+  }
+}

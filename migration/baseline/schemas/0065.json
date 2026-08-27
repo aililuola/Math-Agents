@@ -1,0 +1,161 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.BlueprintNode",
+  "schema": {
+    "$defs": {
+      "BlueprintNodeKind": {
+        "enum": [
+          "given",
+          "claim",
+          "lemma",
+          "construction",
+          "case_split",
+          "countermodel_task",
+          "computation_task",
+          "target"
+        ],
+        "title": "BlueprintNodeKind",
+        "type": "string"
+      },
+      "QuantifierSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "forall",
+              "exists",
+              "exists_unique"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "order": {
+            "minimum": 0,
+            "title": "Order",
+            "type": "integer"
+          },
+          "restrictions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restrictions",
+            "type": "array"
+          },
+          "variable_id": {
+            "minLength": 1,
+            "title": "Variable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order",
+          "kind",
+          "variable_id",
+          "display_name",
+          "domain"
+        ],
+        "title": "QuantifierSpec",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "assumptions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Assumptions",
+        "type": "array"
+      },
+      "executable_first_step": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Executable First Step"
+      },
+      "kind": {
+        "$ref": "#/$defs/BlueprintNodeKind"
+      },
+      "node_id": {
+        "title": "Node Id",
+        "type": "string"
+      },
+      "normalized_statement": {
+        "title": "Normalized Statement",
+        "type": "string"
+      },
+      "quantifiers": {
+        "items": {
+          "$ref": "#/$defs/QuantifierSpec"
+        },
+        "title": "Quantifiers",
+        "type": "array"
+      },
+      "scope_signature_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Scope Signature Id"
+      },
+      "semantic_quality_score": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Semantic Quality Score",
+        "type": "number"
+      },
+      "source_field": {
+        "enum": [
+          "critical_claim",
+          "expected_lemma",
+          "bottleneck",
+          "key_original_step",
+          "generated_bridge",
+          "main_goal",
+          "given"
+        ],
+        "title": "Source Field",
+        "type": "string"
+      },
+      "statement": {
+        "title": "Statement",
+        "type": "string"
+      },
+      "strategy_id": {
+        "title": "Strategy Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "node_id",
+      "strategy_id",
+      "kind",
+      "statement",
+      "normalized_statement",
+      "source_field",
+      "semantic_quality_score"
+    ],
+    "title": "BlueprintNode",
+    "type": "object"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.ObligationDomainRecord",
+  "schema": {
+    "$defs": {
+      "ObligationDomain": {
+        "enum": [
+          "mathematical",
+          "search",
+          "process",
+          "tool",
+          "verification",
+          "protocol",
+          "safety"
+        ],
+        "title": "ObligationDomain",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "confidence": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "domain": {
+        "$ref": "#/$defs/ObligationDomain"
+      },
+      "inferred_from": {
+        "title": "Inferred From",
+        "type": "string"
+      },
+      "obligation_id": {
+        "title": "Obligation Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "obligation_id",
+      "domain",
+      "inferred_from",
+      "confidence"
+    ],
+    "title": "ObligationDomainRecord",
+    "type": "object"
+  }
+}

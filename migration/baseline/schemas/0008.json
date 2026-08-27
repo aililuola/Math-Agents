@@ -1,0 +1,51 @@
+{
+  "qualified_name": "mathproofmesh.config.CommonModeControlConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "include_critical_claims": {
+        "default": true,
+        "title": "Include Critical Claims",
+        "type": "boolean"
+      },
+      "include_strategy_prerequisites": {
+        "default": true,
+        "title": "Include Strategy Prerequisites",
+        "type": "boolean"
+      },
+      "include_unverified_dependencies": {
+        "default": true,
+        "title": "Include Unverified Dependencies",
+        "type": "boolean"
+      },
+      "max_challengers_per_round": {
+        "default": 1,
+        "maximum": 8,
+        "minimum": 0,
+        "title": "Max Challengers Per Round",
+        "type": "integer"
+      },
+      "min_routes": {
+        "default": 3,
+        "maximum": 32,
+        "minimum": 2,
+        "title": "Min Routes",
+        "type": "integer"
+      },
+      "risk_threshold": {
+        "default": 0.6,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Risk Threshold",
+        "type": "number"
+      }
+    },
+    "title": "CommonModeControlConfig",
+    "type": "object"
+  }
+}

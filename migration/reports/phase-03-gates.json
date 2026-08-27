@@ -1,0 +1,109 @@
+{
+  "schema_version": "1.0",
+  "phase": "03",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-30T12:30:29.241Z",
+  "scope": "Configuration, profiles, problem preflight, and secret management",
+  "source": {
+    "authoritative_zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+    "source_files": 401,
+    "source_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "immutability": "PASS"
+  },
+  "configuration": {
+    "records": 38,
+    "fields": 556,
+    "required_fields": 6,
+    "nullable_fields": 11,
+    "field_constraints": 577,
+    "cross_validator_tests": 22,
+    "strict_unknown_fields": "PASS",
+    "strict_missing_and_null_fields": "PASS",
+    "strict_scalar_types": "PASS",
+    "python_legacy_aliases": "PASS",
+    "defensive_immutability": "PASS",
+    "inventory": "migration/reports/phase-03-config-field-inventory.json",
+    "inventory_sha256": "2d252af1ba9c6846b83fb6cccfc4f807a31138a370e9a42dd34f81c84aeac01f"
+  },
+  "profiles": {
+    "authoritative_fixtures": 6,
+    "exact_baseline_copies": 6,
+    "strict_java_parses": 6,
+    "normalized_semantic_matches": 6,
+    "redacted_semantic_matches": 6,
+    "differential_evidence": "migration/reports/phase-03-differential.json"
+  },
+  "goal_preflight": {
+    "mapped_python_tests": 6,
+    "passing_java_tests": 6,
+    "zero_api_clear_path": "PASS",
+    "clarification_before_freeze": "PASS",
+    "original_and_canonical_goal_preserved": "PASS",
+    "goal_integrity_hash": "PASS",
+    "problem_kind_deliverables_language_constraints": "PASS",
+    "normalizer_max_output_tokens": 4096,
+    "normalizer_thinking": false
+  },
+  "security": {
+    "secret_redaction_tests": 4,
+    "logs": "PASS",
+    "exceptions": "PASS",
+    "json": "PASS",
+    "to_string": "PASS",
+    "snapshots": "PASS",
+    "on_demand_environment_resolution": "PASS",
+    "environment_template_secret_slots": 14,
+    "environment_template_nonempty_secret_slots": 0,
+    "provider_endpoint_policy_tests": 7,
+    "https_only_production": "PASS",
+    "administrator_allowlist": "PASS",
+    "user_base_url_override_rejected": "PASS",
+    "nonpublic_dns_answers_rejected": "PASS",
+    "development_mock_loopback_only": "PASS",
+    "cross_host_redirect_rejected": "PASS"
+  },
+  "tests": {
+    "phase_03_tests": 644,
+    "reactor_total": 682,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "online_clean_verify": "PASS",
+    "offline_clean_verify": "PASS"
+  },
+  "quality_and_dependency_security": {
+    "java": "Eclipse Temurin 25.0.4+7",
+    "maven": "3.9.16",
+    "maven_wrapper": "3.3.4 only-script",
+    "dependency_convergence": "PASS",
+    "external_snapshots": 0,
+    "duplicate_classes": 0,
+    "spotbugs_findsecbugs_reports": 5,
+    "spotbugs_findsecbugs_findings": 0,
+    "sbom": {
+      "format": "CycloneDX",
+      "spec_version": "1.6",
+      "components": 87,
+      "dependency_entries": 88,
+      "sha256": "bf2bcf861ac17789b7ef3eee0d2e4c16efe8ea2f32a1165375817e43690416ed"
+    },
+    "owasp": {
+      "engine": "12.2.2",
+      "dependencies": 94,
+      "vulnerable_dependencies": 0,
+      "vulnerability_findings": 0,
+      "report_json_sha256": "55b77a94a6e7f1190cde5d84284a912e6c962de7eccd09094a48de1ef8c86294",
+      "report_html_sha256": "4509592e39689b39f19eca3ef580a5fa37dc1892f9d94fecaf387648aa0cc3db"
+    }
+  },
+  "mappings": {
+    "source_rows": "2/2 migrated",
+    "test_rows": "2/2 ported",
+    "auxiliary_rows": "7/7 translated_verified",
+    "state_rows": "142 + 167 + 92 = 401 unique paths"
+  },
+  "stop_condition": {
+    "phase_04_started": false
+  }
+}

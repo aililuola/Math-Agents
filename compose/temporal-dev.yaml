@@ -1,0 +1,40 @@
+services:
+  temporal-dev:
+    image: ${TEMPORAL_DEV_IMAGE:?missing TEMPORAL_DEV_IMAGE}
+    command:
+      - server
+      - start-dev
+      - --ip
+      - 0.0.0.0
+      - --port
+      - "7233"
+      - --headless
+      - --db-filename
+      - /home/temporal/temporal.db
+      - --namespace
+      - mathproofmesh
+      - --disable-config-file
+      - --disable-config-env
+      - --log-format
+      - json
+      - --log-level
+      - warn
+    ports:
+      - "127.0.0.1:7233:7233"
+    volumes:
+      - temporal-dev-data:/home/temporal
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "temporal", "--disable-config-file", "--disable-config-env", "--address", "127.0.0.1:7233", "operator", "cluster", "health"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
+volumes:
+  temporal-dev-data: {}

@@ -1,0 +1,58 @@
+{
+  "qualified_name": "mathproofmesh.schemas.BridgeTask",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "allowed_fact_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Allowed Fact Ids",
+        "type": "array"
+      },
+      "forbidden_negative_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Forbidden Negative Ids",
+        "type": "array"
+      },
+      "normalized_goal": {
+        "title": "Normalized Goal",
+        "type": "string"
+      },
+      "obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Obligation Ids",
+        "type": "array"
+      },
+      "priority": {
+        "default": 0.5,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Priority",
+        "type": "number"
+      },
+      "route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Route Ids",
+        "type": "array"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "obligation_ids",
+      "route_ids",
+      "normalized_goal"
+    ],
+    "title": "BridgeTask",
+    "type": "object"
+  }
+}

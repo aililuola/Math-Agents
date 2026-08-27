@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.0",
+  "phase": "02",
+  "result": "PASS",
+  "completed_at_utc": "2026-07-30T11:31:46.780Z",
+  "scope": "Contracts, strict validation, canonical JSON, and stable hash parity",
+  "source": {
+    "authoritative_zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+    "source_files": 401,
+    "source_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "immutability": "PASS"
+  },
+  "inventory": {
+    "records": 102,
+    "enums": 40,
+    "total_contract_types": 142,
+    "java_package": "io.github.aililuola.mathproofmesh.contract",
+    "inventory_file": "migration/phase-02-contract-inventory.json"
+  },
+  "contract_gates": {
+    "strict_unknown_fields": "PASS for all 102 records",
+    "missing_fields": "PASS for all records with required fields",
+    "all_optional_missing_behavior": "PASS for 6 records",
+    "boundary_values": "PASS for all 102 records",
+    "invalid_states": "PASS for all 102 records plus explicit domain combinations",
+    "json_round_trip": "PASS for all 102 records",
+    "defensive_immutability": "PASS",
+    "enum_wire_literals": "PASS for all 40 enums",
+    "spring_dependencies": 0,
+    "map_string_object_occurrences": 0
+  },
+  "tests": {
+    "contract_module": 28,
+    "reactor_total": 38,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "online_clean_verify": "PASS",
+    "offline_clean_verify": "PASS"
+  },
+  "quality_and_security": {
+    "spotbugs_findsecbugs_reports": 5,
+    "spotbugs_findsecbugs_findings": 0,
+    "dependency_convergence": "PASS",
+    "duplicate_classes": 0,
+    "sbom": {
+      "format": "CycloneDX",
+      "spec_version": "1.6",
+      "components": 86,
+      "dependency_entries": 87,
+      "sha256": "797d35fc270e385a5c14094a3454817080a2971af89f87b8ddc789dcd41b8a67"
+    },
+    "owasp": {
+      "engine": "12.2.2",
+      "dependencies": 93,
+      "vulnerable_dependencies": 0,
+      "vulnerability_findings": 0
+    }
+  },
+  "mappings": {
+    "source_rows": "2/2 migrated",
+    "test_rows": "3/3 ported",
+    "auxiliary_rows": 0,
+    "state_rows": "142 + 167 + 92 = 401 unique paths"
+  },
+  "stop_condition": {
+    "phase_03_started": false
+  }
+}

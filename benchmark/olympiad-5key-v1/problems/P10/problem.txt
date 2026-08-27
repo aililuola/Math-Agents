@@ -1,0 +1,1 @@
+Find all functions f: R -> R satisfying f(x+y)+f(x-y)=2f(x)+2f(y) for all real x,y, under the additional assumption that f is bounded on some nonempty open interval.

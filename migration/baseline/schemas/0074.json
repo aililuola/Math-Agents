@@ -1,0 +1,73 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.ContinueGateRecord",
+  "schema": {
+    "$defs": {
+      "GateVerdict": {
+        "enum": [
+          "pass",
+          "block",
+          "rewrite",
+          "shadow_block"
+        ],
+        "title": "GateVerdict",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "consecutive_no_core_progress": {
+        "minimum": 0,
+        "title": "Consecutive No Core Progress",
+        "type": "integer"
+      },
+      "core_debt_reduced": {
+        "title": "Core Debt Reduced",
+        "type": "boolean"
+      },
+      "core_obligation_closed": {
+        "title": "Core Obligation Closed",
+        "type": "boolean"
+      },
+      "first_error_changed": {
+        "title": "First Error Changed",
+        "type": "boolean"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "record_id": {
+        "title": "Record Id",
+        "type": "string"
+      },
+      "route_id": {
+        "title": "Route Id",
+        "type": "string"
+      },
+      "segment_index": {
+        "title": "Segment Index",
+        "type": "integer"
+      },
+      "verdict": {
+        "$ref": "#/$defs/GateVerdict"
+      },
+      "verified_bridge_gain": {
+        "title": "Verified Bridge Gain",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "route_id",
+      "segment_index",
+      "verdict",
+      "core_obligation_closed",
+      "core_debt_reduced",
+      "first_error_changed",
+      "verified_bridge_gain",
+      "consecutive_no_core_progress",
+      "reason"
+    ],
+    "title": "ContinueGateRecord",
+    "type": "object"
+  }
+}

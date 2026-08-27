@@ -1,0 +1,47 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.RouteFreezeRecord",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "blocker_task_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Blocker Task Ids",
+        "type": "array"
+      },
+      "created_round": {
+        "minimum": 0,
+        "title": "Created Round",
+        "type": "integer"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "requires_user_intervention": {
+        "title": "Requires User Intervention",
+        "type": "boolean"
+      },
+      "route_id": {
+        "title": "Route Id",
+        "type": "string"
+      },
+      "wake_condition_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Wake Condition Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "route_id",
+      "requires_user_intervention",
+      "reason",
+      "created_round"
+    ],
+    "title": "RouteFreezeRecord",
+    "type": "object"
+  }
+}

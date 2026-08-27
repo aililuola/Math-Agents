@@ -1,0 +1,49 @@
+{
+  "qualified_name": "mathproofmesh.config.FailureControlConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "ambiguous_model_review": {
+        "default": true,
+        "title": "Ambiguous Model Review",
+        "type": "boolean"
+      },
+      "bridge_failure_prefers_bridge_action": {
+        "default": true,
+        "title": "Bridge Failure Prefers Bridge Action",
+        "type": "boolean"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "framing_failure_forces_reanchor": {
+        "default": true,
+        "title": "Framing Failure Forces Reanchor",
+        "type": "boolean"
+      },
+      "max_blueprint_rewrites_per_route": {
+        "default": 1,
+        "maximum": 8,
+        "minimum": 0,
+        "title": "Max Blueprint Rewrites Per Route",
+        "type": "integer"
+      },
+      "min_classification_confidence": {
+        "default": 0.7,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Min Classification Confidence",
+        "type": "number"
+      },
+      "plan_failure_blocks_local_deepen": {
+        "default": true,
+        "title": "Plan Failure Blocks Local Deepen",
+        "type": "boolean"
+      }
+    },
+    "title": "FailureControlConfig",
+    "type": "object"
+  }
+}

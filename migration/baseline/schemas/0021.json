@@ -1,0 +1,42 @@
+{
+  "qualified_name": "mathproofmesh.config.InductionControlConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "max_candidates_per_trigger": {
+        "default": 3,
+        "maximum": 16,
+        "minimum": 1,
+        "title": "Max Candidates Per Trigger",
+        "type": "integer"
+      },
+      "require_well_foundedness_statement": {
+        "default": true,
+        "title": "Require Well Foundedness Statement",
+        "type": "boolean"
+      },
+      "trigger_on_first_occurrence_barrier": {
+        "default": true,
+        "title": "Trigger On First Occurrence Barrier",
+        "type": "boolean"
+      },
+      "trigger_on_recursive_same_type_dependency": {
+        "default": true,
+        "title": "Trigger On Recursive Same Type Dependency",
+        "type": "boolean"
+      },
+      "trigger_on_repeated_feature": {
+        "default": true,
+        "title": "Trigger On Repeated Feature",
+        "type": "boolean"
+      }
+    },
+    "title": "InductionControlConfig",
+    "type": "object"
+  }
+}

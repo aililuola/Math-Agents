@@ -1,0 +1,148 @@
+{
+  "schema_version": "1.0",
+  "phase": "07",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-30T16:17:29.227Z",
+  "scope": "Agent runtime, providers, budget, rate limiting, and call ledger",
+  "source": {
+    "authoritative_zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+    "source_files": 401,
+    "source_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "immutability": "PASS"
+  },
+  "providers": {
+    "deepseek": "PASS",
+    "anthropic": "PASS",
+    "gemini": "PASS",
+    "openai_compatible": "PASS",
+    "mock": "PASS",
+    "transport": "JDK 25 HttpClient",
+    "json": "Jackson",
+    "spring_ai_dependencies": 0,
+    "live_provider_calls": 0,
+    "live_calls_require_explicit_opt_in": "PASS",
+    "endpoint_auth_request_stream_usage_reasoning_request_id_and_error_mapping": "PASS"
+  },
+  "streaming": {
+    "bounded_sse_parser": "PASS",
+    "fragmented_utf8_and_event_boundaries": "PASS",
+    "comments_multiline_data_and_unterminated_tail": "PASS",
+    "first_chunk_timeout": "PASS",
+    "idle_timeout": "PASS",
+    "maximum_response_bytes": "PASS",
+    "cancellation_closes_stream": "PASS",
+    "reconnect_uses_public_prefix_only": "PASS",
+    "incomplete_stream_rejected": "PASS",
+    "usage_summary_required": "PASS"
+  },
+  "runtime": {
+    "virtual_thread_io": "PASS",
+    "fair_global_agent_and_key_semaphores": "PASS",
+    "bounded_concurrency": "PASS",
+    "sliding_window_rpm": "PASS",
+    "budget_reserved_before_dispatch": "PASS",
+    "retry_after": "PASS",
+    "bounded_retry_and_failover": "PASS",
+    "http_401_403_same_key_retries": 0,
+    "reviewer_author_exclusion": "PASS",
+    "persisted_circuit_breaker": "PASS",
+    "usage_reconciliation": "PASS"
+  },
+  "structured_runner": {
+    "redacted_prompt_artifact": "PASS",
+    "planned_before_dispatch": "PASS",
+    "raw_response_artifact": "PASS",
+    "first_balanced_json": "PASS",
+    "strict_contract_parse": "PASS",
+    "bounded_representation_only_repair": "PASS",
+    "mathematical_content_rewrite": 0,
+    "ambiguous_unknown_remote_result": "PASS",
+    "possible_duplicate_cost_recorded": "PASS",
+    "result_application_idempotent": "PASS"
+  },
+  "persistence": {
+    "migration": "mathproofmesh-server/src/main/resources/db/migration/V4__provider_call_runtime.sql",
+    "migration_sha256": "4f23201411fbf68ce3291e8cbb249e538d72bc530708fcb3aeb45af7fd69a7a3",
+    "flyway_migrations": 4,
+    "application_tables": 44,
+    "provider_call_state_machine": "planned -> dispatched -> streaming -> succeeded/failed/ambiguous/cancelled",
+    "immutable_request_identity": "PASS",
+    "unique_application_key": "PASS",
+    "persisted_circuit_snapshot": "PASS",
+    "stale_version_rejected": "PASS"
+  },
+  "tests": {
+    "provider_adapter_fixtures": 7,
+    "bounded_sse": 5,
+    "deepseek_parity": 11,
+    "agent_runtime_policy": 6,
+    "agent_pool": 3,
+    "review_isolation": 1,
+    "structured_agent_runner": 6,
+    "guards_and_context": 7,
+    "typed_prompt_serialization": 4,
+    "provider_call_postgresql": 3,
+    "reactor_total": 849,
+    "report_files": 51,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "online_clean_verify": "PASS",
+    "offline_clean_verify": "PASS",
+    "containers_remaining_after_tests": 0
+  },
+  "quality_and_dependency_security": {
+    "java": "Eclipse Temurin 25.0.4+7",
+    "maven": "3.9.16",
+    "maven_wrapper": "3.3.4 only-script",
+    "dependency_convergence": "PASS",
+    "external_snapshots": 0,
+    "duplicate_classes": 0,
+    "spotbugs_findsecbugs_findings": 0,
+    "modulith_structure": "PASS",
+    "static_sql_policy": "PASS",
+    "dependency_tree": "migration/reports/phase-07-dependency-tree.txt",
+    "dependency_tree_sha256": "ebe8bf809d9d6f20ca07c01d31e10819ff600f464b6fa463f08c120d84152243",
+    "sbom": {
+      "format": "CycloneDX",
+      "spec_version": "1.6",
+      "components": 88,
+      "dependency_entries": 89,
+      "path": "migration/reports/phase-01-sbom.json",
+      "sha256": "2e547c2b8e6fd95d0b5283f742d99f1be62fd0b58472ae619f17cfd3382d398a"
+    },
+    "owasp": {
+      "engine": "12.2.2",
+      "dependencies": 112,
+      "fail_build_on_cvss": 7.0,
+      "findings_at_or_above_gate": 0,
+      "below_gate_findings": [
+        {
+          "cve": "CVE-2021-4277",
+          "artifact": "com.cronutils:cron-utils:9.2.1",
+          "severity": "MEDIUM",
+          "cvss": 5.3
+        }
+      ],
+      "false_positive_cpe_suppressions": 2,
+      "temporarily_suppressed_cves": [
+        "CVE-2026-54399",
+        "CVE-2026-54428"
+      ],
+      "public_feed_only": true,
+      "project_coordinate_submission": false,
+      "report_json_sha256": "0964d52018c20b893e8f1110c6080289cbb37e8a7d3def41c36868bbf47bb824",
+      "report_html_sha256": "eaf66d65b2e13e64c9301bcdc0c7a23be7ba2221173333ed4907b2a744d2b597"
+    }
+  },
+  "mappings": {
+    "source_rows": "10/10 migrated",
+    "test_rows": "4/4 ported",
+    "auxiliary_rows": "2/2 translated_verified",
+    "state_rows": "142 + 167 + 92 = 401 unique paths"
+  },
+  "stop_condition": {
+    "phase_08_started": false
+  }
+}

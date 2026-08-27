@@ -1,0 +1,121 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.AssumptionChallengeResult",
+  "schema": {
+    "$defs": {
+      "AssumptionChallengeAction": {
+        "enum": [
+          "prove",
+          "refute",
+          "weaken",
+          "avoid"
+        ],
+        "title": "AssumptionChallengeAction",
+        "type": "string"
+      },
+      "AssumptionChallengeOutcome": {
+        "enum": [
+          "verified",
+          "refuted",
+          "avoided",
+          "inconclusive",
+          "blocked"
+        ],
+        "title": "AssumptionChallengeOutcome",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "$ref": "#/$defs/AssumptionChallengeAction"
+      },
+      "alternative_strategy_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Alternative Strategy Ids",
+        "type": "array"
+      },
+      "challenger_agent_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Challenger Agent Id"
+      },
+      "completed_round": {
+        "minimum": 0,
+        "title": "Completed Round",
+        "type": "integer"
+      },
+      "created_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Created Route Ids",
+        "type": "array"
+      },
+      "detail": {
+        "title": "Detail",
+        "type": "string"
+      },
+      "evidence_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Evidence Refs",
+        "type": "array"
+      },
+      "family_id": {
+        "title": "Family Id",
+        "type": "string"
+      },
+      "independent_review_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Independent Review Refs",
+        "type": "array"
+      },
+      "outcome": {
+        "$ref": "#/$defs/AssumptionChallengeOutcome"
+      },
+      "result_id": {
+        "title": "Result Id",
+        "type": "string"
+      },
+      "reviewer_agent_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Reviewer Agent Id"
+      },
+      "task_id": {
+        "title": "Task Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "result_id",
+      "task_id",
+      "family_id",
+      "action",
+      "outcome",
+      "detail",
+      "completed_round"
+    ],
+    "title": "AssumptionChallengeResult",
+    "type": "object"
+  }
+}

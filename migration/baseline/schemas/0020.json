@@ -1,0 +1,51 @@
+{
+  "qualified_name": "mathproofmesh.config.GoalAlignmentControlConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "max_strategy_rewrite_attempts": {
+        "default": 1,
+        "maximum": 8,
+        "minimum": 0,
+        "title": "Max Strategy Rewrite Attempts",
+        "type": "integer"
+      },
+      "min_alignment_confidence": {
+        "default": 0.72,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Min Alignment Confidence",
+        "type": "number"
+      },
+      "overstrength_penalty": {
+        "default": 0.25,
+        "maximum": 2.0,
+        "minimum": 0.0,
+        "title": "Overstrength Penalty",
+        "type": "number"
+      },
+      "require_implication_outline": {
+        "default": true,
+        "title": "Require Implication Outline",
+        "type": "boolean"
+      },
+      "require_target_obligation": {
+        "default": true,
+        "title": "Require Target Obligation",
+        "type": "boolean"
+      },
+      "run_countermodel_on_unknown_relation": {
+        "default": true,
+        "title": "Run Countermodel On Unknown Relation",
+        "type": "boolean"
+      }
+    },
+    "title": "GoalAlignmentControlConfig",
+    "type": "object"
+  }
+}

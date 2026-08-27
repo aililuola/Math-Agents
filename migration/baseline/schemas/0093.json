@@ -1,0 +1,77 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.MessageUsageReceipt",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "blueprint_rewrite_request_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Blueprint Rewrite Request Ids",
+        "type": "array"
+      },
+      "cited_by_final_proof": {
+        "default": false,
+        "title": "Cited By Final Proof",
+        "type": "boolean"
+      },
+      "closed_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Closed Obligation Ids",
+        "type": "array"
+      },
+      "consumer_route_id": {
+        "title": "Consumer Route Id",
+        "type": "string"
+      },
+      "message_id": {
+        "title": "Message Id",
+        "type": "string"
+      },
+      "produced_message_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Produced Message Ids",
+        "type": "array"
+      },
+      "referenced_step_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Referenced Step Ids",
+        "type": "array"
+      },
+      "refuted_claim_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Refuted Claim Ids",
+        "type": "array"
+      },
+      "usage_receipt_id": {
+        "title": "Usage Receipt Id",
+        "type": "string"
+      },
+      "utility_score": {
+        "default": 0.0,
+        "minimum": 0.0,
+        "title": "Utility Score",
+        "type": "number"
+      },
+      "verified_use": {
+        "default": false,
+        "title": "Verified Use",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "message_id",
+      "consumer_route_id"
+    ],
+    "title": "MessageUsageReceipt",
+    "type": "object"
+  }
+}

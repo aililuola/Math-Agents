@@ -1,0 +1,566 @@
+{
+  "schema_version": "1.0",
+  "phase": "17",
+  "generated_at_utc": "2026-08-12T05:14:43.342718+00:00",
+  "result": "PASS",
+  "raw_module_coverage": {
+    "contracts": {
+      "line": {
+        "covered": 4743,
+        "missed": 229,
+        "total": 4972,
+        "percent": 95.394208
+      },
+      "branch": {
+        "covered": 2314,
+        "missed": 610,
+        "total": 2924,
+        "percent": 79.138167
+      }
+    },
+    "core": {
+      "line": {
+        "covered": 11887,
+        "missed": 1166,
+        "total": 13053,
+        "percent": 91.067188
+      },
+      "branch": {
+        "covered": 5188,
+        "missed": 1723,
+        "total": 6911,
+        "percent": 75.068731
+      }
+    },
+    "server": {
+      "line": {
+        "covered": 9336,
+        "missed": 1307,
+        "total": 10643,
+        "percent": 87.719628
+      },
+      "branch": {
+        "covered": 2989,
+        "missed": 1262,
+        "total": 4251,
+        "percent": 70.312868
+      }
+    },
+    "desktop": {
+      "line": {
+        "covered": 4963,
+        "missed": 2066,
+        "total": 7029,
+        "percent": 70.607483
+      },
+      "branch": {
+        "covered": 1403,
+        "missed": 1423,
+        "total": 2826,
+        "percent": 49.646143
+      }
+    }
+  },
+  "contracts_generated_accessor_adjustment": {
+    "policy": "Exclude only source lines inside explicitly marked generated defensive accessor blocks. Record constructors, validation, schema, canonical JSON, and all handwritten behavior remain included.",
+    "files_with_explicit_generated_blocks": 82,
+    "excluded": {
+      "line": {
+        "covered": 321,
+        "missed": 0,
+        "total": 321,
+        "percent": 100.0
+      },
+      "branch": {
+        "covered": 323,
+        "missed": 319,
+        "total": 642,
+        "percent": 50.311526
+      }
+    },
+    "adjusted": {
+      "line": {
+        "covered": 4422,
+        "missed": 229,
+        "total": 4651,
+        "percent": 95.076328
+      },
+      "branch": {
+        "covered": 1991,
+        "missed": 291,
+        "total": 2282,
+        "percent": 87.248028
+      }
+    }
+  },
+  "core_audited_invariant_classes": {
+    "selection_policy": "Exact audited class set spanning admission/routing, computation, memory, checkpoint and lease coordination, proof control, graph propagation, and claim verification. Inner classes are included only when named explicitly.",
+    "class_count": 19,
+    "aggregate": {
+      "line": {
+        "covered": 2471,
+        "missed": 144,
+        "total": 2615,
+        "percent": 94.493308
+      },
+      "branch": {
+        "covered": 1317,
+        "missed": 220,
+        "total": 1537,
+        "percent": 85.686402
+      }
+    },
+    "classes": [
+      {
+        "class": "io/github/aililuola/mathproofmesh/communication/MessageAdmissionPolicy",
+        "line": {
+          "covered": 207,
+          "missed": 5,
+          "total": 212,
+          "percent": 97.641509
+        },
+        "branch": {
+          "covered": 184,
+          "missed": 14,
+          "total": 198,
+          "percent": 92.929293
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/communication/RouteRegistry",
+        "line": {
+          "covered": 308,
+          "missed": 0,
+          "total": 308,
+          "percent": 100.0
+        },
+        "branch": {
+          "covered": 84,
+          "missed": 2,
+          "total": 86,
+          "percent": 97.674419
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/computation/ComputationPolicy",
+        "line": {
+          "covered": 76,
+          "missed": 0,
+          "total": 76,
+          "percent": 100.0
+        },
+        "branch": {
+          "covered": 72,
+          "missed": 4,
+          "total": 76,
+          "percent": 94.736842
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/memory/MemoryPromotionPolicy",
+        "line": {
+          "covered": 42,
+          "missed": 7,
+          "total": 49,
+          "percent": 85.714286
+        },
+        "branch": {
+          "covered": 27,
+          "missed": 11,
+          "total": 38,
+          "percent": 71.052632
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/memory/MemoryInvalidationService",
+        "line": {
+          "covered": 59,
+          "missed": 11,
+          "total": 70,
+          "percent": 84.285714
+        },
+        "branch": {
+          "covered": 30,
+          "missed": 18,
+          "total": 48,
+          "percent": 62.5
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/memory/TypedMemory",
+        "line": {
+          "covered": 130,
+          "missed": 26,
+          "total": 156,
+          "percent": 83.333333
+        },
+        "branch": {
+          "covered": 21,
+          "missed": 22,
+          "total": 43,
+          "percent": 48.837209
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/orchestration/ContinuationFunctions$CheckpointLedger",
+        "line": {
+          "covered": 73,
+          "missed": 7,
+          "total": 80,
+          "percent": 91.25
+        },
+        "branch": {
+          "covered": 20,
+          "missed": 16,
+          "total": 36,
+          "percent": 55.555556
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/orchestration/InProcessRunCoordinator",
+        "line": {
+          "covered": 53,
+          "missed": 12,
+          "total": 65,
+          "percent": 81.538462
+        },
+        "branch": {
+          "covered": 35,
+          "missed": 21,
+          "total": 56,
+          "percent": 62.5
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/proofcontrol/CommonModeAnalyzer",
+        "line": {
+          "covered": 159,
+          "missed": 6,
+          "total": 165,
+          "percent": 96.363636
+        },
+        "branch": {
+          "covered": 72,
+          "missed": 8,
+          "total": 80,
+          "percent": 90.0
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/proofcontrol/ControlActionDispatcher",
+        "line": {
+          "covered": 41,
+          "missed": 38,
+          "total": 79,
+          "percent": 51.898734
+        },
+        "branch": {
+          "covered": 7,
+          "missed": 9,
+          "total": 16,
+          "percent": 43.75
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/proofcontrol/DependencyResolver",
+        "line": {
+          "covered": 89,
+          "missed": 0,
+          "total": 89,
+          "percent": 100.0
+        },
+        "branch": {
+          "covered": 68,
+          "missed": 9,
+          "total": 77,
+          "percent": 88.311688
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/proofcontrol/ExecutableTaskController",
+        "line": {
+          "covered": 126,
+          "missed": 0,
+          "total": 126,
+          "percent": 100.0
+        },
+        "branch": {
+          "covered": 71,
+          "missed": 9,
+          "total": 80,
+          "percent": 88.75
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/proofcontrol/FalsificationService",
+        "line": {
+          "covered": 69,
+          "missed": 1,
+          "total": 70,
+          "percent": 98.571429
+        },
+        "branch": {
+          "covered": 41,
+          "missed": 1,
+          "total": 42,
+          "percent": 97.619048
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/proofcontrol/InductionMeasureSelector",
+        "line": {
+          "covered": 84,
+          "missed": 1,
+          "total": 85,
+          "percent": 98.823529
+        },
+        "branch": {
+          "covered": 51,
+          "missed": 1,
+          "total": 52,
+          "percent": 98.076923
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/proofcontrol/MessageUtilityController",
+        "line": {
+          "covered": 80,
+          "missed": 0,
+          "total": 80,
+          "percent": 100.0
+        },
+        "branch": {
+          "covered": 59,
+          "missed": 5,
+          "total": 64,
+          "percent": 92.1875
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/proofcontrol/ScopeGuard",
+        "line": {
+          "covered": 148,
+          "missed": 2,
+          "total": 150,
+          "percent": 98.666667
+        },
+        "branch": {
+          "covered": 116,
+          "missed": 12,
+          "total": 128,
+          "percent": 90.625
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/proofcontrol/SemanticQualityGate",
+        "line": {
+          "covered": 117,
+          "missed": 1,
+          "total": 118,
+          "percent": 99.152542
+        },
+        "branch": {
+          "covered": 116,
+          "missed": 10,
+          "total": 126,
+          "percent": 92.063492
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/proofgraph/ProofGraphStore",
+        "line": {
+          "covered": 506,
+          "missed": 27,
+          "total": 533,
+          "percent": 94.934334
+        },
+        "branch": {
+          "covered": 183,
+          "missed": 45,
+          "total": 228,
+          "percent": 80.263158
+        }
+      },
+      {
+        "class": "io/github/aililuola/mathproofmesh/verification/ClaimVerificationLedger",
+        "line": {
+          "covered": 104,
+          "missed": 0,
+          "total": 104,
+          "percent": 100.0
+        },
+        "branch": {
+          "covered": 60,
+          "missed": 3,
+          "total": 63,
+          "percent": 95.238095
+        }
+      }
+    ]
+  },
+  "server_desktop_policy": "Raw module line coverage is used as the conservative testable-business coverage measure; no generated-code or framework exclusions are applied.",
+  "critical_scenarios": {
+    "policy": "Every selected critical suite must execute with zero failure, error, or skip.",
+    "passed": 9,
+    "total": 9,
+    "percent": 100.0,
+    "scenarios": {
+      "canonical_json_and_stable_hash": {
+        "result": "PASS",
+        "suites": [
+          {
+            "suite": "io.github.aililuola.mathproofmesh.contract.CanonicalJsonParityTest",
+            "tests": 1,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0,
+            "result": "PASS",
+            "report": "target/modules/mathproofmesh-contracts/surefire-reports/TEST-io.github.aililuola.mathproofmesh.contract.CanonicalJsonParityTest.xml"
+          }
+        ]
+      },
+      "ordered_message_admission_and_exactly_once_delivery": {
+        "result": "PASS",
+        "suites": [
+          {
+            "suite": "io.github.aililuola.mathproofmesh.communication.MessageAdmissionPolicyParityTest",
+            "tests": 15,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0,
+            "result": "PASS",
+            "report": "target/modules/mathproofmesh-core/surefire-reports/TEST-io.github.aililuola.mathproofmesh.communication.MessageAdmissionPolicyParityTest.xml"
+          },
+          {
+            "suite": "io.github.aililuola.mathproofmesh.communication.Phase17MessageAdmissionHardeningTest",
+            "tests": 3,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0,
+            "result": "PASS",
+            "report": "target/modules/mathproofmesh-core/surefire-reports/TEST-io.github.aililuola.mathproofmesh.communication.Phase17MessageAdmissionHardeningTest.xml"
+          }
+        ]
+      },
+      "typed_memory_promotion_and_invalidation": {
+        "result": "PASS",
+        "suites": [
+          {
+            "suite": "io.github.aililuola.mathproofmesh.memory.TypedMemoryParityTest",
+            "tests": 9,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0,
+            "result": "PASS",
+            "report": "target/modules/mathproofmesh-core/surefire-reports/TEST-io.github.aililuola.mathproofmesh.memory.TypedMemoryParityTest.xml"
+          },
+          {
+            "suite": "io.github.aililuola.mathproofmesh.persistence.MemoryProofGraphPostgresIT",
+            "tests": 4,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0,
+            "result": "PASS",
+            "report": "target/modules/mathproofmesh-server/failsafe-reports/TEST-io.github.aililuola.mathproofmesh.persistence.MemoryProofGraphPostgresIT.xml"
+          }
+        ]
+      },
+      "counterexample_propagation_and_graph_reopen": {
+        "result": "PASS",
+        "suites": [
+          {
+            "suite": "io.github.aililuola.mathproofmesh.proofgraph.ProofGraphParityTest",
+            "tests": 8,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0,
+            "result": "PASS",
+            "report": "target/modules/mathproofmesh-core/surefire-reports/TEST-io.github.aililuola.mathproofmesh.proofgraph.ProofGraphParityTest.xml"
+          }
+        ]
+      },
+      "checkpoint_cas_lease_outbox_and_inbox": {
+        "result": "PASS",
+        "suites": [
+          {
+            "suite": "io.github.aililuola.mathproofmesh.persistence.PersistencePostgresIT",
+            "tests": 9,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0,
+            "result": "PASS",
+            "report": "target/modules/mathproofmesh-server/failsafe-reports/TEST-io.github.aililuola.mathproofmesh.persistence.PersistencePostgresIT.xml"
+          }
+        ]
+      },
+      "proof_control_action_materialization": {
+        "result": "PASS",
+        "suites": [
+          {
+            "suite": "io.github.aililuola.mathproofmesh.proofcontrol.ControlActionMaterializationParityTest",
+            "tests": 8,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0,
+            "result": "PASS",
+            "report": "target/modules/mathproofmesh-core/surefire-reports/TEST-io.github.aililuola.mathproofmesh.proofcontrol.ControlActionMaterializationParityTest.xml"
+          }
+        ]
+      },
+      "temporal_decisions_replay_and_continue_as_new": {
+        "result": "PASS",
+        "suites": [
+          {
+            "suite": "io.github.aililuola.mathproofmesh.workflow.TemporalWorkflowGateTest",
+            "tests": 4,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0,
+            "result": "PASS",
+            "report": "target/modules/mathproofmesh-server/surefire-reports/TEST-io.github.aililuola.mathproofmesh.workflow.TemporalWorkflowGateTest.xml"
+          }
+        ]
+      },
+      "provider_idempotency_and_failure_recovery": {
+        "result": "PASS",
+        "suites": [
+          {
+            "suite": "io.github.aililuola.mathproofmesh.agent.StructuredAgentRunnerTest",
+            "tests": 10,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0,
+            "result": "PASS",
+            "report": "target/modules/mathproofmesh-server/surefire-reports/TEST-io.github.aililuola.mathproofmesh.agent.StructuredAgentRunnerTest.xml"
+          }
+        ]
+      },
+      "rest_sse_cli_resume_contract": {
+        "result": "PASS",
+        "suites": [
+          {
+            "suite": "io.github.aililuola.mathproofmesh.api.ApiGateTest",
+            "tests": 7,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0,
+            "result": "PASS",
+            "report": "target/modules/mathproofmesh-server/surefire-reports/TEST-io.github.aililuola.mathproofmesh.api.ApiGateTest.xml"
+          }
+        ]
+      }
+    }
+  },
+  "gates": {
+    "contracts_adjusted_line_ge_90": "PASS",
+    "contracts_adjusted_branch_ge_85": "PASS",
+    "core_overall_line_ge_85": "PASS",
+    "core_overall_branch_ge_75": "PASS",
+    "core_invariant_line_ge_90": "PASS",
+    "core_invariant_branch_ge_85": "PASS",
+    "server_testable_business_line_ge_70": "PASS",
+    "desktop_testable_business_line_ge_70": "PASS",
+    "critical_scenarios_100_percent": "PASS"
+  },
+  "failures": []
+}

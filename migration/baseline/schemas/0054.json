@@ -1,0 +1,32 @@
+{
+  "qualified_name": "mathproofmesh.desktop.settings.DesktopSettings",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "remember_credentials": {
+        "default": true,
+        "title": "Remember Credentials",
+        "type": "boolean"
+      },
+      "sandbox_enabled": {
+        "default": true,
+        "title": "Sandbox Enabled",
+        "type": "boolean"
+      },
+      "selected_profile": {
+        "default": "smoke",
+        "enum": [
+          "smoke",
+          "formal",
+          "active",
+          "proof_control_shadow",
+          "proof_control_active"
+        ],
+        "title": "Selected Profile",
+        "type": "string"
+      }
+    },
+    "title": "DesktopSettings",
+    "type": "object"
+  }
+}

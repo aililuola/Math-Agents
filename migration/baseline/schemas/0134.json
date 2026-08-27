@@ -1,0 +1,195 @@
+{
+  "qualified_name": "mathproofmesh.schemas.BudgetDecision",
+  "schema": {
+    "$defs": {
+      "ActionKind": {
+        "enum": [
+          "widen",
+          "deepen",
+          "verify",
+          "synthesize",
+          "revise",
+          "bridge",
+          "resolve_conflict",
+          "search_counterexample",
+          "merge_route",
+          "cooldown_route",
+          "switch_representation",
+          "trigger_inspiration",
+          "search_analogy",
+          "invent_construction",
+          "generate_invariant",
+          "reverse_goal",
+          "meta_replan",
+          "surprise_widen",
+          "stop"
+        ],
+        "title": "ActionKind",
+        "type": "string"
+      },
+      "BudgetAction": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "$ref": "#/$defs/ActionKind"
+          },
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Blocked Reason"
+          },
+          "eligible": {
+            "default": true,
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "estimated_calls": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Estimated Calls",
+            "type": "integer"
+          },
+          "forced": {
+            "default": false,
+            "title": "Forced",
+            "type": "boolean"
+          },
+          "planned_paths": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Planned Paths",
+            "type": "integer"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Rank"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "selected": {
+            "default": false,
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Strategy Id"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Id"
+          }
+        },
+        "required": [
+          "action",
+          "score",
+          "reason"
+        ],
+        "title": "BudgetAction",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "actions": {
+        "items": {
+          "$ref": "#/$defs/BudgetAction"
+        },
+        "title": "Actions",
+        "type": "array"
+      },
+      "all_evaluated_paths_failed": {
+        "default": false,
+        "title": "All Evaluated Paths Failed",
+        "type": "boolean"
+      },
+      "candidates": {
+        "items": {
+          "$ref": "#/$defs/BudgetAction"
+        },
+        "title": "Candidates",
+        "type": "array"
+      },
+      "coverage": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Coverage",
+        "type": "number"
+      },
+      "failure_rate": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Failure Rate",
+        "type": "number"
+      },
+      "finish_reserve_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Finish Reserve Calls",
+        "type": "integer"
+      },
+      "forced_widen": {
+        "default": false,
+        "title": "Forced Widen",
+        "type": "boolean"
+      },
+      "global_uncertainty": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Global Uncertainty",
+        "type": "number"
+      },
+      "rationale": {
+        "title": "Rationale",
+        "type": "string"
+      }
+    },
+    "required": [
+      "actions",
+      "global_uncertainty",
+      "coverage",
+      "rationale"
+    ],
+    "title": "BudgetDecision",
+    "type": "object"
+  }
+}

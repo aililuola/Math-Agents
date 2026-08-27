@@ -1,0 +1,1 @@
+Let the sequence {a_n} satisfy a_1=2, and for each n>=2 let a_n be the smallest prime number that does not divide product_{k=1}^{n-1}(a_k+n-k). For any prime p, let f(p) be the number of times p appears in this sequence. Prove that for every positive integer m and every set of pairwise distinct primes p_1,...,p_m, sum_{i=1}^m f(p_i) <= (max_i p_i + sum_{i=1}^m p_i)/2.

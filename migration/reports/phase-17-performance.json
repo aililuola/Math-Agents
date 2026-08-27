@@ -1,0 +1,214 @@
+{
+  "schema_version": "1.0",
+  "phase": "17",
+  "generated_at_utc": "2026-08-12T05:11:23.220469+00:00",
+  "result": "PASS",
+  "policy": "Seven required scenarios use elapsed monotonic time. The first passing run is the immutable local reference; every later scenario must remain within 20 percent on the same machine fingerprint.",
+  "reference": "migration/baseline/phase-17-performance-reference.json",
+  "reference_action": "compared",
+  "machine": {
+    "os": "Windows",
+    "os_release": "11",
+    "architecture": "AMD64",
+    "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "logical_cpus": 20,
+    "physical_memory_bytes": 34188517376,
+    "jdk": "openjdk version \"25.0.4\" 2026-07-21 LTS | OpenJDK Runtime Environment Temurin-25.0.4+7 (build 25.0.4+7-LTS) | OpenJDK 64-Bit Server VM Temurin-25.0.4+7 (build 25.0.4+7-LTS, mixed mode, sharing)",
+    "jvm_flags": {
+      "MAVEN_OPTS": "",
+      "JAVA_TOOL_OPTIONS": "",
+      "surefire": "@{argLine} (JaCoCo agent during verify)"
+    }
+  },
+  "scenarios": {
+    "message_admission_dedup_delivery_10000": {
+      "fragment": "target/benchmark-reports/phase17-message.json",
+      "metric_definition": "large_elapsed_ns",
+      "metric_ns": 268389500,
+      "measurements_ns": {
+        "large_elapsed_ns": 268389500
+      },
+      "evidence": {
+        "scenario": "10000-message-admission-dedup-delivery",
+        "small_cases": 2000,
+        "large_cases": 10000,
+        "small_elapsed_ns": 102836500,
+        "large_elapsed_ns": 268389500,
+        "growth_ratio": 2.609866,
+        "persisted_messages": 9001,
+        "deliveries": 1,
+        "result": "PASS"
+      }
+    },
+    "concurrent_mock_agent_calls_100": {
+      "fragment": "target/benchmark-reports/phase17-concurrent-mock.json",
+      "metric_definition": "elapsed_ns",
+      "metric_ns": 47474100,
+      "measurements_ns": {
+        "elapsed_ns": 47474100
+      },
+      "evidence": {
+        "scenario": "100-concurrent-mock-agent-calls",
+        "calls": 100,
+        "concurrency_limit": 8,
+        "observed_max_concurrency": 8,
+        "elapsed_ns": 47474100,
+        "failed_calls": 0,
+        "active_after_completion": 0,
+        "result": "PASS"
+      }
+    },
+    "large_proof_graph": {
+      "fragment": "target/benchmark-reports/phase17-proof-graph.json",
+      "metric_definition": "build_elapsed_ns + closure_and_debt_elapsed_ns + counterexample_propagation_elapsed_ns",
+      "metric_ns": 33384300,
+      "measurements_ns": {
+        "build_elapsed_ns": 24341700,
+        "closure_and_debt_elapsed_ns": 8173800,
+        "counterexample_propagation_elapsed_ns": 868800
+      },
+      "evidence": {
+        "scenario": "large-proof-graph-closure-counterexample-debt",
+        "nodes": 2000,
+        "build_elapsed_ns": 24341700,
+        "closure_and_debt_elapsed_ns": 8173800,
+        "counterexample_propagation_elapsed_ns": 868800,
+        "closure_size": 2000,
+        "topological_order_size": 2000,
+        "result": "PASS"
+      }
+    },
+    "checkpoint_outbox_retry_1000": {
+      "fragment": "target/benchmark-reports/phase17-checkpoint-outbox.json",
+      "metric_definition": "checkpoint_elapsed_ns + outbox_insert_elapsed_ns + claim_release_reclaim_publish_elapsed_ns",
+      "metric_ns": 3274081600,
+      "measurements_ns": {
+        "checkpoint_elapsed_ns": 459309100,
+        "outbox_insert_elapsed_ns": 2063206000,
+        "claim_release_reclaim_publish_elapsed_ns": 751566500
+      },
+      "evidence": {
+        "scenario": "1000-checkpoint-outbox-retry",
+        "cases": 1000,
+        "checkpoint_elapsed_ns": 459309100,
+        "outbox_insert_elapsed_ns": 2063206000,
+        "claim_release_reclaim_publish_elapsed_ns": 751566500,
+        "retry_attempts_per_event": 2,
+        "result": "PASS"
+      }
+    },
+    "python_sidecar_cold_warm": {
+      "fragment": "target/benchmark-reports/phase17-python-sidecar.json",
+      "metric_definition": "cold_elapsed_ns + warm_total_elapsed_ns",
+      "metric_ns": 2794596100,
+      "measurements_ns": {
+        "cold_elapsed_ns": 439491200,
+        "warm_total_elapsed_ns": 2355104900
+      },
+      "evidence": {
+        "scenario": "python-sidecar-cold-warm-process-startup",
+        "worker_lifecycle": "short-lived-process-per-request",
+        "cold_calls": 1,
+        "warm_calls": 5,
+        "cold_elapsed_ns": 439491200,
+        "warm_total_elapsed_ns": 2355104900,
+        "warm_mean_elapsed_ns": 471020980,
+        "certified_results": 6,
+        "result": "PASS"
+      }
+    },
+    "sse_long_stream_resume": {
+      "fragment": "target/benchmark-reports/phase17-sse-resume.json",
+      "metric_definition": "stream_elapsed_ns + resume_elapsed_ns",
+      "metric_ns": 44205800,
+      "measurements_ns": {
+        "stream_elapsed_ns": 38896000,
+        "resume_elapsed_ns": 5309800
+      },
+      "evidence": {
+        "scenario": "sse-long-stream-last-event-id-recovery",
+        "events": 10000,
+        "disconnect_after_event_id": 9000,
+        "resumed_events": 1000,
+        "encoded_bytes": 2665595,
+        "stream_elapsed_ns": 38896000,
+        "resume_elapsed_ns": 5309800,
+        "duplicate_or_missing_resumed_events": 0,
+        "result": "PASS"
+      }
+    },
+    "temporal_multi_route_replay_continue_as_new": {
+      "fragment": "target/benchmark-reports/phase17-temporal.json",
+      "metric_definition": "multi_route_elapsed_ns + replay_elapsed_ns + continue_as_new_elapsed_ns",
+      "metric_ns": 238627600,
+      "measurements_ns": {
+        "multi_route_elapsed_ns": 143823200,
+        "replay_elapsed_ns": 21441000,
+        "continue_as_new_elapsed_ns": 73363400
+      },
+      "evidence": {
+        "scenario": "temporal-multi-route-replay-continue-as-new",
+        "routes": 8,
+        "history_events": 138,
+        "continue_as_new_generations": 2,
+        "multi_route_elapsed_ns": 143823200,
+        "replay_elapsed_ns": 21441000,
+        "continue_as_new_elapsed_ns": 73363400,
+        "duplicate_domain_applications": 0,
+        "result": "PASS"
+      }
+    }
+  },
+  "comparison": {
+    "message_admission_dedup_delivery_10000": {
+      "reference_ns": 274786500,
+      "current_ns": 268389500,
+      "ratio": 0.97672,
+      "maximum_ratio": 1.2,
+      "result": "PASS"
+    },
+    "concurrent_mock_agent_calls_100": {
+      "reference_ns": 44456500,
+      "current_ns": 47474100,
+      "ratio": 1.067878,
+      "maximum_ratio": 1.2,
+      "result": "PASS"
+    },
+    "large_proof_graph": {
+      "reference_ns": 211051500,
+      "current_ns": 33384300,
+      "ratio": 0.158181,
+      "maximum_ratio": 1.2,
+      "result": "PASS"
+    },
+    "checkpoint_outbox_retry_1000": {
+      "reference_ns": 28122953400,
+      "current_ns": 3274081600,
+      "ratio": 0.11642,
+      "maximum_ratio": 1.2,
+      "result": "PASS"
+    },
+    "python_sidecar_cold_warm": {
+      "reference_ns": 2519050900,
+      "current_ns": 2794596100,
+      "ratio": 1.109385,
+      "maximum_ratio": 1.2,
+      "result": "PASS"
+    },
+    "sse_long_stream_resume": {
+      "reference_ns": 58201500,
+      "current_ns": 44205800,
+      "ratio": 0.75953,
+      "maximum_ratio": 1.2,
+      "result": "PASS"
+    },
+    "temporal_multi_route_replay_continue_as_new": {
+      "reference_ns": 692395800,
+      "current_ns": 238627600,
+      "ratio": 0.34464,
+      "maximum_ratio": 1.2,
+      "result": "PASS"
+    }
+  },
+  "failures": []
+}

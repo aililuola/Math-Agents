@@ -1,0 +1,148 @@
+{
+  "schema_version": "1.0",
+  "phase": "12",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-31T03:10:42.101Z",
+  "scope": "Route teams, continuation, deep exploration, cross-route synthesis, and database-shaped runner",
+  "source": {
+    "authoritative_zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+    "source_files": 401,
+    "source_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "immutability": "PASS"
+  },
+  "pipeline": {
+    "fixed_stages": 15,
+    "first_round_route_isolation": "PASS",
+    "raw_transcript_cross_route_sharing": false,
+    "broker_only_cross_route_boundary": "PASS",
+    "blind_final_review": "PASS"
+  },
+  "route_teams": {
+    "roles": [
+      "Prover",
+      "Skeptic",
+      "Tool Specialist",
+      "Referee"
+    ],
+    "author_may_referee": false,
+    "skeptic_is_risk_directed": true,
+    "tool_specialist_is_on_demand": true,
+    "unreviewed_global_share": false
+  },
+  "continuation": {
+    "maximum_segment_steps": 16,
+    "maximum_segment_claims": 8,
+    "latest_checkpoint_cas": "PASS",
+    "immutable_problem_path_strategy_identity": "PASS",
+    "rejected_delta_audited_without_advance": "PASS",
+    "rollback_and_branch": "PASS",
+    "resume_source": "committed checkpoint only"
+  },
+  "deep_exploration": {
+    "tiers": [
+      "bounded repair 64k",
+      "deep 96k",
+      "deep 128k"
+    ],
+    "same_signature_atomic_lease": "PASS",
+    "distinct_signature_parallelism": "PASS",
+    "promotion_requires_verified_evidence": "PASS",
+    "one_bounded_repair": "PASS",
+    "first_chunk_timeout_seconds": 60,
+    "stream_stall_timeout_seconds": 300,
+    "elapsed_time_is_mathematical_progress": false
+  },
+  "scheduler_and_synthesis": {
+    "shares": [
+      "breadth",
+      "depth",
+      "verification",
+      "synthesis"
+    ],
+    "finish_reserve_protected": "PASS",
+    "failure_classification": "PASS",
+    "verified_dependency_closure_only": "PASS",
+    "selected_negative_evidence": "PASS",
+    "author_identity_in_blind_packet": false
+  },
+  "reference_runner": {
+    "implementation": "InProcessRunCoordinator",
+    "mock_complete": "PASS",
+    "mock_fail": "PASS",
+    "mock_partial": "PASS",
+    "mock_budget_exhausted": "PASS",
+    "pause_resume": "PASS",
+    "double_coordinator_blocked_by_fenced_lease": "PASS",
+    "restart_from_working_delta": false
+  },
+  "tests": {
+    "mapped_python_test_files": 18,
+    "mapped_python_functions": 107,
+    "authority_named_junit_cases": 107,
+    "reactor_total": 1353,
+    "report_files": 161,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "online_clean_verify": "PASS",
+    "offline_clean_verify": "PASS",
+    "online_log": "migration/logs/phase-12-verify-online.log",
+    "online_log_sha256": "9ab14919c1acfbef748ad78833ea1110e0ed7ece887d3330e46b8a1cbbb71f23",
+    "offline_log": "migration/logs/phase-12-verify-offline.log",
+    "offline_log_sha256": "c534ffe3e6891eb6b21323309b531aff2cfed1c97ea3d92d17aba643b8997e78",
+    "failed_online_attempt": {
+      "path": "migration/logs/phase-12-verify-online-attempt-1.log",
+      "sha256": "ec129177fa34a6e961bf2731249d1820a83ab3046239bfaab294b88247a6e0bd",
+      "classification": "initial SpotBugs hash-comparison finding corrected before final gates",
+      "semantic_or_assertion_failure": false
+    }
+  },
+  "quality_and_dependency_security": {
+    "java": "Eclipse Temurin 25.0.4+7",
+    "maven": "3.9.16",
+    "maven_wrapper": "3.3.4 only-script",
+    "dependencies_added": [],
+    "dependency_version_changes": [],
+    "dependency_convergence": "PASS",
+    "external_snapshots": 0,
+    "duplicate_classes": 0,
+    "spotbugs_findsecbugs_findings": 0,
+    "modulith_structure": "PASS",
+    "dependency_tree": "migration/reports/phase-12-dependency-tree.txt",
+    "dependency_tree_sha256": "2f400fa74b152f115b80862818716de7c4ac46e4f07092e872162e3c158ff482",
+    "sbom": {
+      "format": "CycloneDX",
+      "spec_version": "1.6",
+      "components": 88,
+      "dependency_entries": 89,
+      "path": "migration/reports/phase-01-sbom.json",
+      "sha256": "2e547c2b8e6fd95d0b5283f742d99f1be62fd0b58472ae619f17cfd3382d398a"
+    },
+    "owasp": {
+      "engine": "12.2.2",
+      "dependencies": 112,
+      "fail_build_on_cvss": 7.0,
+      "findings_at_or_above_gate": 0,
+      "below_gate_findings": [
+        {
+          "cve": "CVE-2021-4277",
+          "artifact": "com.cronutils:cron-utils:9.2.1",
+          "severity": "MEDIUM",
+          "cvss": 5.3
+        }
+      ],
+      "report_json_sha256": "abbfc5fc6311b12ac6cbc505aad01fee2b199c99bbcff7379f8efe1e9e0108ad",
+      "report_html_sha256": "b753a5b059e91b2a9aa6ee23131f81fce57b710626d0262fcb214ce2eeadeb73"
+    }
+  },
+  "mappings": {
+    "source_rows": "13/13 migrated",
+    "test_rows": "18/18 ported; 107 Python test functions",
+    "auxiliary_rows": "none assigned to phase 12",
+    "state_rows": "142 + 167 + 92 = 401 unique paths"
+  },
+  "stop_condition": {
+    "phase_13_started_before_phase_12_pass": false
+  }
+}

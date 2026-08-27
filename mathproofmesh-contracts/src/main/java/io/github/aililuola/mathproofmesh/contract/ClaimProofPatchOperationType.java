@@ -1,0 +1,11 @@
+package io.github.aililuola.mathproofmesh.contract;
+
+public enum ClaimProofPatchOperationType {
+  REPLACE_STEP_JUSTIFICATION,
+  REPLACE_STEP_STATEMENT,
+  INSERT_STEP_BEFORE,
+  INSERT_STEP_AFTER,
+  DELETE_REDUNDANT_STEP,
+  REBIND_VERIFIED_DEPENDENCY,
+  ADD_VERIFIED_EVIDENCE_REF
+}

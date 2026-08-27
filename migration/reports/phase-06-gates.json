@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.0",
+  "phase": "06",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-30T14:51:30.447Z",
+  "scope": "Three-tier memory and proof obligation graph",
+  "source": {
+    "authoritative_zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+    "source_files": 401,
+    "source_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "immutability": "PASS"
+  },
+  "memory": {
+    "fact_insight_negative_policy": "PASS",
+    "independent_reviewer": "PASS",
+    "missing_dependency_rejected": "PASS",
+    "bounded_experiment_fact_rejected": "PASS",
+    "duplicate_provenance_no_upgrade": "PASS",
+    "counterexample_replay": "PASS",
+    "transitive_demotion": "PASS",
+    "history_and_reason_retained": "PASS"
+  },
+  "proof_graph": {
+    "postgresql_authority": "PASS",
+    "jgrapht_projection": "PASS",
+    "neo4j_dependencies": 0,
+    "bulk_projection_queries": 4,
+    "cycles_and_missing_endpoints": "PASS",
+    "dependency_closure_and_topology": "PASS",
+    "proof_debt_and_bottlenecks": "PASS",
+    "conflict_duplicate_and_bridge_services": "PASS",
+    "freeze_and_minimal_subgraph": "PASS",
+    "concurrent_mutation": "PASS"
+  },
+  "persistence": {
+    "migration": "mathproofmesh-server/src/main/resources/db/migration/V3__memory_and_proof_graph_authority.sql",
+    "migration_sha256": "de9cd480f52e304a400d4eba885f2476ad3faa9b93c3b1a3efc1f1572defb56c",
+    "flyway_migrations": 3,
+    "application_tables": 42,
+    "counterexample_transaction": "Negative -> invalidation closure -> needs_reverify -> reopened obligations -> event/outbox",
+    "rollback_fault_injection": "PASS",
+    "idempotent_replay": "PASS",
+    "concurrent_single_mutation": "PASS"
+  },
+  "tests": {
+    "lemma_memory": 6,
+    "typed_memory": 9,
+    "proof_graph": 8,
+    "proof_graph_services": 5,
+    "proof_graph_concurrency": 2,
+    "memory_graph_postgresql": 4,
+    "memory_graph_static_policy": 3,
+    "reactor_total": 794,
+    "report_files": 41,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "online_clean_verify": "PASS",
+    "offline_clean_verify": "PASS",
+    "containers_remaining_after_tests": 0
+  },
+  "quality_and_dependency_security": {
+    "java": "Eclipse Temurin 25.0.4+7",
+    "maven": "3.9.16",
+    "maven_wrapper": "3.3.4 only-script",
+    "dependency_convergence": "PASS",
+    "external_snapshots": 0,
+    "duplicate_classes": 0,
+    "spotbugs_findsecbugs_findings": 0,
+    "dependency_tree": "migration/reports/phase-06-dependency-tree.txt",
+    "dependency_tree_sha256": "ebe8bf809d9d6f20ca07c01d31e10819ff600f464b6fa463f08c120d84152243",
+    "sbom": {
+      "format": "CycloneDX",
+      "spec_version": "1.6",
+      "components": 88,
+      "dependency_entries": 89,
+      "path": "migration/reports/phase-01-sbom.json",
+      "sha256": "2e547c2b8e6fd95d0b5283f742d99f1be62fd0b58472ae619f17cfd3382d398a"
+    },
+    "owasp": {
+      "engine": "12.2.2",
+      "dependencies": 112,
+      "unsuppressed_vulnerable_dependencies": 0,
+      "unsuppressed_vulnerability_findings": 0,
+      "temporarily_suppressed_cves": [
+        "CVE-2026-54399",
+        "CVE-2026-54428"
+      ],
+      "suppression_owner": "dependency/CI maintenance",
+      "suppression_expires": "2026-10-31",
+      "report_json_sha256": "ec9630bdc831fe8e055a4269b16c8cb4dca439de5fe3e4b3908d732e8d7f7644",
+      "report_html_sha256": "d49d2f68ef81d119149052ed04d5fa68a12c1bd72ed1aa544e87045d407fd4d9"
+    }
+  },
+  "mappings": {
+    "source_rows": "7/7 migrated",
+    "test_rows": "3/3 ported",
+    "auxiliary_rows": "2/2 translated_verified",
+    "state_rows": "142 + 167 + 92 = 401 unique paths"
+  },
+  "stop_condition": {
+    "phase_07_started": false
+  }
+}

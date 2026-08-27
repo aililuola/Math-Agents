@@ -1,0 +1,211 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ConstructionProposal",
+  "schema": {
+    "$defs": {
+      "NoveltySignature": {
+        "additionalProperties": false,
+        "properties": {
+          "core_objects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Core Objects",
+            "type": "array"
+          },
+          "extension_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Extension Tags",
+            "type": "array"
+          },
+          "key_transformations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Key Transformations",
+            "type": "array"
+          },
+          "mechanism_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Mechanism Tags",
+            "type": "array"
+          },
+          "normalization_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Normalization Confidence"
+          },
+          "normalized_hash": {
+            "default": "",
+            "title": "Normalized Hash",
+            "type": "string"
+          },
+          "normalizer_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Normalizer Version"
+          },
+          "proof_principles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Proof Principles",
+            "type": "array"
+          },
+          "raw_tags": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Raw Tags",
+            "type": "object"
+          },
+          "representation_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Representation Tags",
+            "type": "array"
+          },
+          "targeted_obligation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Targeted Obligation Ids",
+            "type": "array"
+          }
+        },
+        "title": "NoveltySignature",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "constructed_objects": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Constructed Objects",
+        "type": "array"
+      },
+      "construction_type": {
+        "title": "Construction Type",
+        "type": "string"
+      },
+      "definition": {
+        "minLength": 1,
+        "title": "Definition",
+        "type": "string"
+      },
+      "expected_invariant_or_relation": {
+        "title": "Expected Invariant Or Relation",
+        "type": "string"
+      },
+      "expected_proof_debt_reduction": {
+        "default": "",
+        "title": "Expected Proof Debt Reduction",
+        "type": "string"
+      },
+      "failure_conditions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Failure Conditions",
+        "type": "array"
+      },
+      "falsification_tests": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Falsification Tests",
+        "type": "array"
+      },
+      "generated_obligations": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Generated Obligations",
+        "type": "array"
+      },
+      "intended_obligations": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Intended Obligations",
+        "type": "array"
+      },
+      "novelty_signature": {
+        "$ref": "#/$defs/NoveltySignature"
+      },
+      "operator_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Operator Id"
+      },
+      "operator_preconditions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Operator Preconditions",
+        "type": "array"
+      },
+      "proposal_id": {
+        "title": "Proposal Id",
+        "type": "string"
+      },
+      "reversibility_requirements": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Reversibility Requirements",
+        "type": "array"
+      },
+      "suggested_tools": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Suggested Tools",
+        "type": "array"
+      }
+    },
+    "required": [
+      "construction_type",
+      "constructed_objects",
+      "definition",
+      "intended_obligations",
+      "expected_invariant_or_relation",
+      "falsification_tests",
+      "novelty_signature"
+    ],
+    "title": "ConstructionProposal",
+    "type": "object"
+  }
+}

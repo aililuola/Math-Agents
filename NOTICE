@@ -1,0 +1,11 @@
+JavaMathProofMesh
+Copyright (c) 2026 MathProofMesh contributors
+
+This distribution contains a Java migration of version metadata, tests, and
+behavioral contracts from the MIT-licensed MathProofMesh Python project.
+
+The python-compute-service directory is an independent sidecar boundary. It
+does not import or package the frozen outer Python source tree.
+
+Third-party components remain under their respective licenses. The generated
+CycloneDX software bill of materials records the resolved component inventory.

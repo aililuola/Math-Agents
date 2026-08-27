@@ -1,0 +1,92 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.SynthesisReadinessRecord",
+  "schema": {
+    "$defs": {
+      "GateVerdict": {
+        "enum": [
+          "pass",
+          "block",
+          "rewrite",
+          "shadow_block"
+        ],
+        "title": "GateVerdict",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "candidate_evidence_subject_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Candidate Evidence Subject Ids",
+        "type": "array"
+      },
+      "candidate_proof_verified": {
+        "default": false,
+        "title": "Candidate Proof Verified",
+        "type": "boolean"
+      },
+      "invalid_goal_link_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Invalid Goal Link Ids",
+        "type": "array"
+      },
+      "open_core_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Open Core Obligation Ids",
+        "type": "array"
+      },
+      "open_scope_risk_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Open Scope Risk Ids",
+        "type": "array"
+      },
+      "reasons": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Reasons",
+        "type": "array"
+      },
+      "record_id": {
+        "title": "Record Id",
+        "type": "string"
+      },
+      "unresolved_common_mode_assumption_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Unresolved Common Mode Assumption Ids",
+        "type": "array"
+      },
+      "unresolved_conflict_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Unresolved Conflict Ids",
+        "type": "array"
+      },
+      "verdict": {
+        "$ref": "#/$defs/GateVerdict"
+      }
+    },
+    "required": [
+      "verdict",
+      "open_core_obligation_ids",
+      "open_scope_risk_ids",
+      "unresolved_conflict_ids",
+      "invalid_goal_link_ids",
+      "unresolved_common_mode_assumption_ids",
+      "reasons"
+    ],
+    "title": "SynthesisReadinessRecord",
+    "type": "object"
+  }
+}

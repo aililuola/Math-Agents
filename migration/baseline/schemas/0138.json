@@ -1,0 +1,138 @@
+{
+  "qualified_name": "mathproofmesh.schemas.CandidateConjectureBatch",
+  "schema": {
+    "$defs": {
+      "CandidateConjecture": {
+        "additionalProperties": false,
+        "description": "A computation-inspired hypothesis that is explicitly not a proved fact.",
+        "properties": {
+          "confidence": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "conjecture_id": {
+            "title": "Conjecture Id",
+            "type": "string"
+          },
+          "content_hash": {
+            "default": "",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "$ref": "#/$defs/EvidenceRef"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "proof_obligations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Proof Obligations",
+            "type": "array"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "scope_limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scope Limitations",
+            "type": "array"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "status": {
+            "const": "candidate",
+            "default": "candidate",
+            "title": "Status",
+            "type": "string"
+          },
+          "supporting_experiment_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Supporting Experiment Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "statement",
+          "rationale",
+          "supporting_experiment_ids",
+          "scope_limitations",
+          "proof_obligations"
+        ],
+        "title": "CandidateConjecture",
+        "type": "object"
+      },
+      "EvidenceRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_ref": {
+            "title": "Artifact Ref",
+            "type": "string"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Section"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_ref"
+        ],
+        "title": "EvidenceRef",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "candidate_conjectures": {
+        "items": {
+          "$ref": "#/$defs/CandidateConjecture"
+        },
+        "title": "Candidate Conjectures",
+        "type": "array"
+      }
+    },
+    "required": [
+      "candidate_conjectures"
+    ],
+    "title": "CandidateConjectureBatch",
+    "type": "object"
+  }
+}

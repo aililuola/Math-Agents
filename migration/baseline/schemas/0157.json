@@ -1,0 +1,278 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ExperimentResult",
+  "schema": {
+    "$defs": {
+      "ComputationMethod": {
+        "enum": [
+          "sympy_simplify",
+          "sympy_equivalent",
+          "polynomial_factor",
+          "modular_exhaustive",
+          "bounded_integer_search",
+          "graph_certificate",
+          "recurrence_check",
+          "bounded_greedy_sequence",
+          "candidate_period_check",
+          "exact_geometry",
+          "numeric_counterexample",
+          "real_inequality",
+          "number_theory_check",
+          "sandboxed_python",
+          "lean_check"
+        ],
+        "title": "ComputationMethod",
+        "type": "string"
+      },
+      "EvidenceRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_ref": {
+            "title": "Artifact Ref",
+            "type": "string"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Section"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_ref"
+        ],
+        "title": "EvidenceRef",
+        "type": "object"
+      },
+      "EvidenceStrength": {
+        "enum": [
+          "heuristic",
+          "bounded_evidence",
+          "counterexample",
+          "exhaustive_certificate",
+          "formal_certificate"
+        ],
+        "title": "EvidenceStrength",
+        "type": "string"
+      },
+      "ExperimentOutcome": {
+        "enum": [
+          "not_refuted",
+          "counterexample_found",
+          "certified",
+          "inconclusive",
+          "error"
+        ],
+        "title": "ExperimentOutcome",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "artifact_refs": {
+        "items": {
+          "$ref": "#/$defs/EvidenceRef"
+        },
+        "title": "Artifact Refs",
+        "type": "array"
+      },
+      "cached": {
+        "default": false,
+        "title": "Cached",
+        "type": "boolean"
+      },
+      "cases_checked": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Cases Checked",
+        "type": "integer"
+      },
+      "certificate": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Certificate"
+      },
+      "counterexample": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Counterexample"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "error": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Error"
+      },
+      "evidence_strength": {
+        "$ref": "#/$defs/EvidenceStrength"
+      },
+      "exact_arithmetic": {
+        "default": false,
+        "title": "Exact Arithmetic",
+        "type": "boolean"
+      },
+      "experiment_id": {
+        "title": "Experiment Id",
+        "type": "string"
+      },
+      "independently_verified": {
+        "default": false,
+        "title": "Independently Verified",
+        "type": "boolean"
+      },
+      "method": {
+        "$ref": "#/$defs/ComputationMethod"
+      },
+      "outcome": {
+        "$ref": "#/$defs/ExperimentOutcome"
+      },
+      "parent_checkpoint_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Parent Checkpoint Id"
+      },
+      "path_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Path Id"
+      },
+      "program_hash": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Program Hash"
+      },
+      "request_hash": {
+        "title": "Request Hash",
+        "type": "string"
+      },
+      "result_hash": {
+        "default": "",
+        "title": "Result Hash",
+        "type": "string"
+      },
+      "runtime_seconds": {
+        "default": 0.0,
+        "minimum": 0.0,
+        "title": "Runtime Seconds",
+        "type": "number"
+      },
+      "scope": {
+        "additionalProperties": true,
+        "title": "Scope",
+        "type": "object"
+      },
+      "target_claim": {
+        "title": "Target Claim",
+        "type": "string"
+      },
+      "target_claim_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Target Claim Id"
+      },
+      "tool_name": {
+        "title": "Tool Name",
+        "type": "string"
+      },
+      "tool_version": {
+        "title": "Tool Version",
+        "type": "string"
+      },
+      "verification_notes": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Verification Notes",
+        "type": "array"
+      }
+    },
+    "required": [
+      "experiment_id",
+      "request_hash",
+      "target_claim",
+      "method",
+      "outcome",
+      "evidence_strength",
+      "tool_name",
+      "tool_version"
+    ],
+    "title": "ExperimentResult",
+    "type": "object"
+  }
+}

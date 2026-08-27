@@ -1,0 +1,117 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.StructuredVerifierIssue",
+  "schema": {
+    "$defs": {
+      "InferenceRiskType": {
+        "enum": [
+          "necessary_to_sufficient",
+          "eventual_to_global",
+          "pointwise_to_uniform",
+          "finite_range_to_finite_state",
+          "image_inclusion_to_surjectivity",
+          "projection_to_original",
+          "local_to_global",
+          "existence_to_uniform_existence",
+          "pairwise_to_common_witness",
+          "empirical_to_universal",
+          "partial_property_to_total_property",
+          "nonempty_intersection_to_subset_containment",
+          "exists_component_to_all_components",
+          "some_witness_to_all_witnesses",
+          "coverage_to_exhaustiveness",
+          "at_least_one_to_only_from_set",
+          "wrong_direction",
+          "quantifier_swap",
+          "dependency_missing",
+          "scope_mismatch",
+          "ambiguous_semantic_leap"
+        ],
+        "title": "InferenceRiskType",
+        "type": "string"
+      },
+      "VerifierIssueCode": {
+        "enum": [
+          "unsupported_implication",
+          "wrong_direction",
+          "finite_to_universal",
+          "eventual_to_global",
+          "missing_uniformity",
+          "quantifier_swap",
+          "property_strengthening",
+          "unverified_candidate_bound",
+          "dependency_missing",
+          "scope_mismatch",
+          "other"
+        ],
+        "title": "VerifierIssueCode",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "code": {
+        "$ref": "#/$defs/VerifierIssueCode"
+      },
+      "conclusion_summary": {
+        "title": "Conclusion Summary",
+        "type": "string"
+      },
+      "confidence": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Confidence",
+        "type": "number"
+      },
+      "issue_id": {
+        "title": "Issue Id",
+        "type": "string"
+      },
+      "premise_summary": {
+        "title": "Premise Summary",
+        "type": "string"
+      },
+      "report_id": {
+        "title": "Report Id",
+        "type": "string"
+      },
+      "step_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Step Id"
+      },
+      "suggested_risk_type": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/InferenceRiskType"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "target_id": {
+        "title": "Target Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "issue_id",
+      "report_id",
+      "target_id",
+      "code",
+      "premise_summary",
+      "conclusion_summary",
+      "confidence"
+    ],
+    "title": "StructuredVerifierIssue",
+    "type": "object"
+  }
+}

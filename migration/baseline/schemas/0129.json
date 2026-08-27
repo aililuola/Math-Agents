@@ -1,0 +1,416 @@
+{
+  "qualified_name": "mathproofmesh.schemas.BlindReviewPacket",
+  "schema": {
+    "$defs": {
+      "ProblemContract": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Tools",
+            "type": "array"
+          },
+          "canonical_statement": {
+            "default": "",
+            "title": "Canonical Statement",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "definitions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Definitions",
+            "type": "array"
+          },
+          "deliverables": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Deliverables",
+            "type": "array"
+          },
+          "exact_statement": {
+            "title": "Exact Statement",
+            "type": "string"
+          },
+          "goal_hash": {
+            "default": "",
+            "title": "Goal Hash",
+            "type": "string"
+          },
+          "hard_constraints": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Hard Constraints",
+            "type": "array"
+          },
+          "integrity_hash": {
+            "default": "",
+            "title": "Integrity Hash",
+            "type": "string"
+          },
+          "interpretation_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Interpretation Agent Id"
+          },
+          "interpretation_confidence": {
+            "default": 1.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Interpretation Confidence",
+            "type": "number"
+          },
+          "interpretation_raw_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Interpretation Raw Ref"
+          },
+          "interpretation_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Interpretation Reasons",
+            "type": "array"
+          },
+          "interpretation_source": {
+            "default": "original",
+            "enum": [
+              "original",
+              "user_confirmed",
+              "auto_assumed"
+            ],
+            "title": "Interpretation Source",
+            "type": "string"
+          },
+          "normalized_statement": {
+            "title": "Normalized Statement",
+            "type": "string"
+          },
+          "original_statement": {
+            "default": "",
+            "title": "Original Statement",
+            "type": "string"
+          },
+          "output_language": {
+            "default": "zh-CN",
+            "title": "Output Language",
+            "type": "string"
+          },
+          "problem_id": {
+            "title": "Problem Id",
+            "type": "string"
+          },
+          "problem_kind": {
+            "$ref": "#/$defs/ProblemKind",
+            "default": "unknown"
+          },
+          "semantic_view": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ProblemSemanticView"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "task_requirements": {
+            "items": {
+              "$ref": "#/$defs/TaskRequirement"
+            },
+            "title": "Task Requirements",
+            "type": "array"
+          }
+        },
+        "required": [
+          "exact_statement",
+          "normalized_statement"
+        ],
+        "title": "ProblemContract",
+        "type": "object"
+      },
+      "ProblemKind": {
+        "enum": [
+          "proof",
+          "calculation",
+          "logic",
+          "optimization",
+          "construction",
+          "research",
+          "mixed",
+          "unknown"
+        ],
+        "title": "ProblemKind",
+        "type": "string"
+      },
+      "ProblemSemanticView": {
+        "additionalProperties": false,
+        "description": "Audited prompt sidecar excluded from the frozen goal identity.",
+        "properties": {
+          "audit_findings": {
+            "items": {
+              "$ref": "#/$defs/SemanticInvariantAudit"
+            },
+            "title": "Audit Findings",
+            "type": "array"
+          },
+          "authoritative": {
+            "const": false,
+            "default": false,
+            "title": "Authoritative",
+            "type": "boolean"
+          },
+          "candidate_confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Candidate Confidence",
+            "type": "number"
+          },
+          "deterministic_audit_passed": {
+            "default": false,
+            "title": "Deterministic Audit Passed",
+            "type": "boolean"
+          },
+          "english_statement": {
+            "title": "English Statement",
+            "type": "string"
+          },
+          "missing_protected_fragments": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Protected Fragments",
+            "type": "array"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "protected_fragments": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Protected Fragments",
+            "type": "array"
+          },
+          "source_language": {
+            "title": "Source Language",
+            "type": "string"
+          },
+          "source_statement_hash": {
+            "title": "Source Statement Hash",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "usable",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_statement_hash",
+          "source_language",
+          "english_statement",
+          "candidate_confidence",
+          "status"
+        ],
+        "title": "ProblemSemanticView",
+        "type": "object"
+      },
+      "SemanticInvariantAudit": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "invariant": {
+            "minLength": 1,
+            "title": "Invariant",
+            "type": "string"
+          },
+          "source_values": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Values",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "pass",
+              "fail",
+              "not_applicable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target_values": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "invariant",
+          "status",
+          "detail"
+        ],
+        "title": "SemanticInvariantAudit",
+        "type": "object"
+      },
+      "TaskRequirement": {
+        "description": "The user-visible artifact that must be delivered for the task to finish.",
+        "enum": [
+          "proof",
+          "solution",
+          "computation",
+          "conjecture",
+          "counterexample",
+          "classification",
+          "optimization",
+          "construction",
+          "research_progress"
+        ],
+        "title": "TaskRequirement",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "cited_fact_packets": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Cited Fact Packets",
+        "type": "array"
+      },
+      "context_purpose": {
+        "const": "blind_review",
+        "default": "blind_review",
+        "title": "Context Purpose",
+        "type": "string"
+      },
+      "fact_context_complete": {
+        "default": true,
+        "title": "Fact Context Complete",
+        "type": "boolean"
+      },
+      "fact_context_failure_reasons": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Fact Context Failure Reasons",
+        "type": "array"
+      },
+      "final_proof_text": {
+        "title": "Final Proof Text",
+        "type": "string"
+      },
+      "forbidden_claims": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Forbidden Claims",
+        "type": "array"
+      },
+      "missing_cited_fact_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Missing Cited Fact Refs",
+        "type": "array"
+      },
+      "negative_context_char_budget": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Negative Context Char Budget",
+        "type": "integer"
+      },
+      "negative_context_chars_used": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Negative Context Chars Used",
+        "type": "integer"
+      },
+      "negative_context_complete": {
+        "default": true,
+        "title": "Negative Context Complete",
+        "type": "boolean"
+      },
+      "negative_context_truncated": {
+        "default": false,
+        "title": "Negative Context Truncated",
+        "type": "boolean"
+      },
+      "negative_evidence_omitted_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Negative Evidence Omitted Count",
+        "type": "integer"
+      },
+      "negative_evidence_packets": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Negative Evidence Packets",
+        "type": "array"
+      },
+      "negative_evidence_total_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Negative Evidence Total Count",
+        "type": "integer"
+      },
+      "negative_mandatory_omitted_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Negative Mandatory Omitted Count",
+        "type": "integer"
+      },
+      "problem": {
+        "$ref": "#/$defs/ProblemContract"
+      }
+    },
+    "required": [
+      "problem",
+      "final_proof_text"
+    ],
+    "title": "BlindReviewPacket",
+    "type": "object"
+  }
+}

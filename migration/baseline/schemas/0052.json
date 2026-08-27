@@ -1,0 +1,9 @@
+{
+  "qualified_name": "mathproofmesh.desktop.app._ApiModel",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "_ApiModel",
+    "type": "object"
+  }
+}

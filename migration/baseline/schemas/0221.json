@@ -1,0 +1,99 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ToolResult",
+  "schema": {
+    "$defs": {
+      "EvidenceRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_ref": {
+            "title": "Artifact Ref",
+            "type": "string"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Section"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_ref"
+        ],
+        "title": "EvidenceRef",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "error": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Error"
+      },
+      "evidence_ref": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "kind": {
+        "title": "Kind",
+        "type": "string"
+      },
+      "ok": {
+        "title": "Ok",
+        "type": "boolean"
+      },
+      "request_id": {
+        "title": "Request Id",
+        "type": "string"
+      },
+      "result": {
+        "default": null,
+        "title": "Result"
+      }
+    },
+    "required": [
+      "request_id",
+      "kind",
+      "ok"
+    ],
+    "title": "ToolResult",
+    "type": "object"
+  }
+}

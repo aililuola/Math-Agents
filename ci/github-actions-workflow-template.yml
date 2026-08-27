@@ -1,0 +1,75 @@
+name: JavaMathProofMesh release gates
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296
+        env:
+          POSTGRES_USER: mathproofmesh
+          POSTGRES_PASSWORD: clearly-fake-ci-password
+          POSTGRES_DB: mathproofmesh
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mathproofmesh"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Verify, security scan, SBOM, and source immutability
+        env:
+          MPM_ALLOW_LIVE_PROVIDER_CALLS: "false"
+          TESTCONTAINERS_RYUK_CONTAINER_IMAGE: testcontainers/ryuk@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0
+        run: ./scripts/verify-all.sh
+      - name: Package platform-neutral release
+        run: ./scripts/package-release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: java-mathproofmesh-linux
+          path: |
+            target/release/**
+            migration/reports/phase-17-sbom.json
+            migration/reports/dependency-check/**
+
+  package-windows:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Package server, CLI, sidecar, and desktop
+        shell: powershell
+        run: .\scripts\package-release.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: java-mathproofmesh-windows
+          path: |
+            target/release/**
+            target/desktop-dist/**

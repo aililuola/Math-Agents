@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "phase": "16",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-31T06:31:16.918Z",
+  "scope": "Read-only legacy run import, ordered version migration, resume policy, and Python-Java shadow parity",
+  "source": {
+    "authoritative_zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "zip_sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2",
+    "source_files": 401,
+    "source_manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "immutability": "PASS"
+  },
+  "legacy_import": {
+    "source_access": "read-only; links, reparse points, special files, external references, and escapes rejected",
+    "limits": {
+      "files": 10000,
+      "bytes_per_file": 104857600,
+      "bytes_total": 1073741824
+    },
+    "hash_passes": 2,
+    "manifest_identity": "canonical sorted per-file SHA-256 manifest; unique and idempotent",
+    "problem_artifact_checkpoint_validation": "PASS",
+    "ordered_versions": [
+      "0.7",
+      "0.8.0",
+      "0.8.1",
+      "0.8.2"
+    ],
+    "legacy_dependency_namespace": "PASS",
+    "unaudited_claim_quarantine": "PASS",
+    "receipt_or_claim_bypass_resurrection": false,
+    "duplicate_import": "same manifest identity and target run",
+    "corrupt_external_and_oversize_inputs": "fail closed"
+  },
+  "resume": {
+    "terminal_provider_calls": 0,
+    "nonterminal_origin": "latest committed checkpoint",
+    "checkpoint_chain_and_latest_validation": "PASS"
+  },
+  "shadow": {
+    "sections": [
+      "problem_contract",
+      "strategies",
+      "messages",
+      "deliveries",
+      "memory",
+      "proof_graph",
+      "checkpoints",
+      "recovery",
+      "usage",
+      "final_state"
+    ],
+    "authority_named_cases": 98,
+    "actual_python_java_oracle_runs": 1,
+    "live_provider_calls": 0,
+    "declared_nondeterministic_pointers": 0,
+    "critical_differences": 0,
+    "unexplained_differences": 0,
+    "report": "migration/reports/phase-16-differential.json",
+    "report_sha256": "6e1c819e16cdb7c75312b9c17b44218dd618cd4cbfc5aace9f3e8fa3f9c6527a"
+  },
+  "tests": {
+    "legacy_importer_cases": 20,
+    "shadow_comparator_cases": 10,
+    "authority_named_cases": 98,
+    "python_java_shadow_cases": 1,
+    "compatibility_module_tests": 148,
+    "reactor_total": 1549,
+    "report_files": 182,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "online_clean_verify": "PASS",
+    "offline_clean_verify": "PASS",
+    "online_log": "migration/reports/phase-16-verify-online.log",
+    "online_log_sha256": "3d66ae3e7b7d1eccdc8d606ef39b4e17bc8af2bb6de3f523b2b7ed3ac74b388f",
+    "offline_log": "migration/reports/phase-16-verify-offline.log",
+    "offline_log_sha256": "11b744e833c231672fd871d5e48ceb0c06aff8b905b90f1c19f457d1726ef680"
+  },
+  "quality_and_dependency_security": {
+    "java": "Eclipse Temurin 25.0.4+7",
+    "maven": "3.9.16",
+    "maven_wrapper": "3.3.4 only-script",
+    "dependencies_added": [
+      "com.github.spotbugs:spotbugs-annotations:4.10.3 (provided)"
+    ],
+    "dependency_version_changes": [],
+    "dependency_convergence": "PASS",
+    "external_snapshots": 0,
+    "duplicate_classes": 0,
+    "spotbugs_findsecbugs_findings": 0,
+    "dependency_tree": "migration/reports/phase-16-dependency-tree.txt",
+    "dependency_tree_sha256": "44a85ca29e7ef8271b1b09caf1b103a1a67d93ce0dcb5eb657e1e9d92e3823d9",
+    "sbom": {
+      "format": "CycloneDX",
+      "spec_version": "1.6",
+      "components": 111,
+      "dependency_entries": 112,
+      "path": "migration/reports/phase-01-sbom.json",
+      "sha256": "dcd97c48edbcd8cbdd80524c813085b4e6db9b646769782bf0f4185e1f50e5db"
+    },
+    "owasp": {
+      "engine": "12.2.2",
+      "dependencies": 115,
+      "fail_build_on_cvss": 7.0,
+      "findings_at_or_above_gate": 0,
+      "below_gate_findings": [
+        {
+          "cve": "CVE-2021-4277",
+          "artifact": "com.cronutils:cron-utils:9.2.1",
+          "severity": "MEDIUM",
+          "cvss": 5.3
+        }
+      ],
+      "report_json_sha256": "4da46587c58328b54166acccd146859dd3baaefd60fe60f73f9aa23a8cbaaae3",
+      "report_html_sha256": "cbbaca59e3fa5d0ed4bd83148444013bc3e2eaa76ef4721b1fb9fc46c5bb3dc6"
+    }
+  },
+  "mappings": {
+    "source_rows": "142/142 migrated",
+    "test_rows": "167/167 terminal; 149 ported and 18 differential",
+    "auxiliary_rows": "92/92 terminal; 49 translated_verified, 6 reimplemented_verified, 5 verified, and 32 copied_verified",
+    "state_rows": "142 + 167 + 92 = 401 unique frozen paths",
+    "pending_rows": 0
+  },
+  "audit_attempts": {
+    "package_lock": "preserved in phase-16-verify-online-attempt-1.log",
+    "powershell_native_stderr": "preserved in phase-16-verify-online-attempt-2.log",
+    "docker_sandbox_boundary": "preserved in phase-16-verify-online-attempt-3-docker-sandbox.log",
+    "transcript_only_logs": "preserved; final logs use complete stdout/stderr capture"
+  },
+  "stop_condition": {
+    "phase_17_release_execution_started_before_phase_16_pass": false
+  }
+}

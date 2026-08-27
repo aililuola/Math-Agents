@@ -1,0 +1,516 @@
+﻿command=scripts/run-maven.ps1 -Arguments '-o dependency:tree'
+captured_at_utc=2026-07-31T09:18:55.9633292Z
+[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] JavaMathProofMesh                                                  [pom]
+[INFO] MathProofMesh Contracts                                            [jar]
+[INFO] MathProofMesh Core                                                 [jar]
+[INFO] MathProofMesh Server                                               [jar]
+[INFO] MathProofMesh Desktop                                              [jar]
+[INFO] MathProofMesh Compatibility                                        [jar]
+[INFO] 
+[INFO] -----------< io.github.aililuola:java-mathproofmesh-parent >------------
+[INFO] Building JavaMathProofMesh 0.8.0                                   [1/6]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- dependency:3.9.0:tree (default-cli) @ java-mathproofmesh-parent ---
+[INFO] io.github.aililuola:java-mathproofmesh-parent:pom:0.8.0
+[INFO] 
+[INFO] ------------< io.github.aililuola:mathproofmesh-contracts >-------------
+[INFO] Building MathProofMesh Contracts 0.8.0                             [2/6]
+[INFO]   from C:\Users\yanxinyu\Desktop\JavaMathProofMeshMigration\Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control\JavaMathProofMesh-0.8.0\mathproofmesh-contracts\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- dependency:3.9.0:tree (default-cli) @ mathproofmesh-contracts ---
+[INFO] io.github.aililuola:mathproofmesh-contracts:jar:0.8.0
+[INFO] +- com.fasterxml.jackson.core:jackson-core:jar:2.21.4:compile
+[INFO] +- com.fasterxml.jackson.core:jackson-databind:jar:2.21.5:compile
+[INFO] +- com.fasterxml.jackson.core:jackson-annotations:jar:2.21:compile
+[INFO] +- jakarta.validation:jakarta.validation-api:jar:3.1.1:compile
+[INFO] \- org.junit.jupiter:junit-jupiter:jar:6.0.3:test
+[INFO]    +- org.junit.jupiter:junit-jupiter-api:jar:6.0.3:test
+[INFO]    |  +- org.opentest4j:opentest4j:jar:1.3.0:test
+[INFO]    |  +- org.junit.platform:junit-platform-commons:jar:6.0.3:test
+[INFO]    |  +- org.apiguardian:apiguardian-api:jar:1.1.2:test
+[INFO]    |  \- org.jspecify:jspecify:jar:1.0.0:test
+[INFO]    +- org.junit.jupiter:junit-jupiter-params:jar:6.0.3:test
+[INFO]    \- org.junit.jupiter:junit-jupiter-engine:jar:6.0.3:test
+[INFO]       \- org.junit.platform:junit-platform-engine:jar:6.0.3:test
+[INFO] 
+[INFO] ---------------< io.github.aililuola:mathproofmesh-core >---------------
+[INFO] Building MathProofMesh Core 0.8.0                                  [3/6]
+[INFO]   from C:\Users\yanxinyu\Desktop\JavaMathProofMeshMigration\Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control\JavaMathProofMesh-0.8.0\mathproofmesh-core\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- dependency:3.9.0:tree (default-cli) @ mathproofmesh-core ---
+[INFO] io.github.aililuola:mathproofmesh-core:jar:0.8.0
+[INFO] +- com.github.spotbugs:spotbugs-annotations:jar:4.10.3:provided
+[INFO] |  \- com.google.code.findbugs:jsr305:jar:3.0.2:provided
+[INFO] +- io.github.aililuola:mathproofmesh-contracts:jar:0.8.0:compile
+[INFO] |  +- com.fasterxml.jackson.core:jackson-core:jar:2.21.4:compile
+[INFO] |  +- com.fasterxml.jackson.core:jackson-databind:jar:2.21.5:compile
+[INFO] |  +- com.fasterxml.jackson.core:jackson-annotations:jar:2.21:compile
+[INFO] |  \- jakarta.validation:jakarta.validation-api:jar:3.1.1:compile
+[INFO] +- org.jgrapht:jgrapht-core:jar:1.5.3:compile
+[INFO] |  +- org.jheaps:jheaps:jar:0.14:compile
+[INFO] |  \- org.apfloat:apfloat:jar:1.14.0:compile
+[INFO] +- org.junit.jupiter:junit-jupiter:jar:6.0.3:test
+[INFO] |  +- org.junit.jupiter:junit-jupiter-api:jar:6.0.3:test
+[INFO] |  |  +- org.opentest4j:opentest4j:jar:1.3.0:test
+[INFO] |  |  +- org.junit.platform:junit-platform-commons:jar:6.0.3:test
+[INFO] |  |  +- org.apiguardian:apiguardian-api:jar:1.1.2:test
+[INFO] |  |  \- org.jspecify:jspecify:jar:1.0.0:test
+[INFO] |  +- org.junit.jupiter:junit-jupiter-params:jar:6.0.3:test
+[INFO] |  \- org.junit.jupiter:junit-jupiter-engine:jar:6.0.3:test
+[INFO] |     \- org.junit.platform:junit-platform-engine:jar:6.0.3:test
+[INFO] \- org.assertj:assertj-core:jar:3.27.7:test
+[INFO]    \- net.bytebuddy:byte-buddy:jar:1.18.10:test
+[INFO] 
+[INFO] --------------< io.github.aililuola:mathproofmesh-server >--------------
+[INFO] Building MathProofMesh Server 0.8.0                                [4/6]
+[INFO]   from C:\Users\yanxinyu\Desktop\JavaMathProofMeshMigration\Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control\JavaMathProofMesh-0.8.0\mathproofmesh-server\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- dependency:3.9.0:tree (default-cli) @ mathproofmesh-server ---
+[INFO] io.github.aililuola:mathproofmesh-server:jar:0.8.0
+[INFO] +- io.github.aililuola:mathproofmesh-core:jar:0.8.0:compile
+[INFO] |  +- io.github.aililuola:mathproofmesh-contracts:jar:0.8.0:compile
+[INFO] |  |  +- com.fasterxml.jackson.core:jackson-annotations:jar:2.21:compile
+[INFO] |  |  \- jakarta.validation:jakarta.validation-api:jar:3.1.1:compile
+[INFO] |  \- org.jgrapht:jgrapht-core:jar:1.5.3:compile
+[INFO] |     +- org.jheaps:jheaps:jar:0.14:compile
+[INFO] |     \- org.apfloat:apfloat:jar:1.14.0:compile
+[INFO] +- com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:jar:2.21.4:compile
+[INFO] |  +- com.fasterxml.jackson.core:jackson-databind:jar:2.21.5:compile
+[INFO] |  +- org.yaml:snakeyaml:jar:2.6:compile
+[INFO] |  \- com.fasterxml.jackson.core:jackson-core:jar:2.21.4:compile
+[INFO] +- org.springframework.boot:spring-boot-starter:jar:4.1.0:compile
+[INFO] |  +- org.springframework.boot:spring-boot-starter-logging:jar:4.1.0:compile
+[INFO] |  |  +- ch.qos.logback:logback-classic:jar:1.5.34:compile
+[INFO] |  |  |  \- ch.qos.logback:logback-core:jar:1.5.34:compile
+[INFO] |  |  +- org.apache.logging.log4j:log4j-to-slf4j:jar:2.25.5:compile
+[INFO] |  |  |  \- org.apache.logging.log4j:log4j-api:jar:2.25.5:compile
+[INFO] |  |  \- org.slf4j:jul-to-slf4j:jar:2.0.18:compile
+[INFO] |  +- org.springframework.boot:spring-boot-autoconfigure:jar:4.1.0:compile
+[INFO] |  |  \- org.springframework.boot:spring-boot:jar:4.1.0:compile
+[INFO] |  \- jakarta.annotation:jakarta.annotation-api:jar:3.0.0:compile
+[INFO] +- org.springframework.boot:spring-boot-starter-web:jar:4.1.0:compile
+[INFO] |  +- org.springframework.boot:spring-boot-starter-jackson:jar:4.1.0:compile
+[INFO] |  |  \- org.springframework.boot:spring-boot-jackson:jar:4.1.0:compile
+[INFO] |  +- org.springframework.boot:spring-boot-starter-tomcat:jar:4.1.0:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot-starter-tomcat-runtime:jar:4.1.0:compile
+[INFO] |  |  |  +- org.springframework.boot:spring-boot-web-server:jar:4.1.0:compile
+[INFO] |  |  |  +- org.apache.tomcat.embed:tomcat-embed-core:jar:11.0.24:compile
+[INFO] |  |  |  +- org.apache.tomcat.embed:tomcat-embed-el:jar:11.0.24:compile
+[INFO] |  |  |  \- org.apache.tomcat.embed:tomcat-embed-websocket:jar:11.0.24:compile
+[INFO] |  |  \- org.springframework.boot:spring-boot-tomcat:jar:4.1.0:compile
+[INFO] |  +- org.springframework.boot:spring-boot-http-converter:jar:4.1.0:compile
+[INFO] |  |  \- org.springframework:spring-web:jar:7.0.8:compile
+[INFO] |  \- org.springframework.boot:spring-boot-webmvc:jar:4.1.0:compile
+[INFO] |     +- org.springframework.boot:spring-boot-servlet:jar:4.1.0:compile
+[INFO] |     \- org.springframework:spring-webmvc:jar:7.0.8:compile
+[INFO] +- org.springframework.boot:spring-boot-starter-actuator:jar:4.1.0:compile
+[INFO] |  +- org.springframework.boot:spring-boot-starter-micrometer-metrics:jar:4.1.0:compile
+[INFO] |  |  \- org.springframework.boot:spring-boot-micrometer-metrics:jar:4.1.0:compile
+[INFO] |  |     \- org.springframework.boot:spring-boot-micrometer-observation:jar:4.1.0:compile
+[INFO] |  +- org.springframework.boot:spring-boot-actuator-autoconfigure:jar:4.1.0:compile
+[INFO] |  |  \- org.springframework.boot:spring-boot-actuator:jar:4.1.0:compile
+[INFO] |  +- org.springframework.boot:spring-boot-health:jar:4.1.0:compile
+[INFO] |  +- io.micrometer:micrometer-observation:jar:1.17.0:compile
+[INFO] |  |  \- io.micrometer:micrometer-commons:jar:1.17.0:compile
+[INFO] |  \- io.micrometer:micrometer-jakarta9:jar:1.17.0:compile
+[INFO] +- org.springframework:spring-jdbc:jar:7.0.8:compile
+[INFO] |  +- org.springframework:spring-beans:jar:7.0.8:compile
+[INFO] |  +- org.springframework:spring-core:jar:7.0.8:compile
+[INFO] |  |  \- commons-logging:commons-logging:jar:1.3.6:compile
+[INFO] |  \- org.springframework:spring-tx:jar:7.0.8:compile
+[INFO] +- org.springframework.modulith:spring-modulith-api:jar:2.1.0:compile
+[INFO] |  \- org.jspecify:jspecify:jar:1.0.0:compile
+[INFO] +- org.flywaydb:flyway-core:jar:12.4.0:compile
+[INFO] |  \- tools.jackson.core:jackson-databind:jar:3.1.4:compile
+[INFO] |     \- tools.jackson.core:jackson-core:jar:3.1.4:compile
+[INFO] +- org.flywaydb:flyway-database-postgresql:jar:12.4.0:compile
+[INFO] +- org.postgresql:postgresql:jar:42.7.12:runtime
+[INFO] +- io.temporal:temporal-sdk:jar:1.37.0:compile
+[INFO] |  +- io.temporal:temporal-serviceclient:jar:1.37.0:compile
+[INFO] |  |  +- io.grpc:grpc-api:jar:1.80.0:compile
+[INFO] |  |  +- io.grpc:grpc-stub:jar:1.80.0:compile
+[INFO] |  |  |  \- org.codehaus.mojo:animal-sniffer-annotations:jar:1.26:compile
+[INFO] |  |  +- io.grpc:grpc-netty-shaded:jar:1.80.0:compile
+[INFO] |  |  |  +- io.grpc:grpc-util:jar:1.80.0:runtime
+[INFO] |  |  |  +- io.grpc:grpc-core:jar:1.80.0:compile
+[INFO] |  |  |  |  +- com.google.android:annotations:jar:4.1.1.4:runtime
+[INFO] |  |  |  |  \- io.grpc:grpc-context:jar:1.80.0:runtime
+[INFO] |  |  |  \- io.perfmark:perfmark-api:jar:0.27.0:runtime
+[INFO] |  |  +- io.grpc:grpc-protobuf:jar:1.80.0:compile
+[INFO] |  |  |  +- com.google.protobuf:protobuf-java:jar:4.34.2:compile
+[INFO] |  |  |  +- com.google.api.grpc:proto-google-common-protos:jar:2.70.0:compile
+[INFO] |  |  |  \- io.grpc:grpc-protobuf-lite:jar:1.80.0:runtime
+[INFO] |  |  +- io.grpc:grpc-services:jar:1.80.0:compile
+[INFO] |  |  +- io.grpc:grpc-inprocess:jar:1.80.0:compile
+[INFO] |  |  +- com.google.protobuf:protobuf-java-util:jar:4.34.2:compile
+[INFO] |  |  +- com.uber.m3:tally-core:jar:0.13.0:compile
+[INFO] |  |  \- org.slf4j:slf4j-api:jar:2.0.18:compile
+[INFO] |  +- com.google.code.gson:gson:jar:2.13.2:compile
+[INFO] |  |  \- com.google.errorprone:error_prone_annotations:jar:2.45.0:compile
+[INFO] |  +- io.micrometer:micrometer-core:jar:1.17.0:compile
+[INFO] |  |  \- org.hdrhistogram:HdrHistogram:jar:2.2.2:runtime
+[INFO] |  +- io.nexusrpc:nexus-sdk:jar:0.5.0-alpha:compile
+[INFO] |  +- com.google.guava:guava:jar:33.5.0-jre:compile
+[INFO] |  |  +- com.google.guava:failureaccess:jar:1.0.3:compile
+[INFO] |  |  +- com.google.guava:listenablefuture:jar:9999.0-empty-to-avoid-conflict-with-guava:compile
+[INFO] |  |  \- com.google.j2objc:j2objc-annotations:jar:3.1:compile
+[INFO] |  +- com.fasterxml.jackson.datatype:jackson-datatype-jsr310:jar:2.21.4:runtime
+[INFO] |  \- com.fasterxml.jackson.datatype:jackson-datatype-jdk8:jar:2.21.4:runtime
+[INFO] +- info.picocli:picocli:jar:4.7.7:compile
+[INFO] +- com.github.spotbugs:spotbugs-annotations:jar:4.10.3:provided
+[INFO] |  \- com.google.code.findbugs:jsr305:jar:3.0.2:compile
+[INFO] +- org.springframework.boot:spring-boot-starter-test:jar:4.1.0:test
+[INFO] |  +- org.springframework.boot:spring-boot-test:jar:4.1.0:test
+[INFO] |  +- org.springframework.boot:spring-boot-test-autoconfigure:jar:4.1.0:test
+[INFO] |  +- com.jayway.jsonpath:json-path:jar:2.10.0:test
+[INFO] |  +- jakarta.xml.bind:jakarta.xml.bind-api:jar:4.0.5:test
+[INFO] |  |  \- jakarta.activation:jakarta.activation-api:jar:2.1.4:test
+[INFO] |  +- net.minidev:json-smart:jar:2.6.0:test
+[INFO] |  |  \- net.minidev:accessors-smart:jar:2.6.0:test
+[INFO] |  |     \- org.ow2.asm:asm:jar:9.7.1:test
+[INFO] |  +- org.assertj:assertj-core:jar:3.27.7:test
+[INFO] |  |  \- net.bytebuddy:byte-buddy:jar:1.18.10:test
+[INFO] |  +- org.awaitility:awaitility:jar:4.3.0:test
+[INFO] |  +- org.hamcrest:hamcrest:jar:3.0:test
+[INFO] |  +- org.junit.jupiter:junit-jupiter:jar:6.0.3:test
+[INFO] |  |  +- org.junit.jupiter:junit-jupiter-api:jar:6.0.3:test
+[INFO] |  |  |  +- org.opentest4j:opentest4j:jar:1.3.0:test
+[INFO] |  |  |  +- org.junit.platform:junit-platform-commons:jar:6.0.3:test
+[INFO] |  |  |  \- org.apiguardian:apiguardian-api:jar:1.1.2:test
+[INFO] |  |  +- org.junit.jupiter:junit-jupiter-params:jar:6.0.3:test
+[INFO] |  |  \- org.junit.jupiter:junit-jupiter-engine:jar:6.0.3:test
+[INFO] |  |     \- org.junit.platform:junit-platform-engine:jar:6.0.3:test
+[INFO] |  +- org.mockito:mockito-core:jar:5.23.0:test
+[INFO] |  |  +- net.bytebuddy:byte-buddy-agent:jar:1.18.10:test
+[INFO] |  |  \- org.objenesis:objenesis:jar:3.3:test
+[INFO] |  +- org.mockito:mockito-junit-jupiter:jar:5.23.0:test
+[INFO] |  +- org.skyscreamer:jsonassert:jar:1.5.3:test
+[INFO] |  |  \- com.vaadin.external.google:android-json:jar:0.0.20131108.vaadin1:test
+[INFO] |  +- org.springframework:spring-test:jar:7.0.8:test
+[INFO] |  \- org.xmlunit:xmlunit-core:jar:2.11.0:test
+[INFO] +- org.springframework.modulith:spring-modulith-core:jar:2.1.0:test
+[INFO] |  +- com.tngtech.archunit:archunit:jar:1.4.2:test
+[INFO] |  \- org.springframework:spring-context:jar:7.0.8:compile
+[INFO] |     +- org.springframework:spring-aop:jar:7.0.8:compile
+[INFO] |     \- org.springframework:spring-expression:jar:7.0.8:compile
+[INFO] +- io.temporal:temporal-testing:jar:1.37.0:test
+[INFO] |  \- io.temporal:temporal-test-server:jar:1.37.0:test
+[INFO] |     \- com.cronutils:cron-utils:jar:9.2.1:test
+[INFO] +- org.testcontainers:testcontainers-junit-jupiter:jar:2.0.5:test
+[INFO] |  \- org.testcontainers:testcontainers:jar:2.0.5:test
+[INFO] |     +- org.apache.commons:commons-compress:jar:1.28.0:test
+[INFO] |     |  +- commons-codec:commons-codec:jar:1.21.0:test
+[INFO] |     |  +- commons-io:commons-io:jar:2.20.0:test
+[INFO] |     |  \- org.apache.commons:commons-lang3:jar:3.20.0:test
+[INFO] |     +- org.rnorth.duct-tape:duct-tape:jar:1.0.8:test
+[INFO] |     |  \- org.jetbrains:annotations:jar:17.0.0:test
+[INFO] |     +- com.github.docker-java:docker-java-api:jar:3.7.1:test
+[INFO] |     \- com.github.docker-java:docker-java-transport-zerodep:jar:3.7.1:test
+[INFO] |        \- com.github.docker-java:docker-java-transport:jar:3.7.1:test
+[INFO] +- org.testcontainers:testcontainers-postgresql:jar:2.0.5:test
+[INFO] |  \- org.testcontainers:testcontainers-jdbc:jar:2.0.5:test
+[INFO] |     \- org.testcontainers:testcontainers-database-commons:jar:2.0.5:test
+[INFO] +- net.java.dev.jna:jna-jpms:jar:5.19.1:test
+[INFO] \- net.java.dev.jna:jna-platform-jpms:jar:5.19.1:test
+[INFO] 
+[INFO] -------------< io.github.aililuola:mathproofmesh-desktop >--------------
+[INFO] Building MathProofMesh Desktop 0.8.0                               [5/6]
+[INFO]   from C:\Users\yanxinyu\Desktop\JavaMathProofMeshMigration\Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control\JavaMathProofMesh-0.8.0\mathproofmesh-desktop\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- dependency:3.9.0:tree (default-cli) @ mathproofmesh-desktop ---
+[INFO] io.github.aililuola:mathproofmesh-desktop:jar:0.8.0
+[INFO] +- io.github.aililuola:mathproofmesh-server:jar:0.8.0:compile
+[INFO] |  +- io.github.aililuola:mathproofmesh-core:jar:0.8.0:compile
+[INFO] |  |  +- io.github.aililuola:mathproofmesh-contracts:jar:0.8.0:compile
+[INFO] |  |  |  +- com.fasterxml.jackson.core:jackson-annotations:jar:2.21:compile
+[INFO] |  |  |  \- jakarta.validation:jakarta.validation-api:jar:3.1.1:compile
+[INFO] |  |  \- org.jgrapht:jgrapht-core:jar:1.5.3:compile
+[INFO] |  |     +- org.jheaps:jheaps:jar:0.14:compile
+[INFO] |  |     \- org.apfloat:apfloat:jar:1.14.0:compile
+[INFO] |  +- com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:jar:2.21.4:compile
+[INFO] |  |  +- com.fasterxml.jackson.core:jackson-databind:jar:2.21.5:compile
+[INFO] |  |  +- org.yaml:snakeyaml:jar:2.6:compile
+[INFO] |  |  \- com.fasterxml.jackson.core:jackson-core:jar:2.21.4:compile
+[INFO] |  +- org.springframework.boot:spring-boot-starter:jar:4.1.0:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot-starter-logging:jar:4.1.0:compile
+[INFO] |  |  |  +- ch.qos.logback:logback-classic:jar:1.5.34:compile
+[INFO] |  |  |  |  \- ch.qos.logback:logback-core:jar:1.5.34:compile
+[INFO] |  |  |  +- org.apache.logging.log4j:log4j-to-slf4j:jar:2.25.5:compile
+[INFO] |  |  |  |  \- org.apache.logging.log4j:log4j-api:jar:2.25.5:compile
+[INFO] |  |  |  \- org.slf4j:jul-to-slf4j:jar:2.0.18:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot-autoconfigure:jar:4.1.0:compile
+[INFO] |  |  \- jakarta.annotation:jakarta.annotation-api:jar:3.0.0:compile
+[INFO] |  +- org.springframework.boot:spring-boot-starter-web:jar:4.1.0:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot-starter-jackson:jar:4.1.0:compile
+[INFO] |  |  |  \- org.springframework.boot:spring-boot-jackson:jar:4.1.0:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot-starter-tomcat:jar:4.1.0:compile
+[INFO] |  |  |  +- org.springframework.boot:spring-boot-starter-tomcat-runtime:jar:4.1.0:compile
+[INFO] |  |  |  |  +- org.springframework.boot:spring-boot-web-server:jar:4.1.0:compile
+[INFO] |  |  |  |  +- org.apache.tomcat.embed:tomcat-embed-core:jar:11.0.24:compile
+[INFO] |  |  |  |  +- org.apache.tomcat.embed:tomcat-embed-el:jar:11.0.24:compile
+[INFO] |  |  |  |  \- org.apache.tomcat.embed:tomcat-embed-websocket:jar:11.0.24:compile
+[INFO] |  |  |  \- org.springframework.boot:spring-boot-tomcat:jar:4.1.0:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot-http-converter:jar:4.1.0:compile
+[INFO] |  |  |  \- org.springframework:spring-web:jar:7.0.8:compile
+[INFO] |  |  \- org.springframework.boot:spring-boot-webmvc:jar:4.1.0:compile
+[INFO] |  |     +- org.springframework.boot:spring-boot-servlet:jar:4.1.0:compile
+[INFO] |  |     \- org.springframework:spring-webmvc:jar:7.0.8:compile
+[INFO] |  |        +- org.springframework:spring-aop:jar:7.0.8:compile
+[INFO] |  |        \- org.springframework:spring-expression:jar:7.0.8:compile
+[INFO] |  +- org.springframework.boot:spring-boot-starter-actuator:jar:4.1.0:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot-starter-micrometer-metrics:jar:4.1.0:compile
+[INFO] |  |  |  \- org.springframework.boot:spring-boot-micrometer-metrics:jar:4.1.0:compile
+[INFO] |  |  |     \- org.springframework.boot:spring-boot-micrometer-observation:jar:4.1.0:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot-actuator-autoconfigure:jar:4.1.0:compile
+[INFO] |  |  |  \- org.springframework.boot:spring-boot-actuator:jar:4.1.0:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot-health:jar:4.1.0:compile
+[INFO] |  |  +- io.micrometer:micrometer-observation:jar:1.17.0:compile
+[INFO] |  |  |  \- io.micrometer:micrometer-commons:jar:1.17.0:compile
+[INFO] |  |  \- io.micrometer:micrometer-jakarta9:jar:1.17.0:compile
+[INFO] |  +- org.springframework:spring-jdbc:jar:7.0.8:compile
+[INFO] |  |  +- org.springframework:spring-beans:jar:7.0.8:compile
+[INFO] |  |  \- org.springframework:spring-tx:jar:7.0.8:compile
+[INFO] |  +- org.springframework.modulith:spring-modulith-api:jar:2.1.0:compile
+[INFO] |  |  \- org.jspecify:jspecify:jar:1.0.0:compile
+[INFO] |  +- org.flywaydb:flyway-core:jar:12.4.0:compile
+[INFO] |  |  \- tools.jackson.core:jackson-databind:jar:3.1.4:compile
+[INFO] |  |     \- tools.jackson.core:jackson-core:jar:3.1.4:compile
+[INFO] |  +- org.flywaydb:flyway-database-postgresql:jar:12.4.0:compile
+[INFO] |  +- org.postgresql:postgresql:jar:42.7.12:runtime
+[INFO] |  +- io.temporal:temporal-sdk:jar:1.37.0:compile
+[INFO] |  |  +- io.temporal:temporal-serviceclient:jar:1.37.0:compile
+[INFO] |  |  |  +- io.grpc:grpc-api:jar:1.80.0:compile
+[INFO] |  |  |  +- io.grpc:grpc-stub:jar:1.80.0:compile
+[INFO] |  |  |  |  \- org.codehaus.mojo:animal-sniffer-annotations:jar:1.26:compile
+[INFO] |  |  |  +- io.grpc:grpc-netty-shaded:jar:1.80.0:compile
+[INFO] |  |  |  |  +- io.grpc:grpc-util:jar:1.80.0:runtime
+[INFO] |  |  |  |  +- io.grpc:grpc-core:jar:1.80.0:compile
+[INFO] |  |  |  |  |  +- com.google.android:annotations:jar:4.1.1.4:runtime
+[INFO] |  |  |  |  |  \- io.grpc:grpc-context:jar:1.80.0:runtime
+[INFO] |  |  |  |  \- io.perfmark:perfmark-api:jar:0.27.0:runtime
+[INFO] |  |  |  +- io.grpc:grpc-protobuf:jar:1.80.0:compile
+[INFO] |  |  |  |  +- com.google.protobuf:protobuf-java:jar:4.34.2:compile
+[INFO] |  |  |  |  +- com.google.api.grpc:proto-google-common-protos:jar:2.70.0:compile
+[INFO] |  |  |  |  \- io.grpc:grpc-protobuf-lite:jar:1.80.0:runtime
+[INFO] |  |  |  +- io.grpc:grpc-services:jar:1.80.0:compile
+[INFO] |  |  |  +- io.grpc:grpc-inprocess:jar:1.80.0:compile
+[INFO] |  |  |  +- com.google.protobuf:protobuf-java-util:jar:4.34.2:compile
+[INFO] |  |  |  \- com.uber.m3:tally-core:jar:0.13.0:compile
+[INFO] |  |  +- com.google.code.gson:gson:jar:2.13.2:compile
+[INFO] |  |  |  \- com.google.errorprone:error_prone_annotations:jar:2.45.0:compile
+[INFO] |  |  +- io.micrometer:micrometer-core:jar:1.17.0:compile
+[INFO] |  |  |  \- org.hdrhistogram:HdrHistogram:jar:2.2.2:runtime
+[INFO] |  |  +- io.nexusrpc:nexus-sdk:jar:0.5.0-alpha:compile
+[INFO] |  |  +- com.google.guava:guava:jar:33.5.0-jre:compile
+[INFO] |  |  |  +- com.google.guava:failureaccess:jar:1.0.3:compile
+[INFO] |  |  |  +- com.google.guava:listenablefuture:jar:9999.0-empty-to-avoid-conflict-with-guava:compile
+[INFO] |  |  |  \- com.google.j2objc:j2objc-annotations:jar:3.1:compile
+[INFO] |  |  +- com.fasterxml.jackson.datatype:jackson-datatype-jsr310:jar:2.21.4:runtime
+[INFO] |  |  \- com.fasterxml.jackson.datatype:jackson-datatype-jdk8:jar:2.21.4:runtime
+[INFO] |  \- info.picocli:picocli:jar:4.7.7:compile
+[INFO] +- org.openjfx:javafx-controls:jar:win:25.0.4:compile
+[INFO] |  \- org.openjfx:javafx-graphics:jar:25.0.4:compile
+[INFO] |     +- org.openjfx:javafx-graphics:jar:win:25.0.4:compile
+[INFO] |     \- org.openjfx:javafx-base:jar:25.0.4:compile
+[INFO] |        \- org.openjfx:javafx-base:jar:win:25.0.4:compile
+[INFO] +- org.openjfx:javafx-web:jar:win:25.0.4:compile
+[INFO] |  +- org.openjfx:javafx-controls:jar:25.0.4:compile
+[INFO] |  +- org.openjfx:javafx-media:jar:25.0.4:compile
+[INFO] |  |  \- org.openjfx:javafx-media:jar:win:25.0.4:compile
+[INFO] |  \- org.openjfx:jdk-jsobject:jar:25.0.4:compile
+[INFO] |     \- org.openjfx:jdk-jsobject:jar:win:25.0.4:compile
+[INFO] +- net.java.dev.jna:jna-jpms:jar:5.19.1:compile
+[INFO] +- net.java.dev.jna:jna-platform-jpms:jar:5.19.1:compile
+[INFO] +- com.github.spotbugs:spotbugs-annotations:jar:4.10.3:provided
+[INFO] |  \- com.google.code.findbugs:jsr305:jar:3.0.2:compile
+[INFO] +- org.junit.jupiter:junit-jupiter:jar:6.0.3:test
+[INFO] |  +- org.junit.jupiter:junit-jupiter-api:jar:6.0.3:test
+[INFO] |  |  +- org.opentest4j:opentest4j:jar:1.3.0:test
+[INFO] |  |  +- org.junit.platform:junit-platform-commons:jar:6.0.3:test
+[INFO] |  |  \- org.apiguardian:apiguardian-api:jar:1.1.2:test
+[INFO] |  +- org.junit.jupiter:junit-jupiter-params:jar:6.0.3:test
+[INFO] |  \- org.junit.jupiter:junit-jupiter-engine:jar:6.0.3:test
+[INFO] |     \- org.junit.platform:junit-platform-engine:jar:6.0.3:test
+[INFO] \- org.springframework.boot:spring-boot-starter-test:jar:4.1.0:test
+[INFO]    +- org.springframework.boot:spring-boot-test:jar:4.1.0:test
+[INFO]    |  \- org.springframework.boot:spring-boot:jar:4.1.0:compile
+[INFO]    |     \- org.springframework:spring-context:jar:7.0.8:compile
+[INFO]    +- org.springframework.boot:spring-boot-test-autoconfigure:jar:4.1.0:test
+[INFO]    +- com.jayway.jsonpath:json-path:jar:2.10.0:test
+[INFO]    |  \- org.slf4j:slf4j-api:jar:2.0.18:compile
+[INFO]    +- jakarta.xml.bind:jakarta.xml.bind-api:jar:4.0.5:test
+[INFO]    |  \- jakarta.activation:jakarta.activation-api:jar:2.1.4:test
+[INFO]    +- net.minidev:json-smart:jar:2.6.0:test
+[INFO]    |  \- net.minidev:accessors-smart:jar:2.6.0:test
+[INFO]    |     \- org.ow2.asm:asm:jar:9.7.1:test
+[INFO]    +- org.assertj:assertj-core:jar:3.27.7:test
+[INFO]    |  \- net.bytebuddy:byte-buddy:jar:1.18.10:test
+[INFO]    +- org.awaitility:awaitility:jar:4.3.0:test
+[INFO]    +- org.hamcrest:hamcrest:jar:3.0:test
+[INFO]    +- org.mockito:mockito-core:jar:5.23.0:test
+[INFO]    |  +- net.bytebuddy:byte-buddy-agent:jar:1.18.10:test
+[INFO]    |  \- org.objenesis:objenesis:jar:3.3:test
+[INFO]    +- org.mockito:mockito-junit-jupiter:jar:5.23.0:test
+[INFO]    +- org.skyscreamer:jsonassert:jar:1.5.3:test
+[INFO]    |  \- com.vaadin.external.google:android-json:jar:0.0.20131108.vaadin1:test
+[INFO]    +- org.springframework:spring-core:jar:7.0.8:compile
+[INFO]    |  \- commons-logging:commons-logging:jar:1.3.6:compile
+[INFO]    +- org.springframework:spring-test:jar:7.0.8:test
+[INFO]    \- org.xmlunit:xmlunit-core:jar:2.11.0:test
+[INFO] 
+[INFO] ----------< io.github.aililuola:mathproofmesh-compatibility >-----------
+[INFO] Building MathProofMesh Compatibility 0.8.0                         [6/6]
+[INFO]   from C:\Users\yanxinyu\Desktop\JavaMathProofMeshMigration\Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control\JavaMathProofMesh-0.8.0\mathproofmesh-compatibility\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- dependency:3.9.0:tree (default-cli) @ mathproofmesh-compatibility ---
+[INFO] io.github.aililuola:mathproofmesh-compatibility:jar:0.8.0
+[INFO] +- io.github.aililuola:mathproofmesh-contracts:jar:0.8.0:compile
+[INFO] |  +- com.fasterxml.jackson.core:jackson-core:jar:2.21.4:compile
+[INFO] |  +- com.fasterxml.jackson.core:jackson-annotations:jar:2.21:compile
+[INFO] |  \- jakarta.validation:jakarta.validation-api:jar:3.1.1:compile
+[INFO] +- io.github.aililuola:mathproofmesh-core:jar:0.8.0:test
+[INFO] |  \- org.jgrapht:jgrapht-core:jar:1.5.3:test
+[INFO] |     +- org.jheaps:jheaps:jar:0.14:test
+[INFO] |     \- org.apfloat:apfloat:jar:1.14.0:test
+[INFO] +- io.github.aililuola:mathproofmesh-server:jar:0.8.0:test
+[INFO] |  +- com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:jar:2.21.4:test
+[INFO] |  |  \- org.yaml:snakeyaml:jar:2.6:test
+[INFO] |  +- org.springframework.boot:spring-boot-starter:jar:4.1.0:test
+[INFO] |  |  +- org.springframework.boot:spring-boot-starter-logging:jar:4.1.0:test
+[INFO] |  |  |  +- ch.qos.logback:logback-classic:jar:1.5.34:test
+[INFO] |  |  |  |  \- ch.qos.logback:logback-core:jar:1.5.34:test
+[INFO] |  |  |  +- org.apache.logging.log4j:log4j-to-slf4j:jar:2.25.5:test
+[INFO] |  |  |  |  \- org.apache.logging.log4j:log4j-api:jar:2.25.5:test
+[INFO] |  |  |  \- org.slf4j:jul-to-slf4j:jar:2.0.18:test
+[INFO] |  |  +- org.springframework.boot:spring-boot-autoconfigure:jar:4.1.0:test
+[INFO] |  |  |  \- org.springframework.boot:spring-boot:jar:4.1.0:test
+[INFO] |  |  |     \- org.springframework:spring-context:jar:7.0.8:test
+[INFO] |  |  \- jakarta.annotation:jakarta.annotation-api:jar:3.0.0:test
+[INFO] |  +- org.springframework.boot:spring-boot-starter-web:jar:4.1.0:test
+[INFO] |  |  +- org.springframework.boot:spring-boot-starter-jackson:jar:4.1.0:test
+[INFO] |  |  |  \- org.springframework.boot:spring-boot-jackson:jar:4.1.0:test
+[INFO] |  |  +- org.springframework.boot:spring-boot-starter-tomcat:jar:4.1.0:test
+[INFO] |  |  |  +- org.springframework.boot:spring-boot-starter-tomcat-runtime:jar:4.1.0:test
+[INFO] |  |  |  |  +- org.springframework.boot:spring-boot-web-server:jar:4.1.0:test
+[INFO] |  |  |  |  +- org.apache.tomcat.embed:tomcat-embed-core:jar:11.0.24:test
+[INFO] |  |  |  |  +- org.apache.tomcat.embed:tomcat-embed-el:jar:11.0.24:test
+[INFO] |  |  |  |  \- org.apache.tomcat.embed:tomcat-embed-websocket:jar:11.0.24:test
+[INFO] |  |  |  \- org.springframework.boot:spring-boot-tomcat:jar:4.1.0:test
+[INFO] |  |  +- org.springframework.boot:spring-boot-http-converter:jar:4.1.0:test
+[INFO] |  |  |  \- org.springframework:spring-web:jar:7.0.8:test
+[INFO] |  |  \- org.springframework.boot:spring-boot-webmvc:jar:4.1.0:test
+[INFO] |  |     +- org.springframework.boot:spring-boot-servlet:jar:4.1.0:test
+[INFO] |  |     \- org.springframework:spring-webmvc:jar:7.0.8:test
+[INFO] |  |        +- org.springframework:spring-aop:jar:7.0.8:test
+[INFO] |  |        \- org.springframework:spring-expression:jar:7.0.8:test
+[INFO] |  +- org.springframework.boot:spring-boot-starter-actuator:jar:4.1.0:test
+[INFO] |  |  +- org.springframework.boot:spring-boot-starter-micrometer-metrics:jar:4.1.0:test
+[INFO] |  |  |  \- org.springframework.boot:spring-boot-micrometer-metrics:jar:4.1.0:test
+[INFO] |  |  |     \- org.springframework.boot:spring-boot-micrometer-observation:jar:4.1.0:test
+[INFO] |  |  +- org.springframework.boot:spring-boot-actuator-autoconfigure:jar:4.1.0:test
+[INFO] |  |  |  \- org.springframework.boot:spring-boot-actuator:jar:4.1.0:test
+[INFO] |  |  +- org.springframework.boot:spring-boot-health:jar:4.1.0:test
+[INFO] |  |  +- io.micrometer:micrometer-observation:jar:1.17.0:test
+[INFO] |  |  |  \- io.micrometer:micrometer-commons:jar:1.17.0:test
+[INFO] |  |  \- io.micrometer:micrometer-jakarta9:jar:1.17.0:test
+[INFO] |  +- org.springframework:spring-jdbc:jar:7.0.8:test
+[INFO] |  |  +- org.springframework:spring-beans:jar:7.0.8:test
+[INFO] |  |  +- org.springframework:spring-core:jar:7.0.8:test
+[INFO] |  |  |  \- commons-logging:commons-logging:jar:1.3.6:test
+[INFO] |  |  \- org.springframework:spring-tx:jar:7.0.8:test
+[INFO] |  +- org.springframework.modulith:spring-modulith-api:jar:2.1.0:test
+[INFO] |  |  \- org.jspecify:jspecify:jar:1.0.0:test
+[INFO] |  +- org.flywaydb:flyway-core:jar:12.4.0:test
+[INFO] |  |  \- tools.jackson.core:jackson-databind:jar:3.1.4:test
+[INFO] |  |     \- tools.jackson.core:jackson-core:jar:3.1.4:test
+[INFO] |  +- org.flywaydb:flyway-database-postgresql:jar:12.4.0:test
+[INFO] |  +- org.postgresql:postgresql:jar:42.7.12:test
+[INFO] |  +- io.temporal:temporal-sdk:jar:1.37.0:test
+[INFO] |  |  +- io.temporal:temporal-serviceclient:jar:1.37.0:test
+[INFO] |  |  |  +- io.grpc:grpc-api:jar:1.80.0:test
+[INFO] |  |  |  +- io.grpc:grpc-stub:jar:1.80.0:test
+[INFO] |  |  |  |  \- org.codehaus.mojo:animal-sniffer-annotations:jar:1.26:test
+[INFO] |  |  |  +- io.grpc:grpc-netty-shaded:jar:1.80.0:test
+[INFO] |  |  |  |  +- io.grpc:grpc-util:jar:1.80.0:test
+[INFO] |  |  |  |  +- io.grpc:grpc-core:jar:1.80.0:test
+[INFO] |  |  |  |  |  +- com.google.android:annotations:jar:4.1.1.4:test
+[INFO] |  |  |  |  |  \- io.grpc:grpc-context:jar:1.80.0:test
+[INFO] |  |  |  |  \- io.perfmark:perfmark-api:jar:0.27.0:test
+[INFO] |  |  |  +- io.grpc:grpc-protobuf:jar:1.80.0:test
+[INFO] |  |  |  |  +- com.google.protobuf:protobuf-java:jar:4.34.2:test
+[INFO] |  |  |  |  +- com.google.api.grpc:proto-google-common-protos:jar:2.70.0:test
+[INFO] |  |  |  |  \- io.grpc:grpc-protobuf-lite:jar:1.80.0:test
+[INFO] |  |  |  +- io.grpc:grpc-services:jar:1.80.0:test
+[INFO] |  |  |  +- io.grpc:grpc-inprocess:jar:1.80.0:test
+[INFO] |  |  |  +- com.google.protobuf:protobuf-java-util:jar:4.34.2:test
+[INFO] |  |  |  +- com.uber.m3:tally-core:jar:0.13.0:test
+[INFO] |  |  |  \- org.slf4j:slf4j-api:jar:2.0.18:test
+[INFO] |  |  +- com.google.code.gson:gson:jar:2.13.2:test
+[INFO] |  |  |  \- com.google.errorprone:error_prone_annotations:jar:2.45.0:test
+[INFO] |  |  +- io.micrometer:micrometer-core:jar:1.17.0:test
+[INFO] |  |  |  \- org.hdrhistogram:HdrHistogram:jar:2.2.2:test
+[INFO] |  |  +- io.nexusrpc:nexus-sdk:jar:0.5.0-alpha:test
+[INFO] |  |  +- com.google.guava:guava:jar:33.5.0-jre:test
+[INFO] |  |  |  +- com.google.guava:failureaccess:jar:1.0.3:test
+[INFO] |  |  |  +- com.google.guava:listenablefuture:jar:9999.0-empty-to-avoid-conflict-with-guava:test
+[INFO] |  |  |  \- com.google.j2objc:j2objc-annotations:jar:3.1:test
+[INFO] |  |  +- com.fasterxml.jackson.datatype:jackson-datatype-jsr310:jar:2.21.4:test
+[INFO] |  |  \- com.fasterxml.jackson.datatype:jackson-datatype-jdk8:jar:2.21.4:test
+[INFO] |  \- info.picocli:picocli:jar:4.7.7:test
+[INFO] +- io.github.aililuola:mathproofmesh-desktop:jar:0.8.0:test
+[INFO] |  +- org.openjfx:javafx-controls:jar:win:25.0.4:test
+[INFO] |  |  \- org.openjfx:javafx-graphics:jar:25.0.4:test
+[INFO] |  |     +- org.openjfx:javafx-graphics:jar:win:25.0.4:test
+[INFO] |  |     \- org.openjfx:javafx-base:jar:25.0.4:test
+[INFO] |  |        \- org.openjfx:javafx-base:jar:win:25.0.4:test
+[INFO] |  +- org.openjfx:javafx-web:jar:win:25.0.4:test
+[INFO] |  |  +- org.openjfx:javafx-controls:jar:25.0.4:test
+[INFO] |  |  +- org.openjfx:javafx-media:jar:25.0.4:test
+[INFO] |  |  |  \- org.openjfx:javafx-media:jar:win:25.0.4:test
+[INFO] |  |  \- org.openjfx:jdk-jsobject:jar:25.0.4:test
+[INFO] |  |     \- org.openjfx:jdk-jsobject:jar:win:25.0.4:test
+[INFO] |  +- net.java.dev.jna:jna-jpms:jar:5.19.1:test
+[INFO] |  \- net.java.dev.jna:jna-platform-jpms:jar:5.19.1:test
+[INFO] +- com.fasterxml.jackson.core:jackson-databind:jar:2.21.5:compile
+[INFO] +- com.github.spotbugs:spotbugs-annotations:jar:4.10.3:provided
+[INFO] |  \- com.google.code.findbugs:jsr305:jar:3.0.2:provided
+[INFO] +- com.tngtech.archunit:archunit-junit5:jar:1.4.2:test
+[INFO] |  +- com.tngtech.archunit:archunit-junit5-api:jar:1.4.2:test
+[INFO] |  |  \- com.tngtech.archunit:archunit:jar:1.4.2:test
+[INFO] |  \- com.tngtech.archunit:archunit-junit5-engine:jar:1.4.2:test
+[INFO] |     \- com.tngtech.archunit:archunit-junit5-engine-api:jar:1.4.2:test
+[INFO] \- org.junit.jupiter:junit-jupiter:jar:6.0.3:test
+[INFO]    +- org.junit.jupiter:junit-jupiter-api:jar:6.0.3:test
+[INFO]    |  +- org.opentest4j:opentest4j:jar:1.3.0:test
+[INFO]    |  +- org.junit.platform:junit-platform-commons:jar:6.0.3:test
+[INFO]    |  \- org.apiguardian:apiguardian-api:jar:1.1.2:test
+[INFO]    +- org.junit.jupiter:junit-jupiter-params:jar:6.0.3:test
+[INFO]    \- org.junit.jupiter:junit-jupiter-engine:jar:6.0.3:test
+[INFO]       \- org.junit.platform:junit-platform-engine:jar:6.0.3:test
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for JavaMathProofMesh 0.8.0:
+[INFO] 
+[INFO] JavaMathProofMesh .................................. SUCCESS [  0.590 s]
+[INFO] MathProofMesh Contracts ............................ SUCCESS [  0.039 s]
+[INFO] MathProofMesh Core ................................. SUCCESS [  0.035 s]
+[INFO] MathProofMesh Server ............................... SUCCESS [  0.224 s]
+[INFO] MathProofMesh Desktop .............................. SUCCESS [  0.032 s]
+[INFO] MathProofMesh Compatibility ........................ SUCCESS [  0.012 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  1.207 s
+[INFO] Finished at: 2026-07-31T09:18:58Z
+[INFO] ------------------------------------------------------------------------
+result=PASS

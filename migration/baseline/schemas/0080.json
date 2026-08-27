@@ -1,0 +1,236 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.DependencyAtom",
+  "schema": {
+    "$defs": {
+      "AssumptionDomain": {
+        "enum": [
+          "mathematical",
+          "search",
+          "protocol",
+          "process",
+          "tool",
+          "verification",
+          "safety"
+        ],
+        "title": "AssumptionDomain",
+        "type": "string"
+      },
+      "ClaimStatus": {
+        "enum": [
+          "proposed",
+          "verified",
+          "rejected",
+          "uncertain"
+        ],
+        "title": "ClaimStatus",
+        "type": "string"
+      },
+      "DependencyKind": {
+        "enum": [
+          "local_step",
+          "local_claim",
+          "global_fact",
+          "message",
+          "obligation",
+          "tool_certificate",
+          "formal_certificate",
+          "external_result"
+        ],
+        "title": "DependencyKind",
+        "type": "string"
+      },
+      "DependencyRef": {
+        "additionalProperties": false,
+        "properties": {
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "kind": {
+            "$ref": "#/$defs/DependencyKind"
+          },
+          "kind_migration": {
+            "anyOf": [
+              {
+                "enum": [
+                  "legacy_external_to_local_step",
+                  "legacy_external_to_local_claim",
+                  "legacy_external_to_external_result"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Kind Migration"
+          },
+          "source_attempt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Attempt Id"
+          },
+          "source_delta_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Delta Id"
+          },
+          "source_route_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Route Id"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "target_id"
+        ],
+        "title": "DependencyRef",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Route-scoped, sidecar-only record of a load-bearing dependency.",
+    "properties": {
+      "atom_id": {
+        "title": "Atom Id",
+        "type": "string"
+      },
+      "dependency_refs": {
+        "items": {
+          "$ref": "#/$defs/DependencyRef"
+        },
+        "title": "Dependency Refs",
+        "type": "array"
+      },
+      "domain": {
+        "$ref": "#/$defs/AssumptionDomain",
+        "default": "mathematical"
+      },
+      "load_bearing_score": {
+        "default": 0.5,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Load Bearing Score",
+        "type": "number"
+      },
+      "mechanism_signature": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Mechanism Signature",
+        "type": "array"
+      },
+      "normalized_statement": {
+        "title": "Normalized Statement",
+        "type": "string"
+      },
+      "proof_graph_neighborhood": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Proof Graph Neighborhood",
+        "type": "array"
+      },
+      "route_id": {
+        "title": "Route Id",
+        "type": "string"
+      },
+      "scope_signature_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Scope Signature Id"
+      },
+      "source_id": {
+        "title": "Source Id",
+        "type": "string"
+      },
+      "source_kind": {
+        "enum": [
+          "strategy_prerequisite",
+          "critical_claim",
+          "message_assumption",
+          "verified_fact",
+          "obligation_assumption",
+          "typed_dependency",
+          "key_step_justification",
+          "unresolved_gap",
+          "verifier_critical_issue"
+        ],
+        "title": "Source Kind",
+        "type": "string"
+      },
+      "statement": {
+        "title": "Statement",
+        "type": "string"
+      },
+      "statement_hash": {
+        "title": "Statement Hash",
+        "type": "string"
+      },
+      "typed_dependency_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Typed Dependency Ids",
+        "type": "array"
+      },
+      "verification_status": {
+        "$ref": "#/$defs/ClaimStatus",
+        "default": "proposed"
+      }
+    },
+    "required": [
+      "atom_id",
+      "statement",
+      "normalized_statement",
+      "statement_hash",
+      "source_kind",
+      "source_id",
+      "route_id"
+    ],
+    "title": "DependencyAtom",
+    "type": "object"
+  }
+}

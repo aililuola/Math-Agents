@@ -1,0 +1,64 @@
+{
+  "qualified_name": "mathproofmesh.config.SynthesisReadinessControlConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "high_centrality_threshold": {
+        "default": 0.7,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "High Centrality Threshold",
+        "type": "number"
+      },
+      "max_open_auxiliary_obligations": {
+        "default": 16,
+        "maximum": 10000,
+        "minimum": 0,
+        "title": "Max Open Auxiliary Obligations",
+        "type": "integer"
+      },
+      "mode": {
+        "default": "shadow",
+        "enum": [
+          "off",
+          "shadow",
+          "active"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "produce_progress_report_when_blocked": {
+        "default": true,
+        "title": "Produce Progress Report When Blocked",
+        "type": "boolean"
+      },
+      "require_core_dependency_closure": {
+        "default": true,
+        "title": "Require Core Dependency Closure",
+        "type": "boolean"
+      },
+      "require_no_necessary_only_bridge_as_sufficient": {
+        "default": true,
+        "title": "Require No Necessary Only Bridge As Sufficient",
+        "type": "boolean"
+      },
+      "require_no_open_scope_risks": {
+        "default": true,
+        "title": "Require No Open Scope Risks",
+        "type": "boolean"
+      },
+      "require_no_unresolved_high_centrality_conflicts": {
+        "default": true,
+        "title": "Require No Unresolved High Centrality Conflicts",
+        "type": "boolean"
+      }
+    },
+    "title": "SynthesisReadinessControlConfig",
+    "type": "object"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mathproofmesh.local/schemas/olympiad-5key-v1/issue-matrix.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "issue_001", "issue_002", "issue_003", "issue_004", "issue_005",
+    "issue_006", "issue_007", "issue_008", "issue_009", "issue_010",
+    "issue_011", "issue_012", "issue_013"
+  ],
+  "patternProperties": {
+    "^issue_0(?:0[1-9]|1[0-3])$": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["violations", "evidence_refs"],
+      "properties": {
+        "violations": {"type": "integer", "minimum": 0},
+        "evidence_refs": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

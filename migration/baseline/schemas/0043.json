@@ -1,0 +1,277 @@
+{
+  "qualified_name": "mathproofmesh.deep_exploration.ExplorationAttemptRecord",
+  "schema": {
+    "$defs": {
+      "ExplorationOutcome": {
+        "enum": [
+          "running",
+          "verified_progress",
+          "verified_mechanism_change",
+          "useful_counterexample",
+          "usable_partial",
+          "no_artifact",
+          "no_verified_progress",
+          "external_failure",
+          "interrupted"
+        ],
+        "title": "ExplorationOutcome",
+        "type": "string"
+      },
+      "ExplorationSignature": {
+        "additionalProperties": false,
+        "description": "A mathematical state signature; route IDs and domains are metadata only.",
+        "properties": {
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "construction_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Construction Tags",
+            "type": "array"
+          },
+          "invariant_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Invariant Tags",
+            "type": "array"
+          },
+          "mechanism_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Mechanism Tags",
+            "type": "array"
+          },
+          "problem_hash": {
+            "title": "Problem Hash",
+            "type": "string"
+          },
+          "recovery_lineage_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Recovery Lineage Id"
+          },
+          "representation_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Representation Tags",
+            "type": "array"
+          },
+          "route_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Route Id"
+          },
+          "signature_hash": {
+            "default": "",
+            "title": "Signature Hash",
+            "type": "string"
+          },
+          "signature_version": {
+            "default": 2,
+            "title": "Signature Version",
+            "type": "integer"
+          },
+          "target_obligation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Obligation Id"
+          },
+          "target_statement": {
+            "title": "Target Statement",
+            "type": "string"
+          },
+          "transformation_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transformation Tags",
+            "type": "array"
+          },
+          "verified_checkpoint_hash": {
+            "title": "Verified Checkpoint Hash",
+            "type": "string"
+          },
+          "verified_checkpoint_id": {
+            "title": "Verified Checkpoint Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "problem_hash",
+          "verified_checkpoint_id",
+          "verified_checkpoint_hash",
+          "target_statement"
+        ],
+        "title": "ExplorationSignature",
+        "type": "object"
+      },
+      "UsageRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "estimated_cost_usd": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Estimated Cost Usd",
+            "type": "number"
+          },
+          "input_tokens": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "latency_ms": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Latency Ms",
+            "type": "number"
+          },
+          "output_tokens": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "title": "UsageRecord",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "checkpoint_after_hash": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Checkpoint After Hash"
+      },
+      "current_goal_changed": {
+        "default": false,
+        "title": "Current Goal Changed",
+        "type": "boolean"
+      },
+      "finished_at": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Finished At"
+      },
+      "granted_tier": {
+        "minimum": 0,
+        "title": "Granted Tier",
+        "type": "integer"
+      },
+      "lease_id": {
+        "title": "Lease Id",
+        "type": "string"
+      },
+      "max_output_tokens": {
+        "minimum": 512,
+        "title": "Max Output Tokens",
+        "type": "integer"
+      },
+      "outcome": {
+        "$ref": "#/$defs/ExplorationOutcome",
+        "default": "running"
+      },
+      "proof_debt_changed": {
+        "default": false,
+        "title": "Proof Debt Changed",
+        "type": "boolean"
+      },
+      "reason": {
+        "default": "",
+        "title": "Reason",
+        "type": "string"
+      },
+      "recovery_only": {
+        "default": false,
+        "title": "Recovery Only",
+        "type": "boolean"
+      },
+      "requested_tier": {
+        "minimum": 0,
+        "title": "Requested Tier",
+        "type": "integer"
+      },
+      "round_index": {
+        "minimum": 0,
+        "title": "Round Index",
+        "type": "integer"
+      },
+      "route_id": {
+        "title": "Route Id",
+        "type": "string"
+      },
+      "signature": {
+        "$ref": "#/$defs/ExplorationSignature"
+      },
+      "started_at": {
+        "title": "Started At",
+        "type": "string"
+      },
+      "usage": {
+        "$ref": "#/$defs/UsageRecord"
+      }
+    },
+    "required": [
+      "lease_id",
+      "signature",
+      "route_id",
+      "round_index",
+      "requested_tier",
+      "granted_tier",
+      "max_output_tokens"
+    ],
+    "title": "ExplorationAttemptRecord",
+    "type": "object"
+  }
+}

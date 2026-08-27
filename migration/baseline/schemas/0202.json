@@ -1,0 +1,185 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ProofObligation",
+  "schema": {
+    "$defs": {
+      "ObligationKind": {
+        "enum": [
+          "main_goal",
+          "subgoal",
+          "lemma",
+          "case_branch",
+          "construction",
+          "computation_question",
+          "formalization_task",
+          "contradiction"
+        ],
+        "title": "ObligationKind",
+        "type": "string"
+      },
+      "QuantifierSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "forall",
+              "exists",
+              "exists_unique"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "order": {
+            "minimum": 0,
+            "title": "Order",
+            "type": "integer"
+          },
+          "restrictions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restrictions",
+            "type": "array"
+          },
+          "variable_id": {
+            "minLength": 1,
+            "title": "Variable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order",
+          "kind",
+          "variable_id",
+          "display_name",
+          "domain"
+        ],
+        "title": "QuantifierSpec",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "assumptions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Assumptions",
+        "type": "array"
+      },
+      "centrality": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Centrality",
+        "type": "number"
+      },
+      "content_hash": {
+        "default": "",
+        "title": "Content Hash",
+        "type": "string"
+      },
+      "dependency_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Dependency Ids",
+        "type": "array"
+      },
+      "dependency_refs": {
+        "items": {},
+        "title": "Dependency Refs",
+        "type": "array"
+      },
+      "evidence_message_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Evidence Message Ids",
+        "type": "array"
+      },
+      "first_error_fingerprint": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "First Error Fingerprint"
+      },
+      "kind": {
+        "$ref": "#/$defs/ObligationKind"
+      },
+      "normalized_statement": {
+        "title": "Normalized Statement",
+        "type": "string"
+      },
+      "obligation_id": {
+        "title": "Obligation Id",
+        "type": "string"
+      },
+      "priority": {
+        "default": 0.5,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Priority",
+        "type": "number"
+      },
+      "problem_hash": {
+        "title": "Problem Hash",
+        "type": "string"
+      },
+      "quantifiers": {
+        "items": {
+          "$ref": "#/$defs/QuantifierSpec"
+        },
+        "title": "Quantifiers",
+        "type": "array"
+      },
+      "route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Route Ids",
+        "type": "array"
+      },
+      "statement": {
+        "title": "Statement",
+        "type": "string"
+      },
+      "status": {
+        "default": "open",
+        "enum": [
+          "open",
+          "tentative",
+          "closed",
+          "refuted",
+          "blocked"
+        ],
+        "title": "Status",
+        "type": "string"
+      }
+    },
+    "required": [
+      "problem_hash",
+      "route_ids",
+      "kind",
+      "statement",
+      "normalized_statement"
+    ],
+    "title": "ProofObligation",
+    "type": "object"
+  }
+}

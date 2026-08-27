@@ -1,0 +1,65 @@
+{
+  "qualified_name": "mathproofmesh.config.BottleneckControlConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "compression_interval_rounds": {
+        "default": 1,
+        "maximum": 16,
+        "minimum": 1,
+        "title": "Compression Interval Rounds",
+        "type": "integer"
+      },
+      "dominance_threshold": {
+        "default": 0.9,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Dominance Threshold",
+        "type": "number"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "equivalence_threshold": {
+        "default": 0.84,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Equivalence Threshold",
+        "type": "number"
+      },
+      "max_cluster_members": {
+        "default": 64,
+        "maximum": 1000,
+        "minimum": 2,
+        "title": "Max Cluster Members",
+        "type": "integer"
+      },
+      "min_open_growth_for_forced_compression": {
+        "default": 8,
+        "maximum": 1000,
+        "minimum": 1,
+        "title": "Min Open Growth For Forced Compression",
+        "type": "integer"
+      },
+      "mode": {
+        "default": "shadow",
+        "enum": [
+          "off",
+          "shadow",
+          "active"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "preserve_original_nodes": {
+        "default": true,
+        "title": "Preserve Original Nodes",
+        "type": "boolean"
+      }
+    },
+    "title": "BottleneckControlConfig",
+    "type": "object"
+  }
+}

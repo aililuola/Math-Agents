@@ -1,0 +1,31 @@
+{
+  "config": {
+    "environment_variable_count": 11,
+    "field_count": 318,
+    "normalized_profile_count": 6,
+    "source_fixture_count": 8
+  },
+  "enums": 82,
+  "hash_vectors": 16,
+  "mapping_coverage": {
+    "auxiliary_rows": 92,
+    "duplicates": 0,
+    "extra": [],
+    "manifest_sha256": "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+    "missing": [],
+    "source_rows": 142,
+    "test_rows": 167,
+    "union_rows": 401
+  },
+  "module_imports": 137,
+  "phase_zero_auxiliary_copies": 5,
+  "pydantic_schemas": 236,
+  "test_inventory": {
+    "collected_test_items": 759,
+    "explicit_test_functions": 707,
+    "mapped_files": 167,
+    "parameterized_expansion": 52,
+    "support_files": 3,
+    "test_modules": 164
+  }
+}

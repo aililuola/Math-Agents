@@ -1,0 +1,80 @@
+{
+  "qualified_name": "mathproofmesh.schemas.FrontierBridge",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "backward_frontier_id": {
+        "title": "Backward Frontier Id",
+        "type": "string"
+      },
+      "bridge_id": {
+        "title": "Bridge Id",
+        "type": "string"
+      },
+      "compatibility_conditions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Compatibility Conditions",
+        "type": "array"
+      },
+      "forward_frontier_id": {
+        "title": "Forward Frontier Id",
+        "type": "string"
+      },
+      "lexical_overlap": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Lexical Overlap",
+        "type": "number"
+      },
+      "missing_implication": {
+        "minLength": 1,
+        "title": "Missing Implication",
+        "type": "string"
+      },
+      "required_supporting_conditions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Required Supporting Conditions",
+        "type": "array"
+      },
+      "semantic_relationship": {
+        "default": "scope_only",
+        "enum": [
+          "scope_only",
+          "candidate_ingredient"
+        ],
+        "title": "Semantic Relationship",
+        "type": "string"
+      },
+      "source_sufficiency_assumed": {
+        "const": false,
+        "default": false,
+        "title": "Source Sufficiency Assumed",
+        "type": "boolean"
+      },
+      "status": {
+        "default": "open",
+        "enum": [
+          "open",
+          "refuted",
+          "closed"
+        ],
+        "title": "Status",
+        "type": "string"
+      }
+    },
+    "required": [
+      "bridge_id",
+      "forward_frontier_id",
+      "backward_frontier_id",
+      "missing_implication",
+      "compatibility_conditions"
+    ],
+    "title": "FrontierBridge",
+    "type": "object"
+  }
+}

@@ -1,0 +1,329 @@
+schema_version: "1.0"
+plan_id: "java-mathproofmesh-0.8.0-migration"
+plan_date: "2026-07-29"
+authoritative_plan: "MIGRATION_PLAN.md"
+source_mapping: "PYTHON_SOURCE_MIGRATION_MAP.csv"
+test_mapping: "PYTHON_TEST_MIGRATION_MAP.csv"
+auxiliary_mapping: "OPS_CONFIG_DOC_MIGRATION_MAP.csv"
+workspace:
+  root_rule: "Git worktree root containing pyproject.toml, BUILD_INFO.json, src/mathproofmesh, and tests"
+  target_directory: "JavaMathProofMesh-0.8.0"
+  allowed_write_root: "${WORKSPACE_ROOT}/JavaMathProofMesh-0.8.0"
+  allowed_new_paths_outside_target: []
+  source_manifest_excludes:
+    - ".git/**"
+    - "JavaMathProofMesh-0.8.0/**"
+  source_zip_sha256: "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2"
+  source_manifest_sha256: "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770"
+  source_manifest_file: "SOURCE_SNAPSHOT_SHA256SUMS.txt"
+  source_manifest_line_format: "<lowercase-sha256><two ASCII spaces><relative POSIX path><LF>; UTF-8 path byte-order sort; final LF included"
+  declared_python_version: "0.8.2"
+  target_release_version: "0.8.0"
+  expected_python_tests: 759
+  source_mapping_rows: 142
+  test_mapping_files: 167
+  test_modules: 164
+  test_support_files: 3
+  auxiliary_mapping_rows: 92
+  total_non_git_files: 401
+  explicit_python_test_functions: 707
+execution:
+  one_phase_per_invocation: true
+  stop_on_failed_gate: true
+  permit_phase_skip: false
+  permit_disabled_required_tests: false
+  permit_placeholder_implementation: false
+  permit_live_provider_calls_by_default: false
+  state_file: "migration/state.json"
+  valid_states: [pending, in_progress, passed, blocked]
+  required_pre_phase_steps:
+    - "read all six migration specifications"
+    - "verify prior phase passed"
+    - "check original source immutable"
+    - "set current phase in_progress"
+  required_post_phase_steps:
+    - "run phase-specific tests"
+    - "run full Maven verify when project skeleton exists"
+    - "check original source immutable"
+    - "update source-state.csv, test-state.csv, and auxiliary-state.csv"
+    - "write phase report"
+    - "set passed only when every gate passes"
+fixed_versions:
+  java: "25"
+  recommended_jdk_distribution: "Eclipse Temurin"
+  recommended_jdk_patch: "25.0.4+7 or newer 25.x security patch"
+  maven: "3.9.16"
+  maven_wrapper: "3.3.4"
+  maven_wrapper_type: "only-script"
+  spring_boot: "4.1.0"
+  spring_modulith: "2.1.0"
+  temporal_java_sdk: "1.37.0"
+  temporal_cli: "1.8.1"
+  temporal_dev_image_tag: "temporalio/temporal:1.8.1"
+  temporal_embedded_server: "1.31.2"
+  postgresql: "18.4"
+  postgresql_image_tag: "postgres:18.4-bookworm"
+  javafx: "25.0.4"
+  picocli: "4.7.7"
+  jgrapht: "1.5.3"
+  jna_jpms: "5.19.1"
+  archunit: "1.4.2"
+  maven_enforcer_plugin: "3.6.3"
+  spotbugs_maven_plugin: "4.10.3.0"
+  jacoco: "0.8.15"
+  owasp_dependency_check: "12.2.2"
+  cyclonedx_maven_plugin: "2.9.2"
+required_manual_tools:
+  - id: jdk
+    verification: ["java -version", "javac -version"]
+    acceptance: "both report Java 25"
+  - id: git
+    verification: ["git --version"]
+    acceptance: "command succeeds"
+  - id: docker
+    verification: ["docker version", "docker compose version"]
+    acceptance: "daemon and Compose v2 available"
+  - id: python
+    verification: ["python --version", "py -0p (Windows only)"]
+    acceptance: "Python >=3.11; 3.13.x preferred"
+manual_install_not_required:
+  - Maven
+  - PostgreSQL server
+  - Temporal CLI/server
+  - Spring Boot
+  - JavaFX SDK
+  - Node.js
+  - Redis
+  - Kafka
+  - Neo4j
+security_invariants:
+  - "No secrets in Git, logs, exceptions, SSE, artifacts, or snapshots"
+  - "No writable symlink/junction/reparse-point escape"
+  - "Unknown JSON/YAML fields fail"
+  - "No Jackson default typing or arbitrary class deserialization"
+  - "No user-controlled provider URL, SQL URL, sandbox image, or filesystem root"
+  - "All database access is parameterized and run-scoped"
+  - "Provider calls and computation are bounded by concurrency, time, size, and budget"
+  - "Arbitrary model-generated Python is disabled by default"
+  - "Original Python file set remains byte-for-byte unchanged"
+common_commands:
+  windows:
+    source_check: ".\\scripts\\check-original-immutable.ps1"
+    verify: ".\\mvnw.cmd -B -ntp verify"
+  posix:
+    source_check: "./scripts/check-original-immutable.sh"
+    verify: "./mvnw -B -ntp verify"
+phases:
+  - id: "00"
+    name: "immutable baseline, environment, and framework preflight"
+    depends_on: []
+    mapping_phases: ["00"]
+    scope:
+      - "create target root and migration control files"
+      - "freeze original source manifest before target creation"
+      - "verify required tools and fixed dependencies"
+      - "run isolated Python baseline without writing to original tree"
+      - "export schemas, enum literals, defaults, fixtures, and hash vectors"
+    required_outputs:
+      - "mvnw"
+      - "mvnw.cmd"
+      - ".mvn/wrapper/maven-wrapper.properties"
+      - "migration/BASELINE.json"
+      - "migration/state.json"
+      - "migration/baseline/source-manifest.csv"
+      - "migration/baseline/test-inventory.json"
+      - "migration/baseline/schemas/**"
+      - "migration/baseline/hash-vectors.jsonl"
+      - "migration/source-state.csv"
+      - "migration/test-state.csv"
+      - "migration/auxiliary-state.csv"
+      - "migration/reports/phase-00.md"
+    gates:
+      - "source zip and pre-target source manifest match expected fingerprints"
+      - "Python baseline reports exactly 759 passed"
+      - "JDK 25, Git, Docker Compose v2, and Python >=3.11 verified"
+      - "official Maven 3.9.16 bootstrap archive passes SHA-512 verification; fully qualified Maven Wrapper Plugin 3.3.4 generates only-script wrapper with distributionSha256Sum"
+      - "all fixed Maven artifacts/BOMs/plugins and platform-specific JavaFX artifacts resolve without snapshots or conflicts"
+      - "postgres:18.4-bookworm and temporalio/temporal:1.8.1 are locked as full image@sha256 references; Temporal CLI 1.8.1 and embedded Server 1.31.2 are verified"
+      - "Temporal preflight is headless, SQLite-persistent, read-only hardened, and bound only to 127.0.0.1:7233"
+      - "source/test/auxiliary mapping union contains exactly 401 unique frozen source paths (142 + 167 + 92)"
+      - "original source unchanged and no files created outside target"
+  - id: "01"
+    name: "Maven multi-module skeleton and secure build"
+    depends_on: ["00"]
+    mapping_phases: ["01"]
+    required_outputs:
+      - "pom.xml"
+      - ".mvn/wrapper/**"
+      - "mvnw"
+      - "mvnw.cmd"
+      - "mathproofmesh-contracts/pom.xml"
+      - "mathproofmesh-core/pom.xml"
+      - "mathproofmesh-server/pom.xml"
+      - "mathproofmesh-desktop/pom.xml"
+      - "mathproofmesh-compatibility/pom.xml"
+      - "python-compute-service/**"
+      - "migration/reports/phase-01.md"
+    gates:
+      - "JDK release 25 build succeeds"
+      - "dependency convergence and no-snapshot enforcer rules pass"
+      - "Spring Boot context, Modulith model, and Temporal testing dependency smoke tests pass"
+      - "SBOM generated and high/critical findings resolved or explicitly blocked"
+  - id: "02"
+    name: "contracts, strict validation, canonical JSON, and hash parity"
+    depends_on: ["01"]
+    mapping_phases: ["02"]
+    gates:
+      - "all Python contract/schema rows mapped"
+      - "enum wire values match exactly"
+      - "100 percent of hash vectors match Python"
+      - "unknown fields and invalid state combinations fail"
+      - "contracts module has no Spring dependency and no core Map<String,Object>"
+  - id: "03"
+    name: "configuration, profiles, preflight, and secrets"
+    depends_on: ["02"]
+    mapping_phases: ["03"]
+    gates:
+      - "all original YAML fixtures parse strictly"
+      - "all Python config validators have Java tests"
+      - "secret redaction tests pass for logs, exceptions, JSON, and toString"
+      - "provider endpoint SSRF policy tests pass"
+  - id: "04"
+    name: "PostgreSQL, Flyway, artifacts, outbox/inbox, and run lease"
+    depends_on: ["03"]
+    mapping_phases: ["04"]
+    gates:
+      - "flyway-core and flyway-database-postgresql both present"
+      - "empty PostgreSQL 18.4 migrates successfully and restart is idempotent"
+      - "Testcontainers uses PostgreSQL, not H2"
+      - "outbox/inbox crash and duplicate tests pass"
+      - "run lease fencing and optimistic-lock tests pass"
+      - "artifact traversal, symlink, hash, size, and quota tests pass"
+  - id: "05"
+    name: "typed communication, route registry, sparse topology, and receipts"
+    depends_on: ["04"]
+    mapping_phases: ["05"]
+    gates:
+      - "admission order and all rejection reasons match baseline"
+      - "delivery, prompt_consumed, acknowledged, and actually_used remain distinct"
+      - "resume never re-emits prompt-consumed delivery"
+      - "message delivery and domain effects are idempotent"
+  - id: "06"
+    name: "three-tier memory and proof obligation graph"
+    depends_on: ["05"]
+    mapping_phases: ["06"]
+    gates:
+      - "Fact/Insight/Negative promotion and demotion rules match baseline"
+      - "counterexample invalidation propagates transactionally"
+      - "proof graph cycle, closure, conflict, debt, and freeze tests pass"
+      - "concurrent mutation tests pass"
+  - id: "07"
+    name: "agent runtime, providers, budget, rate limiting, and call ledger"
+    depends_on: ["06"]
+    mapping_phases: ["07"]
+    gates:
+      - "DeepSeek, Anthropic, Gemini, OpenAI-compatible, and Mock adapters pass fixtures"
+      - "SSE parsing, usage reconciliation, failover, timeout, Retry-After, and circuit rules pass"
+      - "401/403 are not retried with the same key"
+      - "virtual-thread concurrency remains bounded"
+      - "no live provider call without explicit opt-in"
+  - id: "08"
+    name: "computation engine and restricted Python sidecar"
+    depends_on: ["07"]
+    mapping_phases: ["08"]
+    gates:
+      - "Java-native deterministic handlers pass baseline fixtures"
+      - "stdio JSON-RPC sidecar protocol is versioned, bounded, and rejects unknown operations"
+      - "sidecar has no network/database/secret access"
+      - "SymPy/Z3 differential fixtures match"
+      - "arbitrary Python execution remains disabled by default"
+  - id: "09"
+    name: "verification escalation, blind review, mutation, and formal micro-certificates"
+    depends_on: ["08"]
+    mapping_phases: ["09"]
+    gates:
+      - "structural-first escalation ladder matches baseline"
+      - "author and independent reviewer separation enforced"
+      - "blind packet denylist prevents identity/provenance leakage"
+      - "mutation and formal micro-certificate tests pass"
+  - id: "10"
+    name: "Goal-Plan-Failure-Utility proof control"
+    depends_on: ["09"]
+    mapping_phases: ["10"]
+    subphases: ["10A", "10B", "10C", "10D", "10E", "10F", "10G"]
+    gates:
+      - "all 10A-10G mechanisms implemented without a monolithic controller"
+      - "proof-control permission boundaries pass"
+      - "action dispatcher and resume policy are idempotent"
+      - "all mapped proof-control Python tests pass Java or differential equivalents"
+  - id: "11"
+    name: "inspiration engine"
+    depends_on: ["10"]
+    mapping_phases: ["11"]
+    gates:
+      - "all mapped inspiration modules are implemented"
+      - "proposal, referee, novelty, surprise budget, UCB, and outcome ledger tests pass"
+      - "rejected inspiration remains auditable but cannot masquerade as Fact"
+  - id: "12"
+    name: "route teams, continuation, scheduler, synthesis, and database-driven runner"
+    depends_on: ["11"]
+    mapping_phases: ["12"]
+    gates:
+      - "fixed run-stage state machine is implemented"
+      - "route/team isolation and independent roles pass"
+      - "continuation, deepening, cross-route, stall, and synthesis tests pass"
+      - "mock end-to-end run, pause, resume, and final review pass without Temporal"
+  - id: "13"
+    name: "Temporal durable workflow and crash replay"
+    depends_on: ["12"]
+    mapping_phases: ["13"]
+    gates:
+      - "workflow code is deterministic and all I/O is in Activities"
+      - "workflow replay tests pass"
+      - "Signal/Update idempotency tests pass"
+      - "worker-crash and activity-completion-before-ack fault tests pass"
+      - "database domain state remains authoritative and exactly-once at state-transition level"
+      - "compose uses only TEMPORAL_DEV_IMAGE=temporalio/temporal@sha256:..., runs headless with persistent SQLite, read-only hardening, and maps only 127.0.0.1:7233"
+      - "only MathProofMeshSolveWorkflow and RouteExplorationWorkflow exist; final review is implemented as idempotent Activities"
+  - id: "14"
+    name: "REST, SSE, CLI, timeline, reporting, and observability"
+    depends_on: ["13"]
+    mapping_phases: ["14"]
+    gates:
+      - "health/solve/resume/status/SSE compatibility tests pass"
+      - "SSE monotonic event_id and Last-Event-ID resume pass"
+      - "CLI solve/resume/demo/probe/serve tests pass"
+      - "logs, metrics, traces, and errors are correlated and redacted"
+  - id: "15"
+    name: "JavaFX desktop, DPAPI, and local packaging"
+    depends_on: ["14"]
+    mapping_phases: ["15"]
+    gates:
+      - "JavaFX UI drives local server APIs rather than database repositories"
+      - "Windows DPAPI key storage and redaction tests pass"
+      - "desktop packaging smoke test passes"
+      - "no plaintext secret is written"
+  - id: "16"
+    name: "legacy Python run importer and differential parity"
+    depends_on: ["15"]
+    mapping_phases: ["16"]
+    gates:
+      - "legacy importer is read-only, idempotent, and preserves provenance"
+      - "version migration fixtures pass"
+      - "Python-vs-Java shadow comparator covers contracts, messages, memory, graph, checkpoints, and mock E2E"
+      - "all mapped source, test, and auxiliary rows are migrated or verified"
+      - "source/test/auxiliary state union exactly matches all 401 frozen non-Git files"
+  - id: "17"
+    name: "hardening, performance, release, and final acceptance"
+    depends_on: ["16"]
+    mapping_phases: ["17"]
+    gates:
+      - "all unit, integration, differential, security, replay, desktop, and packaging tests pass"
+      - "no required TODO/FIXME/placeholder/disabled test remains"
+      - "coverage thresholds in the main plan pass"
+      - "performance and resource budgets pass"
+      - "SBOM, license, dependency vulnerability, migration coverage, and release reports exist"
+      - "source-state has 142 verified rows, test-state has 167 verified files (164 test modules and 3 support files), and auxiliary-state has 92 verified rows"
+      - "the three state files contain exactly 401 unique source paths and match the frozen manifest"
+      - "original Python file set is byte-for-byte unchanged"
+      - "server, CLI, desktop, sidecar, database migrations, checksums, and completion report are released"

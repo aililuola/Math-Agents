@@ -1,0 +1,51 @@
+{
+  "qualified_name": "mathproofmesh.verification.escalation.ValidationStepResult",
+  "schema": {
+    "$defs": {
+      "ValidationLevel": {
+        "enum": [
+          "deterministic",
+          "blind_same_model",
+          "adversarial_blind",
+          "cross_provider",
+          "tool_or_formal"
+        ],
+        "title": "ValidationLevel",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "diagnostic": {
+        "default": "",
+        "title": "Diagnostic",
+        "type": "string"
+      },
+      "evidence_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Evidence Refs",
+        "type": "array"
+      },
+      "executed": {
+        "title": "Executed",
+        "type": "boolean"
+      },
+      "level": {
+        "$ref": "#/$defs/ValidationLevel"
+      },
+      "passed": {
+        "title": "Passed",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "level",
+      "executed",
+      "passed"
+    ],
+    "title": "ValidationStepResult",
+    "type": "object"
+  }
+}

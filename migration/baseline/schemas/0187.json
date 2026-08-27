@@ -1,0 +1,47 @@
+{
+  "qualified_name": "mathproofmesh.schemas.MetaDirectiveAudit",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "accepted": {
+        "title": "Accepted",
+        "type": "boolean"
+      },
+      "auditor_id": {
+        "default": "deterministic_meta_directive_auditor",
+        "title": "Auditor Id",
+        "type": "string"
+      },
+      "budget_safe": {
+        "title": "Budget Safe",
+        "type": "boolean"
+      },
+      "directive_id": {
+        "title": "Directive Id",
+        "type": "string"
+      },
+      "evidence_complete": {
+        "title": "Evidence Complete",
+        "type": "boolean"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "targets_valid": {
+        "title": "Targets Valid",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "directive_id",
+      "accepted",
+      "evidence_complete",
+      "targets_valid",
+      "budget_safe",
+      "reason"
+    ],
+    "title": "MetaDirectiveAudit",
+    "type": "object"
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "qualified_name": "mathproofmesh.deep_exploration.ExplorationSignature",
+  "schema": {
+    "additionalProperties": false,
+    "description": "A mathematical state signature; route IDs and domains are metadata only.",
+    "properties": {
+      "assumptions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Assumptions",
+        "type": "array"
+      },
+      "construction_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Construction Tags",
+        "type": "array"
+      },
+      "invariant_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Invariant Tags",
+        "type": "array"
+      },
+      "mechanism_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Mechanism Tags",
+        "type": "array"
+      },
+      "problem_hash": {
+        "title": "Problem Hash",
+        "type": "string"
+      },
+      "recovery_lineage_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Recovery Lineage Id"
+      },
+      "representation_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Representation Tags",
+        "type": "array"
+      },
+      "route_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Route Id"
+      },
+      "signature_hash": {
+        "default": "",
+        "title": "Signature Hash",
+        "type": "string"
+      },
+      "signature_version": {
+        "default": 2,
+        "title": "Signature Version",
+        "type": "integer"
+      },
+      "target_obligation_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Target Obligation Id"
+      },
+      "target_statement": {
+        "title": "Target Statement",
+        "type": "string"
+      },
+      "transformation_tags": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Transformation Tags",
+        "type": "array"
+      },
+      "verified_checkpoint_hash": {
+        "title": "Verified Checkpoint Hash",
+        "type": "string"
+      },
+      "verified_checkpoint_id": {
+        "title": "Verified Checkpoint Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "problem_hash",
+      "verified_checkpoint_id",
+      "verified_checkpoint_hash",
+      "target_statement"
+    ],
+    "title": "ExplorationSignature",
+    "type": "object"
+  }
+}

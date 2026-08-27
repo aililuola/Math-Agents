@@ -1,0 +1,19 @@
+﻿{
+    "schema_version":  "1.0",
+    "phase":  "17",
+    "started_at_utc":  "2026-07-31T09:17:42.2175876Z",
+    "completed_at_utc":  "2026-07-31T09:18:50.3088540Z",
+    "result":  "PASS",
+    "python":  {
+                   "expected_tests":  759,
+                   "exit_code":  0,
+                   "result":  "PASS"
+               },
+    "source_immutability":  {
+                                "expected_files":  401,
+                                "expected_manifest_sha256":  "9f3def2bec8cea99d0a18b51fbb5fa8ce53f44a24ce869f6495cac809b7e3770",
+                                "exit_code":  0,
+                                "result":  "PASS"
+                            },
+    "log":  "migration/reports/phase-17-python-baseline.log"
+}

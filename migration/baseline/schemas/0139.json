@@ -1,0 +1,72 @@
+{
+  "qualified_name": "mathproofmesh.schemas.CitationRecord",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "applicability_conditions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Applicability Conditions",
+        "type": "array"
+      },
+      "authors": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Authors",
+        "type": "array"
+      },
+      "exact_statement": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Exact Statement"
+      },
+      "location": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Location"
+      },
+      "title": {
+        "title": "Title",
+        "type": "string"
+      },
+      "url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Url"
+      },
+      "verified": {
+        "default": false,
+        "title": "Verified",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "title"
+    ],
+    "title": "CitationRecord",
+    "type": "object"
+  }
+}

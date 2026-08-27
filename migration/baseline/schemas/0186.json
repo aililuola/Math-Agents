@@ -1,0 +1,123 @@
+{
+  "qualified_name": "mathproofmesh.schemas.MetaDirective",
+  "schema": {
+    "$defs": {
+      "InspirationMechanism": {
+        "enum": [
+          "representation_switch",
+          "structural_analogy",
+          "auxiliary_construction",
+          "invariant_hypothesis",
+          "reverse_goal_analysis",
+          "bridge_lemma",
+          "surprise_exploration",
+          "meta_replan",
+          "inspiration_composition"
+        ],
+        "title": "InspirationMechanism",
+        "type": "string"
+      },
+      "MetaDirectiveAction": {
+        "enum": [
+          "continue",
+          "repair",
+          "rewrite_plan",
+          "switch_representation",
+          "cooldown_route",
+          "abandon_route",
+          "merge_routes",
+          "allocate_surprise_budget"
+        ],
+        "title": "MetaDirectiveAction",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Auditable control-plane instruction; never mathematical evidence.",
+    "properties": {
+      "action": {
+        "$ref": "#/$defs/MetaDirectiveAction"
+      },
+      "directive_id": {
+        "title": "Directive Id",
+        "type": "string"
+      },
+      "estimated_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Estimated Calls",
+        "type": "integer"
+      },
+      "expires_round": {
+        "minimum": 0,
+        "title": "Expires Round",
+        "type": "integer"
+      },
+      "mandatory": {
+        "default": false,
+        "title": "Mandatory",
+        "type": "boolean"
+      },
+      "observable_evidence": {
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        },
+        "title": "Observable Evidence",
+        "type": "object"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "round_index": {
+        "minimum": 0,
+        "title": "Round Index",
+        "type": "integer"
+      },
+      "route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Route Ids",
+        "type": "array"
+      },
+      "selected_mechanism": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/InspirationMechanism"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "source_decision_id": {
+        "title": "Source Decision Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "source_decision_id",
+      "round_index",
+      "action",
+      "reason",
+      "expires_round"
+    ],
+    "title": "MetaDirective",
+    "type": "object"
+  }
+}

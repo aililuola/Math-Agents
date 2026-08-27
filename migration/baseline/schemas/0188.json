@@ -1,0 +1,47 @@
+{
+  "qualified_name": "mathproofmesh.schemas.MetaDirectiveExecution",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "affected_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Affected Route Ids",
+        "type": "array"
+      },
+      "directive_id": {
+        "title": "Directive Id",
+        "type": "string"
+      },
+      "generated_task_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Generated Task Ids",
+        "type": "array"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "executed",
+          "rejected",
+          "deferred",
+          "noop"
+        ],
+        "title": "Status",
+        "type": "string"
+      }
+    },
+    "required": [
+      "directive_id",
+      "status",
+      "reason"
+    ],
+    "title": "MetaDirectiveExecution",
+    "type": "object"
+  }
+}

@@ -1,0 +1,1 @@
+Let p be an odd prime and let a,b be coprime positive integers. Prove that gcd(a+b, (a^p+b^p)/(a+b)) belongs to {1,p}.

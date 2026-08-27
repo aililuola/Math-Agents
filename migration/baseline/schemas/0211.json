@@ -1,0 +1,42 @@
+{
+  "qualified_name": "mathproofmesh.schemas.RouteMember",
+  "schema": {
+    "$defs": {
+      "RouteRole": {
+        "enum": [
+          "prover",
+          "skeptic",
+          "tool_specialist",
+          "referee",
+          "bridge_prover",
+          "conflict_resolver",
+          "counterexample_hunter"
+        ],
+        "title": "RouteRole",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "agent_id": {
+        "title": "Agent Id",
+        "type": "string"
+      },
+      "assigned_round": {
+        "minimum": 0,
+        "title": "Assigned Round",
+        "type": "integer"
+      },
+      "role": {
+        "$ref": "#/$defs/RouteRole"
+      }
+    },
+    "required": [
+      "agent_id",
+      "role",
+      "assigned_round"
+    ],
+    "title": "RouteMember",
+    "type": "object"
+  }
+}

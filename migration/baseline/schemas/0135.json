@@ -1,0 +1,219 @@
+{
+  "qualified_name": "mathproofmesh.schemas.CalculationGateRecord",
+  "schema": {
+    "$defs": {
+      "CalculationGateVerdict": {
+        "enum": [
+          "passed",
+          "missing_declaration",
+          "invalid_contract",
+          "refuted",
+          "inconclusive"
+        ],
+        "title": "CalculationGateVerdict",
+        "type": "string"
+      },
+      "EvidenceRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_ref": {
+            "title": "Artifact Ref",
+            "type": "string"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Content Hash"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Section"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_ref"
+        ],
+        "title": "EvidenceRef",
+        "type": "object"
+      },
+      "ToolRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "domains": {
+            "additionalProperties": true,
+            "title": "Domains",
+            "type": "object"
+          },
+          "kind": {
+            "enum": [
+              "sympy_simplify",
+              "sympy_equivalent",
+              "numeric_counterexample",
+              "polynomial_factor",
+              "modular_exhaustive",
+              "bounded_integer_search",
+              "graph_certificate",
+              "recurrence_check",
+              "bounded_greedy_sequence",
+              "candidate_period_check",
+              "exact_geometry",
+              "lean_check"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "max_cases": {
+            "default": 100000,
+            "maximum": 100000000,
+            "minimum": 1,
+            "title": "Max Cases",
+            "type": "integer"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "purpose"
+        ],
+        "title": "ToolRequest",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Authoritative result of checking one route-critical finite calculation.",
+    "properties": {
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "evidence_refs": {
+        "items": {
+          "$ref": "#/$defs/EvidenceRef"
+        },
+        "title": "Evidence Refs",
+        "type": "array"
+      },
+      "experiment_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Experiment Id"
+      },
+      "gate_id": {
+        "title": "Gate Id",
+        "type": "string"
+      },
+      "path_id": {
+        "title": "Path Id",
+        "type": "string"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      },
+      "request": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ToolRequest"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "request_hash": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Request Hash"
+      },
+      "result_hash": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Result Hash"
+      },
+      "scope_id": {
+        "title": "Scope Id",
+        "type": "string"
+      },
+      "scope_type": {
+        "enum": [
+          "strategy",
+          "proof_step",
+          "final_step"
+        ],
+        "title": "Scope Type",
+        "type": "string"
+      },
+      "trigger": {
+        "title": "Trigger",
+        "type": "string"
+      },
+      "verdict": {
+        "$ref": "#/$defs/CalculationGateVerdict"
+      }
+    },
+    "required": [
+      "scope_type",
+      "scope_id",
+      "path_id",
+      "trigger",
+      "verdict",
+      "reason"
+    ],
+    "title": "CalculationGateRecord",
+    "type": "object"
+  }
+}

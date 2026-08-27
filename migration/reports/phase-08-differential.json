@@ -1,0 +1,77 @@
+{
+  "schema_version": "1.0",
+  "phase": "08",
+  "result": "PASS",
+  "captured_at_utc": "2026-07-30T17:47:36.929Z",
+  "authority": {
+    "zip": "migration/input/Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control.zip",
+    "sha256": "5e09eb8a704ea5f841078bafcc1c5e72e4d17a76b2fef7a344e41d55e013c1b2"
+  },
+  "java_native_parity": {
+    "result": "PASS",
+    "tests": 53,
+    "handlers": [
+      "modular exhaustive",
+      "bounded integer search",
+      "graph certificate",
+      "recurrence check",
+      "bounded greedy sequence",
+      "candidate period check",
+      "exact rational geometry",
+      "deterministic small number theory",
+      "typed computation contracts",
+      "critical calculation and evidence gates"
+    ]
+  },
+  "sidecar_cases": [
+    {
+      "case": "sympy exact simplification",
+      "method": "sympy_simplify",
+      "expected_outcome": "certified",
+      "expected_certificate": {
+        "simplified": "0",
+        "is_zero": true
+      },
+      "result": "PASS"
+    },
+    {
+      "case": "z3 unsatisfiable negation over declared real domain",
+      "method": "real_inequality",
+      "expected_outcome": "certified",
+      "expected_evidence": "formal_certificate",
+      "expected_solver_status": "unsat",
+      "result": "PASS"
+    },
+    {
+      "case": "z3 counterexample replayed with exact SymPy rationals",
+      "method": "real_inequality",
+      "expected_outcome": "counterexample_found",
+      "independent_replay": true,
+      "result": "PASS"
+    },
+    {
+      "case": "sampled numeric search without counterexample",
+      "method": "numeric_counterexample",
+      "expected_outcome": "not_refuted",
+      "expected_evidence": "heuristic",
+      "promoted_to_proof": false,
+      "result": "PASS"
+    }
+  ],
+  "sidecar_protocol": {
+    "protocol": "JSON-RPC 2.0 JSONL over UTF-8 stdin/stdout",
+    "protocol_version": "1.0",
+    "tool_version": "mathproofmesh-python-compute/0.8.0;sympy=1.14.0;z3=4.16.0",
+    "tcp_listener": false,
+    "registered_methods": [
+      "sympy_simplify",
+      "sympy_equivalent",
+      "polynomial_factor",
+      "numeric_counterexample",
+      "real_inequality"
+    ],
+    "differential_tests": 4,
+    "protocol_and_security_tests": 12,
+    "result": "PASS"
+  }
+}

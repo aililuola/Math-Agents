@@ -1,0 +1,83 @@
+{
+  "qualified_name": "mathproofmesh.config.MessageUtilityControlConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "blueprint_rewrite_credit": {
+        "default": 0.4,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Blueprint Rewrite Credit",
+        "type": "number"
+      },
+      "broadcast_min_expected_core_debt_reduction": {
+        "default": 0.0,
+        "maximum": 1000.0,
+        "minimum": 0.0,
+        "title": "Broadcast Min Expected Core Debt Reduction",
+        "type": "number"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "final_citation_credit": {
+        "default": 1.0,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Final Citation Credit",
+        "type": "number"
+      },
+      "max_target_obligations": {
+        "default": 8,
+        "maximum": 64,
+        "minimum": 1,
+        "title": "Max Target Obligations",
+        "type": "integer"
+      },
+      "no_use_cooldown_threshold": {
+        "default": 3,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "No Use Cooldown Threshold",
+        "type": "integer"
+      },
+      "obligation_close_credit": {
+        "default": 0.8,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Obligation Close Credit",
+        "type": "number"
+      },
+      "refutation_credit": {
+        "default": 0.8,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Refutation Credit",
+        "type": "number"
+      },
+      "require_utility_contract_for_cross_route": {
+        "default": true,
+        "title": "Require Utility Contract For Cross Route",
+        "type": "boolean"
+      },
+      "utility_credit_horizon_rounds": {
+        "default": 3,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Utility Credit Horizon Rounds",
+        "type": "integer"
+      },
+      "verified_step_credit": {
+        "default": 0.5,
+        "maximum": 4.0,
+        "minimum": 0.0,
+        "title": "Verified Step Credit",
+        "type": "number"
+      }
+    },
+    "title": "MessageUtilityControlConfig",
+    "type": "object"
+  }
+}

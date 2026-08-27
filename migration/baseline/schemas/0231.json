@@ -1,0 +1,58 @@
+{
+  "qualified_name": "mathproofmesh.verification.capability_profile.CapabilityCell",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "agent_id": {
+        "title": "Agent Id",
+        "type": "string"
+      },
+      "domain": {
+        "title": "Domain",
+        "type": "string"
+      },
+      "observations": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Observations",
+        "type": "integer"
+      },
+      "overturns": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Overturns",
+        "type": "integer"
+      },
+      "role": {
+        "title": "Role",
+        "type": "string"
+      },
+      "score": {
+        "default": 0.5,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Score",
+        "type": "number"
+      },
+      "weighted_success": {
+        "default": 0.0,
+        "minimum": 0.0,
+        "title": "Weighted Success",
+        "type": "number"
+      },
+      "weighted_total": {
+        "default": 0.0,
+        "minimum": 0.0,
+        "title": "Weighted Total",
+        "type": "number"
+      }
+    },
+    "required": [
+      "agent_id",
+      "domain",
+      "role"
+    ],
+    "title": "CapabilityCell",
+    "type": "object"
+  }
+}

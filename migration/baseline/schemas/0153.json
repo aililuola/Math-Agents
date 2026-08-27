@@ -1,0 +1,59 @@
+{
+  "qualified_name": "mathproofmesh.schemas.DeliverableAssessment",
+  "schema": {
+    "$defs": {
+      "DeliverableStatus": {
+        "enum": [
+          "completed",
+          "partial",
+          "missing"
+        ],
+        "title": "DeliverableStatus",
+        "type": "string"
+      },
+      "TaskRequirement": {
+        "description": "The user-visible artifact that must be delivered for the task to finish.",
+        "enum": [
+          "proof",
+          "solution",
+          "computation",
+          "conjecture",
+          "counterexample",
+          "classification",
+          "optimization",
+          "construction",
+          "research_progress"
+        ],
+        "title": "TaskRequirement",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "evidence_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Evidence Ids",
+        "type": "array"
+      },
+      "requirement": {
+        "$ref": "#/$defs/TaskRequirement"
+      },
+      "status": {
+        "$ref": "#/$defs/DeliverableStatus"
+      },
+      "summary": {
+        "title": "Summary",
+        "type": "string"
+      }
+    },
+    "required": [
+      "requirement",
+      "status",
+      "summary"
+    ],
+    "title": "DeliverableAssessment",
+    "type": "object"
+  }
+}

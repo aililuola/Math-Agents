@@ -1,0 +1,336 @@
+{
+  "qualified_name": "mathproofmesh.schemas.MessageEnvelope",
+  "schema": {
+    "$defs": {
+      "ClaimStatus": {
+        "enum": [
+          "proposed",
+          "verified",
+          "rejected",
+          "uncertain"
+        ],
+        "title": "ClaimStatus",
+        "type": "string"
+      },
+      "EvidenceType": {
+        "enum": [
+          "unverified_idea",
+          "numerical_heuristic",
+          "bounded_experiment",
+          "exact_symbolic_identity",
+          "complete_finite_enumeration",
+          "sat_smt_certificate",
+          "counterexample",
+          "natural_proof_audited",
+          "formal_kernel_certificate"
+        ],
+        "title": "EvidenceType",
+        "type": "string"
+      },
+      "MemoryTier": {
+        "enum": [
+          "fact",
+          "insight",
+          "negative"
+        ],
+        "title": "MemoryTier",
+        "type": "string"
+      },
+      "MessageType": {
+        "enum": [
+          "claim_proposal",
+          "verified_lemma",
+          "proof_obligation",
+          "counterexample",
+          "contradiction_notice",
+          "computation_plan",
+          "computation_certificate",
+          "formal_certificate",
+          "repair_request",
+          "bridge_lemma_request",
+          "strategy_rewrite_request",
+          "failure_record",
+          "route_checkpoint"
+        ],
+        "title": "MessageType",
+        "type": "string"
+      },
+      "QuantifierSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "forall",
+              "exists",
+              "exists_unique"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "order": {
+            "minimum": 0,
+            "title": "Order",
+            "type": "integer"
+          },
+          "restrictions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restrictions",
+            "type": "array"
+          },
+          "variable_id": {
+            "minLength": 1,
+            "title": "Variable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order",
+          "kind",
+          "variable_id",
+          "display_name",
+          "domain"
+        ],
+        "title": "QuantifierSpec",
+        "type": "object"
+      },
+      "RouteRole": {
+        "enum": [
+          "prover",
+          "skeptic",
+          "tool_specialist",
+          "referee",
+          "bridge_prover",
+          "conflict_resolver",
+          "counterexample_hunter"
+        ],
+        "title": "RouteRole",
+        "type": "string"
+      },
+      "VariableBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "owner_scope": {
+            "minLength": 1,
+            "title": "Owner Scope",
+            "type": "string"
+          },
+          "variable_id": {
+            "minLength": 1,
+            "title": "Variable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "variable_id",
+          "display_name",
+          "domain",
+          "owner_scope"
+        ],
+        "title": "VariableBinding",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "artifact_refs": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Artifact Refs",
+        "type": "array"
+      },
+      "assumptions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Assumptions",
+        "type": "array"
+      },
+      "conclusion": {
+        "minLength": 1,
+        "title": "Conclusion",
+        "type": "string"
+      },
+      "content_hash": {
+        "default": "",
+        "title": "Content Hash",
+        "type": "string"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "dependencies": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Dependencies",
+        "type": "array"
+      },
+      "dependency_refs": {
+        "items": {},
+        "title": "Dependency Refs",
+        "type": "array"
+      },
+      "evidence_type": {
+        "$ref": "#/$defs/EvidenceType"
+      },
+      "memory_tier": {
+        "$ref": "#/$defs/MemoryTier"
+      },
+      "message_id": {
+        "title": "Message Id",
+        "type": "string"
+      },
+      "message_type": {
+        "$ref": "#/$defs/MessageType"
+      },
+      "normalization_confidence": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Normalization Confidence",
+        "type": "number"
+      },
+      "normalized_statement": {
+        "minLength": 1,
+        "title": "Normalized Statement",
+        "type": "string"
+      },
+      "problem_hash": {
+        "minLength": 1,
+        "title": "Problem Hash",
+        "type": "string"
+      },
+      "quantifiers": {
+        "items": {
+          "$ref": "#/$defs/QuantifierSpec"
+        },
+        "title": "Quantifiers",
+        "type": "array"
+      },
+      "raw_source_ref": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Raw Source Ref"
+      },
+      "round_created": {
+        "minimum": 0,
+        "title": "Round Created",
+        "type": "integer"
+      },
+      "schema_version": {
+        "default": "1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "scope_limitations": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Scope Limitations",
+        "type": "array"
+      },
+      "source_agent_id": {
+        "minLength": 1,
+        "title": "Source Agent Id",
+        "type": "string"
+      },
+      "source_role": {
+        "$ref": "#/$defs/RouteRole"
+      },
+      "source_route_id": {
+        "minLength": 1,
+        "title": "Source Route Id",
+        "type": "string"
+      },
+      "statement": {
+        "minLength": 1,
+        "title": "Statement",
+        "type": "string"
+      },
+      "target_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Route Ids",
+        "type": "array"
+      },
+      "ttl_rounds": {
+        "default": 2,
+        "minimum": 1,
+        "title": "Ttl Rounds",
+        "type": "integer"
+      },
+      "variable_bindings": {
+        "items": {
+          "$ref": "#/$defs/VariableBinding"
+        },
+        "title": "Variable Bindings",
+        "type": "array"
+      },
+      "verification_confidence": {
+        "default": 0.0,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Verification Confidence",
+        "type": "number"
+      },
+      "verification_status": {
+        "$ref": "#/$defs/ClaimStatus"
+      }
+    },
+    "required": [
+      "problem_hash",
+      "source_agent_id",
+      "source_route_id",
+      "source_role",
+      "message_type",
+      "statement",
+      "normalized_statement",
+      "conclusion",
+      "evidence_type",
+      "memory_tier",
+      "verification_status",
+      "round_created"
+    ],
+    "title": "MessageEnvelope",
+    "type": "object"
+  }
+}

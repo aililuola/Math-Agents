@@ -1,0 +1,226 @@
+{
+  "qualified_name": "mathproofmesh.schemas.InspirationOutcome",
+  "schema": {
+    "$defs": {
+      "InspirationMechanism": {
+        "enum": [
+          "representation_switch",
+          "structural_analogy",
+          "auxiliary_construction",
+          "invariant_hypothesis",
+          "reverse_goal_analysis",
+          "bridge_lemma",
+          "surprise_exploration",
+          "meta_replan",
+          "inspiration_composition"
+        ],
+        "title": "InspirationMechanism",
+        "type": "string"
+      },
+      "InspirationTriggerType": {
+        "enum": [
+          "stagnation",
+          "repeated_first_error",
+          "high_route_redundancy",
+          "all_routes_failed",
+          "shared_bottleneck",
+          "proof_debt_plateau",
+          "final_repair_failed",
+          "manual"
+        ],
+        "title": "InspirationTriggerType",
+        "type": "string"
+      },
+      "ObligationKind": {
+        "enum": [
+          "main_goal",
+          "subgoal",
+          "lemma",
+          "case_branch",
+          "construction",
+          "computation_question",
+          "formalization_task",
+          "contradiction"
+        ],
+        "title": "ObligationKind",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Observed downstream value of one proposal, not a proof certificate.",
+    "properties": {
+      "cited_by_final_proof": {
+        "default": false,
+        "title": "Cited By Final Proof",
+        "type": "boolean"
+      },
+      "credit_obligation_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Credit Obligation Ids",
+        "type": "array"
+      },
+      "credit_route_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Credit Route Ids",
+        "type": "array"
+      },
+      "domain": {
+        "default": "unknown",
+        "title": "Domain",
+        "type": "string"
+      },
+      "materialization_action": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Materialization Action"
+      },
+      "materialized": {
+        "default": false,
+        "title": "Materialized",
+        "type": "boolean"
+      },
+      "mechanism": {
+        "$ref": "#/$defs/InspirationMechanism"
+      },
+      "obligation_kinds": {
+        "items": {
+          "$ref": "#/$defs/ObligationKind"
+        },
+        "title": "Obligation Kinds",
+        "type": "array"
+      },
+      "obligations_closed": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Obligations Closed",
+        "type": "array"
+      },
+      "problem_hash": {
+        "default": "",
+        "title": "Problem Hash",
+        "type": "string"
+      },
+      "proof_debt_after": {
+        "anyOf": [
+          {
+            "minimum": 0.0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Proof Debt After"
+      },
+      "proof_debt_before": {
+        "default": 0.0,
+        "minimum": 0.0,
+        "title": "Proof Debt Before",
+        "type": "number"
+      },
+      "proof_debt_delta": {
+        "default": 0.0,
+        "title": "Proof Debt Delta",
+        "type": "number"
+      },
+      "proposal_id": {
+        "title": "Proposal Id",
+        "type": "string"
+      },
+      "proposer_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Proposer Calls",
+        "type": "integer"
+      },
+      "refuted": {
+        "default": false,
+        "title": "Refuted",
+        "type": "boolean"
+      },
+      "review_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Review Calls",
+        "type": "integer"
+      },
+      "reward": {
+        "default": 0.0,
+        "title": "Reward",
+        "type": "number"
+      },
+      "round_created": {
+        "minimum": 0,
+        "title": "Round Created",
+        "type": "integer"
+      },
+      "rounds_to_first_gain": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rounds To First Gain"
+      },
+      "route_calls": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Route Calls",
+        "type": "integer"
+      },
+      "task_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Task Id"
+      },
+      "tokens": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Tokens",
+        "type": "integer"
+      },
+      "trigger_type": {
+        "$ref": "#/$defs/InspirationTriggerType"
+      },
+      "verified_fact_gain": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Verified Fact Gain",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "proposal_id",
+      "mechanism",
+      "trigger_type",
+      "round_created"
+    ],
+    "title": "InspirationOutcome",
+    "type": "object"
+  }
+}

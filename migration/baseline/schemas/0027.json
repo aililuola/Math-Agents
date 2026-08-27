@@ -1,0 +1,63 @@
+{
+  "qualified_name": "mathproofmesh.config.ProofGraphConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "allow_cycles": {
+        "default": false,
+        "title": "Allow Cycles",
+        "type": "boolean"
+      },
+      "close_obligation_threshold": {
+        "default": 0.8,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Close Obligation Threshold",
+        "type": "number"
+      },
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "freeze_before_synthesis": {
+        "default": true,
+        "title": "Freeze Before Synthesis",
+        "type": "boolean"
+      },
+      "max_edges": {
+        "default": 20000,
+        "maximum": 500000,
+        "minimum": 100,
+        "title": "Max Edges",
+        "type": "integer"
+      },
+      "max_nodes": {
+        "default": 5000,
+        "maximum": 100000,
+        "minimum": 100,
+        "title": "Max Nodes",
+        "type": "integer"
+      },
+      "mode": {
+        "default": "shadow",
+        "enum": [
+          "off",
+          "shadow",
+          "active"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "shared_bottleneck_min_routes": {
+        "default": 2,
+        "maximum": 32,
+        "minimum": 2,
+        "title": "Shared Bottleneck Min Routes",
+        "type": "integer"
+      }
+    },
+    "title": "ProofGraphConfig",
+    "type": "object"
+  }
+}

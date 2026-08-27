@@ -1,0 +1,69 @@
+{
+  "qualified_name": "mathproofmesh.schemas.CandidateAssessment",
+  "schema": {
+    "$defs": {
+      "ActionKind": {
+        "enum": [
+          "widen",
+          "deepen",
+          "verify",
+          "synthesize",
+          "revise",
+          "bridge",
+          "resolve_conflict",
+          "search_counterexample",
+          "merge_route",
+          "cooldown_route",
+          "switch_representation",
+          "trigger_inspiration",
+          "search_analogy",
+          "invent_construction",
+          "generate_invariant",
+          "reverse_goal",
+          "meta_replan",
+          "surprise_widen",
+          "stop"
+        ],
+        "title": "ActionKind",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "recommended_action": {
+        "$ref": "#/$defs/ActionKind"
+      },
+      "score": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Score",
+        "type": "number"
+      },
+      "strengths": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Strengths",
+        "type": "array"
+      },
+      "target_id": {
+        "title": "Target Id",
+        "type": "string"
+      },
+      "weaknesses": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Weaknesses",
+        "type": "array"
+      }
+    },
+    "required": [
+      "target_id",
+      "score",
+      "recommended_action"
+    ],
+    "title": "CandidateAssessment",
+    "type": "object"
+  }
+}

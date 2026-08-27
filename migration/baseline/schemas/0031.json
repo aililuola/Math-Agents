@@ -1,0 +1,221 @@
+{
+  "qualified_name": "mathproofmesh.config.RuntimeConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "activity_heartbeat_seconds": {
+        "default": 20.0,
+        "maximum": 600.0,
+        "minimum": 0.0,
+        "title": "Activity Heartbeat Seconds",
+        "type": "number"
+      },
+      "activity_include_agent_calls": {
+        "default": true,
+        "title": "Activity Include Agent Calls",
+        "type": "boolean"
+      },
+      "activity_max_visible": {
+        "default": 18,
+        "maximum": 200,
+        "minimum": 4,
+        "title": "Activity Max Visible",
+        "type": "integer"
+      },
+      "activity_mode": {
+        "default": "compact",
+        "enum": [
+          "off",
+          "compact",
+          "detailed"
+        ],
+        "title": "Activity Mode",
+        "type": "string"
+      },
+      "activity_persist": {
+        "default": true,
+        "title": "Activity Persist",
+        "type": "boolean"
+      },
+      "agent_call_wall_timeout_seconds": {
+        "default": 7200.0,
+        "maximum": 7200.0,
+        "minimum": 5.0,
+        "title": "Agent Call Wall Timeout Seconds",
+        "type": "number"
+      },
+      "checkpoint_every_stage": {
+        "default": true,
+        "title": "Checkpoint Every Stage",
+        "type": "boolean"
+      },
+      "exploration_output_token_tiers": {
+        "items": {
+          "type": "integer"
+        },
+        "maxItems": 8,
+        "minItems": 1,
+        "title": "Exploration Output Token Tiers",
+        "type": "array"
+      },
+      "json_repair_max_output_tokens": {
+        "default": 8192,
+        "maximum": 384000,
+        "minimum": 256,
+        "title": "Json Repair Max Output Tokens",
+        "type": "integer"
+      },
+      "log_level": {
+        "default": "INFO",
+        "enum": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "title": "Log Level",
+        "type": "string"
+      },
+      "max_parallel_calls": {
+        "default": 8,
+        "maximum": 128,
+        "minimum": 1,
+        "title": "Max Parallel Calls",
+        "type": "integer"
+      },
+      "output_language": {
+        "default": "zh-CN",
+        "title": "Output Language",
+        "type": "string"
+      },
+      "parse_retries": {
+        "default": 1,
+        "maximum": 5,
+        "minimum": 0,
+        "title": "Parse Retries",
+        "type": "integer"
+      },
+      "project_root": {
+        "default": ".",
+        "title": "Project Root",
+        "type": "string"
+      },
+      "provider_circuit_breaker_enabled": {
+        "default": true,
+        "title": "Provider Circuit Breaker Enabled",
+        "type": "boolean"
+      },
+      "provider_circuit_cooldown_seconds": {
+        "default": 300.0,
+        "maximum": 86400.0,
+        "minimum": 1.0,
+        "title": "Provider Circuit Cooldown Seconds",
+        "type": "number"
+      },
+      "provider_circuit_failure_threshold": {
+        "default": 2,
+        "maximum": 32,
+        "minimum": 2,
+        "title": "Provider Circuit Failure Threshold",
+        "type": "integer"
+      },
+      "provider_circuit_window_seconds": {
+        "default": 90.0,
+        "maximum": 3600.0,
+        "minimum": 1.0,
+        "title": "Provider Circuit Window Seconds",
+        "type": "number"
+      },
+      "provider_shared_auth_http_statuses": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Provider Shared Auth Http Statuses",
+        "type": "array"
+      },
+      "provider_terminal_http_statuses": {
+        "items": {
+          "type": "integer"
+        },
+        "title": "Provider Terminal Http Statuses",
+        "type": "array"
+      },
+      "random_seed": {
+        "default": 20260719,
+        "title": "Random Seed",
+        "type": "integer"
+      },
+      "redact_prompts_in_console": {
+        "default": true,
+        "title": "Redact Prompts In Console",
+        "type": "boolean"
+      },
+      "request_retries": {
+        "default": 3,
+        "maximum": 10,
+        "minimum": 0,
+        "title": "Request Retries",
+        "type": "integer"
+      },
+      "run_root": {
+        "default": "runs",
+        "title": "Run Root",
+        "type": "string"
+      },
+      "save_raw_provider_responses": {
+        "default": true,
+        "title": "Save Raw Provider Responses",
+        "type": "boolean"
+      },
+      "stage_output_token_limits": {
+        "additionalProperties": {
+          "type": "integer"
+        },
+        "title": "Stage Output Token Limits",
+        "type": "object"
+      },
+      "stage_thinking_modes": {
+        "additionalProperties": {
+          "enum": [
+            "agent_default",
+            "disabled",
+            "high",
+            "max",
+            "tiered"
+          ],
+          "type": "string"
+        },
+        "title": "Stage Thinking Modes",
+        "type": "object"
+      },
+      "stream_first_chunk_timeout_seconds": {
+        "default": 90.0,
+        "maximum": 3600.0,
+        "minimum": 5.0,
+        "title": "Stream First Chunk Timeout Seconds",
+        "type": "number"
+      },
+      "stream_idle_timeout_seconds": {
+        "default": 300.0,
+        "maximum": 3600.0,
+        "minimum": 5.0,
+        "title": "Stream Idle Timeout Seconds",
+        "type": "number"
+      },
+      "two_phase_output": {
+        "default": false,
+        "title": "Two Phase Output",
+        "type": "boolean"
+      },
+      "two_phase_stages": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Two Phase Stages",
+        "type": "array"
+      }
+    },
+    "title": "RuntimeConfig",
+    "type": "object"
+  }
+}

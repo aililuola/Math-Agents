@@ -1,0 +1,1 @@
+For positive real numbers a,b,c, prove that a/(b+c) + b/(c+a) + c/(a+b) >= 3/2, and determine all equality cases.

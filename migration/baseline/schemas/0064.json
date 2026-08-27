@@ -1,0 +1,63 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.BlueprintEdge",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "edge_id": {
+        "title": "Edge Id",
+        "type": "string"
+      },
+      "implication_outline": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Implication Outline",
+        "type": "array"
+      },
+      "origin": {
+        "default": "list_order_guess",
+        "enum": [
+          "planner_structured",
+          "definition_dependency",
+          "explicit_strategy_outline",
+          "list_order_guess",
+          "review_generated"
+        ],
+        "title": "Origin",
+        "type": "string"
+      },
+      "relation": {
+        "enum": [
+          "implies",
+          "depends_on",
+          "equivalent_to",
+          "closes",
+          "requires_construction"
+        ],
+        "title": "Relation",
+        "type": "string"
+      },
+      "source_node_id": {
+        "title": "Source Node Id",
+        "type": "string"
+      },
+      "target_node_id": {
+        "title": "Target Node Id",
+        "type": "string"
+      },
+      "verified": {
+        "default": false,
+        "title": "Verified",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "edge_id",
+      "source_node_id",
+      "target_node_id",
+      "relation"
+    ],
+    "title": "BlueprintEdge",
+    "type": "object"
+  }
+}

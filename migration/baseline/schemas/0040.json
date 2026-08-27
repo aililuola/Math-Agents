@@ -1,0 +1,101 @@
+{
+  "qualified_name": "mathproofmesh.config.VerificationConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "detailed_only_after_structural_pass": {
+        "default": true,
+        "title": "Detailed Only After Structural Pass",
+        "type": "boolean"
+      },
+      "enable_lean": {
+        "default": false,
+        "title": "Enable Lean",
+        "type": "boolean"
+      },
+      "enable_numeric_counterexamples": {
+        "default": true,
+        "title": "Enable Numeric Counterexamples",
+        "type": "boolean"
+      },
+      "enable_sympy_tools": {
+        "default": true,
+        "title": "Enable Sympy Tools",
+        "type": "boolean"
+      },
+      "external_tool_timeout_seconds": {
+        "default": 20.0,
+        "maximum": 600.0,
+        "minimum": 1.0,
+        "title": "External Tool Timeout Seconds",
+        "type": "number"
+      },
+      "lean_command": {
+        "default": "lake env lean",
+        "title": "Lean Command",
+        "type": "string"
+      },
+      "lean_sandbox_cpus": {
+        "default": 1.0,
+        "exclusiveMinimum": 0.0,
+        "maximum": 8.0,
+        "title": "Lean Sandbox Cpus",
+        "type": "number"
+      },
+      "lean_sandbox_image": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Lean Sandbox Image"
+      },
+      "lean_sandbox_memory_mb": {
+        "default": 1024,
+        "maximum": 8192,
+        "minimum": 128,
+        "title": "Lean Sandbox Memory Mb",
+        "type": "integer"
+      },
+      "lean_sandbox_pids_limit": {
+        "default": 128,
+        "maximum": 1024,
+        "minimum": 16,
+        "title": "Lean Sandbox Pids Limit",
+        "type": "integer"
+      },
+      "lean_sandbox_required": {
+        "const": true,
+        "default": true,
+        "title": "Lean Sandbox Required",
+        "type": "boolean"
+      },
+      "require_first_error_step": {
+        "default": true,
+        "title": "Require First Error Step",
+        "type": "boolean"
+      },
+      "require_key_step_tagging": {
+        "default": true,
+        "title": "Require Key Step Tagging",
+        "type": "boolean"
+      },
+      "structural_first": {
+        "default": true,
+        "title": "Structural First",
+        "type": "boolean"
+      },
+      "verify_problem_integrity": {
+        "default": true,
+        "title": "Verify Problem Integrity",
+        "type": "boolean"
+      }
+    },
+    "title": "VerificationConfig",
+    "type": "object"
+  }
+}

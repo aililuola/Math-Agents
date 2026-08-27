@@ -1,0 +1,102 @@
+{
+  "qualified_name": "mathproofmesh.schemas.FormalStatementPacket",
+  "schema": {
+    "$defs": {
+      "QuantifierSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "forall",
+              "exists",
+              "exists_unique"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "order": {
+            "minimum": 0,
+            "title": "Order",
+            "type": "integer"
+          },
+          "restrictions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restrictions",
+            "type": "array"
+          },
+          "variable_id": {
+            "minLength": 1,
+            "title": "Variable Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order",
+          "kind",
+          "variable_id",
+          "display_name",
+          "domain"
+        ],
+        "title": "QuantifierSpec",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "assumptions": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Assumptions",
+        "type": "array"
+      },
+      "obligation_id": {
+        "title": "Obligation Id",
+        "type": "string"
+      },
+      "packet_id": {
+        "title": "Packet Id",
+        "type": "string"
+      },
+      "problem_hash": {
+        "title": "Problem Hash",
+        "type": "string"
+      },
+      "quantifiers": {
+        "items": {
+          "$ref": "#/$defs/QuantifierSpec"
+        },
+        "title": "Quantifiers",
+        "type": "array"
+      },
+      "statement": {
+        "title": "Statement",
+        "type": "string"
+      },
+      "target_language": {
+        "default": "lean4",
+        "title": "Target Language",
+        "type": "string"
+      }
+    },
+    "required": [
+      "problem_hash",
+      "obligation_id",
+      "statement"
+    ],
+    "title": "FormalStatementPacket",
+    "type": "object"
+  }
+}

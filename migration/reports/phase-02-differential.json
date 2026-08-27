@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "phase": "02",
+  "result": "PASS",
+  "python_to_java": {
+    "source": "migration/baseline/hash-vectors.jsonl",
+    "vectors": 16,
+    "matched": 16,
+    "sha256": "806d58c33b4afb8ff54a3983710ef1110d4296db6a32f7bb251f8d883598a8e3",
+    "coverage": [
+      "raw top-level UTF-8 strings",
+      "Unicode code-point object-key order",
+      "Python-compatible number lexemes",
+      "nested canonical JSON",
+      "stable contract and derived hashes"
+    ]
+  },
+  "java_to_python": {
+    "oracle": "scripts/phase02-python-hash-oracle.py",
+    "cases": 10,
+    "matched": 10,
+    "case_names": [
+      "raw-supplementary",
+      "unicode-key-order",
+      "small-float",
+      "claim-card",
+      "novelty-signature",
+      "mechanism-chain",
+      "experiment-request",
+      "experiment-execution",
+      "experiment-program-source",
+      "experiment-result"
+    ]
+  },
+  "python_source_mode": "read-only",
+  "test": "PythonDifferentialParityTest"
+}

@@ -1,0 +1,55 @@
+{
+    "captured_at_utc":  "2026-07-30T08:13:25.0674039Z",
+    "name":  "mathproofmesh-phase00-temporal-1",
+    "image":  "temporalio/temporal@sha256:59561b9ef060eaeb1f46cb6a1842d6cbdd8a393eb3b6d315ecef5fe2f0b1d7a6",
+    "image_id":  "sha256:59561b9ef060eaeb1f46cb6a1842d6cbdd8a393eb3b6d315ecef5fe2f0b1d7a6",
+    "user":  "temporal",
+    "command":  [
+                    "server",
+                    "start-dev",
+                    "--ip",
+                    "0.0.0.0",
+                    "--port",
+                    "7233",
+                    "--headless",
+                    "--db-filename",
+                    "/var/lib/temporal/temporal.db",
+                    "--namespace",
+                    "mathproofmesh",
+                    "--disable-config-file",
+                    "--disable-config-env",
+                    "--log-format",
+                    "json",
+                    "--log-level",
+                    "warn"
+                ],
+    "read_only_root_filesystem":  true,
+    "cap_drop":  [
+                     "ALL"
+                 ],
+    "security_options":  [
+                             "no-new-privileges:true"
+                         ],
+    "pids_limit":  256,
+    "memory_bytes":  1073741824,
+    "nano_cpus":  1000000000,
+    "health_status":  "healthy",
+    "running":  true,
+    "ports":  {
+                  "7233/tcp":  [
+                                   {
+                                       "HostIp":  "127.0.0.1",
+                                       "HostPort":  "7233"
+                                   }
+                               ]
+              },
+    "mounts":  [
+                   {
+                       "type":  "bind",
+                       "source":  "C:\\Users\\yanxinyu\\Desktop\\JavaMathProofMeshMigration\\Math-Agents-feature-mathproofmesh-v0.8.0-goal-plan-failure-utility-control\\JavaMathProofMesh-0.8.0\\.work\\container-preflight\\temporal",
+                       "destination":  "/var/lib/temporal",
+                       "mode":  "rw",
+                       "rw":  true
+                   }
+               ]
+}

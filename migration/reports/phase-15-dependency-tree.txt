@@ -1,0 +1,139 @@
+io.github.aililuola:mathproofmesh-desktop:jar:0.8.0-SNAPSHOT
++- io.github.aililuola:mathproofmesh-server:jar:0.8.0-SNAPSHOT:compile
+|  +- io.github.aililuola:mathproofmesh-core:jar:0.8.0-SNAPSHOT:compile
+|  |  +- io.github.aililuola:mathproofmesh-contracts:jar:0.8.0-SNAPSHOT:compile
+|  |  |  +- com.fasterxml.jackson.core:jackson-annotations:jar:2.21:compile
+|  |  |  \- jakarta.validation:jakarta.validation-api:jar:3.1.1:compile
+|  |  \- org.jgrapht:jgrapht-core:jar:1.5.3:compile
+|  |     +- org.jheaps:jheaps:jar:0.14:compile
+|  |     \- org.apfloat:apfloat:jar:1.14.0:compile
+|  +- com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:jar:2.21.4:compile
+|  |  +- com.fasterxml.jackson.core:jackson-databind:jar:2.21.5:compile
+|  |  +- org.yaml:snakeyaml:jar:2.6:compile
+|  |  \- com.fasterxml.jackson.core:jackson-core:jar:2.21.4:compile
+|  +- org.springframework.boot:spring-boot-starter:jar:4.1.0:compile
+|  |  +- org.springframework.boot:spring-boot-starter-logging:jar:4.1.0:compile
+|  |  |  +- ch.qos.logback:logback-classic:jar:1.5.34:compile
+|  |  |  |  \- ch.qos.logback:logback-core:jar:1.5.34:compile
+|  |  |  +- org.apache.logging.log4j:log4j-to-slf4j:jar:2.25.5:compile
+|  |  |  |  \- org.apache.logging.log4j:log4j-api:jar:2.25.5:compile
+|  |  |  \- org.slf4j:jul-to-slf4j:jar:2.0.18:compile
+|  |  +- org.springframework.boot:spring-boot-autoconfigure:jar:4.1.0:compile
+|  |  \- jakarta.annotation:jakarta.annotation-api:jar:3.0.0:compile
+|  +- org.springframework.boot:spring-boot-starter-web:jar:4.1.0:compile
+|  |  +- org.springframework.boot:spring-boot-starter-jackson:jar:4.1.0:compile
+|  |  |  \- org.springframework.boot:spring-boot-jackson:jar:4.1.0:compile
+|  |  +- org.springframework.boot:spring-boot-starter-tomcat:jar:4.1.0:compile
+|  |  |  +- org.springframework.boot:spring-boot-starter-tomcat-runtime:jar:4.1.0:compile
+|  |  |  |  +- org.springframework.boot:spring-boot-web-server:jar:4.1.0:compile
+|  |  |  |  +- org.apache.tomcat.embed:tomcat-embed-core:jar:11.0.24:compile
+|  |  |  |  +- org.apache.tomcat.embed:tomcat-embed-el:jar:11.0.24:compile
+|  |  |  |  \- org.apache.tomcat.embed:tomcat-embed-websocket:jar:11.0.24:compile
+|  |  |  \- org.springframework.boot:spring-boot-tomcat:jar:4.1.0:compile
+|  |  +- org.springframework.boot:spring-boot-http-converter:jar:4.1.0:compile
+|  |  |  \- org.springframework:spring-web:jar:7.0.8:compile
+|  |  \- org.springframework.boot:spring-boot-webmvc:jar:4.1.0:compile
+|  |     +- org.springframework.boot:spring-boot-servlet:jar:4.1.0:compile
+|  |     \- org.springframework:spring-webmvc:jar:7.0.8:compile
+|  |        +- org.springframework:spring-aop:jar:7.0.8:compile
+|  |        \- org.springframework:spring-expression:jar:7.0.8:compile
+|  +- org.springframework.boot:spring-boot-starter-actuator:jar:4.1.0:compile
+|  |  +- org.springframework.boot:spring-boot-starter-micrometer-metrics:jar:4.1.0:compile
+|  |  |  \- org.springframework.boot:spring-boot-micrometer-metrics:jar:4.1.0:compile
+|  |  |     \- org.springframework.boot:spring-boot-micrometer-observation:jar:4.1.0:compile
+|  |  +- org.springframework.boot:spring-boot-actuator-autoconfigure:jar:4.1.0:compile
+|  |  |  \- org.springframework.boot:spring-boot-actuator:jar:4.1.0:compile
+|  |  +- org.springframework.boot:spring-boot-health:jar:4.1.0:compile
+|  |  +- io.micrometer:micrometer-observation:jar:1.17.0:compile
+|  |  |  \- io.micrometer:micrometer-commons:jar:1.17.0:compile
+|  |  \- io.micrometer:micrometer-jakarta9:jar:1.17.0:compile
+|  +- org.springframework:spring-jdbc:jar:7.0.8:compile
+|  |  +- org.springframework:spring-beans:jar:7.0.8:compile
+|  |  \- org.springframework:spring-tx:jar:7.0.8:compile
+|  +- org.springframework.modulith:spring-modulith-api:jar:2.1.0:compile
+|  |  \- org.jspecify:jspecify:jar:1.0.0:compile
+|  +- org.flywaydb:flyway-core:jar:12.4.0:compile
+|  |  \- tools.jackson.core:jackson-databind:jar:3.1.4:compile
+|  |     \- tools.jackson.core:jackson-core:jar:3.1.4:compile
+|  +- org.flywaydb:flyway-database-postgresql:jar:12.4.0:compile
+|  +- org.postgresql:postgresql:jar:42.7.12:runtime
+|  +- io.temporal:temporal-sdk:jar:1.37.0:compile
+|  |  +- io.temporal:temporal-serviceclient:jar:1.37.0:compile
+|  |  |  +- io.grpc:grpc-api:jar:1.80.0:compile
+|  |  |  +- io.grpc:grpc-stub:jar:1.80.0:compile
+|  |  |  |  \- org.codehaus.mojo:animal-sniffer-annotations:jar:1.26:compile
+|  |  |  +- io.grpc:grpc-netty-shaded:jar:1.80.0:compile
+|  |  |  |  +- io.grpc:grpc-util:jar:1.80.0:runtime
+|  |  |  |  +- io.grpc:grpc-core:jar:1.80.0:compile
+|  |  |  |  |  +- com.google.android:annotations:jar:4.1.1.4:runtime
+|  |  |  |  |  \- io.grpc:grpc-context:jar:1.80.0:runtime
+|  |  |  |  \- io.perfmark:perfmark-api:jar:0.27.0:runtime
+|  |  |  +- io.grpc:grpc-protobuf:jar:1.80.0:compile
+|  |  |  |  +- com.google.protobuf:protobuf-java:jar:4.34.2:compile
+|  |  |  |  +- com.google.api.grpc:proto-google-common-protos:jar:2.70.0:compile
+|  |  |  |  \- io.grpc:grpc-protobuf-lite:jar:1.80.0:runtime
+|  |  |  +- io.grpc:grpc-services:jar:1.80.0:compile
+|  |  |  +- io.grpc:grpc-inprocess:jar:1.80.0:compile
+|  |  |  +- com.google.protobuf:protobuf-java-util:jar:4.34.2:compile
+|  |  |  \- com.uber.m3:tally-core:jar:0.13.0:compile
+|  |  +- com.google.code.gson:gson:jar:2.13.2:compile
+|  |  |  \- com.google.errorprone:error_prone_annotations:jar:2.45.0:compile
+|  |  +- io.micrometer:micrometer-core:jar:1.17.0:compile
+|  |  |  \- org.hdrhistogram:HdrHistogram:jar:2.2.2:runtime
+|  |  +- io.nexusrpc:nexus-sdk:jar:0.5.0-alpha:compile
+|  |  +- com.google.guava:guava:jar:33.5.0-jre:compile
+|  |  |  +- com.google.guava:failureaccess:jar:1.0.3:compile
+|  |  |  +- com.google.guava:listenablefuture:jar:9999.0-empty-to-avoid-conflict-with-guava:compile
+|  |  |  \- com.google.j2objc:j2objc-annotations:jar:3.1:compile
+|  |  +- com.fasterxml.jackson.datatype:jackson-datatype-jsr310:jar:2.21.4:runtime
+|  |  \- com.fasterxml.jackson.datatype:jackson-datatype-jdk8:jar:2.21.4:runtime
+|  \- info.picocli:picocli:jar:4.7.7:compile
++- org.openjfx:javafx-controls:jar:win:25.0.4:compile
+|  \- org.openjfx:javafx-graphics:jar:25.0.4:compile
+|     +- org.openjfx:javafx-graphics:jar:win:25.0.4:compile
+|     \- org.openjfx:javafx-base:jar:25.0.4:compile
+|        \- org.openjfx:javafx-base:jar:win:25.0.4:compile
++- org.openjfx:javafx-web:jar:win:25.0.4:compile
+|  +- org.openjfx:javafx-controls:jar:25.0.4:compile
+|  +- org.openjfx:javafx-media:jar:25.0.4:compile
+|  |  \- org.openjfx:javafx-media:jar:win:25.0.4:compile
+|  \- org.openjfx:jdk-jsobject:jar:25.0.4:compile
+|     \- org.openjfx:jdk-jsobject:jar:win:25.0.4:compile
++- net.java.dev.jna:jna-jpms:jar:5.19.1:compile
++- net.java.dev.jna:jna-platform-jpms:jar:5.19.1:compile
++- com.github.spotbugs:spotbugs-annotations:jar:4.10.3:provided
+|  \- com.google.code.findbugs:jsr305:jar:3.0.2:compile
++- org.junit.jupiter:junit-jupiter:jar:6.0.3:test
+|  +- org.junit.jupiter:junit-jupiter-api:jar:6.0.3:test
+|  |  +- org.opentest4j:opentest4j:jar:1.3.0:test
+|  |  +- org.junit.platform:junit-platform-commons:jar:6.0.3:test
+|  |  \- org.apiguardian:apiguardian-api:jar:1.1.2:test
+|  +- org.junit.jupiter:junit-jupiter-params:jar:6.0.3:test
+|  \- org.junit.jupiter:junit-jupiter-engine:jar:6.0.3:test
+|     \- org.junit.platform:junit-platform-engine:jar:6.0.3:test
+\- org.springframework.boot:spring-boot-starter-test:jar:4.1.0:test
+   +- org.springframework.boot:spring-boot-test:jar:4.1.0:test
+   |  \- org.springframework.boot:spring-boot:jar:4.1.0:compile
+   |     \- org.springframework:spring-context:jar:7.0.8:compile
+   +- org.springframework.boot:spring-boot-test-autoconfigure:jar:4.1.0:test
+   +- com.jayway.jsonpath:json-path:jar:2.10.0:test
+   |  \- org.slf4j:slf4j-api:jar:2.0.18:compile
+   +- jakarta.xml.bind:jakarta.xml.bind-api:jar:4.0.5:test
+   |  \- jakarta.activation:jakarta.activation-api:jar:2.1.4:test
+   +- net.minidev:json-smart:jar:2.6.0:test
+   |  \- net.minidev:accessors-smart:jar:2.6.0:test
+   |     \- org.ow2.asm:asm:jar:9.7.1:test
+   +- org.assertj:assertj-core:jar:3.27.7:test
+   |  \- net.bytebuddy:byte-buddy:jar:1.18.10:test
+   +- org.awaitility:awaitility:jar:4.3.0:test
+   +- org.hamcrest:hamcrest:jar:3.0:test
+   +- org.mockito:mockito-core:jar:5.23.0:test
+   |  +- net.bytebuddy:byte-buddy-agent:jar:1.18.10:test
+   |  \- org.objenesis:objenesis:jar:3.3:test
+   +- org.mockito:mockito-junit-jupiter:jar:5.23.0:test
+   +- org.skyscreamer:jsonassert:jar:1.5.3:test
+   |  \- com.vaadin.external.google:android-json:jar:0.0.20131108.vaadin1:test
+   +- org.springframework:spring-core:jar:7.0.8:compile
+   |  \- commons-logging:commons-logging:jar:1.3.6:compile
+   +- org.springframework:spring-test:jar:7.0.8:test
+   \- org.xmlunit:xmlunit-core:jar:2.11.0:test

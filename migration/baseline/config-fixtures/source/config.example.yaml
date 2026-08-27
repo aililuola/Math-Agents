@@ -1,0 +1,290 @@
+system_name: MathProofMesh
+
+# Each entry is one isolated sub-agent and consumes one API key.
+# Keys are read from environment variables and are never written to run logs.
+#
+# HETEROGENEITY MATTERS ON HARD PROBLEMS: a pool of same-model keys is one
+# distribution sampled N times — reviewers inherit the prover's blind spots,
+# and thinking-mode providers ignore temperature, so config-level diversity
+# is the only real lever. Put at least one verifier (and ideally one
+# explorer) on a DIFFERENT provider/model family than the provers, as the
+# explorer-2/verifier examples below show. The pool automatically prefers a
+# cross-provider reviewer for verification (prefer_provider_not).
+agents:
+  - id: planner-1
+    provider: openai_compatible
+    model: your-planner-model
+    base_url: https://api.openai.com/v1
+    api_key_env: AGENT_PLANNER_KEY
+    roles: [planner, meta_reviewer, experimenter]
+    specialties: [problem_decomposition, strategy_selection]
+    max_concurrency: 1
+    temperature: 0.2
+    max_output_tokens: 12000
+
+  - id: explorer-1
+    provider: openai_compatible
+    model: your-reasoning-model
+    base_url: https://api.openai.com/v1
+    api_key_env: AGENT_EXPLORER_1_KEY
+    roles: [explorer, summarizer]
+    specialties: [algebra, number_theory, combinatorics]
+    max_concurrency: 1
+    temperature: 0.45
+    max_output_tokens: 24000
+
+  - id: explorer-2
+    provider: anthropic
+    model: your-anthropic-model
+    api_key_env: AGENT_EXPLORER_2_KEY
+    roles: [explorer, summarizer]
+    specialties: [geometry, analysis, inequalities]
+    max_concurrency: 1
+    temperature: 0.45
+    max_output_tokens: 24000
+
+  - id: verifier-1
+    provider: openai_compatible
+    model: your-verifier-model
+    base_url: https://api.openai.com/v1
+    api_key_env: AGENT_VERIFIER_1_KEY
+    roles: [structural_verifier, detailed_verifier]
+    specialties: [proof_audit, counterexample_search]
+    max_concurrency: 1
+    temperature: 0.0
+    max_output_tokens: 16000
+
+  - id: verifier-2
+    provider: gemini
+    model: your-gemini-model
+    api_key_env: AGENT_VERIFIER_2_KEY
+    roles: [detailed_verifier, final_verifier]
+    specialties: [independent_verification, symbolic_checks]
+    max_concurrency: 1
+    temperature: 0.0
+    max_output_tokens: 16000
+
+  - id: synthesizer-1
+    provider: openai_compatible
+    model: your-synthesis-model
+    base_url: https://api.openai.com/v1
+    api_key_env: AGENT_SYNTHESIZER_KEY
+    roles: [synthesizer, final_verifier]
+    specialties: [proof_writing, rigorous_exposition]
+    max_concurrency: 1
+    temperature: 0.1
+    max_output_tokens: 24000
+
+budget:
+  max_total_calls: 48
+  max_rounds: 4
+  initial_paths: 4
+  max_paths: 8
+  strategies_to_generate: 7
+  candidates_to_verify: 3
+  max_revisions: 3
+  base_verifier_replicas: 1
+  high_risk_verifier_replicas: 2
+  high_risk_threshold: 0.45
+  verification_pass_threshold: 0.78
+  synthesis_threshold: 0.72
+  max_total_tokens: null
+  max_cost_usd: null
+  breadth_share: 0.30
+  depth_share: 0.35
+  verification_share: 0.25
+  synthesis_share: 0.10
+
+scheduler:
+  hard_stagnation_enabled: true
+  max_normal_attempts_per_signature: 1
+  max_repair_attempts_per_signature: 1
+  global_no_progress_rounds_before_meta_pivot: 2
+  global_no_progress_rounds_before_stop: 3
+  # The scheduler is generic: change these values for different problems and budgets.
+  max_actions_per_round: 2
+  widen_paths_per_action: 2
+  force_widen_when_all_failed: true
+  max_execution_repairs_per_path: 1
+  max_plan_repairs_per_path: 1
+  max_unknown_failure_repairs_per_path: 1
+  allow_strategy_failure_repair: false
+  failed_path_cooldown_rounds: 1
+  meaningful_progress_threshold: 0.04
+  unverified_progress_discount: 0.55
+  uncertain_progress_discount: 0.40
+  failed_progress_discount: 0.10
+  structural_failure_progress_cap: 0.10
+  execution_failure_progress_cap: 0.45
+  plan_failure_progress_cap: 0.18
+  strategy_failure_progress_cap: 0.05
+  structural_failure_penalty: 0.30
+  execution_failure_penalty: 0.12
+  plan_failure_penalty: 0.30
+  strategy_failure_penalty: 0.50
+  repeated_failure_penalty: 0.15
+  reserve_revision_cycles: 1
+  include_post_action_verification_in_cost: true
+  include_meta_review_in_cost: true
+  verification_call_safety_margin: 0
+  finish_transition_buffer_calls: 1
+  diagnostics_enabled: true
+  diagnostic_candidate_limit: 12
+
+topology:
+  # v0.7 features are opt-in here so old installations retain v0.6 behavior.
+  mode: legacy_sparse
+  neighbor_k: 2
+  prefer_cross_provider_review: true
+  isolate_initial_exploration: true
+  conditional_cross_review: true
+  disagreement_threshold: 0.35
+  strategy_similarity_threshold: 0.72
+  max_context_chars: 90000
+  max_verified_claims_per_context: 24
+  preserve_raw_evidence: true
+  inspiration:
+    # Active candidate assignment scans all enabled agents with these roles.
+    # Add or remove API-backed agents freely; no key count is hard-coded.
+    proposer_generalist_roles: [explorer, route_prover]
+    max_single_agent_proposals_per_task: 2
+
+verification:
+  structural_first: true
+  detailed_only_after_structural_pass: true
+  verify_problem_integrity: true
+  require_first_error_step: true
+  require_key_step_tagging: true
+  enable_sympy_tools: true
+  enable_numeric_counterexamples: true
+  enable_lean: false
+  lean_command: lake env lean
+  external_tool_timeout_seconds: 20
+
+continuation:
+  # Off by default for backward compatibility. Enable to split long proofs into
+  # verified deltas, resume from committed checkpoints, and fail over across keys.
+  enabled: false
+  checkpoint_policy: verified_subgoal
+  max_new_steps_per_call: 3
+  max_new_claims_per_call: 3
+  max_output_tokens_per_segment: 12000
+  segments_per_explore_call: 2
+  max_segments_per_path: 12
+  verify_each_delta: true
+  delta_verifier_replicas: 1
+  checkpoint_pass_threshold: 0.78
+  resume_on_disconnect: true
+  allow_cross_agent_failover: true
+  max_failover_agents: 2
+  process_resume_enabled: true
+  retain_rejected_deltas: true
+  post_failure_bottleneck_enabled: true
+  post_failure_bottleneck_max_output_tokens: 12000
+  post_failure_bottleneck_once_per_checkpoint: true
+  post_failure_trigger_inspiration: true
+
+deep_exploration_policy:
+  # Route IDs or broad domains never define duplicates. Admission uses the
+  # verified checkpoint, target obligation, mechanism, representation,
+  # construction, invariant, transformations, and assumptions.
+  # Normal routes start at high_tier_threshold_tokens (96K below). The lower
+  # tier remains available only for bounded repair of a repeated signature.
+  enabled: true
+  tiers:
+    - {output_tokens: 64000, artifact_recovery_tokens: 8000}
+    - {output_tokens: 96000, artifact_recovery_tokens: 12000}
+    - {output_tokens: 128000, artifact_recovery_tokens: 16000}
+  high_tier_threshold_tokens: 96000
+  partial_repair_max_output_tokens: 64000
+  max_partial_repairs_per_signature: 1
+  max_running_per_signature: 1
+  no_progress_high_tier_limit_per_signature: 1
+  semantic_duplicate_threshold: 0.86
+  allow_parallel_distinct_signatures: true
+  allow_local_bottleneck_pivot: true
+  require_novelty_review_for_pivot: true
+  require_meta_approval_for_128k: true
+  min_remaining_calls_for_128k: 8
+  min_remaining_tokens_for_128k: 256000
+  preserve_parent_verified_checkpoint: true
+  reset_on_verified_checkpoint: true
+  reset_on_referee_confirmed_mechanism_change: true
+  persist_across_resume: true
+
+computation:
+  # Disabled in the generic profile for backward compatibility. Enable it only
+  # when explorers should use the reasoning-first request/continue protocol.
+  enabled: false
+  policy: reasoning_first
+  typed_tools_enabled: true
+  sandboxed_python_enabled: false
+  execute_planner_hints_immediately: false
+  # Require exact typed checks before explicit computed values can become premises.
+  critical_calculation_gate_enabled: true
+  critical_calculation_require_declarations: true
+  critical_calculation_max_checks_per_artifact: 8
+  targeted_falsification_fast_path: true
+  # Low-cost exact typed probes may run before route stagnation. Their results
+  # remain bounded evidence and cannot certify an infinite pattern.
+  bounded_typed_probe_fast_path: true
+  bounded_typed_probe_max_cases: 25000
+  soft_experiments_per_path: 2
+  hard_experiments_per_path: 6
+  max_compute_cycles_per_segment: 1
+  max_contract_repairs_per_segment: 1
+  contract_repair_max_output_tokens: 8192
+  max_total_cpu_seconds: 120
+  max_cases_per_experiment: 1000000
+  max_output_chars: 20000
+  broad_search_after_stalled_rounds: 1
+  broad_search_requires_meta_review: true
+  cache_results: true
+  # Enabling sandboxed Python also requires an immutable image reference:
+  # sandbox_image: your-registry/mathproofmesh-python@sha256:<64 hex chars>
+
+runtime:
+  run_root: runs
+  output_language: zh-CN
+  max_parallel_calls: 8
+  parse_retries: 1
+  request_retries: 3
+  checkpoint_every_stage: true
+  save_raw_provider_responses: true
+  redact_prompts_in_console: true
+  # Live progress shows only stage summaries and structured outcomes, never raw chain of thought.
+  activity_mode: compact
+  activity_max_visible: 18
+  activity_persist: true
+  activity_include_agent_calls: true
+  activity_heartbeat_seconds: 20
+  # Active SSE data may continue until the token limit. Five idle minutes means
+  # the transport stalled; two hours is only an emergency whole-call ceiling.
+  stream_first_chunk_timeout_seconds: 90
+  stream_idle_timeout_seconds: 300
+  agent_call_wall_timeout_seconds: 7200
+  stage_thinking_modes:
+    goal_normalization: disabled
+    triage: disabled
+    claim_extraction: disabled
+    post_failure_bottleneck: disabled
+    computation_contract_repair: disabled
+    pattern_conjecture_completion: disabled
+    strategy_generation: high
+    independent_exploration: tiered
+    proof_continuation: tiered
+    route_prove: tiered
+    structural_verification: high
+    checkpoint_verification: high
+    detailed_verification: high
+    final_verification: high
+    blind_structural_verification: high
+    blind_detailed_verification: high
+    meta_review: high
+    route_skeptic: high
+    route_referee: high
+    route_tool_audit: high
+    synthesis: high
+    final_revision: high
+  log_level: INFO
+  random_seed: 20260719

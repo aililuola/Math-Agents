@@ -1,0 +1,70 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ProofGraphEdge",
+  "schema": {
+    "$defs": {
+      "GraphEdgeType": {
+        "enum": [
+          "depends_on",
+          "implies",
+          "refutes",
+          "equivalent_to",
+          "strengthens",
+          "weakens",
+          "uses_construction",
+          "closes"
+        ],
+        "title": "GraphEdgeType",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "edge_id": {
+        "title": "Edge Id",
+        "type": "string"
+      },
+      "edge_type": {
+        "$ref": "#/$defs/GraphEdgeType"
+      },
+      "evidence_message_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Evidence Message Id"
+      },
+      "route_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Route Id"
+      },
+      "source_id": {
+        "title": "Source Id",
+        "type": "string"
+      },
+      "target_id": {
+        "title": "Target Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "source_id",
+      "target_id",
+      "edge_type"
+    ],
+    "title": "ProofGraphEdge",
+    "type": "object"
+  }
+}

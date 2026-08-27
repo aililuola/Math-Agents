@@ -1,0 +1,29 @@
+{
+  "qualified_name": "mathproofmesh.desktop.app.CredentialsRequest",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "clear": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Clear",
+        "type": "array"
+      },
+      "persist": {
+        "default": true,
+        "title": "Persist",
+        "type": "boolean"
+      },
+      "values": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Values",
+        "type": "object"
+      }
+    },
+    "title": "CredentialsRequest",
+    "type": "object"
+  }
+}

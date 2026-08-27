@@ -1,0 +1,71 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.NegativePatternRecord",
+  "schema": {
+    "$defs": {
+      "InferenceRiskType": {
+        "enum": [
+          "necessary_to_sufficient",
+          "eventual_to_global",
+          "pointwise_to_uniform",
+          "finite_range_to_finite_state",
+          "image_inclusion_to_surjectivity",
+          "projection_to_original",
+          "local_to_global",
+          "existence_to_uniform_existence",
+          "pairwise_to_common_witness",
+          "empirical_to_universal",
+          "partial_property_to_total_property",
+          "nonempty_intersection_to_subset_containment",
+          "exists_component_to_all_components",
+          "some_witness_to_all_witnesses",
+          "coverage_to_exhaustiveness",
+          "at_least_one_to_only_from_set",
+          "wrong_direction",
+          "quantifier_swap",
+          "dependency_missing",
+          "scope_mismatch",
+          "ambiguous_semantic_leap"
+        ],
+        "title": "InferenceRiskType",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "description": {
+        "title": "Description",
+        "type": "string"
+      },
+      "deterministic_signature": {
+        "title": "Deterministic Signature",
+        "type": "string"
+      },
+      "evidence_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Evidence Ids",
+        "type": "array"
+      },
+      "pattern_id": {
+        "title": "Pattern Id",
+        "type": "string"
+      },
+      "risk_type": {
+        "$ref": "#/$defs/InferenceRiskType"
+      },
+      "source_risk_id": {
+        "title": "Source Risk Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "source_risk_id",
+      "risk_type",
+      "description",
+      "deterministic_signature"
+    ],
+    "title": "NegativePatternRecord",
+    "type": "object"
+  }
+}

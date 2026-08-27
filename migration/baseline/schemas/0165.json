@@ -1,0 +1,45 @@
+{
+  "qualified_name": "mathproofmesh.schemas.GoalClarificationDecision",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "canonical_statement": {
+        "minLength": 1,
+        "title": "Canonical Statement",
+        "type": "string"
+      },
+      "request_id": {
+        "title": "Request Id",
+        "type": "string"
+      },
+      "selected_candidate_index": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Selected Candidate Index"
+      },
+      "source": {
+        "default": "user_confirmed",
+        "enum": [
+          "user_confirmed",
+          "auto_assumed"
+        ],
+        "title": "Source",
+        "type": "string"
+      }
+    },
+    "required": [
+      "request_id",
+      "canonical_statement"
+    ],
+    "title": "GoalClarificationDecision",
+    "type": "object"
+  }
+}

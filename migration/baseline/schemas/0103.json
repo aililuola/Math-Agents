@@ -1,0 +1,45 @@
+{
+  "qualified_name": "mathproofmesh.proof_control.models.PremiseClosureRecord",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "closure_type": {
+        "enum": [
+          "given_assumption",
+          "direct_witness",
+          "definition_unfolding",
+          "verified_fact_instance",
+          "none"
+        ],
+        "title": "Closure Type",
+        "type": "string"
+      },
+      "record_id": {
+        "title": "Record Id",
+        "type": "string"
+      },
+      "supporting_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Supporting Ids",
+        "type": "array"
+      },
+      "target_obligation_id": {
+        "title": "Target Obligation Id",
+        "type": "string"
+      },
+      "verified": {
+        "default": false,
+        "title": "Verified",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "target_obligation_id",
+      "closure_type"
+    ],
+    "title": "PremiseClosureRecord",
+    "type": "object"
+  }
+}

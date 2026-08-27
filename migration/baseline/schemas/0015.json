@@ -1,0 +1,147 @@
+{
+  "qualified_name": "mathproofmesh.config.DeepExplorationPolicyConfig",
+  "schema": {
+    "$defs": {
+      "ExplorationTierPolicyConfig": {
+        "additionalProperties": false,
+        "description": "One server-owned deep-exploration operating tier.",
+        "properties": {
+          "artifact_recovery_tokens": {
+            "maximum": 128000,
+            "minimum": 256,
+            "title": "Artifact Recovery Tokens",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "maximum": 384000,
+            "minimum": 512,
+            "title": "Output Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "output_tokens",
+          "artifact_recovery_tokens"
+        ],
+        "title": "ExplorationTierPolicyConfig",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Evidence-gated long reasoning without a global high-tier concurrency cap.",
+    "properties": {
+      "allow_local_bottleneck_pivot": {
+        "default": true,
+        "title": "Allow Local Bottleneck Pivot",
+        "type": "boolean"
+      },
+      "allow_parallel_distinct_signatures": {
+        "default": true,
+        "title": "Allow Parallel Distinct Signatures",
+        "type": "boolean"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "high_tier_threshold_tokens": {
+        "default": 96000,
+        "maximum": 384000,
+        "minimum": 512,
+        "title": "High Tier Threshold Tokens",
+        "type": "integer"
+      },
+      "max_partial_repairs_per_signature": {
+        "default": 1,
+        "maximum": 4,
+        "minimum": 0,
+        "title": "Max Partial Repairs Per Signature",
+        "type": "integer"
+      },
+      "max_running_per_signature": {
+        "default": 1,
+        "maximum": 4,
+        "minimum": 1,
+        "title": "Max Running Per Signature",
+        "type": "integer"
+      },
+      "min_remaining_calls_for_128k": {
+        "default": 8,
+        "maximum": 1000,
+        "minimum": 1,
+        "title": "Min Remaining Calls For 128K",
+        "type": "integer"
+      },
+      "min_remaining_tokens_for_128k": {
+        "default": 256000,
+        "maximum": 1000000000,
+        "minimum": 128000,
+        "title": "Min Remaining Tokens For 128K",
+        "type": "integer"
+      },
+      "no_progress_high_tier_limit_per_signature": {
+        "default": 1,
+        "maximum": 8,
+        "minimum": 1,
+        "title": "No Progress High Tier Limit Per Signature",
+        "type": "integer"
+      },
+      "partial_repair_max_output_tokens": {
+        "default": 64000,
+        "maximum": 384000,
+        "minimum": 512,
+        "title": "Partial Repair Max Output Tokens",
+        "type": "integer"
+      },
+      "persist_across_resume": {
+        "default": true,
+        "title": "Persist Across Resume",
+        "type": "boolean"
+      },
+      "preserve_parent_verified_checkpoint": {
+        "default": true,
+        "title": "Preserve Parent Verified Checkpoint",
+        "type": "boolean"
+      },
+      "require_meta_approval_for_128k": {
+        "default": true,
+        "title": "Require Meta Approval For 128K",
+        "type": "boolean"
+      },
+      "require_novelty_review_for_pivot": {
+        "default": true,
+        "title": "Require Novelty Review For Pivot",
+        "type": "boolean"
+      },
+      "reset_on_referee_confirmed_mechanism_change": {
+        "default": true,
+        "title": "Reset On Referee Confirmed Mechanism Change",
+        "type": "boolean"
+      },
+      "reset_on_verified_checkpoint": {
+        "default": true,
+        "title": "Reset On Verified Checkpoint",
+        "type": "boolean"
+      },
+      "semantic_duplicate_threshold": {
+        "default": 0.86,
+        "maximum": 1.0,
+        "minimum": 0.5,
+        "title": "Semantic Duplicate Threshold",
+        "type": "number"
+      },
+      "tiers": {
+        "items": {
+          "$ref": "#/$defs/ExplorationTierPolicyConfig"
+        },
+        "maxItems": 8,
+        "minItems": 1,
+        "title": "Tiers",
+        "type": "array"
+      }
+    },
+    "title": "DeepExplorationPolicyConfig",
+    "type": "object"
+  }
+}

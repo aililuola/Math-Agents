@@ -1,0 +1,112 @@
+{
+  "qualified_name": "mathproofmesh.schemas.BrokerDecision",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "accepted": {
+        "title": "Accepted",
+        "type": "boolean"
+      },
+      "accepted_claim_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Accepted Claim Ids",
+        "type": "array"
+      },
+      "bridge_task_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Bridge Task Id"
+      },
+      "contradiction_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Contradiction Id"
+      },
+      "deferred_claim_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Deferred Claim Ids",
+        "type": "array"
+      },
+      "duplicate_of": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Duplicate Of"
+      },
+      "message_id": {
+        "title": "Message Id",
+        "type": "string"
+      },
+      "rejected_claim_ids": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Rejected Claim Ids",
+        "type": "array"
+      },
+      "rejected_targets": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "title": "Rejected Targets",
+        "type": "object"
+      },
+      "rejection_reason": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rejection Reason"
+      },
+      "score_breakdown": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "title": "Score Breakdown",
+        "type": "object"
+      },
+      "selected_targets": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Selected Targets",
+        "type": "array"
+      }
+    },
+    "required": [
+      "message_id",
+      "accepted"
+    ],
+    "title": "BrokerDecision",
+    "type": "object"
+  }
+}

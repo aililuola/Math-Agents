@@ -1,0 +1,64 @@
+{
+  "qualified_name": "mathproofmesh.config.CoreDebtControlConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "auxiliary_weight": {
+        "default": 0.35,
+        "maximum": 100.0,
+        "minimum": 0.0,
+        "title": "Auxiliary Weight",
+        "type": "number"
+      },
+      "common_mode_weight": {
+        "default": 1.5,
+        "maximum": 100.0,
+        "minimum": 0.0,
+        "title": "Common Mode Weight",
+        "type": "number"
+      },
+      "core_bridge_weight": {
+        "default": 2.5,
+        "maximum": 100.0,
+        "minimum": 0.0,
+        "title": "Core Bridge Weight",
+        "type": "number"
+      },
+      "core_stagnation_rounds": {
+        "default": 2,
+        "maximum": 32,
+        "minimum": 1,
+        "title": "Core Stagnation Rounds",
+        "type": "integer"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "main_goal_weight": {
+        "default": 4.0,
+        "maximum": 100.0,
+        "minimum": 0.0,
+        "title": "Main Goal Weight",
+        "type": "number"
+      },
+      "necessary_only_weight": {
+        "default": 0.15,
+        "maximum": 100.0,
+        "minimum": 0.0,
+        "title": "Necessary Only Weight",
+        "type": "number"
+      },
+      "unresolved_scope_risk_weight": {
+        "default": 1.5,
+        "maximum": 100.0,
+        "minimum": 0.0,
+        "title": "Unresolved Scope Risk Weight",
+        "type": "number"
+      }
+    },
+    "title": "CoreDebtControlConfig",
+    "type": "object"
+  }
+}

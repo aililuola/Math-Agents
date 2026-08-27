@@ -1,0 +1,46 @@
+{
+  "qualified_name": "mathproofmesh.config.NearMissControlConfig",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "allow_model_extraction_on_ambiguous": {
+        "default": true,
+        "title": "Allow Model Extraction On Ambiguous",
+        "type": "boolean"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "extraction_requires_salvageable_component": {
+        "default": true,
+        "title": "Extraction Requires Salvageable Component",
+        "type": "boolean"
+      },
+      "max_records": {
+        "default": 512,
+        "maximum": 10000,
+        "minimum": 0,
+        "title": "Max Records",
+        "type": "integer"
+      },
+      "max_route_context_items": {
+        "default": 6,
+        "maximum": 64,
+        "minimum": 0,
+        "title": "Max Route Context Items",
+        "type": "integer"
+      },
+      "min_verifier_confidence": {
+        "default": 0.65,
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Min Verifier Confidence",
+        "type": "number"
+      }
+    },
+    "title": "NearMissControlConfig",
+    "type": "object"
+  }
+}

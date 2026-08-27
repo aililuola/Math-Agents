@@ -1,0 +1,4638 @@
+{
+  "mathproofmesh.config.AgentCapabilityConfig": {
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "first_error_accuracy_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.25,
+      "default_factory": null,
+      "required": false
+    },
+    "min_observations_before_trust_update": {
+      "annotation": "<class 'int'>",
+      "default": 5,
+      "default_factory": null,
+      "required": false
+    },
+    "mutation_benchmark_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.3,
+      "default_factory": null,
+      "required": false
+    },
+    "overturn_rate_penalty": {
+      "annotation": "<class 'float'>",
+      "default": 0.2,
+      "default_factory": null,
+      "required": false
+    },
+    "recency_decay": {
+      "annotation": "<class 'float'>",
+      "default": 0.98,
+      "default_factory": null,
+      "required": false
+    },
+    "tool_agreement_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.25,
+      "default_factory": null,
+      "required": false
+    },
+    "use_self_reported_confidence": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.AgentConfig": {
+    "api_key": {
+      "annotation": "pydantic.types.SecretStr | None",
+      "default": null,
+      "default_factory": null,
+      "required": false
+    },
+    "api_key_env": {
+      "annotation": "str | None",
+      "default": null,
+      "default_factory": null,
+      "required": false
+    },
+    "base_url": {
+      "annotation": "str | None",
+      "default": null,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "extra_headers": {
+      "annotation": "dict[str, str]",
+      "default": {},
+      "default_factory": "dict",
+      "required": false
+    },
+    "id": {
+      "annotation": "<class 'str'>",
+      "default": null,
+      "default_factory": null,
+      "required": true
+    },
+    "max_concurrency": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "max_output_tokens": {
+      "annotation": "<class 'int'>",
+      "default": 8192,
+      "default_factory": null,
+      "required": false
+    },
+    "mock_profile": {
+      "annotation": "str | None",
+      "default": null,
+      "default_factory": null,
+      "required": false
+    },
+    "model": {
+      "annotation": "<class 'str'>",
+      "default": null,
+      "default_factory": null,
+      "required": true
+    },
+    "pricing": {
+      "annotation": "<class 'mathproofmesh.config.PricingConfig'>",
+      "default": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      },
+      "default_factory": "PricingConfig",
+      "required": false
+    },
+    "provider": {
+      "annotation": "typing.Literal['openai_compatible', 'deepseek', 'anthropic', 'gemini', 'mock']",
+      "default": null,
+      "default_factory": null,
+      "required": true
+    },
+    "provider_max_output_tokens": {
+      "annotation": "<class 'int'>",
+      "default": 384000,
+      "default_factory": null,
+      "required": false
+    },
+    "reasoning_effort": {
+      "annotation": "typing.Literal['high', 'max'] | None",
+      "default": null,
+      "default_factory": null,
+      "required": false
+    },
+    "requests_per_minute": {
+      "annotation": "int | None",
+      "default": null,
+      "default_factory": null,
+      "required": false
+    },
+    "roles": {
+      "annotation": "list[typing.Literal['planner', 'explorer', 'summarizer', 'structural_verifier', 'detailed_verifier', 'meta_reviewer', 'synthesizer', 'final_verifier', 'experimenter', 'route_prover', 'route_skeptic', 'tool_specialist', 'route_referee', 'bridge_prover', 'conflict_resolver', 'counterexample_hunter', 'representation_switchboard', 'analogy_agent', 'construction_inventor', 'invariant_hypothesis_agent', 'reverse_goal_analyzer', 'meta_strategist', 'inspiration_referee', 'general']]",
+      "default": [
+        "general"
+      ],
+      "default_factory": "AgentConfig.<lambda>",
+      "required": false
+    },
+    "specialties": {
+      "annotation": "list[str]",
+      "default": [],
+      "default_factory": "list",
+      "required": false
+    },
+    "streaming": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "temperature": {
+      "annotation": "<class 'float'>",
+      "default": 0.2,
+      "default_factory": null,
+      "required": false
+    },
+    "thinking_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "timeout_seconds": {
+      "annotation": "<class 'float'>",
+      "default": 180.0,
+      "default_factory": null,
+      "required": false
+    },
+    "trust_prior": {
+      "annotation": "<class 'float'>",
+      "default": 0.5,
+      "default_factory": null,
+      "required": false
+    },
+    "user_id": {
+      "annotation": "str | None",
+      "default": null,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.BlueprintReviewControlConfig": {
+    "max_batch_repair_items": {
+      "annotation": "<class 'int'>",
+      "default": 12,
+      "default_factory": null,
+      "required": false
+    },
+    "max_nodes_per_batch": {
+      "annotation": "<class 'int'>",
+      "default": 12,
+      "default_factory": null,
+      "required": false
+    },
+    "max_repair_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "max_review_calls_per_round": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.BottleneckControlConfig": {
+    "compression_interval_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "dominance_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.9,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "equivalence_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.84,
+      "default_factory": null,
+      "required": false
+    },
+    "max_cluster_members": {
+      "annotation": "<class 'int'>",
+      "default": 64,
+      "default_factory": null,
+      "required": false
+    },
+    "min_open_growth_for_forced_compression": {
+      "annotation": "<class 'int'>",
+      "default": 8,
+      "default_factory": null,
+      "required": false
+    },
+    "mode": {
+      "annotation": "typing.Literal['off', 'shadow', 'active']",
+      "default": "shadow",
+      "default_factory": null,
+      "required": false
+    },
+    "preserve_original_nodes": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.BrokerConfig": {
+    "ambiguous_match_high": {
+      "annotation": "<class 'float'>",
+      "default": 0.82,
+      "default_factory": null,
+      "required": false
+    },
+    "ambiguous_match_low": {
+      "annotation": "<class 'float'>",
+      "default": 0.55,
+      "default_factory": null,
+      "required": false
+    },
+    "bridge_detection": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "bridge_similarity_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.78,
+      "default_factory": null,
+      "required": false
+    },
+    "contradiction_detection": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "contradiction_similarity_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.82,
+      "default_factory": null,
+      "required": false
+    },
+    "deterministic_matching_first": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "duplicate_route_detection": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "duplicate_strategy_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.84,
+      "default_factory": null,
+      "required": false
+    },
+    "max_bridge_tasks_per_round": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "max_conflict_tasks_per_round": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "min_routes_for_bridge": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "use_llm_matching_on_ambiguous": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.BudgetConfig": {
+    "base_verifier_replicas": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "breadth_share": {
+      "annotation": "<class 'float'>",
+      "default": 0.3,
+      "default_factory": null,
+      "required": false
+    },
+    "candidates_to_verify": {
+      "annotation": "<class 'int'>",
+      "default": 3,
+      "default_factory": null,
+      "required": false
+    },
+    "depth_share": {
+      "annotation": "<class 'float'>",
+      "default": 0.35,
+      "default_factory": null,
+      "required": false
+    },
+    "hard_problem_call_multiplier": {
+      "annotation": "<class 'float'>",
+      "default": 2.0,
+      "default_factory": null,
+      "required": false
+    },
+    "hard_problem_extra_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "high_risk_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.45,
+      "default_factory": null,
+      "required": false
+    },
+    "high_risk_verifier_replicas": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "initial_paths": {
+      "annotation": "<class 'int'>",
+      "default": 4,
+      "default_factory": null,
+      "required": false
+    },
+    "max_cost_usd": {
+      "annotation": "float | None",
+      "default": null,
+      "default_factory": null,
+      "required": false
+    },
+    "max_paths": {
+      "annotation": "<class 'int'>",
+      "default": 8,
+      "default_factory": null,
+      "required": false
+    },
+    "max_revisions": {
+      "annotation": "<class 'int'>",
+      "default": 3,
+      "default_factory": null,
+      "required": false
+    },
+    "max_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 4,
+      "default_factory": null,
+      "required": false
+    },
+    "max_total_calls": {
+      "annotation": "<class 'int'>",
+      "default": 48,
+      "default_factory": null,
+      "required": false
+    },
+    "max_total_tokens": {
+      "annotation": "int | None",
+      "default": null,
+      "default_factory": null,
+      "required": false
+    },
+    "scale_budget_with_difficulty": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "strategies_to_generate": {
+      "annotation": "<class 'int'>",
+      "default": 7,
+      "default_factory": null,
+      "required": false
+    },
+    "synthesis_share": {
+      "annotation": "<class 'float'>",
+      "default": 0.1,
+      "default_factory": null,
+      "required": false
+    },
+    "synthesis_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.72,
+      "default_factory": null,
+      "required": false
+    },
+    "verification_pass_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.78,
+      "default_factory": null,
+      "required": false
+    },
+    "verification_share": {
+      "annotation": "<class 'float'>",
+      "default": 0.25,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.CommonModeControlConfig": {
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "include_critical_claims": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "include_strategy_prerequisites": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "include_unverified_dependencies": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "max_challengers_per_round": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "min_routes": {
+      "annotation": "<class 'int'>",
+      "default": 3,
+      "default_factory": null,
+      "required": false
+    },
+    "risk_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.6,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.ComputationConfig": {
+    "bounded_typed_probe_fast_path": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "bounded_typed_probe_max_cases": {
+      "annotation": "<class 'int'>",
+      "default": 25000,
+      "default_factory": null,
+      "required": false
+    },
+    "broad_search_after_stalled_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "broad_search_requires_meta_review": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "cache_results": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "contract_repair_max_output_tokens": {
+      "annotation": "<class 'int'>",
+      "default": 8192,
+      "default_factory": null,
+      "required": false
+    },
+    "critical_calculation_gate_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "critical_calculation_max_checks_per_artifact": {
+      "annotation": "<class 'int'>",
+      "default": 8,
+      "default_factory": null,
+      "required": false
+    },
+    "critical_calculation_require_declarations": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "execute_planner_hints_immediately": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "hard_experiments_per_path": {
+      "annotation": "<class 'int'>",
+      "default": 6,
+      "default_factory": null,
+      "required": false
+    },
+    "max_cases_per_experiment": {
+      "annotation": "<class 'int'>",
+      "default": 1000000,
+      "default_factory": null,
+      "required": false
+    },
+    "max_compute_cycles_per_segment": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "max_contract_repairs_per_segment": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "max_output_chars": {
+      "annotation": "<class 'int'>",
+      "default": 20000,
+      "default_factory": null,
+      "required": false
+    },
+    "max_total_cpu_seconds": {
+      "annotation": "<class 'float'>",
+      "default": 120.0,
+      "default_factory": null,
+      "required": false
+    },
+    "policy": {
+      "annotation": "typing.Literal['reasoning_first']",
+      "default": "reasoning_first",
+      "default_factory": null,
+      "required": false
+    },
+    "sandbox_cpus": {
+      "annotation": "<class 'float'>",
+      "default": 1.0,
+      "default_factory": null,
+      "required": false
+    },
+    "sandbox_image": {
+      "annotation": "str | None",
+      "default": null,
+      "default_factory": null,
+      "required": false
+    },
+    "sandbox_memory_mb": {
+      "annotation": "<class 'int'>",
+      "default": 256,
+      "default_factory": null,
+      "required": false
+    },
+    "sandbox_pids_limit": {
+      "annotation": "<class 'int'>",
+      "default": 32,
+      "default_factory": null,
+      "required": false
+    },
+    "sandbox_timeout_seconds": {
+      "annotation": "<class 'float'>",
+      "default": 20.0,
+      "default_factory": null,
+      "required": false
+    },
+    "sandboxed_python_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "soft_experiments_per_path": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "targeted_falsification_fast_path": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "typed_tools_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.ConfigModel": {},
+  "mathproofmesh.config.ContinuationConfig": {
+    "allow_checkpoint_rollback": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "allow_cross_agent_failover": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "checkpoint_pass_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.78,
+      "default_factory": null,
+      "required": false
+    },
+    "checkpoint_policy": {
+      "annotation": "typing.Literal['verified_subgoal', 'verified_delta']",
+      "default": "verified_subgoal",
+      "default_factory": null,
+      "required": false
+    },
+    "delta_verifier_replicas": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "max_failover_agents": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "max_new_claims_per_call": {
+      "annotation": "<class 'int'>",
+      "default": 3,
+      "default_factory": null,
+      "required": false
+    },
+    "max_new_steps_per_call": {
+      "annotation": "<class 'int'>",
+      "default": 3,
+      "default_factory": null,
+      "required": false
+    },
+    "max_output_tokens_per_segment": {
+      "annotation": "<class 'int'>",
+      "default": 12000,
+      "default_factory": null,
+      "required": false
+    },
+    "max_segments_per_path": {
+      "annotation": "<class 'int'>",
+      "default": 12,
+      "default_factory": null,
+      "required": false
+    },
+    "post_failure_bottleneck_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "post_failure_bottleneck_max_output_tokens": {
+      "annotation": "<class 'int'>",
+      "default": 16000,
+      "default_factory": null,
+      "required": false
+    },
+    "post_failure_bottleneck_once_per_checkpoint": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "post_failure_trigger_inspiration": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "process_resume_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "resume_on_disconnect": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "retain_rejected_deltas": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "segments_per_explore_call": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "verify_each_delta": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.ContinueGateControlConfig": {
+    "allow_on_core_debt_reduced": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "allow_on_core_obligation_closed": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "allow_on_first_error_changed": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "allow_on_verified_bridge_gain": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "force_blueprint_rewrite_after_block": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "mode": {
+      "annotation": "typing.Literal['off', 'shadow', 'active']",
+      "default": "shadow",
+      "default_factory": null,
+      "required": false
+    },
+    "no_core_progress_segments": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "require_any_core_signal": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.CoreDebtControlConfig": {
+    "auxiliary_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.35,
+      "default_factory": null,
+      "required": false
+    },
+    "common_mode_weight": {
+      "annotation": "<class 'float'>",
+      "default": 1.5,
+      "default_factory": null,
+      "required": false
+    },
+    "core_bridge_weight": {
+      "annotation": "<class 'float'>",
+      "default": 2.5,
+      "default_factory": null,
+      "required": false
+    },
+    "core_stagnation_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "main_goal_weight": {
+      "annotation": "<class 'float'>",
+      "default": 4.0,
+      "default_factory": null,
+      "required": false
+    },
+    "necessary_only_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.15,
+      "default_factory": null,
+      "required": false
+    },
+    "unresolved_scope_risk_weight": {
+      "annotation": "<class 'float'>",
+      "default": 1.5,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.CrossRouteConfig": {
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "initial_isolation_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "max_global_messages_per_round": {
+      "annotation": "<class 'int'>",
+      "default": 24,
+      "default_factory": null,
+      "required": false
+    },
+    "max_messages_per_route_per_round": {
+      "annotation": "<class 'int'>",
+      "default": 6,
+      "default_factory": null,
+      "required": false
+    },
+    "max_neighbors_per_route": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "message_ttl_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "share_counterexamples": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "share_failure_records": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "share_open_obligations": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "share_unverified_insights": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "share_verified_facts": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.DeepExplorationPolicyConfig": {
+    "allow_local_bottleneck_pivot": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "allow_parallel_distinct_signatures": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "high_tier_threshold_tokens": {
+      "annotation": "<class 'int'>",
+      "default": 96000,
+      "default_factory": null,
+      "required": false
+    },
+    "max_partial_repairs_per_signature": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "max_running_per_signature": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "min_remaining_calls_for_128k": {
+      "annotation": "<class 'int'>",
+      "default": 8,
+      "default_factory": null,
+      "required": false
+    },
+    "min_remaining_tokens_for_128k": {
+      "annotation": "<class 'int'>",
+      "default": 256000,
+      "default_factory": null,
+      "required": false
+    },
+    "no_progress_high_tier_limit_per_signature": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "partial_repair_max_output_tokens": {
+      "annotation": "<class 'int'>",
+      "default": 64000,
+      "default_factory": null,
+      "required": false
+    },
+    "persist_across_resume": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "preserve_parent_verified_checkpoint": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_meta_approval_for_128k": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_novelty_review_for_pivot": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "reset_on_referee_confirmed_mechanism_change": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "reset_on_verified_checkpoint": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "semantic_duplicate_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.86,
+      "default_factory": null,
+      "required": false
+    },
+    "tiers": {
+      "annotation": "list[mathproofmesh.config.ExplorationTierPolicyConfig]",
+      "default": [
+        {
+          "artifact_recovery_tokens": 8000,
+          "output_tokens": 64000
+        },
+        {
+          "artifact_recovery_tokens": 12000,
+          "output_tokens": 96000
+        },
+        {
+          "artifact_recovery_tokens": 16000,
+          "output_tokens": 128000
+        }
+      ],
+      "default_factory": "DeepExplorationPolicyConfig.<lambda>",
+      "required": false
+    }
+  },
+  "mathproofmesh.config.ExplorationTierPolicyConfig": {
+    "artifact_recovery_tokens": {
+      "annotation": "<class 'int'>",
+      "default": null,
+      "default_factory": null,
+      "required": true
+    },
+    "output_tokens": {
+      "annotation": "<class 'int'>",
+      "default": null,
+      "default_factory": null,
+      "required": true
+    }
+  },
+  "mathproofmesh.config.FailureControlConfig": {
+    "ambiguous_model_review": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "bridge_failure_prefers_bridge_action": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "framing_failure_forces_reanchor": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "max_blueprint_rewrites_per_route": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "min_classification_confidence": {
+      "annotation": "<class 'float'>",
+      "default": 0.7,
+      "default_factory": null,
+      "required": false
+    },
+    "plan_failure_blocks_local_deepen": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.FalsificationFastLaneControlConfig": {
+    "allow_sandboxed_python": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "allowed_purposes": {
+      "annotation": "list[mathproofmesh.schemas.ComputationPurpose]",
+      "default": [
+        "falsify_claim",
+        "test_boundary_cases"
+      ],
+      "default_factory": "FalsificationFastLaneControlConfig.<lambda>",
+      "required": false
+    },
+    "auto_fact_promotion": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "exact_arithmetic_only": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "max_cases": {
+      "annotation": "<class 'int'>",
+      "default": 100000,
+      "default_factory": null,
+      "required": false
+    },
+    "max_memory_mb": {
+      "annotation": "<class 'int'>",
+      "default": 256,
+      "default_factory": null,
+      "required": false
+    },
+    "max_runtime_seconds": {
+      "annotation": "<class 'float'>",
+      "default": 10.0,
+      "default_factory": null,
+      "required": false
+    },
+    "max_tasks_per_round": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.FinalTopologyConfig": {
+    "blind_detailed_review": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "blind_structural_review": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "freeze_graph_before_synthesis": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "remove_agent_identity": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "remove_route_ranking": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "remove_self_confidence": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.GoalAlignmentControlConfig": {
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "max_strategy_rewrite_attempts": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "min_alignment_confidence": {
+      "annotation": "<class 'float'>",
+      "default": 0.72,
+      "default_factory": null,
+      "required": false
+    },
+    "overstrength_penalty": {
+      "annotation": "<class 'float'>",
+      "default": 0.25,
+      "default_factory": null,
+      "required": false
+    },
+    "require_implication_outline": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_target_obligation": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "run_countermodel_on_unknown_relation": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.InductionControlConfig": {
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "max_candidates_per_trigger": {
+      "annotation": "<class 'int'>",
+      "default": 3,
+      "default_factory": null,
+      "required": false
+    },
+    "require_well_foundedness_statement": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "trigger_on_first_occurrence_barrier": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "trigger_on_recursive_same_type_dependency": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "trigger_on_repeated_feature": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.InspirationConfig": {
+    "active_proposals_per_task": {
+      "annotation": "<class 'int'>",
+      "default": 3,
+      "default_factory": null,
+      "required": false
+    },
+    "adaptive_mechanism_selection": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "adaptive_min_exploration_rate": {
+      "annotation": "<class 'float'>",
+      "default": 0.15,
+      "default_factory": null,
+      "required": false
+    },
+    "adaptive_min_observations": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "adaptive_reward_call_cost": {
+      "annotation": "<class 'float'>",
+      "default": 0.1,
+      "default_factory": null,
+      "required": false
+    },
+    "adaptive_reward_debt_weight": {
+      "annotation": "<class 'float'>",
+      "default": 1.0,
+      "default_factory": null,
+      "required": false
+    },
+    "adaptive_reward_fact_weight": {
+      "annotation": "<class 'float'>",
+      "default": 4.0,
+      "default_factory": null,
+      "required": false
+    },
+    "adaptive_reward_final_citation_weight": {
+      "annotation": "<class 'float'>",
+      "default": 3.0,
+      "default_factory": null,
+      "required": false
+    },
+    "adaptive_reward_obligation_weight": {
+      "annotation": "<class 'float'>",
+      "default": 1.0,
+      "default_factory": null,
+      "required": false
+    },
+    "adaptive_reward_refutation_cost": {
+      "annotation": "<class 'float'>",
+      "default": 1.0,
+      "default_factory": null,
+      "required": false
+    },
+    "adaptive_reward_token_cost_per_100k": {
+      "annotation": "<class 'float'>",
+      "default": 0.1,
+      "default_factory": null,
+      "required": false
+    },
+    "adaptive_ucb_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.75,
+      "default_factory": null,
+      "required": false
+    },
+    "all_routes_failed_trigger": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "allow_external_retrieval": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "analogy_agent": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "analogy_library_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "analogy_library_path": {
+      "annotation": "<class 'str'>",
+      "default": "benchmarks/analogy_library.jsonl",
+      "default_factory": null,
+      "required": false
+    },
+    "analogy_top_k": {
+      "annotation": "<class 'int'>",
+      "default": 6,
+      "default_factory": null,
+      "required": false
+    },
+    "auxiliary_construction_inventor": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "bidirectional_frontier_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "bridge_lemma_generator": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "cold_context_proposals_per_task": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "composer_max_candidates_per_round": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "composer_max_combined_cost": {
+      "annotation": "<class 'int'>",
+      "default": 4,
+      "default_factory": null,
+      "required": false
+    },
+    "composer_max_sources": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "composer_require_quick_falsification": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "controlled_surprise_mutation_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "cross_run_learning_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "cross_run_learning_path": {
+      "annotation": "<class 'str'>",
+      "default": ".mathproofmesh/learning",
+      "default_factory": null,
+      "required": false
+    },
+    "cross_run_max_experiences": {
+      "annotation": "<class 'int'>",
+      "default": 2000,
+      "default_factory": null,
+      "required": false
+    },
+    "cross_run_max_negative_analogies": {
+      "annotation": "<class 'int'>",
+      "default": 2000,
+      "default_factory": null,
+      "required": false
+    },
+    "cross_run_max_outcomes": {
+      "annotation": "<class 'int'>",
+      "default": 10000,
+      "default_factory": null,
+      "required": false
+    },
+    "cross_run_require_final_citation": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "domain_operator_max_prompt_items": {
+      "annotation": "<class 'int'>",
+      "default": 8,
+      "default_factory": null,
+      "required": false
+    },
+    "domain_operator_plugins_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "experience_distillation_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "final_repair_failure_trigger": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "frontier_max_backward_claims": {
+      "annotation": "<class 'int'>",
+      "default": 8,
+      "default_factory": null,
+      "required": false
+    },
+    "frontier_max_bridge_candidates": {
+      "annotation": "<class 'int'>",
+      "default": 3,
+      "default_factory": null,
+      "required": false
+    },
+    "frontier_max_forward_claims": {
+      "annotation": "<class 'int'>",
+      "default": 8,
+      "default_factory": null,
+      "required": false
+    },
+    "frontier_min_candidate_overlap": {
+      "annotation": "<class 'float'>",
+      "default": 0.35,
+      "default_factory": null,
+      "required": false
+    },
+    "inspiration_composer_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "inspiration_context_max_chars": {
+      "annotation": "<class 'int'>",
+      "default": 24000,
+      "default_factory": null,
+      "required": false
+    },
+    "invariant_hypothesis_agent": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "max_consecutive_surprise_rejections": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "max_distilled_experiences": {
+      "annotation": "<class 'int'>",
+      "default": 256,
+      "default_factory": null,
+      "required": false
+    },
+    "max_inspiration_tasks_per_round": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "max_materialized_proposals_per_trigger": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "max_negative_analogy_records": {
+      "annotation": "<class 'int'>",
+      "default": 256,
+      "default_factory": null,
+      "required": false
+    },
+    "max_new_routes_per_trigger": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "max_proposals_per_task": {
+      "annotation": "<class 'int'>",
+      "default": 3,
+      "default_factory": null,
+      "required": false
+    },
+    "max_reviewed_proposals_per_task": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "max_single_agent_proposals_per_task": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "mechanism_duplicate_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.86,
+      "default_factory": null,
+      "required": false
+    },
+    "meta_allow_route_abandon": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "meta_directive_cooldown_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "meta_directive_expiry_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "meta_directive_max_estimated_calls": {
+      "annotation": "<class 'int'>",
+      "default": 8,
+      "default_factory": null,
+      "required": false
+    },
+    "meta_directives_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "minimum_verified_gain": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "mode": {
+      "annotation": "typing.Literal['off', 'shadow', 'active']",
+      "default": "shadow",
+      "default_factory": null,
+      "required": false
+    },
+    "negative_analogy_library_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "novelty_mechanism_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.24,
+      "default_factory": null,
+      "required": false
+    },
+    "novelty_object_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.16,
+      "default_factory": null,
+      "required": false
+    },
+    "novelty_obligation_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.1,
+      "default_factory": null,
+      "required": false
+    },
+    "novelty_principle_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.1,
+      "default_factory": null,
+      "required": false
+    },
+    "novelty_representation_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.24,
+      "default_factory": null,
+      "required": false
+    },
+    "novelty_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.65,
+      "default_factory": null,
+      "required": false
+    },
+    "novelty_transformation_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.16,
+      "default_factory": null,
+      "required": false
+    },
+    "persistent_meta_strategist": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "proof_debt_min_reduction": {
+      "annotation": "<class 'float'>",
+      "default": 0.03,
+      "default_factory": null,
+      "required": false
+    },
+    "proposals_enter_fact_memory": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "proposer_generalist_roles": {
+      "annotation": "list[typing.Literal['planner', 'explorer', 'summarizer', 'structural_verifier', 'detailed_verifier', 'meta_reviewer', 'synthesizer', 'final_verifier', 'experimenter', 'route_prover', 'route_skeptic', 'tool_specialist', 'route_referee', 'bridge_prover', 'conflict_resolver', 'counterexample_hunter', 'representation_switchboard', 'analogy_agent', 'construction_inventor', 'invariant_hypothesis_agent', 'reverse_goal_analyzer', 'meta_strategist', 'inspiration_referee', 'general']]",
+      "default": [
+        "explorer",
+        "route_prover"
+      ],
+      "default_factory": "InspirationConfig.<lambda>",
+      "required": false
+    },
+    "protect_finalization_reserve": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "repeated_error_threshold": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "representation_switchboard": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_inspiration_referee": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "reverse_goal_analysis": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "route_budget_share_trigger": {
+      "annotation": "<class 'float'>",
+      "default": 0.5,
+      "default_factory": null,
+      "required": false
+    },
+    "route_redundancy_trigger": {
+      "annotation": "<class 'float'>",
+      "default": 0.8,
+      "default_factory": null,
+      "required": false
+    },
+    "shared_bottleneck_trigger": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "stagnation_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "surprise_budget_fraction": {
+      "annotation": "<class 'float'>",
+      "default": 0.08,
+      "default_factory": null,
+      "required": false
+    },
+    "surprise_budget_max_calls": {
+      "annotation": "<class 'int'>",
+      "default": 32,
+      "default_factory": null,
+      "required": false
+    },
+    "surprise_budget_min_calls": {
+      "annotation": "<class 'int'>",
+      "default": 10,
+      "default_factory": null,
+      "required": false
+    },
+    "surprise_cooldown_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "surprise_exploration": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "warm_context_max_facts": {
+      "annotation": "<class 'int'>",
+      "default": 5,
+      "default_factory": null,
+      "required": false
+    },
+    "warm_context_max_negatives": {
+      "annotation": "<class 'int'>",
+      "default": 5,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.MessageUtilityControlConfig": {
+    "blueprint_rewrite_credit": {
+      "annotation": "<class 'float'>",
+      "default": 0.4,
+      "default_factory": null,
+      "required": false
+    },
+    "broadcast_min_expected_core_debt_reduction": {
+      "annotation": "<class 'float'>",
+      "default": 0.0,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "final_citation_credit": {
+      "annotation": "<class 'float'>",
+      "default": 1.0,
+      "default_factory": null,
+      "required": false
+    },
+    "max_target_obligations": {
+      "annotation": "<class 'int'>",
+      "default": 8,
+      "default_factory": null,
+      "required": false
+    },
+    "no_use_cooldown_threshold": {
+      "annotation": "<class 'int'>",
+      "default": 3,
+      "default_factory": null,
+      "required": false
+    },
+    "obligation_close_credit": {
+      "annotation": "<class 'float'>",
+      "default": 0.8,
+      "default_factory": null,
+      "required": false
+    },
+    "refutation_credit": {
+      "annotation": "<class 'float'>",
+      "default": 0.8,
+      "default_factory": null,
+      "required": false
+    },
+    "require_utility_contract_for_cross_route": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "utility_credit_horizon_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 3,
+      "default_factory": null,
+      "required": false
+    },
+    "verified_step_credit": {
+      "annotation": "<class 'float'>",
+      "default": 0.5,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.NearMissControlConfig": {
+    "allow_model_extraction_on_ambiguous": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "extraction_requires_salvageable_component": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "max_records": {
+      "annotation": "<class 'int'>",
+      "default": 512,
+      "default_factory": null,
+      "required": false
+    },
+    "max_route_context_items": {
+      "annotation": "<class 'int'>",
+      "default": 6,
+      "default_factory": null,
+      "required": false
+    },
+    "min_verifier_confidence": {
+      "annotation": "<class 'float'>",
+      "default": 0.65,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.PricingConfig": {
+    "input_per_million": {
+      "annotation": "<class 'float'>",
+      "default": 0.0,
+      "default_factory": null,
+      "required": false
+    },
+    "output_per_million": {
+      "annotation": "<class 'float'>",
+      "default": 0.0,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.ProofControlConfig": {
+    "bottleneck": {
+      "annotation": "<class 'mathproofmesh.config.BottleneckControlConfig'>",
+      "default": {
+        "compression_interval_rounds": 1,
+        "dominance_threshold": 0.9,
+        "enabled": true,
+        "equivalence_threshold": 0.84,
+        "max_cluster_members": 64,
+        "min_open_growth_for_forced_compression": 8,
+        "mode": "shadow",
+        "preserve_original_nodes": true
+      },
+      "default_factory": "BottleneckControlConfig",
+      "required": false
+    },
+    "common_mode": {
+      "annotation": "<class 'mathproofmesh.config.CommonModeControlConfig'>",
+      "default": {
+        "enabled": true,
+        "include_critical_claims": true,
+        "include_strategy_prerequisites": true,
+        "include_unverified_dependencies": true,
+        "max_challengers_per_round": 1,
+        "min_routes": 3,
+        "risk_threshold": 0.6
+      },
+      "default_factory": "CommonModeControlConfig",
+      "required": false
+    },
+    "continue_gate": {
+      "annotation": "<class 'mathproofmesh.config.ContinueGateControlConfig'>",
+      "default": {
+        "allow_on_core_debt_reduced": true,
+        "allow_on_core_obligation_closed": true,
+        "allow_on_first_error_changed": true,
+        "allow_on_verified_bridge_gain": true,
+        "enabled": true,
+        "force_blueprint_rewrite_after_block": true,
+        "mode": "shadow",
+        "no_core_progress_segments": 2,
+        "require_any_core_signal": true
+      },
+      "default_factory": "ContinueGateControlConfig",
+      "required": false
+    },
+    "core_debt": {
+      "annotation": "<class 'mathproofmesh.config.CoreDebtControlConfig'>",
+      "default": {
+        "auxiliary_weight": 0.35,
+        "common_mode_weight": 1.5,
+        "core_bridge_weight": 2.5,
+        "core_stagnation_rounds": 2,
+        "enabled": true,
+        "main_goal_weight": 4.0,
+        "necessary_only_weight": 0.15,
+        "unresolved_scope_risk_weight": 1.5
+      },
+      "default_factory": "CoreDebtControlConfig",
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "failure": {
+      "annotation": "<class 'mathproofmesh.config.FailureControlConfig'>",
+      "default": {
+        "ambiguous_model_review": true,
+        "bridge_failure_prefers_bridge_action": true,
+        "enabled": true,
+        "framing_failure_forces_reanchor": true,
+        "max_blueprint_rewrites_per_route": 1,
+        "min_classification_confidence": 0.7,
+        "plan_failure_blocks_local_deepen": true
+      },
+      "default_factory": "FailureControlConfig",
+      "required": false
+    },
+    "falsification_fast_lane": {
+      "annotation": "<class 'mathproofmesh.config.FalsificationFastLaneControlConfig'>",
+      "default": {
+        "allow_sandboxed_python": false,
+        "allowed_purposes": [
+          "falsify_claim",
+          "test_boundary_cases"
+        ],
+        "auto_fact_promotion": false,
+        "enabled": true,
+        "exact_arithmetic_only": true,
+        "max_cases": 100000,
+        "max_memory_mb": 256,
+        "max_runtime_seconds": 10.0,
+        "max_tasks_per_round": 2
+      },
+      "default_factory": "FalsificationFastLaneControlConfig",
+      "required": false
+    },
+    "goal_alignment": {
+      "annotation": "<class 'mathproofmesh.config.GoalAlignmentControlConfig'>",
+      "default": {
+        "enabled": true,
+        "max_strategy_rewrite_attempts": 1,
+        "min_alignment_confidence": 0.72,
+        "overstrength_penalty": 0.25,
+        "require_implication_outline": true,
+        "require_target_obligation": true,
+        "run_countermodel_on_unknown_relation": true
+      },
+      "default_factory": "GoalAlignmentControlConfig",
+      "required": false
+    },
+    "induction": {
+      "annotation": "<class 'mathproofmesh.config.InductionControlConfig'>",
+      "default": {
+        "enabled": true,
+        "max_candidates_per_trigger": 3,
+        "require_well_foundedness_statement": true,
+        "trigger_on_first_occurrence_barrier": true,
+        "trigger_on_recursive_same_type_dependency": true,
+        "trigger_on_repeated_feature": true
+      },
+      "default_factory": "InductionControlConfig",
+      "required": false
+    },
+    "message_utility": {
+      "annotation": "<class 'mathproofmesh.config.MessageUtilityControlConfig'>",
+      "default": {
+        "blueprint_rewrite_credit": 0.4,
+        "broadcast_min_expected_core_debt_reduction": 0.0,
+        "enabled": true,
+        "final_citation_credit": 1.0,
+        "max_target_obligations": 8,
+        "no_use_cooldown_threshold": 3,
+        "obligation_close_credit": 0.8,
+        "refutation_credit": 0.8,
+        "require_utility_contract_for_cross_route": true,
+        "utility_credit_horizon_rounds": 3,
+        "verified_step_credit": 0.5
+      },
+      "default_factory": "MessageUtilityControlConfig",
+      "required": false
+    },
+    "mode": {
+      "annotation": "typing.Literal['off', 'shadow', 'active']",
+      "default": "off",
+      "default_factory": null,
+      "required": false
+    },
+    "near_miss": {
+      "annotation": "<class 'mathproofmesh.config.NearMissControlConfig'>",
+      "default": {
+        "allow_model_extraction_on_ambiguous": true,
+        "enabled": true,
+        "extraction_requires_salvageable_component": true,
+        "max_records": 512,
+        "max_route_context_items": 6,
+        "min_verifier_confidence": 0.65
+      },
+      "default_factory": "NearMissControlConfig",
+      "required": false
+    },
+    "realizer": {
+      "annotation": "<class 'mathproofmesh.config.RealizerControlConfig'>",
+      "default": {
+        "enabled": true,
+        "max_realizer_repairs_per_structure": 2,
+        "preserve_abstract_proposal_after_candidate_failure": true,
+        "require_explicit_admissibility": true,
+        "require_falsification_test": true,
+        "require_well_founded_descent": true
+      },
+      "default_factory": "RealizerControlConfig",
+      "required": false
+    },
+    "route_admission": {
+      "annotation": "<class 'mathproofmesh.config.RouteAdmissionControlConfig'>",
+      "default": {
+        "blueprint_review": {
+          "max_batch_repair_items": 12,
+          "max_nodes_per_batch": 12,
+          "max_repair_rounds": 2,
+          "max_review_calls_per_round": 2
+        },
+        "enabled": true,
+        "fail_closed_if_all_rejected": true,
+        "max_regeneration_attempts": 1,
+        "max_semantic_repair_calls": 2,
+        "min_goal_alignment": 0.65,
+        "mode": "shadow",
+        "reject_heuristic_only_as_main_route": true,
+        "reject_necessary_only_as_main_route": true,
+        "require_falsification_test": true,
+        "require_mechanism_novelty": true,
+        "semantic_repair_budget_fraction": 0.1,
+        "semantic_repair_enabled": true
+      },
+      "default_factory": "RouteAdmissionControlConfig",
+      "required": false
+    },
+    "scope_guard": {
+      "annotation": "<class 'mathproofmesh.config.ScopeGuardControlConfig'>",
+      "default": {
+        "ambiguous_model_review": true,
+        "block_fact_promotion_on_open_scope_risk": true,
+        "block_obligation_close_on_scope_mismatch": true,
+        "deterministic_first": true,
+        "enabled": true,
+        "max_countermodel_tasks_per_round": 2,
+        "risk_confidence_threshold": 0.7
+      },
+      "default_factory": "ScopeGuardControlConfig",
+      "required": false
+    },
+    "strict_fail_closed": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "synthesis_readiness": {
+      "annotation": "<class 'mathproofmesh.config.SynthesisReadinessControlConfig'>",
+      "default": {
+        "enabled": true,
+        "high_centrality_threshold": 0.7,
+        "max_open_auxiliary_obligations": 16,
+        "mode": "shadow",
+        "produce_progress_report_when_blocked": true,
+        "require_core_dependency_closure": true,
+        "require_no_necessary_only_bridge_as_sufficient": true,
+        "require_no_open_scope_risks": true,
+        "require_no_unresolved_high_centrality_conflicts": true
+      },
+      "default_factory": "SynthesisReadinessControlConfig",
+      "required": false
+    }
+  },
+  "mathproofmesh.config.ProofGraphConfig": {
+    "allow_cycles": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "close_obligation_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.8,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "freeze_before_synthesis": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "max_edges": {
+      "annotation": "<class 'int'>",
+      "default": 20000,
+      "default_factory": null,
+      "required": false
+    },
+    "max_nodes": {
+      "annotation": "<class 'int'>",
+      "default": 5000,
+      "default_factory": null,
+      "required": false
+    },
+    "mode": {
+      "annotation": "typing.Literal['off', 'shadow', 'active']",
+      "default": "shadow",
+      "default_factory": null,
+      "required": false
+    },
+    "shared_bottleneck_min_routes": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.RealizerControlConfig": {
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "max_realizer_repairs_per_structure": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "preserve_abstract_proposal_after_candidate_failure": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_explicit_admissibility": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_falsification_test": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_well_founded_descent": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.RouteAdmissionControlConfig": {
+    "blueprint_review": {
+      "annotation": "<class 'mathproofmesh.config.BlueprintReviewControlConfig'>",
+      "default": {
+        "max_batch_repair_items": 12,
+        "max_nodes_per_batch": 12,
+        "max_repair_rounds": 2,
+        "max_review_calls_per_round": 2
+      },
+      "default_factory": "BlueprintReviewControlConfig",
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "fail_closed_if_all_rejected": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "max_regeneration_attempts": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "max_semantic_repair_calls": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "min_goal_alignment": {
+      "annotation": "<class 'float'>",
+      "default": 0.65,
+      "default_factory": null,
+      "required": false
+    },
+    "mode": {
+      "annotation": "typing.Literal['off', 'shadow', 'active']",
+      "default": "shadow",
+      "default_factory": null,
+      "required": false
+    },
+    "reject_heuristic_only_as_main_route": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "reject_necessary_only_as_main_route": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_falsification_test": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_mechanism_novelty": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "semantic_repair_budget_fraction": {
+      "annotation": "<class 'float'>",
+      "default": 0.1,
+      "default_factory": null,
+      "required": false
+    },
+    "semantic_repair_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.RouteTeamConfig": {
+    "allow_role_reuse_after_stage": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "local_review_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "max_members_per_route": {
+      "annotation": "<class 'int'>",
+      "default": 3,
+      "default_factory": null,
+      "required": false
+    },
+    "referee_must_differ_from_author": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "referee_required_before_global_share": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "skeptic_on_high_risk_only": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "skeptic_risk_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.55,
+      "default_factory": null,
+      "required": false
+    },
+    "tool_agent_on_demand": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.RuntimeConfig": {
+    "activity_heartbeat_seconds": {
+      "annotation": "<class 'float'>",
+      "default": 20.0,
+      "default_factory": null,
+      "required": false
+    },
+    "activity_include_agent_calls": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "activity_max_visible": {
+      "annotation": "<class 'int'>",
+      "default": 18,
+      "default_factory": null,
+      "required": false
+    },
+    "activity_mode": {
+      "annotation": "typing.Literal['off', 'compact', 'detailed']",
+      "default": "compact",
+      "default_factory": null,
+      "required": false
+    },
+    "activity_persist": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "agent_call_wall_timeout_seconds": {
+      "annotation": "<class 'float'>",
+      "default": 7200.0,
+      "default_factory": null,
+      "required": false
+    },
+    "checkpoint_every_stage": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "exploration_output_token_tiers": {
+      "annotation": "list[int]",
+      "default": [
+        64000,
+        96000,
+        128000
+      ],
+      "default_factory": "RuntimeConfig.<lambda>",
+      "required": false
+    },
+    "json_repair_max_output_tokens": {
+      "annotation": "<class 'int'>",
+      "default": 8192,
+      "default_factory": null,
+      "required": false
+    },
+    "log_level": {
+      "annotation": "typing.Literal['DEBUG', 'INFO', 'WARNING', 'ERROR']",
+      "default": "INFO",
+      "default_factory": null,
+      "required": false
+    },
+    "max_parallel_calls": {
+      "annotation": "<class 'int'>",
+      "default": 8,
+      "default_factory": null,
+      "required": false
+    },
+    "output_language": {
+      "annotation": "<class 'str'>",
+      "default": "zh-CN",
+      "default_factory": null,
+      "required": false
+    },
+    "parse_retries": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "project_root": {
+      "annotation": "<class 'str'>",
+      "default": ".",
+      "default_factory": null,
+      "required": false
+    },
+    "provider_circuit_breaker_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "provider_circuit_cooldown_seconds": {
+      "annotation": "<class 'float'>",
+      "default": 300.0,
+      "default_factory": null,
+      "required": false
+    },
+    "provider_circuit_failure_threshold": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "provider_circuit_window_seconds": {
+      "annotation": "<class 'float'>",
+      "default": 90.0,
+      "default_factory": null,
+      "required": false
+    },
+    "provider_shared_auth_http_statuses": {
+      "annotation": "list[int]",
+      "default": [
+        401,
+        403
+      ],
+      "default_factory": "RuntimeConfig.<lambda>",
+      "required": false
+    },
+    "provider_terminal_http_statuses": {
+      "annotation": "list[int]",
+      "default": [
+        402
+      ],
+      "default_factory": "RuntimeConfig.<lambda>",
+      "required": false
+    },
+    "random_seed": {
+      "annotation": "<class 'int'>",
+      "default": 20260719,
+      "default_factory": null,
+      "required": false
+    },
+    "redact_prompts_in_console": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "request_retries": {
+      "annotation": "<class 'int'>",
+      "default": 3,
+      "default_factory": null,
+      "required": false
+    },
+    "run_root": {
+      "annotation": "<class 'str'>",
+      "default": "runs",
+      "default_factory": null,
+      "required": false
+    },
+    "save_raw_provider_responses": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "stage_output_token_limits": {
+      "annotation": "dict[str, int]",
+      "default": {
+        "blind_detailed_verification": 32000,
+        "blind_structural_verification": 16000,
+        "checkpoint_verification": 24000,
+        "claim_extraction": 12000,
+        "computation_contract_repair": 8192,
+        "detailed_verification": 32000,
+        "experiment_codegen": 12000,
+        "final_revision": 64000,
+        "final_verification": 32000,
+        "goal_normalization": 4096,
+        "hypothesize_invariant": 24000,
+        "inspiration_referee": 16000,
+        "invent_auxiliary_construction": 24000,
+        "meta_review": 16000,
+        "pattern_conjecture_completion": 4096,
+        "persistent_meta_strategy": 24000,
+        "post_failure_bottleneck": 16000,
+        "representation_switchboard": 24000,
+        "reverse_goal_analysis": 24000,
+        "route_referee": 16000,
+        "route_skeptic": 24000,
+        "route_tool_audit": 16000,
+        "strategy_generation": 24000,
+        "structural_analogy_search": 24000,
+        "structural_verification": 16000,
+        "surprise_exploration": 24000,
+        "synthesis": 64000,
+        "triage": 12000
+      },
+      "default_factory": "RuntimeConfig.<lambda>",
+      "required": false
+    },
+    "stage_thinking_modes": {
+      "annotation": "dict[str, typing.Literal['agent_default', 'disabled', 'high', 'max', 'tiered']]",
+      "default": {
+        "blind_detailed_verification": "high",
+        "blind_structural_verification": "high",
+        "checkpoint_verification": "high",
+        "claim_extraction": "disabled",
+        "computation_contract_repair": "disabled",
+        "detailed_verification": "high",
+        "final_revision": "high",
+        "final_verification": "high",
+        "goal_normalization": "disabled",
+        "independent_exploration": "tiered",
+        "meta_review": "high",
+        "pattern_conjecture_completion": "disabled",
+        "post_failure_bottleneck": "disabled",
+        "proof_continuation": "tiered",
+        "route_prove": "tiered",
+        "route_referee": "high",
+        "route_skeptic": "high",
+        "route_tool_audit": "high",
+        "strategy_generation": "high",
+        "structural_verification": "high",
+        "synthesis": "high",
+        "triage": "disabled"
+      },
+      "default_factory": "RuntimeConfig.<lambda>",
+      "required": false
+    },
+    "stream_first_chunk_timeout_seconds": {
+      "annotation": "<class 'float'>",
+      "default": 90.0,
+      "default_factory": null,
+      "required": false
+    },
+    "stream_idle_timeout_seconds": {
+      "annotation": "<class 'float'>",
+      "default": 300.0,
+      "default_factory": null,
+      "required": false
+    },
+    "two_phase_output": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "two_phase_stages": {
+      "annotation": "list[str]",
+      "default": [
+        "independent_exploration",
+        "proof_continuation"
+      ],
+      "default_factory": "RuntimeConfig.<lambda>",
+      "required": false
+    }
+  },
+  "mathproofmesh.config.SchedulerConfig": {
+    "allow_strategy_failure_repair": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "analogy_relevance_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.12,
+      "default_factory": null,
+      "required": false
+    },
+    "auxiliary_fact_gain_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.08,
+      "default_factory": null,
+      "required": false
+    },
+    "bridge_priority_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.28,
+      "default_factory": null,
+      "required": false
+    },
+    "common_mode_risk_penalty": {
+      "annotation": "<class 'float'>",
+      "default": 0.3,
+      "default_factory": null,
+      "required": false
+    },
+    "construction_relevance_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.14,
+      "default_factory": null,
+      "required": false
+    },
+    "contradiction_priority_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.36,
+      "default_factory": null,
+      "required": false
+    },
+    "core_proof_debt_reduction_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.32,
+      "default_factory": null,
+      "required": false
+    },
+    "core_verified_bridge_gain_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.25,
+      "default_factory": null,
+      "required": false
+    },
+    "counterexample_priority_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.42,
+      "default_factory": null,
+      "required": false
+    },
+    "diagnostic_candidate_limit": {
+      "annotation": "<class 'int'>",
+      "default": 12,
+      "default_factory": null,
+      "required": false
+    },
+    "diagnostics_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "execution_failure_penalty": {
+      "annotation": "<class 'float'>",
+      "default": 0.12,
+      "default_factory": null,
+      "required": false
+    },
+    "execution_failure_progress_cap": {
+      "annotation": "<class 'float'>",
+      "default": 0.45,
+      "default_factory": null,
+      "required": false
+    },
+    "failed_path_cooldown_rounds": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "failed_progress_discount": {
+      "annotation": "<class 'float'>",
+      "default": 0.1,
+      "default_factory": null,
+      "required": false
+    },
+    "finish_transition_buffer_calls": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "force_widen_when_all_failed": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "global_no_progress_rounds_before_meta_pivot": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "global_no_progress_rounds_before_stop": {
+      "annotation": "<class 'int'>",
+      "default": 3,
+      "default_factory": null,
+      "required": false
+    },
+    "goal_alignment_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.18,
+      "default_factory": null,
+      "required": false
+    },
+    "hard_stagnation_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "include_meta_review_in_cost": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "include_post_action_verification_in_cost": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "inspiration_novelty_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.2,
+      "default_factory": null,
+      "required": false
+    },
+    "max_actions_per_round": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "max_execution_repairs_per_path": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "max_normal_attempts_per_signature": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "max_plan_repairs_per_path": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "max_repair_attempts_per_signature": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "max_unknown_failure_repairs_per_path": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "meaningful_progress_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.04,
+      "default_factory": null,
+      "required": false
+    },
+    "message_utility_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.1,
+      "default_factory": null,
+      "required": false
+    },
+    "meta_replan_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.15,
+      "default_factory": null,
+      "required": false
+    },
+    "obligation_base_weight": {
+      "annotation": "<class 'float'>",
+      "default": 1.0,
+      "default_factory": null,
+      "required": false
+    },
+    "obligation_centrality_weight": {
+      "annotation": "<class 'float'>",
+      "default": 1.0,
+      "default_factory": null,
+      "required": false
+    },
+    "obligation_conflict_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.75,
+      "default_factory": null,
+      "required": false
+    },
+    "obligation_dependency_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.25,
+      "default_factory": null,
+      "required": false
+    },
+    "obligation_failure_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.3,
+      "default_factory": null,
+      "required": false
+    },
+    "obligation_main_goal_weight": {
+      "annotation": "<class 'float'>",
+      "default": 2.0,
+      "default_factory": null,
+      "required": false
+    },
+    "obligation_shared_route_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.4,
+      "default_factory": null,
+      "required": false
+    },
+    "plan_failure_penalty": {
+      "annotation": "<class 'float'>",
+      "default": 0.3,
+      "default_factory": null,
+      "required": false
+    },
+    "plan_failure_progress_cap": {
+      "annotation": "<class 'float'>",
+      "default": 0.18,
+      "default_factory": null,
+      "required": false
+    },
+    "proof_debt_reduction_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.22,
+      "default_factory": null,
+      "required": false
+    },
+    "repeated_failure_penalty": {
+      "annotation": "<class 'float'>",
+      "default": 0.15,
+      "default_factory": null,
+      "required": false
+    },
+    "representation_switch_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.16,
+      "default_factory": null,
+      "required": false
+    },
+    "reserve_revision_cycles": {
+      "annotation": "<class 'int'>",
+      "default": 1,
+      "default_factory": null,
+      "required": false
+    },
+    "route_redundancy_penalty": {
+      "annotation": "<class 'float'>",
+      "default": 0.24,
+      "default_factory": null,
+      "required": false
+    },
+    "shared_bottleneck_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.18,
+      "default_factory": null,
+      "required": false
+    },
+    "strategy_failure_penalty": {
+      "annotation": "<class 'float'>",
+      "default": 0.5,
+      "default_factory": null,
+      "required": false
+    },
+    "strategy_failure_progress_cap": {
+      "annotation": "<class 'float'>",
+      "default": 0.05,
+      "default_factory": null,
+      "required": false
+    },
+    "structural_failure_penalty": {
+      "annotation": "<class 'float'>",
+      "default": 0.3,
+      "default_factory": null,
+      "required": false
+    },
+    "structural_failure_progress_cap": {
+      "annotation": "<class 'float'>",
+      "default": 0.1,
+      "default_factory": null,
+      "required": false
+    },
+    "surprise_exploration_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.1,
+      "default_factory": null,
+      "required": false
+    },
+    "uncertain_progress_discount": {
+      "annotation": "<class 'float'>",
+      "default": 0.4,
+      "default_factory": null,
+      "required": false
+    },
+    "unverified_progress_discount": {
+      "annotation": "<class 'float'>",
+      "default": 0.55,
+      "default_factory": null,
+      "required": false
+    },
+    "verification_call_safety_margin": {
+      "annotation": "<class 'int'>",
+      "default": 0,
+      "default_factory": null,
+      "required": false
+    },
+    "verified_fact_gain_weight": {
+      "annotation": "<class 'float'>",
+      "default": 0.24,
+      "default_factory": null,
+      "required": false
+    },
+    "widen_paths_per_action": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.ScopeGuardControlConfig": {
+    "ambiguous_model_review": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "block_fact_promotion_on_open_scope_risk": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "block_obligation_close_on_scope_mismatch": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "deterministic_first": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "max_countermodel_tasks_per_round": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "risk_confidence_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.7,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.SynthesisReadinessControlConfig": {
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "high_centrality_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.7,
+      "default_factory": null,
+      "required": false
+    },
+    "max_open_auxiliary_obligations": {
+      "annotation": "<class 'int'>",
+      "default": 16,
+      "default_factory": null,
+      "required": false
+    },
+    "mode": {
+      "annotation": "typing.Literal['off', 'shadow', 'active']",
+      "default": "shadow",
+      "default_factory": null,
+      "required": false
+    },
+    "produce_progress_report_when_blocked": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_core_dependency_closure": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_no_necessary_only_bridge_as_sufficient": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_no_open_scope_risks": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_no_unresolved_high_centrality_conflicts": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.SystemConfig": {
+    "agents": {
+      "annotation": "list[mathproofmesh.config.AgentConfig]",
+      "default": null,
+      "default_factory": null,
+      "required": true
+    },
+    "budget": {
+      "annotation": "<class 'mathproofmesh.config.BudgetConfig'>",
+      "default": {
+        "base_verifier_replicas": 1,
+        "breadth_share": 0.3,
+        "candidates_to_verify": 3,
+        "depth_share": 0.35,
+        "hard_problem_call_multiplier": 2.0,
+        "hard_problem_extra_rounds": 2,
+        "high_risk_threshold": 0.45,
+        "high_risk_verifier_replicas": 2,
+        "initial_paths": 4,
+        "max_cost_usd": null,
+        "max_paths": 8,
+        "max_revisions": 3,
+        "max_rounds": 4,
+        "max_total_calls": 48,
+        "max_total_tokens": null,
+        "scale_budget_with_difficulty": false,
+        "strategies_to_generate": 7,
+        "synthesis_share": 0.1,
+        "synthesis_threshold": 0.72,
+        "verification_pass_threshold": 0.78,
+        "verification_share": 0.25
+      },
+      "default_factory": "BudgetConfig",
+      "required": false
+    },
+    "computation": {
+      "annotation": "<class 'mathproofmesh.config.ComputationConfig'>",
+      "default": {
+        "bounded_typed_probe_fast_path": true,
+        "bounded_typed_probe_max_cases": 25000,
+        "broad_search_after_stalled_rounds": 1,
+        "broad_search_requires_meta_review": true,
+        "cache_results": true,
+        "contract_repair_max_output_tokens": 8192,
+        "critical_calculation_gate_enabled": true,
+        "critical_calculation_max_checks_per_artifact": 8,
+        "critical_calculation_require_declarations": true,
+        "enabled": false,
+        "execute_planner_hints_immediately": false,
+        "hard_experiments_per_path": 6,
+        "max_cases_per_experiment": 1000000,
+        "max_compute_cycles_per_segment": 1,
+        "max_contract_repairs_per_segment": 1,
+        "max_output_chars": 20000,
+        "max_total_cpu_seconds": 120.0,
+        "policy": "reasoning_first",
+        "sandbox_cpus": 1.0,
+        "sandbox_image": null,
+        "sandbox_memory_mb": 256,
+        "sandbox_pids_limit": 32,
+        "sandbox_timeout_seconds": 20.0,
+        "sandboxed_python_enabled": false,
+        "soft_experiments_per_path": 2,
+        "targeted_falsification_fast_path": true,
+        "typed_tools_enabled": true
+      },
+      "default_factory": "ComputationConfig",
+      "required": false
+    },
+    "continuation": {
+      "annotation": "<class 'mathproofmesh.config.ContinuationConfig'>",
+      "default": {
+        "allow_checkpoint_rollback": true,
+        "allow_cross_agent_failover": true,
+        "checkpoint_pass_threshold": 0.78,
+        "checkpoint_policy": "verified_subgoal",
+        "delta_verifier_replicas": 1,
+        "enabled": false,
+        "max_failover_agents": 2,
+        "max_new_claims_per_call": 3,
+        "max_new_steps_per_call": 3,
+        "max_output_tokens_per_segment": 12000,
+        "max_segments_per_path": 12,
+        "post_failure_bottleneck_enabled": true,
+        "post_failure_bottleneck_max_output_tokens": 16000,
+        "post_failure_bottleneck_once_per_checkpoint": true,
+        "post_failure_trigger_inspiration": true,
+        "process_resume_enabled": true,
+        "resume_on_disconnect": true,
+        "retain_rejected_deltas": true,
+        "segments_per_explore_call": 1,
+        "verify_each_delta": true
+      },
+      "default_factory": "ContinuationConfig",
+      "required": false
+    },
+    "deep_exploration_policy": {
+      "annotation": "<class 'mathproofmesh.config.DeepExplorationPolicyConfig'>",
+      "default": {
+        "allow_local_bottleneck_pivot": true,
+        "allow_parallel_distinct_signatures": true,
+        "enabled": true,
+        "high_tier_threshold_tokens": 96000,
+        "max_partial_repairs_per_signature": 1,
+        "max_running_per_signature": 1,
+        "min_remaining_calls_for_128k": 8,
+        "min_remaining_tokens_for_128k": 256000,
+        "no_progress_high_tier_limit_per_signature": 1,
+        "partial_repair_max_output_tokens": 64000,
+        "persist_across_resume": true,
+        "preserve_parent_verified_checkpoint": true,
+        "require_meta_approval_for_128k": true,
+        "require_novelty_review_for_pivot": true,
+        "reset_on_referee_confirmed_mechanism_change": true,
+        "reset_on_verified_checkpoint": true,
+        "semantic_duplicate_threshold": 0.86,
+        "tiers": [
+          {
+            "artifact_recovery_tokens": 8000,
+            "output_tokens": 64000
+          },
+          {
+            "artifact_recovery_tokens": 12000,
+            "output_tokens": 96000
+          },
+          {
+            "artifact_recovery_tokens": 16000,
+            "output_tokens": 128000
+          }
+        ]
+      },
+      "default_factory": "DeepExplorationPolicyConfig",
+      "required": false
+    },
+    "runtime": {
+      "annotation": "<class 'mathproofmesh.config.RuntimeConfig'>",
+      "default": {
+        "activity_heartbeat_seconds": 20.0,
+        "activity_include_agent_calls": true,
+        "activity_max_visible": 18,
+        "activity_mode": "compact",
+        "activity_persist": true,
+        "agent_call_wall_timeout_seconds": 7200.0,
+        "checkpoint_every_stage": true,
+        "exploration_output_token_tiers": [
+          64000,
+          96000,
+          128000
+        ],
+        "json_repair_max_output_tokens": 8192,
+        "log_level": "INFO",
+        "max_parallel_calls": 8,
+        "output_language": "zh-CN",
+        "parse_retries": 1,
+        "project_root": ".",
+        "provider_circuit_breaker_enabled": true,
+        "provider_circuit_cooldown_seconds": 300.0,
+        "provider_circuit_failure_threshold": 2,
+        "provider_circuit_window_seconds": 90.0,
+        "provider_shared_auth_http_statuses": [
+          401,
+          403
+        ],
+        "provider_terminal_http_statuses": [
+          402
+        ],
+        "random_seed": 20260719,
+        "redact_prompts_in_console": true,
+        "request_retries": 3,
+        "run_root": "runs",
+        "save_raw_provider_responses": true,
+        "stage_output_token_limits": {
+          "blind_detailed_verification": 32000,
+          "blind_structural_verification": 16000,
+          "checkpoint_verification": 24000,
+          "claim_extraction": 12000,
+          "computation_contract_repair": 8192,
+          "detailed_verification": 32000,
+          "experiment_codegen": 12000,
+          "final_revision": 64000,
+          "final_verification": 32000,
+          "goal_normalization": 4096,
+          "hypothesize_invariant": 24000,
+          "inspiration_referee": 16000,
+          "invent_auxiliary_construction": 24000,
+          "meta_review": 16000,
+          "pattern_conjecture_completion": 4096,
+          "persistent_meta_strategy": 24000,
+          "post_failure_bottleneck": 16000,
+          "representation_switchboard": 24000,
+          "reverse_goal_analysis": 24000,
+          "route_referee": 16000,
+          "route_skeptic": 24000,
+          "route_tool_audit": 16000,
+          "strategy_generation": 24000,
+          "structural_analogy_search": 24000,
+          "structural_verification": 16000,
+          "surprise_exploration": 24000,
+          "synthesis": 64000,
+          "triage": 12000
+        },
+        "stage_thinking_modes": {
+          "blind_detailed_verification": "high",
+          "blind_structural_verification": "high",
+          "checkpoint_verification": "high",
+          "claim_extraction": "disabled",
+          "computation_contract_repair": "disabled",
+          "detailed_verification": "high",
+          "final_revision": "high",
+          "final_verification": "high",
+          "goal_normalization": "disabled",
+          "independent_exploration": "tiered",
+          "meta_review": "high",
+          "pattern_conjecture_completion": "disabled",
+          "post_failure_bottleneck": "disabled",
+          "proof_continuation": "tiered",
+          "route_prove": "tiered",
+          "route_referee": "high",
+          "route_skeptic": "high",
+          "route_tool_audit": "high",
+          "strategy_generation": "high",
+          "structural_verification": "high",
+          "synthesis": "high",
+          "triage": "disabled"
+        },
+        "stream_first_chunk_timeout_seconds": 90.0,
+        "stream_idle_timeout_seconds": 300.0,
+        "two_phase_output": false,
+        "two_phase_stages": [
+          "independent_exploration",
+          "proof_continuation"
+        ]
+      },
+      "default_factory": "RuntimeConfig",
+      "required": false
+    },
+    "scheduler": {
+      "annotation": "<class 'mathproofmesh.config.SchedulerConfig'>",
+      "default": {
+        "allow_strategy_failure_repair": false,
+        "analogy_relevance_weight": 0.12,
+        "auxiliary_fact_gain_weight": 0.08,
+        "bridge_priority_weight": 0.28,
+        "common_mode_risk_penalty": 0.3,
+        "construction_relevance_weight": 0.14,
+        "contradiction_priority_weight": 0.36,
+        "core_proof_debt_reduction_weight": 0.32,
+        "core_verified_bridge_gain_weight": 0.25,
+        "counterexample_priority_weight": 0.42,
+        "diagnostic_candidate_limit": 12,
+        "diagnostics_enabled": true,
+        "execution_failure_penalty": 0.12,
+        "execution_failure_progress_cap": 0.45,
+        "failed_path_cooldown_rounds": 1,
+        "failed_progress_discount": 0.1,
+        "finish_transition_buffer_calls": 1,
+        "force_widen_when_all_failed": true,
+        "global_no_progress_rounds_before_meta_pivot": 2,
+        "global_no_progress_rounds_before_stop": 3,
+        "goal_alignment_weight": 0.18,
+        "hard_stagnation_enabled": true,
+        "include_meta_review_in_cost": true,
+        "include_post_action_verification_in_cost": true,
+        "inspiration_novelty_weight": 0.2,
+        "max_actions_per_round": 2,
+        "max_execution_repairs_per_path": 1,
+        "max_normal_attempts_per_signature": 1,
+        "max_plan_repairs_per_path": 1,
+        "max_repair_attempts_per_signature": 1,
+        "max_unknown_failure_repairs_per_path": 1,
+        "meaningful_progress_threshold": 0.04,
+        "message_utility_weight": 0.1,
+        "meta_replan_weight": 0.15,
+        "obligation_base_weight": 1.0,
+        "obligation_centrality_weight": 1.0,
+        "obligation_conflict_weight": 0.75,
+        "obligation_dependency_weight": 0.25,
+        "obligation_failure_weight": 0.3,
+        "obligation_main_goal_weight": 2.0,
+        "obligation_shared_route_weight": 0.4,
+        "plan_failure_penalty": 0.3,
+        "plan_failure_progress_cap": 0.18,
+        "proof_debt_reduction_weight": 0.22,
+        "repeated_failure_penalty": 0.15,
+        "representation_switch_weight": 0.16,
+        "reserve_revision_cycles": 1,
+        "route_redundancy_penalty": 0.24,
+        "shared_bottleneck_weight": 0.18,
+        "strategy_failure_penalty": 0.5,
+        "strategy_failure_progress_cap": 0.05,
+        "structural_failure_penalty": 0.3,
+        "structural_failure_progress_cap": 0.1,
+        "surprise_exploration_weight": 0.1,
+        "uncertain_progress_discount": 0.4,
+        "unverified_progress_discount": 0.55,
+        "verification_call_safety_margin": 0,
+        "verified_fact_gain_weight": 0.24,
+        "widen_paths_per_action": 2
+      },
+      "default_factory": "SchedulerConfig",
+      "required": false
+    },
+    "system_name": {
+      "annotation": "<class 'str'>",
+      "default": "MathProofMesh",
+      "default_factory": null,
+      "required": false
+    },
+    "topology": {
+      "annotation": "<class 'mathproofmesh.config.TopologyConfig'>",
+      "default": {
+        "agent_capability": {
+          "enabled": true,
+          "first_error_accuracy_weight": 0.25,
+          "min_observations_before_trust_update": 5,
+          "mutation_benchmark_weight": 0.3,
+          "overturn_rate_penalty": 0.2,
+          "recency_decay": 0.98,
+          "tool_agreement_weight": 0.25,
+          "use_self_reported_confidence": false
+        },
+        "broker": {
+          "ambiguous_match_high": 0.82,
+          "ambiguous_match_low": 0.55,
+          "bridge_detection": true,
+          "bridge_similarity_threshold": 0.78,
+          "contradiction_detection": true,
+          "contradiction_similarity_threshold": 0.82,
+          "deterministic_matching_first": true,
+          "duplicate_route_detection": true,
+          "duplicate_strategy_threshold": 0.84,
+          "max_bridge_tasks_per_round": 2,
+          "max_conflict_tasks_per_round": 2,
+          "min_routes_for_bridge": 2,
+          "use_llm_matching_on_ambiguous": true
+        },
+        "conditional_cross_review": true,
+        "cross_route": {
+          "enabled": false,
+          "initial_isolation_rounds": 1,
+          "max_global_messages_per_round": 24,
+          "max_messages_per_route_per_round": 6,
+          "max_neighbors_per_route": 2,
+          "message_ttl_rounds": 2,
+          "share_counterexamples": true,
+          "share_failure_records": true,
+          "share_open_obligations": true,
+          "share_unverified_insights": false,
+          "share_verified_facts": true
+        },
+        "disagreement_threshold": 0.35,
+        "final_stage": {
+          "blind_detailed_review": true,
+          "blind_structural_review": true,
+          "freeze_graph_before_synthesis": true,
+          "remove_agent_identity": true,
+          "remove_route_ranking": true,
+          "remove_self_confidence": true
+        },
+        "inspiration": {
+          "active_proposals_per_task": 3,
+          "adaptive_mechanism_selection": true,
+          "adaptive_min_exploration_rate": 0.15,
+          "adaptive_min_observations": 1,
+          "adaptive_reward_call_cost": 0.1,
+          "adaptive_reward_debt_weight": 1.0,
+          "adaptive_reward_fact_weight": 4.0,
+          "adaptive_reward_final_citation_weight": 3.0,
+          "adaptive_reward_obligation_weight": 1.0,
+          "adaptive_reward_refutation_cost": 1.0,
+          "adaptive_reward_token_cost_per_100k": 0.1,
+          "adaptive_ucb_weight": 0.75,
+          "all_routes_failed_trigger": true,
+          "allow_external_retrieval": false,
+          "analogy_agent": true,
+          "analogy_library_enabled": true,
+          "analogy_library_path": "benchmarks/analogy_library.jsonl",
+          "analogy_top_k": 6,
+          "auxiliary_construction_inventor": true,
+          "bidirectional_frontier_enabled": true,
+          "bridge_lemma_generator": true,
+          "cold_context_proposals_per_task": 1,
+          "composer_max_candidates_per_round": 2,
+          "composer_max_combined_cost": 4,
+          "composer_max_sources": 2,
+          "composer_require_quick_falsification": true,
+          "controlled_surprise_mutation_enabled": true,
+          "cross_run_learning_enabled": false,
+          "cross_run_learning_path": ".mathproofmesh/learning",
+          "cross_run_max_experiences": 2000,
+          "cross_run_max_negative_analogies": 2000,
+          "cross_run_max_outcomes": 10000,
+          "cross_run_require_final_citation": true,
+          "domain_operator_max_prompt_items": 8,
+          "domain_operator_plugins_enabled": true,
+          "enabled": false,
+          "experience_distillation_enabled": true,
+          "final_repair_failure_trigger": true,
+          "frontier_max_backward_claims": 8,
+          "frontier_max_bridge_candidates": 3,
+          "frontier_max_forward_claims": 8,
+          "frontier_min_candidate_overlap": 0.35,
+          "inspiration_composer_enabled": true,
+          "inspiration_context_max_chars": 24000,
+          "invariant_hypothesis_agent": true,
+          "max_consecutive_surprise_rejections": 2,
+          "max_distilled_experiences": 256,
+          "max_inspiration_tasks_per_round": 2,
+          "max_materialized_proposals_per_trigger": 1,
+          "max_negative_analogy_records": 256,
+          "max_new_routes_per_trigger": 2,
+          "max_proposals_per_task": 3,
+          "max_reviewed_proposals_per_task": 2,
+          "max_single_agent_proposals_per_task": 2,
+          "mechanism_duplicate_threshold": 0.86,
+          "meta_allow_route_abandon": true,
+          "meta_directive_cooldown_rounds": 2,
+          "meta_directive_expiry_rounds": 2,
+          "meta_directive_max_estimated_calls": 8,
+          "meta_directives_enabled": true,
+          "minimum_verified_gain": 1,
+          "mode": "shadow",
+          "negative_analogy_library_enabled": true,
+          "novelty_mechanism_weight": 0.24,
+          "novelty_object_weight": 0.16,
+          "novelty_obligation_weight": 0.1,
+          "novelty_principle_weight": 0.1,
+          "novelty_representation_weight": 0.24,
+          "novelty_threshold": 0.65,
+          "novelty_transformation_weight": 0.16,
+          "persistent_meta_strategist": true,
+          "proof_debt_min_reduction": 0.03,
+          "proposals_enter_fact_memory": false,
+          "proposer_generalist_roles": [
+            "explorer",
+            "route_prover"
+          ],
+          "protect_finalization_reserve": true,
+          "repeated_error_threshold": 2,
+          "representation_switchboard": true,
+          "require_inspiration_referee": true,
+          "reverse_goal_analysis": true,
+          "route_budget_share_trigger": 0.5,
+          "route_redundancy_trigger": 0.8,
+          "shared_bottleneck_trigger": true,
+          "stagnation_rounds": 2,
+          "surprise_budget_fraction": 0.08,
+          "surprise_budget_max_calls": 32,
+          "surprise_budget_min_calls": 10,
+          "surprise_cooldown_rounds": 2,
+          "surprise_exploration": true,
+          "warm_context_max_facts": 5,
+          "warm_context_max_negatives": 5
+        },
+        "isolate_initial_exploration": true,
+        "max_context_chars": 90000,
+        "max_verified_claims_per_context": 24,
+        "mode": "legacy_sparse",
+        "neighbor_k": 2,
+        "prefer_cross_provider_review": true,
+        "preserve_raw_evidence": true,
+        "proof_control": {
+          "bottleneck": {
+            "compression_interval_rounds": 1,
+            "dominance_threshold": 0.9,
+            "enabled": true,
+            "equivalence_threshold": 0.84,
+            "max_cluster_members": 64,
+            "min_open_growth_for_forced_compression": 8,
+            "mode": "shadow",
+            "preserve_original_nodes": true
+          },
+          "common_mode": {
+            "enabled": true,
+            "include_critical_claims": true,
+            "include_strategy_prerequisites": true,
+            "include_unverified_dependencies": true,
+            "max_challengers_per_round": 1,
+            "min_routes": 3,
+            "risk_threshold": 0.6
+          },
+          "continue_gate": {
+            "allow_on_core_debt_reduced": true,
+            "allow_on_core_obligation_closed": true,
+            "allow_on_first_error_changed": true,
+            "allow_on_verified_bridge_gain": true,
+            "enabled": true,
+            "force_blueprint_rewrite_after_block": true,
+            "mode": "shadow",
+            "no_core_progress_segments": 2,
+            "require_any_core_signal": true
+          },
+          "core_debt": {
+            "auxiliary_weight": 0.35,
+            "common_mode_weight": 1.5,
+            "core_bridge_weight": 2.5,
+            "core_stagnation_rounds": 2,
+            "enabled": true,
+            "main_goal_weight": 4.0,
+            "necessary_only_weight": 0.15,
+            "unresolved_scope_risk_weight": 1.5
+          },
+          "enabled": false,
+          "failure": {
+            "ambiguous_model_review": true,
+            "bridge_failure_prefers_bridge_action": true,
+            "enabled": true,
+            "framing_failure_forces_reanchor": true,
+            "max_blueprint_rewrites_per_route": 1,
+            "min_classification_confidence": 0.7,
+            "plan_failure_blocks_local_deepen": true
+          },
+          "falsification_fast_lane": {
+            "allow_sandboxed_python": false,
+            "allowed_purposes": [
+              "falsify_claim",
+              "test_boundary_cases"
+            ],
+            "auto_fact_promotion": false,
+            "enabled": true,
+            "exact_arithmetic_only": true,
+            "max_cases": 100000,
+            "max_memory_mb": 256,
+            "max_runtime_seconds": 10.0,
+            "max_tasks_per_round": 2
+          },
+          "goal_alignment": {
+            "enabled": true,
+            "max_strategy_rewrite_attempts": 1,
+            "min_alignment_confidence": 0.72,
+            "overstrength_penalty": 0.25,
+            "require_implication_outline": true,
+            "require_target_obligation": true,
+            "run_countermodel_on_unknown_relation": true
+          },
+          "induction": {
+            "enabled": true,
+            "max_candidates_per_trigger": 3,
+            "require_well_foundedness_statement": true,
+            "trigger_on_first_occurrence_barrier": true,
+            "trigger_on_recursive_same_type_dependency": true,
+            "trigger_on_repeated_feature": true
+          },
+          "message_utility": {
+            "blueprint_rewrite_credit": 0.4,
+            "broadcast_min_expected_core_debt_reduction": 0.0,
+            "enabled": true,
+            "final_citation_credit": 1.0,
+            "max_target_obligations": 8,
+            "no_use_cooldown_threshold": 3,
+            "obligation_close_credit": 0.8,
+            "refutation_credit": 0.8,
+            "require_utility_contract_for_cross_route": true,
+            "utility_credit_horizon_rounds": 3,
+            "verified_step_credit": 0.5
+          },
+          "mode": "off",
+          "near_miss": {
+            "allow_model_extraction_on_ambiguous": true,
+            "enabled": true,
+            "extraction_requires_salvageable_component": true,
+            "max_records": 512,
+            "max_route_context_items": 6,
+            "min_verifier_confidence": 0.65
+          },
+          "realizer": {
+            "enabled": true,
+            "max_realizer_repairs_per_structure": 2,
+            "preserve_abstract_proposal_after_candidate_failure": true,
+            "require_explicit_admissibility": true,
+            "require_falsification_test": true,
+            "require_well_founded_descent": true
+          },
+          "route_admission": {
+            "blueprint_review": {
+              "max_batch_repair_items": 12,
+              "max_nodes_per_batch": 12,
+              "max_repair_rounds": 2,
+              "max_review_calls_per_round": 2
+            },
+            "enabled": true,
+            "fail_closed_if_all_rejected": true,
+            "max_regeneration_attempts": 1,
+            "max_semantic_repair_calls": 2,
+            "min_goal_alignment": 0.65,
+            "mode": "shadow",
+            "reject_heuristic_only_as_main_route": true,
+            "reject_necessary_only_as_main_route": true,
+            "require_falsification_test": true,
+            "require_mechanism_novelty": true,
+            "semantic_repair_budget_fraction": 0.1,
+            "semantic_repair_enabled": true
+          },
+          "scope_guard": {
+            "ambiguous_model_review": true,
+            "block_fact_promotion_on_open_scope_risk": true,
+            "block_obligation_close_on_scope_mismatch": true,
+            "deterministic_first": true,
+            "enabled": true,
+            "max_countermodel_tasks_per_round": 2,
+            "risk_confidence_threshold": 0.7
+          },
+          "strict_fail_closed": true,
+          "synthesis_readiness": {
+            "enabled": true,
+            "high_centrality_threshold": 0.7,
+            "max_open_auxiliary_obligations": 16,
+            "mode": "shadow",
+            "produce_progress_report_when_blocked": true,
+            "require_core_dependency_closure": true,
+            "require_no_necessary_only_bridge_as_sufficient": true,
+            "require_no_open_scope_risks": true,
+            "require_no_unresolved_high_centrality_conflicts": true
+          }
+        },
+        "proof_graph": {
+          "allow_cycles": false,
+          "close_obligation_threshold": 0.8,
+          "enabled": false,
+          "freeze_before_synthesis": true,
+          "max_edges": 20000,
+          "max_nodes": 5000,
+          "mode": "shadow",
+          "shared_bottleneck_min_routes": 2
+        },
+        "route_teams": {
+          "allow_role_reuse_after_stage": true,
+          "enabled": false,
+          "local_review_rounds": 1,
+          "max_members_per_route": 3,
+          "referee_must_differ_from_author": true,
+          "referee_required_before_global_share": true,
+          "skeptic_on_high_risk_only": true,
+          "skeptic_risk_threshold": 0.55,
+          "tool_agent_on_demand": true
+        },
+        "strategy_similarity_threshold": 0.72,
+        "typed_communication": {
+          "enabled": false,
+          "exactly_once_delivery": true,
+          "max_assumptions": 24,
+          "max_dependencies": 64,
+          "max_message_chars": 24000,
+          "require_content_hash": true,
+          "require_problem_hash": true,
+          "require_receipt": true,
+          "schema_version": "1"
+        },
+        "typed_memory": {
+          "counterexample_is_global_negative": true,
+          "enabled": false,
+          "fact_pass_threshold": 0.8,
+          "max_fact_context": 32,
+          "max_insight_context": 16,
+          "max_negative_context": 16,
+          "retain_expired_insights": true,
+          "retain_rejected_claims": true,
+          "strict_fact_gate": true
+        },
+        "validation_escalation": {
+          "adversarial_prompt_review": true,
+          "blind_same_model_review": true,
+          "cross_provider_review": false,
+          "deterministic_checks_first": true,
+          "enabled": true,
+          "escalate_before_fact_promotion": true,
+          "escalate_final_proof": true,
+          "escalate_on_reviewer_disagreement": true,
+          "high_risk_threshold": 0.75,
+          "tool_or_formal_check_on_high_risk": true
+        }
+      },
+      "default_factory": "TopologyConfig",
+      "required": false
+    },
+    "verification": {
+      "annotation": "<class 'mathproofmesh.config.VerificationConfig'>",
+      "default": {
+        "detailed_only_after_structural_pass": true,
+        "enable_lean": false,
+        "enable_numeric_counterexamples": true,
+        "enable_sympy_tools": true,
+        "external_tool_timeout_seconds": 20.0,
+        "lean_command": "lake env lean",
+        "lean_sandbox_cpus": 1.0,
+        "lean_sandbox_image": null,
+        "lean_sandbox_memory_mb": 1024,
+        "lean_sandbox_pids_limit": 128,
+        "lean_sandbox_required": true,
+        "require_first_error_step": true,
+        "require_key_step_tagging": true,
+        "structural_first": true,
+        "verify_problem_integrity": true
+      },
+      "default_factory": "VerificationConfig",
+      "required": false
+    }
+  },
+  "mathproofmesh.config.TopologyConfig": {
+    "agent_capability": {
+      "annotation": "<class 'mathproofmesh.config.AgentCapabilityConfig'>",
+      "default": {
+        "enabled": true,
+        "first_error_accuracy_weight": 0.25,
+        "min_observations_before_trust_update": 5,
+        "mutation_benchmark_weight": 0.3,
+        "overturn_rate_penalty": 0.2,
+        "recency_decay": 0.98,
+        "tool_agreement_weight": 0.25,
+        "use_self_reported_confidence": false
+      },
+      "default_factory": "AgentCapabilityConfig",
+      "required": false
+    },
+    "broker": {
+      "annotation": "<class 'mathproofmesh.config.BrokerConfig'>",
+      "default": {
+        "ambiguous_match_high": 0.82,
+        "ambiguous_match_low": 0.55,
+        "bridge_detection": true,
+        "bridge_similarity_threshold": 0.78,
+        "contradiction_detection": true,
+        "contradiction_similarity_threshold": 0.82,
+        "deterministic_matching_first": true,
+        "duplicate_route_detection": true,
+        "duplicate_strategy_threshold": 0.84,
+        "max_bridge_tasks_per_round": 2,
+        "max_conflict_tasks_per_round": 2,
+        "min_routes_for_bridge": 2,
+        "use_llm_matching_on_ambiguous": true
+      },
+      "default_factory": "BrokerConfig",
+      "required": false
+    },
+    "conditional_cross_review": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "cross_route": {
+      "annotation": "<class 'mathproofmesh.config.CrossRouteConfig'>",
+      "default": {
+        "enabled": false,
+        "initial_isolation_rounds": 1,
+        "max_global_messages_per_round": 24,
+        "max_messages_per_route_per_round": 6,
+        "max_neighbors_per_route": 2,
+        "message_ttl_rounds": 2,
+        "share_counterexamples": true,
+        "share_failure_records": true,
+        "share_open_obligations": true,
+        "share_unverified_insights": false,
+        "share_verified_facts": true
+      },
+      "default_factory": "CrossRouteConfig",
+      "required": false
+    },
+    "disagreement_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.35,
+      "default_factory": null,
+      "required": false
+    },
+    "final_stage": {
+      "annotation": "<class 'mathproofmesh.config.FinalTopologyConfig'>",
+      "default": {
+        "blind_detailed_review": true,
+        "blind_structural_review": true,
+        "freeze_graph_before_synthesis": true,
+        "remove_agent_identity": true,
+        "remove_route_ranking": true,
+        "remove_self_confidence": true
+      },
+      "default_factory": "FinalTopologyConfig",
+      "required": false
+    },
+    "inspiration": {
+      "annotation": "<class 'mathproofmesh.config.InspirationConfig'>",
+      "default": {
+        "active_proposals_per_task": 3,
+        "adaptive_mechanism_selection": true,
+        "adaptive_min_exploration_rate": 0.15,
+        "adaptive_min_observations": 1,
+        "adaptive_reward_call_cost": 0.1,
+        "adaptive_reward_debt_weight": 1.0,
+        "adaptive_reward_fact_weight": 4.0,
+        "adaptive_reward_final_citation_weight": 3.0,
+        "adaptive_reward_obligation_weight": 1.0,
+        "adaptive_reward_refutation_cost": 1.0,
+        "adaptive_reward_token_cost_per_100k": 0.1,
+        "adaptive_ucb_weight": 0.75,
+        "all_routes_failed_trigger": true,
+        "allow_external_retrieval": false,
+        "analogy_agent": true,
+        "analogy_library_enabled": true,
+        "analogy_library_path": "benchmarks/analogy_library.jsonl",
+        "analogy_top_k": 6,
+        "auxiliary_construction_inventor": true,
+        "bidirectional_frontier_enabled": true,
+        "bridge_lemma_generator": true,
+        "cold_context_proposals_per_task": 1,
+        "composer_max_candidates_per_round": 2,
+        "composer_max_combined_cost": 4,
+        "composer_max_sources": 2,
+        "composer_require_quick_falsification": true,
+        "controlled_surprise_mutation_enabled": true,
+        "cross_run_learning_enabled": false,
+        "cross_run_learning_path": ".mathproofmesh/learning",
+        "cross_run_max_experiences": 2000,
+        "cross_run_max_negative_analogies": 2000,
+        "cross_run_max_outcomes": 10000,
+        "cross_run_require_final_citation": true,
+        "domain_operator_max_prompt_items": 8,
+        "domain_operator_plugins_enabled": true,
+        "enabled": false,
+        "experience_distillation_enabled": true,
+        "final_repair_failure_trigger": true,
+        "frontier_max_backward_claims": 8,
+        "frontier_max_bridge_candidates": 3,
+        "frontier_max_forward_claims": 8,
+        "frontier_min_candidate_overlap": 0.35,
+        "inspiration_composer_enabled": true,
+        "inspiration_context_max_chars": 24000,
+        "invariant_hypothesis_agent": true,
+        "max_consecutive_surprise_rejections": 2,
+        "max_distilled_experiences": 256,
+        "max_inspiration_tasks_per_round": 2,
+        "max_materialized_proposals_per_trigger": 1,
+        "max_negative_analogy_records": 256,
+        "max_new_routes_per_trigger": 2,
+        "max_proposals_per_task": 3,
+        "max_reviewed_proposals_per_task": 2,
+        "max_single_agent_proposals_per_task": 2,
+        "mechanism_duplicate_threshold": 0.86,
+        "meta_allow_route_abandon": true,
+        "meta_directive_cooldown_rounds": 2,
+        "meta_directive_expiry_rounds": 2,
+        "meta_directive_max_estimated_calls": 8,
+        "meta_directives_enabled": true,
+        "minimum_verified_gain": 1,
+        "mode": "shadow",
+        "negative_analogy_library_enabled": true,
+        "novelty_mechanism_weight": 0.24,
+        "novelty_object_weight": 0.16,
+        "novelty_obligation_weight": 0.1,
+        "novelty_principle_weight": 0.1,
+        "novelty_representation_weight": 0.24,
+        "novelty_threshold": 0.65,
+        "novelty_transformation_weight": 0.16,
+        "persistent_meta_strategist": true,
+        "proof_debt_min_reduction": 0.03,
+        "proposals_enter_fact_memory": false,
+        "proposer_generalist_roles": [
+          "explorer",
+          "route_prover"
+        ],
+        "protect_finalization_reserve": true,
+        "repeated_error_threshold": 2,
+        "representation_switchboard": true,
+        "require_inspiration_referee": true,
+        "reverse_goal_analysis": true,
+        "route_budget_share_trigger": 0.5,
+        "route_redundancy_trigger": 0.8,
+        "shared_bottleneck_trigger": true,
+        "stagnation_rounds": 2,
+        "surprise_budget_fraction": 0.08,
+        "surprise_budget_max_calls": 32,
+        "surprise_budget_min_calls": 10,
+        "surprise_cooldown_rounds": 2,
+        "surprise_exploration": true,
+        "warm_context_max_facts": 5,
+        "warm_context_max_negatives": 5
+      },
+      "default_factory": "InspirationConfig",
+      "required": false
+    },
+    "isolate_initial_exploration": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "max_context_chars": {
+      "annotation": "<class 'int'>",
+      "default": 90000,
+      "default_factory": null,
+      "required": false
+    },
+    "max_verified_claims_per_context": {
+      "annotation": "<class 'int'>",
+      "default": 24,
+      "default_factory": null,
+      "required": false
+    },
+    "mode": {
+      "annotation": "typing.Literal['legacy_sparse', 'hierarchical_sparse']",
+      "default": "legacy_sparse",
+      "default_factory": null,
+      "required": false
+    },
+    "neighbor_k": {
+      "annotation": "<class 'int'>",
+      "default": 2,
+      "default_factory": null,
+      "required": false
+    },
+    "prefer_cross_provider_review": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "preserve_raw_evidence": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "proof_control": {
+      "annotation": "<class 'mathproofmesh.config.ProofControlConfig'>",
+      "default": {
+        "bottleneck": {
+          "compression_interval_rounds": 1,
+          "dominance_threshold": 0.9,
+          "enabled": true,
+          "equivalence_threshold": 0.84,
+          "max_cluster_members": 64,
+          "min_open_growth_for_forced_compression": 8,
+          "mode": "shadow",
+          "preserve_original_nodes": true
+        },
+        "common_mode": {
+          "enabled": true,
+          "include_critical_claims": true,
+          "include_strategy_prerequisites": true,
+          "include_unverified_dependencies": true,
+          "max_challengers_per_round": 1,
+          "min_routes": 3,
+          "risk_threshold": 0.6
+        },
+        "continue_gate": {
+          "allow_on_core_debt_reduced": true,
+          "allow_on_core_obligation_closed": true,
+          "allow_on_first_error_changed": true,
+          "allow_on_verified_bridge_gain": true,
+          "enabled": true,
+          "force_blueprint_rewrite_after_block": true,
+          "mode": "shadow",
+          "no_core_progress_segments": 2,
+          "require_any_core_signal": true
+        },
+        "core_debt": {
+          "auxiliary_weight": 0.35,
+          "common_mode_weight": 1.5,
+          "core_bridge_weight": 2.5,
+          "core_stagnation_rounds": 2,
+          "enabled": true,
+          "main_goal_weight": 4.0,
+          "necessary_only_weight": 0.15,
+          "unresolved_scope_risk_weight": 1.5
+        },
+        "enabled": false,
+        "failure": {
+          "ambiguous_model_review": true,
+          "bridge_failure_prefers_bridge_action": true,
+          "enabled": true,
+          "framing_failure_forces_reanchor": true,
+          "max_blueprint_rewrites_per_route": 1,
+          "min_classification_confidence": 0.7,
+          "plan_failure_blocks_local_deepen": true
+        },
+        "falsification_fast_lane": {
+          "allow_sandboxed_python": false,
+          "allowed_purposes": [
+            "falsify_claim",
+            "test_boundary_cases"
+          ],
+          "auto_fact_promotion": false,
+          "enabled": true,
+          "exact_arithmetic_only": true,
+          "max_cases": 100000,
+          "max_memory_mb": 256,
+          "max_runtime_seconds": 10.0,
+          "max_tasks_per_round": 2
+        },
+        "goal_alignment": {
+          "enabled": true,
+          "max_strategy_rewrite_attempts": 1,
+          "min_alignment_confidence": 0.72,
+          "overstrength_penalty": 0.25,
+          "require_implication_outline": true,
+          "require_target_obligation": true,
+          "run_countermodel_on_unknown_relation": true
+        },
+        "induction": {
+          "enabled": true,
+          "max_candidates_per_trigger": 3,
+          "require_well_foundedness_statement": true,
+          "trigger_on_first_occurrence_barrier": true,
+          "trigger_on_recursive_same_type_dependency": true,
+          "trigger_on_repeated_feature": true
+        },
+        "message_utility": {
+          "blueprint_rewrite_credit": 0.4,
+          "broadcast_min_expected_core_debt_reduction": 0.0,
+          "enabled": true,
+          "final_citation_credit": 1.0,
+          "max_target_obligations": 8,
+          "no_use_cooldown_threshold": 3,
+          "obligation_close_credit": 0.8,
+          "refutation_credit": 0.8,
+          "require_utility_contract_for_cross_route": true,
+          "utility_credit_horizon_rounds": 3,
+          "verified_step_credit": 0.5
+        },
+        "mode": "off",
+        "near_miss": {
+          "allow_model_extraction_on_ambiguous": true,
+          "enabled": true,
+          "extraction_requires_salvageable_component": true,
+          "max_records": 512,
+          "max_route_context_items": 6,
+          "min_verifier_confidence": 0.65
+        },
+        "realizer": {
+          "enabled": true,
+          "max_realizer_repairs_per_structure": 2,
+          "preserve_abstract_proposal_after_candidate_failure": true,
+          "require_explicit_admissibility": true,
+          "require_falsification_test": true,
+          "require_well_founded_descent": true
+        },
+        "route_admission": {
+          "blueprint_review": {
+            "max_batch_repair_items": 12,
+            "max_nodes_per_batch": 12,
+            "max_repair_rounds": 2,
+            "max_review_calls_per_round": 2
+          },
+          "enabled": true,
+          "fail_closed_if_all_rejected": true,
+          "max_regeneration_attempts": 1,
+          "max_semantic_repair_calls": 2,
+          "min_goal_alignment": 0.65,
+          "mode": "shadow",
+          "reject_heuristic_only_as_main_route": true,
+          "reject_necessary_only_as_main_route": true,
+          "require_falsification_test": true,
+          "require_mechanism_novelty": true,
+          "semantic_repair_budget_fraction": 0.1,
+          "semantic_repair_enabled": true
+        },
+        "scope_guard": {
+          "ambiguous_model_review": true,
+          "block_fact_promotion_on_open_scope_risk": true,
+          "block_obligation_close_on_scope_mismatch": true,
+          "deterministic_first": true,
+          "enabled": true,
+          "max_countermodel_tasks_per_round": 2,
+          "risk_confidence_threshold": 0.7
+        },
+        "strict_fail_closed": true,
+        "synthesis_readiness": {
+          "enabled": true,
+          "high_centrality_threshold": 0.7,
+          "max_open_auxiliary_obligations": 16,
+          "mode": "shadow",
+          "produce_progress_report_when_blocked": true,
+          "require_core_dependency_closure": true,
+          "require_no_necessary_only_bridge_as_sufficient": true,
+          "require_no_open_scope_risks": true,
+          "require_no_unresolved_high_centrality_conflicts": true
+        }
+      },
+      "default_factory": "ProofControlConfig",
+      "required": false
+    },
+    "proof_graph": {
+      "annotation": "<class 'mathproofmesh.config.ProofGraphConfig'>",
+      "default": {
+        "allow_cycles": false,
+        "close_obligation_threshold": 0.8,
+        "enabled": false,
+        "freeze_before_synthesis": true,
+        "max_edges": 20000,
+        "max_nodes": 5000,
+        "mode": "shadow",
+        "shared_bottleneck_min_routes": 2
+      },
+      "default_factory": "ProofGraphConfig",
+      "required": false
+    },
+    "route_teams": {
+      "annotation": "<class 'mathproofmesh.config.RouteTeamConfig'>",
+      "default": {
+        "allow_role_reuse_after_stage": true,
+        "enabled": false,
+        "local_review_rounds": 1,
+        "max_members_per_route": 3,
+        "referee_must_differ_from_author": true,
+        "referee_required_before_global_share": true,
+        "skeptic_on_high_risk_only": true,
+        "skeptic_risk_threshold": 0.55,
+        "tool_agent_on_demand": true
+      },
+      "default_factory": "RouteTeamConfig",
+      "required": false
+    },
+    "strategy_similarity_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.72,
+      "default_factory": null,
+      "required": false
+    },
+    "typed_communication": {
+      "annotation": "<class 'mathproofmesh.config.TypedCommunicationConfig'>",
+      "default": {
+        "enabled": false,
+        "exactly_once_delivery": true,
+        "max_assumptions": 24,
+        "max_dependencies": 64,
+        "max_message_chars": 24000,
+        "require_content_hash": true,
+        "require_problem_hash": true,
+        "require_receipt": true,
+        "schema_version": "1"
+      },
+      "default_factory": "TypedCommunicationConfig",
+      "required": false
+    },
+    "typed_memory": {
+      "annotation": "<class 'mathproofmesh.config.TypedMemoryConfig'>",
+      "default": {
+        "counterexample_is_global_negative": true,
+        "enabled": false,
+        "fact_pass_threshold": 0.8,
+        "max_fact_context": 32,
+        "max_insight_context": 16,
+        "max_negative_context": 16,
+        "retain_expired_insights": true,
+        "retain_rejected_claims": true,
+        "strict_fact_gate": true
+      },
+      "default_factory": "TypedMemoryConfig",
+      "required": false
+    },
+    "validation_escalation": {
+      "annotation": "<class 'mathproofmesh.config.ValidationEscalationConfig'>",
+      "default": {
+        "adversarial_prompt_review": true,
+        "blind_same_model_review": true,
+        "cross_provider_review": false,
+        "deterministic_checks_first": true,
+        "enabled": true,
+        "escalate_before_fact_promotion": true,
+        "escalate_final_proof": true,
+        "escalate_on_reviewer_disagreement": true,
+        "high_risk_threshold": 0.75,
+        "tool_or_formal_check_on_high_risk": true
+      },
+      "default_factory": "ValidationEscalationConfig",
+      "required": false
+    }
+  },
+  "mathproofmesh.config.TypedCommunicationConfig": {
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "exactly_once_delivery": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "max_assumptions": {
+      "annotation": "<class 'int'>",
+      "default": 24,
+      "default_factory": null,
+      "required": false
+    },
+    "max_dependencies": {
+      "annotation": "<class 'int'>",
+      "default": 64,
+      "default_factory": null,
+      "required": false
+    },
+    "max_message_chars": {
+      "annotation": "<class 'int'>",
+      "default": 24000,
+      "default_factory": null,
+      "required": false
+    },
+    "require_content_hash": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_problem_hash": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_receipt": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "schema_version": {
+      "annotation": "<class 'str'>",
+      "default": "1",
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.TypedMemoryConfig": {
+    "counterexample_is_global_negative": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "fact_pass_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.8,
+      "default_factory": null,
+      "required": false
+    },
+    "max_fact_context": {
+      "annotation": "<class 'int'>",
+      "default": 32,
+      "default_factory": null,
+      "required": false
+    },
+    "max_insight_context": {
+      "annotation": "<class 'int'>",
+      "default": 16,
+      "default_factory": null,
+      "required": false
+    },
+    "max_negative_context": {
+      "annotation": "<class 'int'>",
+      "default": 16,
+      "default_factory": null,
+      "required": false
+    },
+    "retain_expired_insights": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "retain_rejected_claims": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "strict_fact_gate": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.ValidationEscalationConfig": {
+    "adversarial_prompt_review": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "blind_same_model_review": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "cross_provider_review": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "deterministic_checks_first": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "escalate_before_fact_promotion": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "escalate_final_proof": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "escalate_on_reviewer_disagreement": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "high_risk_threshold": {
+      "annotation": "<class 'float'>",
+      "default": 0.75,
+      "default_factory": null,
+      "required": false
+    },
+    "tool_or_formal_check_on_high_risk": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.config.VerificationConfig": {
+    "detailed_only_after_structural_pass": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "enable_lean": {
+      "annotation": "<class 'bool'>",
+      "default": false,
+      "default_factory": null,
+      "required": false
+    },
+    "enable_numeric_counterexamples": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "enable_sympy_tools": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "external_tool_timeout_seconds": {
+      "annotation": "<class 'float'>",
+      "default": 20.0,
+      "default_factory": null,
+      "required": false
+    },
+    "lean_command": {
+      "annotation": "<class 'str'>",
+      "default": "lake env lean",
+      "default_factory": null,
+      "required": false
+    },
+    "lean_sandbox_cpus": {
+      "annotation": "<class 'float'>",
+      "default": 1.0,
+      "default_factory": null,
+      "required": false
+    },
+    "lean_sandbox_image": {
+      "annotation": "str | None",
+      "default": null,
+      "default_factory": null,
+      "required": false
+    },
+    "lean_sandbox_memory_mb": {
+      "annotation": "<class 'int'>",
+      "default": 1024,
+      "default_factory": null,
+      "required": false
+    },
+    "lean_sandbox_pids_limit": {
+      "annotation": "<class 'int'>",
+      "default": 128,
+      "default_factory": null,
+      "required": false
+    },
+    "lean_sandbox_required": {
+      "annotation": "typing.Literal[True]",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_first_error_step": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "require_key_step_tagging": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "structural_first": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "verify_problem_integrity": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    }
+  },
+  "mathproofmesh.desktop.settings.DesktopSettings": {
+    "remember_credentials": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "sandbox_enabled": {
+      "annotation": "<class 'bool'>",
+      "default": true,
+      "default_factory": null,
+      "required": false
+    },
+    "selected_profile": {
+      "annotation": "typing.Literal['smoke', 'formal', 'active', 'proof_control_shadow', 'proof_control_active']",
+      "default": "smoke",
+      "default_factory": null,
+      "required": false
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "qualified_name": "mathproofmesh.schemas.SemanticInvariantAudit",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "detail": {
+        "minLength": 1,
+        "title": "Detail",
+        "type": "string"
+      },
+      "invariant": {
+        "minLength": 1,
+        "title": "Invariant",
+        "type": "string"
+      },
+      "source_values": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Source Values",
+        "type": "array"
+      },
+      "status": {
+        "enum": [
+          "pass",
+          "fail",
+          "not_applicable"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "target_values": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Target Values",
+        "type": "array"
+      }
+    },
+    "required": [
+      "invariant",
+      "status",
+      "detail"
+    ],
+    "title": "SemanticInvariantAudit",
+    "type": "object"
+  }
+}

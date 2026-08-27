@@ -1,0 +1,57 @@
+{
+  "qualified_name": "mathproofmesh.schemas.ToolRequest",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "arguments": {
+        "additionalProperties": true,
+        "title": "Arguments",
+        "type": "object"
+      },
+      "domains": {
+        "additionalProperties": true,
+        "title": "Domains",
+        "type": "object"
+      },
+      "kind": {
+        "enum": [
+          "sympy_simplify",
+          "sympy_equivalent",
+          "numeric_counterexample",
+          "polynomial_factor",
+          "modular_exhaustive",
+          "bounded_integer_search",
+          "graph_certificate",
+          "recurrence_check",
+          "bounded_greedy_sequence",
+          "candidate_period_check",
+          "exact_geometry",
+          "lean_check"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "max_cases": {
+        "default": 100000,
+        "maximum": 100000000,
+        "minimum": 1,
+        "title": "Max Cases",
+        "type": "integer"
+      },
+      "purpose": {
+        "title": "Purpose",
+        "type": "string"
+      },
+      "request_id": {
+        "title": "Request Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "kind",
+      "purpose"
+    ],
+    "title": "ToolRequest",
+    "type": "object"
+  }
+}
