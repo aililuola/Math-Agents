@@ -1530,6 +1530,52 @@ and all seven Flyway migrations. A following no-test `verify` passed all five re
 SpotBugs reported zero bugs and zero errors. No static-analysis rule or performance threshold was
 relaxed.
 
+### Route-theorem authority and synthesis closure
+
+The next isolated P09 attempt, `p09-t1-20260826T225329Z-7872d424`, stopped `INCOMPLETE` after 38
+physical calls at USD 0.338018055. The campaign total was USD 2.860314225, and the initial and final
+Root Goal hashes remained
+`0cb0a46f4e99f355767519c56199cbb190bea8fe721a5735a68afb791d2857c9`. A route-level reviewer and
+the final blind and adversarial reviewers accepted a coherent eight-step complex-coordinate proof
+of Simson's theorem. Claim Court, however, correctly returned `REPAIR_EXHAUSTED`: the proposed
+route-theorem patch changed five proof steps and exceeded the existing deterministic limit of
+three. That limit was not changed.
+
+Two authority projections were inconsistent after that valid rejection. The route retained its
+stale `verified` status even though its route-theorem artifact was `UNCERTAIN`, and the production
+`deepseek-v4-pro.yaml` profile mapped an open-main-goal synthesis block to advisory pass because
+optional Proof Control mode was off. The proof graph still contained an open `main-goal`, so final
+deterministic validation rejected the result only after unnecessary synthesis calls.
+
+The repair now revokes route-level verified authority whenever a `ROUTE_THEOREM` Claim Court case
+does not finish `VERIFIED`. The route status and failure reason are included in the existing atomic
+Claim Court projection snapshot, so injected projection failures restore the prior authority and a
+deterministic retry applies the rejection exactly once. Synthesis now has an unconditional server
+precondition: the canonical `main-goal` obligation must actually be closed. Optional Proof Control
+mode can add stricter checks but can no longer turn an open main goal into synthesis authority.
+
+The production-path test was first run against the old behavior and failed with `expected
+<unverified> but was <verified>` while the Claim Court outcome was already
+`REPAIR_EXHAUSTED`. After the repair, the focused and adjacent authority/atomicity matrix passed
+seven tests with zero failures or errors and reported:
+
+```text
+ROUTE THEOREM CLAIM LIFECYCLE DIAGNOSTIC
+ROUTE_LEVEL_REVIEWS_PASSED=1
+ROUTE_THEOREM_REPAIR_EXHAUSTIONS=1
+OVERSIZED_REPAIR_BYPASSES=0
+STALE_VERIFIED_ROUTE_PROJECTIONS=0
+PREMATURE_SYNTHESIS_ADMISSIONS=0
+MAIN_GOAL_CLOSURES=0
+RESULT=PASS
+```
+
+The complete Desktop reactor regression passed 2,841 tests: 75 Contracts, 1,413 Core, 941 Server,
+and 412 Desktop, with zero failures, zero errors, and six intentional skips. PostgreSQL 18.4
+Testcontainers started successfully and all seven Flyway migrations ran. The existing Claim Court
+repair-size gate, Root Goal Contract, Negative Knowledge registry, and all Issue 001-013 authority
+boundaries remain unchanged.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

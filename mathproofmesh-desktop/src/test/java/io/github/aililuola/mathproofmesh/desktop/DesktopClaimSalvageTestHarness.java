@@ -137,8 +137,13 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
   }
 
   static DesktopClaimSalvageTestHarness open(Path runDirectory, String runId) {
+    return open(runDirectory, runId, "proof-control-active.yaml");
+  }
+
+  static DesktopClaimSalvageTestHarness open(
+      Path runDirectory, String runId, String profileFile) {
     SystemConfig source =
-        new DesktopRuntimeLocator(projectRoot(), null).loadProfile("proof-control-active.yaml");
+        new DesktopRuntimeLocator(projectRoot(), null).loadProfile(profileFile);
     SystemConfig config = mockConfig(source);
     ClaimReviewResponder responder = new ClaimReviewResponder();
     Map<String, MockResponder> responders = new LinkedHashMap<>();
@@ -503,6 +508,78 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
             true,
             true,
             List.of()));
+  }
+
+  void installVerifiedAttemptWithOversizedRouteTheoremRepair(int round)
+      throws ReflectiveOperationException {
+    setRound(round);
+    Object route = route();
+    AgentRuntime author = field(route, "author", AgentRuntime.class);
+    StrategyCard strategy = field(route, "strategy", StrategyCard.class);
+    List<ProofStep> steps =
+        java.util.stream.IntStream.range(0, 5)
+            .mapToObj(
+                index ->
+                    proofStep(
+                        "route-theorem-oversized-repair-" + index,
+                        "Intermediate theorem step " + index + ".",
+                        "The submitted bridge for step " + index + "."))
+            .toList();
+    ProofAttempt attempt =
+        new ProofAttempt(
+            author.id(),
+            "verified-oversized-repair-attempt-" + round,
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of("route-level review passed before Claim Court"),
+            "ROUTE_THEOREM_OVERSIZED_REPAIR REPAIRABLE: a complete proof of the frozen main goal.",
+            null,
+            null,
+            PROBLEM_HASH,
+            "A route theorem whose proposed repair exceeds the deterministic minimality limit.",
+            steps,
+            List.of(),
+            "artifact://verified-oversized-repair-route/" + round,
+            null,
+            round,
+            1,
+            0.99d,
+            AttemptStatus.COMPLETE,
+            strategy.strategyId(),
+            List.of(),
+            new UsageRecord());
+    setField(route, "attempt", attempt);
+    setField(route, "status", "verified");
+    setField(route, "failureReason", null);
+    setField(route, "reviewComplete", true);
+    setField(route, "checkpointProcessed", true);
+    setField(route, "integrated", false);
+    setField(route, "delta", null);
+    setField(route, "deltaId", null);
+    setField(route, "claimReview", null);
+    setField(
+        route,
+        "validationExecution",
+        new ValidationExecution(
+            new EscalationPlan(0.0d, List.of(), List.of(), false),
+            List.of(),
+            true,
+            true,
+            List.of()));
+  }
+
+  String routeStatus() {
+    return uncheckedField(routeUnchecked(), "status", String.class);
+  }
+
+  String routeFailureReason() {
+    return uncheckedField(routeUnchecked(), "failureReason", String.class);
+  }
+
+  boolean synthesisGatePassed() throws Exception {
+    return (boolean) invoke("synthesisGatePassed");
   }
 
   List<String> claimCourtRequestClaimIds() {
@@ -1648,25 +1725,46 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
                   : statement.contains("REPAIRABLE")
                   ? ClaimProofAuditVerdict.INVALID_REPAIRABLE
                   : ClaimProofAuditVerdict.VALID;
-      List<ProofAuditIssue> issues =
-          verdict == ClaimProofAuditVerdict.VALID
-              ? List.of()
-              : List.of(
-                  new ProofAuditIssue(
-                      "issue-" + frozen.claimId(),
-                      frozen.claimId(),
-                      revision.path("proofSteps").isEmpty()
-                          ? "PROOF_LEVEL"
-                          : text(revision.path("proofSteps").get(0), "stepId", "step_id"),
-                      "The supplied premise.",
-                      "The asserted local conclusion.",
-                      ProofIssueKind.MISSING_JUSTIFICATION,
-                      verdict == ClaimProofAuditVerdict.INVALID_REPAIRABLE
-                          ? ProofRepairability.LOCAL_PATCH
-                          : ProofRepairability.NONLOCAL_REWRITE_REQUIRED,
-                      List.of(),
-                      false,
-                      "The proof bridge is incomplete."));
+      List<ProofAuditIssue> issues;
+      if (verdict == ClaimProofAuditVerdict.VALID) {
+        issues = List.of();
+      } else if (statement.contains("ROUTE_THEOREM_OVERSIZED_REPAIR")) {
+        List<ProofAuditIssue> oversized = new ArrayList<>();
+        for (int index = 0; index < 4; index++) {
+          String stepId = text(revision.path("proofSteps").get(index), "stepId", "step_id");
+          oversized.add(
+              new ProofAuditIssue(
+                  "issue-" + frozen.claimId() + "-" + index,
+                  frozen.claimId(),
+                  stepId,
+                  "The supplied premise for step " + index + ".",
+                  "The asserted conclusion for step " + index + ".",
+                  ProofIssueKind.MISSING_JUSTIFICATION,
+                  ProofRepairability.LOCAL_PATCH,
+                  List.of(),
+                  false,
+                  "The proof bridge is incomplete."));
+        }
+        issues = List.copyOf(oversized);
+      } else {
+        issues =
+            List.of(
+                new ProofAuditIssue(
+                    "issue-" + frozen.claimId(),
+                    frozen.claimId(),
+                    revision.path("proofSteps").isEmpty()
+                        ? "PROOF_LEVEL"
+                        : text(revision.path("proofSteps").get(0), "stepId", "step_id"),
+                    "The supplied premise.",
+                    "The asserted local conclusion.",
+                    ProofIssueKind.MISSING_JUSTIFICATION,
+                    verdict == ClaimProofAuditVerdict.INVALID_REPAIRABLE
+                        ? ProofRepairability.LOCAL_PATCH
+                        : ProofRepairability.NONLOCAL_REWRITE_REQUIRED,
+                    List.of(),
+                    false,
+                    "The proof bridge is incomplete."));
+      }
       ClaimProofAuditBatch batch =
           new ClaimProofAuditBatch(
               "audit-batch-" + frozen.claimId(),
@@ -1688,34 +1786,40 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
           ContractObjectMapper.read(context.path("frozen_claim"), FrozenClaimSnapshot.class);
       JsonNode base = context.path("base_proof_revision");
       JsonNode audit = context.path("proof_audit");
-      JsonNode issue = audit.path("issues").get(0);
-      String issueId = text(issue, "issueId", "issue_id");
-      String stepId = text(issue, "stepId", "step_id");
       boolean injectEvidence = frozen.statement().contains("EVIDENCE_INJECTION");
-      ClaimProofPatchOperation operation =
-          injectEvidence
-              ? new ClaimProofPatchOperation(
-                  "patch-operation-" + frozen.claimId(),
-                  ClaimProofPatchOperationType.ADD_VERIFIED_EVIDENCE_REF,
-                  stepId,
-                  null,
-                  null,
-                  null,
-                  null,
-                  new EvidenceRef(
-                      "artifact://repairer-invented",
-                      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                      "certificate",
-                      "Repairer claims this artifact is verified."))
-              : new ClaimProofPatchOperation(
-                  "patch-operation-" + frozen.claimId(),
-                  ClaimProofPatchOperationType.REPLACE_STEP_JUSTIFICATION,
-                  stepId,
-                  null,
-                  "A bounded counting or kernel bridge supplies the missing implication.",
-                  null,
-                  null,
-                  null);
+      List<String> issueIds = new ArrayList<>();
+      List<String> changedStepIds = new ArrayList<>();
+      List<ClaimProofPatchOperation> operations = new ArrayList<>();
+      for (JsonNode issue : audit.path("issues")) {
+        String issueId = text(issue, "issueId", "issue_id");
+        String stepId = text(issue, "stepId", "step_id");
+        issueIds.add(issueId);
+        changedStepIds.add(stepId);
+        operations.add(
+            injectEvidence
+                ? new ClaimProofPatchOperation(
+                    "patch-operation-" + frozen.claimId() + "-" + operations.size(),
+                    ClaimProofPatchOperationType.ADD_VERIFIED_EVIDENCE_REF,
+                    stepId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    new EvidenceRef(
+                        "artifact://repairer-invented",
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "certificate",
+                        "Repairer claims this artifact is verified."))
+                : new ClaimProofPatchOperation(
+                    "patch-operation-" + frozen.claimId() + "-" + operations.size(),
+                    ClaimProofPatchOperationType.REPLACE_STEP_JUSTIFICATION,
+                    stepId,
+                    null,
+                    "A bounded counting or kernel bridge supplies the missing implication.",
+                    null,
+                    null,
+                    null));
+      }
       ClaimProofPatch patch =
           new ClaimProofPatch(
               "patch-" + frozen.claimId(),
@@ -1723,10 +1827,10 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
               frozen.claimSemanticHash(),
               base.path("revisionId").asText(),
               base.path("proofHash").asText(),
-              List.of(issueId),
-              List.of(stepId),
-              List.of(operation),
-              List.of(issueId));
+              issueIds,
+              changedStepIds,
+              operations,
+              issueIds);
       ClaimMinimalRepairBatch batch =
           new ClaimMinimalRepairBatch(
               "repair-batch-" + frozen.claimId(),

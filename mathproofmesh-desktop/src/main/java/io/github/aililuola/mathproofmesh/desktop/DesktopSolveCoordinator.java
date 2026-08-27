@@ -7733,6 +7733,14 @@ final class DesktopSolveCoordinator {
       case INCONCLUSIVE, DEFERRED_INDEPENDENCE_UNAVAILABLE ->
           addDistinct(route.uncertainClaimIds, claimId);
     }
+    if (artifact.kind() == AttemptArtifactKind.ROUTE_THEOREM
+        && outcome != ClaimCourtOutcome.VERIFIED) {
+      route.status = "unverified";
+      route.failureReason =
+          "ROUTE_THEOREM_CLAIM_"
+              + outcome.name()
+              + ": route-level review does not grant theorem authority";
+    }
   }
 
   private static ClaimCourtReviewResult claimCourtResult(
@@ -7767,6 +7775,8 @@ final class DesktopSolveCoordinator {
         List.copyOf(pendingProofTasks),
         new RouteClaimProjectionSnapshot(
             route.routeId,
+            route.status,
+            route.failureReason,
             route.claimIds,
             route.salvagedVerifiedClaimIds,
             route.salvagedCounterexampleIds,
@@ -9075,6 +9085,22 @@ final class DesktopSolveCoordinator {
   }
 
   private boolean synthesisGatePassed() {
+    boolean mainGoalClosed =
+        proofGraph.obligations().stream()
+            .anyMatch(
+                obligation ->
+                    MAIN_GOAL_ID.equals(obligation.obligationId())
+                        && "closed".equals(obligation.status()));
+    if (!mainGoalClosed) {
+      event(
+          "synthesis_readiness_gate",
+          "scheduler_decision",
+          null,
+          "unverified",
+          "MAIN_GOAL_AUTHORITY_NOT_CLOSED",
+          "synthesis-ready-main-goal-open");
+      return false;
+    }
     Set<String> verifiedRouteIds =
         verifiedRoutes().stream()
             .filter(route -> !route.claimIds.isEmpty())
@@ -16467,6 +16493,8 @@ final class DesktopSolveCoordinator {
 
   private record RouteClaimProjectionSnapshot(
       String routeId,
+      String status,
+      String failureReason,
       List<String> claimIds,
       List<String> salvagedVerifiedClaimIds,
       List<String> salvagedCounterexampleIds,
@@ -16478,6 +16506,8 @@ final class DesktopSolveCoordinator {
       ClaimReviewBatch claimReview) {
     private RouteClaimProjectionSnapshot {
       Objects.requireNonNull(routeId, "routeId");
+      Objects.requireNonNull(status, "status");
+      failureReason = Objects.toString(failureReason, "");
       claimIds = List.copyOf(claimIds);
       salvagedVerifiedClaimIds = List.copyOf(salvagedVerifiedClaimIds);
       salvagedCounterexampleIds = List.copyOf(salvagedCounterexampleIds);
@@ -16489,6 +16519,8 @@ final class DesktopSolveCoordinator {
     }
 
     private void restore(RouteState route) {
+      route.status = status;
+      route.failureReason = failureReason;
       replace(route.claimIds, claimIds);
       replace(route.salvagedVerifiedClaimIds, salvagedVerifiedClaimIds);
       replace(route.salvagedCounterexampleIds, salvagedCounterexampleIds);
