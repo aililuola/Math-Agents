@@ -85,3 +85,18 @@ jobs:
         with:
           name: java-mathproofmesh-windows
           path: target/release/**
+
+  validate:
+    if: ${{ always() }}
+    needs:
+      - verify
+      - package-windows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all release gates
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          PACKAGE_WINDOWS_RESULT: ${{ needs['package-windows'].result }}
+        run: |
+          test "$VERIFY_RESULT" = "success"
+          test "$PACKAGE_WINDOWS_RESULT" = "success"
