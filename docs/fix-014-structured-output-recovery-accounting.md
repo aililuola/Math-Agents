@@ -1634,6 +1634,46 @@ Testcontainers started successfully and all seven Flyway
 migrations ran. A no-test `verify` passed all five modules; SpotBugs reported zero bugs and zero
 errors.
 
+### Canonicalized Blueprint edges cannot crash route admission
+
+The first isolated P09 rerun after the mandatory-review reservation change,
+`p09-t1-20260827T023015Z-6feb65cb`, stopped `INVALID` after nine physical calls at USD
+0.074594670. P01-P08 were reused without provider calls, and the initial and final Root Goal hashes
+both remained `0cb0a46f4e99f355767519c56199cbb190bea8fe721a5735a68afb791d2857c9`.
+The failure was a deterministic route-admission exception rather than a model-budget failure:
+`ProofGraphStore#addEdge` rejected a self edge.
+
+The Blueprint contained two different node IDs with the same mathematical statement. Proof Graph
+canonicalization correctly collapsed the second obligation into an alias of the first, but the
+edge materializer retained the two pre-canonicalization IDs. Resolving those aliases inside
+`addEdge` therefore turned an ordinary Blueprint edge into a canonical self edge and aborted the
+otherwise atomic portfolio admission.
+
+The materializer now records the actual graph node ID after every obligation write, translates
+both endpoints through that map, and deterministically elides only edges whose endpoints become
+identical after canonicalization. Missing or non-materialized endpoints remain skipped under the
+existing Blueprint policy. `ProofGraphStore` still rejects callers that directly attempt a real
+self edge; its invariant was not weakened.
+
+The production black-box test was run before the change and reproduced the exact live stack:
+`ProofGraphStore.addEdge -> DesktopSolveCoordinator.addBlueprintObligations`. After repair, the
+focused test and adjacent admission atomicity and 20-round canonicalization restore tests passed:
+
+```text
+DUPLICATE_BLUEPRINT_STEPS=2
+CANONICAL_BLUEPRINT_NODES=1
+CANONICAL_SELF_EDGE_FAILURES=0
+RESULT=PASS
+
+PARTIAL_ARCHIVE_WRITES=0
+PARTIAL_BLUEPRINT_WRITES=0
+PARTIAL_GOAL_LINK_WRITES=0
+PARTIAL_ADMITTED_STRATEGIES=0
+PARTIAL_ROUTE_CREATIONS=0
+PARTIAL_PROOF_GRAPH_WRITES=0
+TASK_LEASE_LEAKS=0
+```
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

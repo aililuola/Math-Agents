@@ -3863,7 +3863,8 @@ final class DesktopSolveCoordinator {
     }
     StrategyBlueprintCompiler.Blueprint blueprint = compilation.blueprint();
     Set<String> obligationProposalIds = Set.copyOf(compilation.obligationProposals());
-    Set<String> created = new LinkedHashSet<>();
+    Map<String, String> materializedNodeIds = new LinkedHashMap<>();
+    materializedNodeIds.put(blueprint.mainGoalNodeId(), MAIN_GOAL_ID);
     for (StrategyBlueprintCompiler.Node node : blueprint.nodes()) {
       if (node.kind() == ProofControlModels.BlueprintNodeKind.GIVEN
           || node.kind() == ProofControlModels.BlueprintNodeKind.TARGET
@@ -3907,18 +3908,22 @@ final class DesktopSolveCoordinator {
                 route.strategy.bottleneck()),
             FocusedRecoveryActionType.NEW_STRATEGY);
       }
-      created.add(node.id());
+      materializedNodeIds.put(node.id(), proofGraph.resolvedNodeId(node.id()));
     }
     for (StrategyBlueprintCompiler.Edge edge : blueprint.edges()) {
-      String source =
-          edge.sourceId().equals(blueprint.mainGoalNodeId()) ? MAIN_GOAL_ID : edge.sourceId();
-      String target =
-          edge.targetId().equals(blueprint.mainGoalNodeId()) ? MAIN_GOAL_ID : edge.targetId();
-      if ((!created.contains(source) && !MAIN_GOAL_ID.equals(source))
-          || (!created.contains(target) && !MAIN_GOAL_ID.equals(target))) {
+      String source = materializedNodeIds.get(edge.sourceId());
+      String target = materializedNodeIds.get(edge.targetId());
+      if (source == null || target == null) {
         continue;
       }
       if (source.equals(target)) {
+        event(
+            "proof_graph_canonical_self_edge_elided",
+            "proof_control",
+            null,
+            "completed",
+            "ELIDED_CANONICAL_SELF_EDGE",
+            edge.id());
         continue;
       }
       proofGraph.addEdge(

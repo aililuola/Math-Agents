@@ -821,6 +821,19 @@ public final class ProofGraphStore {
     return canonicalization.canonicalForObligation(obligationId);
   }
 
+  /** Returns the materialized graph node after following any canonicalization aliases. */
+  public synchronized String resolvedNodeId(String nodeId) {
+    String normalized = java.util.Objects.requireNonNull(nodeId, "nodeId").strip();
+    if (normalized.isEmpty()) {
+      throw new IllegalArgumentException("nodeId is required");
+    }
+    String resolved = resolve(normalized);
+    if (!containsNode(resolved)) {
+      throw new IllegalArgumentException("proof graph node is not materialized: " + nodeId);
+    }
+    return resolved;
+  }
+
   public synchronized Optional<String> existingCanonicalTargetId(
       ProofObligation obligation, ObligationCreationContext context) {
     return canonicalization.exactCanonicalTargetId(obligation, context);
