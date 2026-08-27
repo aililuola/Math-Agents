@@ -14,7 +14,7 @@ import java.util.Objects;
 
 /** Deterministic soft-budget scheduler driven by verified progress and failure class. */
 public final class AdaptiveBudgetManager {
-  private static final String POLICY_VERSION = "evidence-budget-v2";
+  private static final String POLICY_VERSION = "evidence-budget-v3";
   private final int maxPaths;
   private final int finishReserve;
   private final Map<String, BudgetDecision> decisions = new LinkedHashMap<>();
@@ -104,7 +104,7 @@ public final class AdaptiveBudgetManager {
   public synchronized EvidenceAwareBudgetDecision decide(BudgetStateSnapshot snapshot) {
     Objects.requireNonNull(snapshot, "snapshot");
     EvidenceAwareBudgetDecision prior = stateDecisions.get(snapshot.snapshotHash());
-    if (prior != null) {
+    if (prior != null && POLICY_VERSION.equals(prior.identity().policyVersion())) {
       return prior;
     }
     BudgetResourceVector used =
@@ -120,6 +120,9 @@ public final class AdaptiveBudgetManager {
     List<PathBudgetStats> paths = snapshot.pathStats();
     PathBudgetStats preferred =
         paths.stream()
+            .filter(path -> !path.failed())
+            .filter(path -> !path.complete())
+            .filter(PathBudgetStats::structurallyValid)
             .max(
                 Comparator.comparingDouble(this::pathValue)
                     .thenComparing(PathBudgetStats::routeId, Comparator.reverseOrder()))
@@ -134,6 +137,7 @@ public final class AdaptiveBudgetManager {
             .orElse(null);
     PathBudgetStats verifiable =
         paths.stream()
+            .filter(path -> !path.failed())
             .filter(path -> path.verifiedProgress() || path.verificationScore() >= 0.5d)
             .filter(path -> !"pass".equals(path.latestVerdict()))
             .max(
@@ -142,6 +146,7 @@ public final class AdaptiveBudgetManager {
             .orElse(null);
     PathBudgetStats synthesis =
         paths.stream()
+            .filter(path -> !path.failed())
             .filter(path -> path.verifiedProgress() || "pass".equals(path.latestVerdict()))
             .max(
                 Comparator.comparingDouble(PathBudgetStats::verificationScore)
