@@ -30,7 +30,10 @@ final class BudgetNoBypassArchitectureTest {
         coordinator,
         "private boolean schedulePendingProofTasksBatch()",
         "private BudgetStateSnapshot state()");
-    assertBefore(batch, "reserveProofTaskBatch(batch)", "schedulePendingProofTask()");
+    assertBefore(
+        batch,
+        "largestReservablePrefix(batch, this::reserveProofTaskBatch)",
+        "schedulePendingProofTask()");
     String recovery =
         method(
             coordinator,

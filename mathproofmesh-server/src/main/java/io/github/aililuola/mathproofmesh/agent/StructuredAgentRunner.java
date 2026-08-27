@@ -154,14 +154,35 @@ public final class StructuredAgentRunner {
 
   /** Keeps one admitted action envelope bound across the scheduler's decision/explore/integrate cursors. */
   public void activateRunBudgetEnvelope(BudgetEnvelopeId envelopeId) {
+    activateRunBudgetEnvelope(envelopeId, BudgetResourceVector.zero());
+  }
+
+  /** Keeps mandatory downstream work protected while optional calls use the active envelope. */
+  public void activateRunBudgetEnvelope(
+      BudgetEnvelopeId envelopeId, BudgetResourceVector protectedReserve) {
     Objects.requireNonNull(envelopeId, "envelopeId");
+    Objects.requireNonNull(protectedReserve, "protectedReserve");
     EnvelopeExecution current = runBudgetEnvelope;
     if (current != null && !current.envelopeId().equals(envelopeId)) {
       throw new IllegalStateException("another run budget envelope is already active");
     }
     if (current == null) {
-      runBudgetEnvelope = new EnvelopeExecution(envelopeId);
+      runBudgetEnvelope = new EnvelopeExecution(envelopeId, protectedReserve);
+    } else {
+      current.setProtectedReserve(protectedReserve);
     }
+  }
+
+  /** Changes the protected floor without changing the action envelope identity. */
+  public void setRunBudgetEnvelopeProtectedReserve(
+      BudgetEnvelopeId envelopeId, BudgetResourceVector protectedReserve) {
+    Objects.requireNonNull(envelopeId, "envelopeId");
+    Objects.requireNonNull(protectedReserve, "protectedReserve");
+    EnvelopeExecution current = runBudgetEnvelope;
+    if (current == null || !current.envelopeId().equals(envelopeId)) {
+      throw new IllegalStateException("run budget envelope is not active");
+    }
+    current.setProtectedReserve(protectedReserve);
   }
 
   public void clearRunBudgetEnvelope(BudgetEnvelopeId envelopeId) {
@@ -638,7 +659,8 @@ public final class StructuredAgentRunner {
                 stage,
                 ordinal,
                 pricingHash,
-                resources)
+                resources,
+                implicit ? BudgetResourceVector.zero() : execution.protectedReserve())
             .reservationId();
     return new PhysicalBudgetBinding(ledger, envelopeId, reservationId, implicit);
   }
@@ -652,10 +674,16 @@ public final class StructuredAgentRunner {
     if (execution == null) {
       execution = runBudgetEnvelope;
     }
-    return execution == null
-        ? null
-        : Objects.requireNonNull(supplier.get(), "budget envelope ledger")
+    if (execution == null) {
+      return null;
+    }
+    BudgetResourceVector remaining =
+        Objects.requireNonNull(supplier.get(), "budget envelope ledger")
             .remaining(execution.envelopeId());
+    BudgetResourceVector protectedReserve = execution.protectedReserve();
+    return protectedReserve.fitsWithin(remaining)
+        ? remaining.minus(protectedReserve)
+        : BudgetResourceVector.zero();
   }
 
   private static BudgetBucket budgetBucket(String value) {
@@ -1627,13 +1655,28 @@ public final class StructuredAgentRunner {
 
   private static final class EnvelopeExecution {
     private final BudgetEnvelopeId envelopeId;
+    private volatile BudgetResourceVector protectedReserve;
 
     private EnvelopeExecution(BudgetEnvelopeId envelopeId) {
+      this(envelopeId, BudgetResourceVector.zero());
+    }
+
+    private EnvelopeExecution(
+        BudgetEnvelopeId envelopeId, BudgetResourceVector protectedReserve) {
       this.envelopeId = Objects.requireNonNull(envelopeId, "envelopeId");
+      this.protectedReserve = Objects.requireNonNull(protectedReserve, "protectedReserve");
     }
 
     private BudgetEnvelopeId envelopeId() {
       return envelopeId;
+    }
+
+    private BudgetResourceVector protectedReserve() {
+      return protectedReserve;
+    }
+
+    private void setProtectedReserve(BudgetResourceVector protectedReserve) {
+      this.protectedReserve = Objects.requireNonNull(protectedReserve, "protectedReserve");
     }
 
     private int ordinalFor(String providerCallId) {

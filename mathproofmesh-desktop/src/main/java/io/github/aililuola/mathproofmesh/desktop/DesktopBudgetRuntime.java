@@ -136,6 +136,13 @@ final class DesktopBudgetRuntime {
     return costEstimator.estimate(ActionKind.DEEPEN).times(routeCount);
   }
 
+  BudgetResourceVector authorityReviewReserve(int routeCount) {
+    if (routeCount < 0) {
+      throw new IllegalArgumentException("routeCount must not be negative");
+    }
+    return costEstimator.estimate(ActionKind.VERIFY).times(routeCount);
+  }
+
   Optional<BudgetEnvelope> activeEnvelope() {
     return envelopes.envelopeSnapshot().envelopes().stream()
         .filter(

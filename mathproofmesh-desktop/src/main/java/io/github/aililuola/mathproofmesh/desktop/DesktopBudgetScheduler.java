@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Predicate;
 
 /** Applies scheduler choices only after their physical resource envelope is durable. */
 final class DesktopBudgetScheduler {
@@ -82,7 +83,8 @@ final class DesktopBudgetScheduler {
                 "initial-portfolio",
                 ActionKind.WIDEN,
                 "initial-portfolio"),
-            "INITIAL_ROUTE_EXPLORATION")
+            "INITIAL_ROUTE_EXPLORATION",
+            runtime.authorityReviewReserve(pendingRoutes))
         != null;
   }
 
@@ -149,8 +151,30 @@ final class DesktopBudgetScheduler {
                 batchSignature,
                 revision ? ActionKind.REVISE : ActionKind.DEEPEN,
                 batchSignature),
-            "PROOF_TASK_BATCH")
+            "PROOF_TASK_BATCH",
+            runtime.authorityReviewReserve(tasks.size()))
         != null;
+  }
+
+  boolean supportingClaimCourtAffordable(int supportingClaimCount) {
+    BudgetResourceVector available = runtime.availableExplorationCapacity();
+    BudgetEnvelope active = runtime.activeEnvelope().orElse(null);
+    if (active != null) {
+      available = available.plus(runtime.envelopes().remaining(active.envelopeId()));
+    }
+    return DesktopClaimCourtBatchExecutor.supportingWorkFits(
+        available,
+        runtime.estimate(ActionKind.DEEPEN),
+        runtime.estimate(ActionKind.VERIFY),
+        supportingClaimCount);
+  }
+
+  void beginAuthorityReview() {
+    BudgetEnvelope active = runtime.activeEnvelope().orElse(null);
+    if (active != null) {
+      runner.setRunBudgetEnvelopeProtectedReserve(
+          active.envelopeId(), BudgetResourceVector.zero());
+    }
   }
 
   boolean reserveClaimCourtBatch(List<String> claimIds, String authorityHash) {
@@ -213,7 +237,21 @@ final class DesktopBudgetScheduler {
     }
     TargetMechanismKey target = host.restoredBudgetTarget(checkpoint, envelope);
     runtime.restoreActiveEnvelope(target, host.gainBaseline());
-    runner.activateRunBudgetEnvelope(envelope.envelopeId());
+    runner.activateRunBudgetEnvelope(
+        envelope.envelopeId(), restoredProtectedReserve(checkpoint, envelope));
+  }
+
+  static <T> List<T> largestReservablePrefix(
+      List<T> candidates, Predicate<List<T>> reservation) {
+    List<T> stableCandidates = List.copyOf(Objects.requireNonNull(candidates, "candidates"));
+    Objects.requireNonNull(reservation, "reservation");
+    for (int size = stableCandidates.size(); size > 0; size--) {
+      List<T> prefix = List.copyOf(stableCandidates.subList(0, size));
+      if (reservation.test(prefix)) {
+        return prefix;
+      }
+    }
+    return List.of();
   }
 
   private BudgetEnvelope reserve(
@@ -224,6 +262,26 @@ final class DesktopBudgetScheduler {
       BudgetResourceVector resources,
       TargetMechanismKey target,
       String actionName) {
+    return reserve(
+        epochId,
+        workItemId,
+        decisionId,
+        bucket,
+        resources,
+        target,
+        actionName,
+        BudgetResourceVector.zero());
+  }
+
+  private BudgetEnvelope reserve(
+      String epochId,
+      String workItemId,
+      String decisionId,
+      BudgetBucket bucket,
+      BudgetResourceVector resources,
+      TargetMechanismKey target,
+      String actionName,
+      BudgetResourceVector protectedReserve) {
     BudgetEnvelope envelope;
     try {
       envelope =
@@ -243,8 +301,27 @@ final class DesktopBudgetScheduler {
       throw failure;
     }
     host.persistReservation();
-    runner.activateRunBudgetEnvelope(envelope.envelopeId());
+    runner.activateRunBudgetEnvelope(envelope.envelopeId(), protectedReserve);
     return envelope;
+  }
+
+  private BudgetResourceVector restoredProtectedReserve(
+      DesktopSolveCheckpoint checkpoint, BudgetEnvelope envelope) {
+    boolean protectedAction =
+        "initial-route-exploration".equals(envelope.workItemId())
+            || envelope.workItemId().startsWith("proof-task-batch-");
+    boolean beforeAuthorityReviewCompletion =
+        List.of("isolated_exploration", "working_delta", "independent_review")
+            .contains(checkpoint.currentStage());
+    if (!protectedAction || !beforeAuthorityReviewCompletion) {
+      return BudgetResourceVector.zero();
+    }
+    long callsPerRoute = runtime.estimate(ActionKind.DEEPEN).calls();
+    if (callsPerRoute < 1L) {
+      return BudgetResourceVector.zero();
+    }
+    long routeCount = Math.max(1L, envelope.allocated().calls() / callsPerRoute);
+    return runtime.authorityReviewReserve(Math.toIntExact(routeCount));
   }
 
   private static boolean budgetAdmissionRefused(IllegalStateException failure) {

@@ -136,6 +136,29 @@ public final class BudgetEnvelopeLedger {
       int physicalCallOrdinal,
       String pricingHash,
       BudgetResourceVector resources) {
+    return reservePhysical(
+        envelopeId,
+        providerCallId,
+        idempotencyKey,
+        stage,
+        physicalCallOrdinal,
+        pricingHash,
+        resources,
+        BudgetResourceVector.zero());
+  }
+
+  /** Reserves one physical call while retaining resources for mandatory work in the action. */
+  public synchronized BudgetPhysicalReservation reservePhysical(
+      BudgetEnvelopeId envelopeId,
+      String providerCallId,
+      String idempotencyKey,
+      String stage,
+      int physicalCallOrdinal,
+      String pricingHash,
+      BudgetResourceVector resources,
+      BudgetResourceVector protectedReserve) {
+    Objects.requireNonNull(resources, "resources");
+    Objects.requireNonNull(protectedReserve, "protectedReserve");
     BudgetEnvelope envelope = requireEnvelope(envelopeId);
     if (envelope.status() != BudgetEnvelopeStatus.ACTIVE
         && envelope.status() != BudgetEnvelopeStatus.RESERVED) {
@@ -162,12 +185,16 @@ public final class BudgetEnvelopeLedger {
       }
       return prior;
     }
-    if (!resources.fitsWithin(unassigned(envelope))) {
+    BudgetResourceVector remaining = unassigned(envelope);
+    if (!resources.plus(protectedReserve).fitsWithin(remaining)) {
+      if (!protectedReserve.isZero()) {
+        throw new IllegalStateException("ACTION_ENVELOPE_PROTECTED_RESERVE");
+      }
       throw new IllegalStateException(
           "physical reservation exceeds action envelope: requested="
               + resources
               + ", remaining="
-              + unassigned(envelope));
+              + remaining);
     }
     BudgetPhysicalReservation reservation =
         new BudgetPhysicalReservation(

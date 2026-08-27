@@ -1576,6 +1576,64 @@ Testcontainers started successfully and all seven Flyway migrations ran. The exi
 repair-size gate, Root Goal Contract, Negative Knowledge registry, and all Issue 001-013 authority
 boundaries remain unchanged.
 
+### Mandatory review budget cannot be starved by optional recovery
+
+The next isolated P09 attempt, `p09-t1-20260827T003115Z-41020a5d`, stopped
+`INCOMPLETE` after 38 physical calls at USD 0.459785865. P01-P08 were reused without provider
+calls, and the Root Goal hash remained
+`0cb0a46f4e99f355767519c56199cbb190bea8fe721a5735a68afb791d2857c9`. The preceding
+route-theorem lifecycle repair behaved correctly: the invalid theorem authority was revoked, the
+main goal stayed open, and no synthesis result leaked through. The new failure was scheduling
+starvation inside a seven-call proof-task envelope.
+
+Optional focused roles and structured-output recovery consumed six calls. The Skeptic consumed the
+seventh, so the structural and detailed independent reviews were denied. Three supporting local
+claims then consumed six Claim Court calls, leaving no capacity for the next bounded proof repair
+although three unused strategies and open proof debt remained. This was not solved by widening the
+frozen benchmark budget.
+
+The production repair adds a multidimensional protected floor to a live action envelope. Initial
+route exploration and proof-task batches protect the ordinary `VERIFY` estimate for every admitted
+route; optional provider calls cannot cross that floor, including under concurrent reservation.
+The floor is released immediately before independent route review and is reconstructed for an
+active pre-review envelope after checkpoint restore. A bounded repair now runs one authoritative
+focused Prover before the existing independent Skeptic, structural, and detailed review gates;
+the four-role matrix remains unchanged for initial focused research.
+
+Supporting Claim Court cases remain durable but are deferred when reviewing them would consume the
+last capacity for one more proof repair. A verified route theorem remains closure-critical and is
+never filtered by this policy. Pending proof-task scheduling now reserves the largest stable
+affordable prefix rather than rejecting an entire batch because its tail does not fit. No Claim
+Court authority rule, finalization reserve, benchmark limit, Root Goal rule, or Negative Knowledge
+rule was relaxed.
+
+The red test run first failed to compile because the prior production API had no protected physical
+reservation, affordable-prefix selection, or supporting-court affordability decision. After the
+repair, the focused tests passed four cases and reported:
+
+```text
+BOUNDED REPAIR FOCUSED-ROLE DIAGNOSTIC
+BOUNDED_REPAIR_AUTHORITATIVE_PROVERS=1
+OPTIONAL_MATRIX_CALLS=0
+RESULT=PASS
+
+PROTECTED_AUTHORITY_REVIEW_CALLS=3
+OPTIONAL_CALLS_BEFORE_PROTECTION=4
+OPTIONAL_CALLS_BLOCKED_AT_FLOOR=1
+AFFORDABLE_BATCH_ATTEMPTS=[3, 2, 1]
+AFFORDABLE_BATCH_ADMISSIONS=1
+SUPPORTING_COURT_REPAIR_RESERVE_VIOLATIONS=0
+```
+
+The adjacent route-theorem, Claim Court, structured recovery, concurrent Finding, and no-bypass
+matrix passed after updating the architecture assertion to require prefix reservation before the
+first proof-task mutation. The complete Desktop reactor regression passed 2,845 tests: 75
+Contracts, 1,413 Core, 941 Server, and 416 Desktop, with zero failures, zero errors, and three
+intentional skips in each of the Server and Desktop modules (six total). PostgreSQL 18.4
+Testcontainers started successfully and all seven Flyway
+migrations ran. A no-test `verify` passed all five modules; SpotBugs reported zero bugs and zero
+errors.
+
 ## Protected behavior
 
 No API key, raw provider response, authorization header, target output, database file, or checkpoint

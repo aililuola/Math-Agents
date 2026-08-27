@@ -307,6 +307,10 @@ final class DesktopClaimSalvageTestHarness implements AutoCloseable {
     setField(focusedRoute, "focusedCanonicalTargetId", "canonical-focused-test");
   }
 
+  void setFocusedRouteRevisionCount(int revisionCount) throws ReflectiveOperationException {
+    setField(route(), "revisionCount", revisionCount);
+  }
+
   void runFocusedExploration(long delayMillis) throws Exception {
     responder.setExplorationDelayMillis(delayMillis);
     invoke(

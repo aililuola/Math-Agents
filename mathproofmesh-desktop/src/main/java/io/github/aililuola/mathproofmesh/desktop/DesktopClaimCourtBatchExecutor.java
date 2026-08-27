@@ -1,5 +1,6 @@
 package io.github.aililuola.mathproofmesh.desktop;
 
+import io.github.aililuola.mathproofmesh.orchestration.BudgetResourceVector;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactKind;
 import io.github.aililuola.mathproofmesh.proofcontrol.AttemptArtifactRecord;
 import java.util.ArrayList;
@@ -52,5 +53,21 @@ final class DesktopClaimCourtBatchExecutor {
             (AttemptArtifactRecord record) ->
                 record.kind() == AttemptArtifactKind.ROUTE_THEOREM ? 0 : 1)
         .thenComparing(AttemptArtifactRecord::artifactId);
+  }
+
+  static boolean supportingWorkFits(
+      BudgetResourceVector available,
+      BudgetResourceVector nextProofTask,
+      BudgetResourceVector perClaimReview,
+      int supportingClaimCount) {
+    Objects.requireNonNull(available, "available");
+    Objects.requireNonNull(nextProofTask, "nextProofTask");
+    Objects.requireNonNull(perClaimReview, "perClaimReview");
+    if (supportingClaimCount < 0) {
+      throw new IllegalArgumentException("supportingClaimCount must not be negative");
+    }
+    return nextProofTask
+        .plus(perClaimReview.times(supportingClaimCount))
+        .fitsWithin(available);
   }
 }

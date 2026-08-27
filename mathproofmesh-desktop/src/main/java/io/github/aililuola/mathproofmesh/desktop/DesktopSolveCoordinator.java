@@ -3139,14 +3139,7 @@ final class DesktopSolveCoordinator {
       int workOrdinal = 0;
       for (RouteState route : active) {
         routeById.put(route.routeId, route);
-        List<ResearchWorkKind> kinds =
-            route.focusedCanonicalTargetId.isBlank()
-                ? List.of(ResearchWorkKind.ROUTE_EXPLORATION)
-                : List.of(
-                    ResearchWorkKind.FOCUSED_PROVER,
-                    ResearchWorkKind.FOCUSED_FALSIFIER,
-                    ResearchWorkKind.FOCUSED_REPROVER,
-                    ResearchWorkKind.DEPENDENCY_AUDITOR);
+        List<ResearchWorkKind> kinds = focusedExplorationKinds(route);
         for (ResearchWorkKind kind : kinds) {
           specs.add(
               new AuthoritativeWorkSpec(
@@ -3240,6 +3233,20 @@ final class DesktopSolveCoordinator {
       case DEPENDENCY_AUDITOR -> "route_referee";
       default -> "explorer";
     };
+  }
+
+  private List<ResearchWorkKind> focusedExplorationKinds(RouteState route) {
+    if (route.focusedCanonicalTargetId.isBlank()) {
+      return List.of(ResearchWorkKind.ROUTE_EXPLORATION);
+    }
+    if (route.revisionCount > 0) {
+      return List.of(ResearchWorkKind.FOCUSED_PROVER);
+    }
+    return List.of(
+        ResearchWorkKind.FOCUSED_PROVER,
+        ResearchWorkKind.FOCUSED_FALSIFIER,
+        ResearchWorkKind.FOCUSED_REPROVER,
+        ResearchWorkKind.DEPENDENCY_AUDITOR);
   }
 
   private void failIsolatedRoute(RouteState route, RuntimeException failure) {
@@ -5417,24 +5424,44 @@ final class DesktopSolveCoordinator {
                 ordinal++));
       }
     }
+    java.util.function.Predicate<AuthoritativeWorkSpec> closureCritical =
+        spec -> {
+          RouteState route = routeById.get(spec.routeId());
+          AttemptArtifactRecord artifact =
+              artifactByCase.get(claimCourtCaseKey(spec.routeId(), spec.claimId()));
+          return route != null
+              && artifact != null
+              && "verified".equals(route.status)
+              && artifact.kind() == AttemptArtifactKind.ROUTE_THEOREM;
+        };
+    List<AuthoritativeWorkSpec> admittedSpecs = List.copyOf(specs);
+    int supportingClaimCount =
+        (int) admittedSpecs.stream().filter(closureCritical.negate()).count();
+    boolean repairOpportunity =
+        submitted.stream()
+            .filter(route -> !"verified".equals(route.status))
+            .anyMatch(route -> canDeepenRoute(route) || canReviseRoute(route));
+    if (repairOpportunity
+        && supportingClaimCount > 0
+        && !budgetScheduler.supportingClaimCourtAffordable(supportingClaimCount)) {
+      admittedSpecs = admittedSpecs.stream().filter(closureCritical).toList();
+      event(
+          "claim_court_supporting_budget_deferred",
+          "claim_memory_graph",
+          null,
+          "deferred",
+          "Deferred "
+              + supportingClaimCount
+              + " supporting claim reviews to preserve one bounded proof repair opportunity",
+          "claim-court://round-" + roundIndex.get());
+    }
     boolean claimCourtExecuted =
         DesktopClaimCourtBatchExecutor.execute(
             budgetScheduler,
-            specs,
+            admittedSpecs,
             AuthoritativeWorkSpec::claimId,
             currentResearchAuthorityAnchor().restoreStableHash(),
-            new java.util.function.Predicate<>() {
-              @Override
-              public boolean test(AuthoritativeWorkSpec spec) {
-                RouteState route = routeById.get(spec.routeId());
-                AttemptArtifactRecord artifact =
-                    artifactByCase.get(claimCourtCaseKey(spec.routeId(), spec.claimId()));
-                return route != null
-                    && artifact != null
-                    && "verified".equals(route.status)
-                    && artifact.kind() == AttemptArtifactKind.ROUTE_THEOREM;
-              }
-            },
+            closureCritical,
             roundIndex.get(),
             new java.util.function.BiConsumer<>() {
               @Override
@@ -5749,6 +5776,7 @@ final class DesktopSolveCoordinator {
   }
 
   private void reviewRoutesConcurrently(List<RouteState> submitted) {
+    budgetScheduler.beginAuthorityReview();
     List<RouteState> pending =
         submitted.stream()
             .filter(route -> !route.reviewComplete)
@@ -16693,7 +16721,12 @@ final class DesktopSolveCoordinator {
               .filter(this::schedulableProofTask)
               .limit(config.scheduler().maxActionsPerRound())
               .toList();
-      if (batch.isEmpty() || !reserveProofTaskBatch(batch)) {
+      if (batch.isEmpty()) {
+        return false;
+      }
+      batch =
+          DesktopBudgetScheduler.largestReservablePrefix(batch, this::reserveProofTaskBatch);
+      if (batch.isEmpty()) {
         return false;
       }
       int scheduled = 0;
